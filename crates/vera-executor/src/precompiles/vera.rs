@@ -12,7 +12,7 @@ use vera_modules::vera::administration::SignedAdministrativeRequest;
 
 use super::{
     DispatchReturn, VERA_ADDRESS, decode_error, did_from_signer, err_dispatch, event_log,
-    json_bytes, ok_dispatch,
+    json_bytes, ok_dispatch, oog_dispatch,
 };
 
 /// Flat gas cost for read operations (real metering is Phase 10).
@@ -30,23 +30,23 @@ pub(super) fn dispatch(
     gas_limit: u64,
 ) -> DispatchReturn {
     if input.len() < 4 {
-        return Err(PrecompileError::Other(
-            "input too short for selector".into(),
-        ));
+        return Ok(err_dispatch("input too short for selector"));
     }
     let selector: [u8; 4] = input[..4].try_into().expect("checked length above");
 
     match selector {
         IVera::storeThresholdObjectCall::SELECTOR => {
             if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IVera::storeThresholdObjectCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > vera_modules::vera::objects::MAX_OBJECT_REQUEST_BYTES {
-                return Err(PrecompileError::Other("object request is too large".into()));
+                return Err(PrecompileError::Fatal(
+                    "object request is too large".to_string(),
+                ));
             }
             let object = serde_json::from_slice(&call.request)
-                .map_err(|error| PrecompileError::Other(error.to_string().into()))?;
+                .map_err(|error| PrecompileError::Fatal(error.to_string()))?;
             match module.store_threshold_object(acp, block_ctx, tx_ctx, &call.bearerToken, &object)
             {
                 Ok(record) => Ok(ok_dispatch(
@@ -59,14 +59,16 @@ pub(super) fn dispatch(
         }
         IVera::applyRingCommandCall::SELECTOR => {
             if gas_limit < 500_000 {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IVera::applyRingCommandCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > vera_modules::vera::rings::MAX_RING_REQUEST_BYTES {
-                return Err(PrecompileError::Other("ring command is too large".into()));
+                return Err(PrecompileError::Fatal(
+                    "ring command is too large".to_string(),
+                ));
             }
             let command = serde_json::from_slice(&call.request)
-                .map_err(|error| PrecompileError::Other(error.to_string().into()))?;
+                .map_err(|error| PrecompileError::Fatal(error.to_string()))?;
             match module.apply_ring_command(acp, block_ctx, tx_ctx, &call.bearerToken, &command) {
                 Ok(record) => Ok(ok_dispatch(
                     500_000,
@@ -78,15 +80,17 @@ pub(super) fn dispatch(
         }
         IVera::applyRingParticipantRequestCall::SELECTOR => {
             if gas_limit < 100_000 {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call =
                 IVera::applyRingParticipantRequestCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > vera_modules::vera::rings::MAX_RING_REQUEST_BYTES {
-                return Err(PrecompileError::Other("ring request is too large".into()));
+                return Err(PrecompileError::Fatal(
+                    "ring request is too large".to_string(),
+                ));
             }
             let signed = serde_json::from_slice(&call.request)
-                .map_err(|error| PrecompileError::Other(error.to_string().into()))?;
+                .map_err(|error| PrecompileError::Fatal(error.to_string()))?;
             match module.apply_ring_participant_request(block_ctx, &signed) {
                 Ok(record) => Ok(ok_dispatch(
                     100_000,
@@ -100,14 +104,16 @@ pub(super) fn dispatch(
         }
         IVera::finalizeRingReshareCall::SELECTOR => {
             if gas_limit < 500_000 {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IVera::finalizeRingReshareCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > vera_modules::vera::rings::MAX_RING_REQUEST_BYTES {
-                return Err(PrecompileError::Other("ring request is too large".into()));
+                return Err(PrecompileError::Fatal(
+                    "ring request is too large".to_string(),
+                ));
             }
             let signed = serde_json::from_slice(&call.request)
-                .map_err(|error| PrecompileError::Other(error.to_string().into()))?;
+                .map_err(|error| PrecompileError::Fatal(error.to_string()))?;
             match module.finalize_ring_reshare(block_ctx, &signed) {
                 Ok(record) => Ok(ok_dispatch(
                     500_000,
@@ -119,14 +125,16 @@ pub(super) fn dispatch(
         }
         IVera::submitRingReportCall::SELECTOR => {
             if gas_limit < 500_000 {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IVera::submitRingReportCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > vera_modules::vera::rings::reports::MAX_REPORT_REQUEST_BYTES {
-                return Err(PrecompileError::Other("ring request is too large".into()));
+                return Err(PrecompileError::Fatal(
+                    "ring request is too large".to_string(),
+                ));
             }
             let signed = serde_json::from_slice(&call.request)
-                .map_err(|error| PrecompileError::Other(error.to_string().into()))?;
+                .map_err(|error| PrecompileError::Fatal(error.to_string()))?;
             match module.submit_ring_report(block_ctx, &signed) {
                 Ok(record) => Ok(ok_dispatch(
                     500_000,
@@ -138,14 +146,16 @@ pub(super) fn dispatch(
         }
         IVera::applyNodeRequestCall::SELECTOR => {
             if gas_limit < 100_000 {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IVera::applyNodeRequestCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > vera_modules::vera::nodes::MAX_NODE_BYTES {
-                return Err(PrecompileError::Other("node request is too large".into()));
+                return Err(PrecompileError::Fatal(
+                    "node request is too large".to_string(),
+                ));
             }
             let signed = serde_json::from_slice(&call.request)
-                .map_err(|error| PrecompileError::Other(error.to_string().into()))?;
+                .map_err(|error| PrecompileError::Fatal(error.to_string()))?;
             match module.apply_node_request(block_ctx, &signed) {
                 Ok(record) => Ok(ok_dispatch(
                     100_000,
@@ -157,16 +167,16 @@ pub(super) fn dispatch(
         }
         IVera::applyAdministrationCall::SELECTOR => {
             if gas_limit < 500_000 {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IVera::applyAdministrationCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > 32_768 {
-                return Err(PrecompileError::Other(
-                    "administrative request is too large".into(),
+                return Err(PrecompileError::Fatal(
+                    "administrative request is too large".to_string(),
                 ));
             }
             let signed: SignedAdministrativeRequest = serde_json::from_slice(&call.request)
-                .map_err(|error| PrecompileError::Other(error.to_string().into()))?;
+                .map_err(|error| PrecompileError::Fatal(error.to_string()))?;
             match module.apply_administrative_request(
                 acp,
                 block_ctx.genesis_id,
@@ -179,7 +189,7 @@ pub(super) fn dispatch(
         }
         IVera::getAdministrationCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             match module.administration() {
                 Ok(state) => Ok(ok_dispatch(
@@ -193,7 +203,7 @@ pub(super) fn dispatch(
         // ── Write methods ────────────────────────────────────────────
         IVera::revokeDelegationCall::SELECTOR => {
             if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IVera::revokeDelegationCall::abi_decode(input).map_err(decode_error)?;
             let caller = did_from_signer(&tx_ctx.signer)?;
@@ -213,7 +223,7 @@ pub(super) fn dispatch(
         }
         IVera::invalidateJWSCall::SELECTOR => {
             if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IVera::invalidateJWSCall::abi_decode(input).map_err(decode_error)?;
             let creator = did_from_signer(&tx_ctx.signer)?;
@@ -236,14 +246,13 @@ pub(super) fn dispatch(
 
         IVera::updateParamsCall::SELECTOR => {
             if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IVera::updateParamsCall::abi_decode(input).map_err(decode_error)?;
             let authority = did_from_signer(&tx_ctx.signer)?;
             let params: vera_modules::vera::types::VeraParams =
-                serde_json::from_slice(&call.params).map_err(|e| {
-                    PrecompileError::Other(format!("params JSON decode: {e}").into())
-                })?;
+                serde_json::from_slice(&call.params)
+                    .map_err(|e| PrecompileError::Fatal(format!("params JSON decode: {e}")))?;
 
             match module.update_params(&authority, params) {
                 Ok(()) => {}
@@ -256,7 +265,7 @@ pub(super) fn dispatch(
         // ── Read methods ─────────────────────────────────────────────
         IVera::getJWSTokenCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IVera::getJWSTokenCall::abi_decode(input).map_err(decode_error)?;
 
@@ -278,11 +287,11 @@ pub(super) fn dispatch(
 
         IVera::getJWSTokensByDidCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IVera::getJWSTokensByDidCall::abi_decode(input).map_err(decode_error)?;
             let did = Did::new(&call.did)
-                .map_err(|e| PrecompileError::Other(format!("DID parse: {e}").into()))?;
+                .map_err(|e| PrecompileError::Fatal(format!("DID parse: {e}")))?;
 
             let tokens = match module.get_jws_tokens_by_did(&did) {
                 Ok(r) => r,
@@ -295,7 +304,7 @@ pub(super) fn dispatch(
 
         IVera::getJWSTokensByAccountCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IVera::getJWSTokensByAccountCall::abi_decode(input).map_err(decode_error)?;
             let account_str = format!("{}", call.account);
@@ -311,7 +320,7 @@ pub(super) fn dispatch(
 
         IVera::getDelegationsBySubmitterCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call =
                 IVera::getDelegationsBySubmitterCall::abi_decode(input).map_err(decode_error)?;
@@ -326,7 +335,7 @@ pub(super) fn dispatch(
 
         IVera::getChainConfigCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             // Zero-parameter function — no ABI decoding needed.
             let config = match module.get_chain_config() {
@@ -340,7 +349,7 @@ pub(super) fn dispatch(
 
         IVera::getParamsCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             // Zero-parameter function — no ABI decoding needed.
             let params = match module.query_params() {
@@ -352,14 +361,16 @@ pub(super) fn dispatch(
             Ok(ok_dispatch(READ_GAS, ret, vec![]))
         }
 
-        _ => Err(PrecompileError::Other(
-            format!("unknown Vera selector: 0x{}", hex::encode(selector)).into(),
-        )),
+        _ => Err(PrecompileError::Fatal(format!(
+            "unknown Vera selector: 0x{}",
+            hex::encode(selector)
+        ))),
     }
 }
 
 #[test]
 fn threshold_object_requires_gas_before_decoding_or_admission() {
+    use revm::precompile::{PrecompileHalt, PrecompileStatus};
     let result = dispatch(
         &mut VeraModule::new(),
         &mut AcpModule::new(),
@@ -372,13 +383,17 @@ fn threshold_object_requires_gas_before_decoding_or_admission() {
         &IVera::storeThresholdObjectCall::SELECTOR,
         WRITE_GAS - 1,
     );
-    assert!(matches!(result, Err(PrecompileError::OutOfGas)));
+    assert!(matches!(
+        result,
+        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+    ));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_sol_types::SolEvent;
+    use revm::precompile::{PrecompileHalt, PrecompileStatus};
     use vera_modules::{types::Timestamp, vera::types::JWSTokenStatus};
 
     #[test]
@@ -416,7 +431,7 @@ mod tests {
             WRITE_GAS,
         )
         .unwrap();
-        assert!(!result.precompile.reverted);
+        assert!(!result.precompile.status.is_revert());
         let stored = module.get_jws_token(&hash).unwrap().unwrap();
         assert_eq!(stored.status, JWSTokenStatus::Invalid);
         assert_eq!(stored.invalidated_by, account);

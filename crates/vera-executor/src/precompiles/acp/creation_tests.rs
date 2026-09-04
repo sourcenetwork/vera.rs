@@ -1,6 +1,7 @@
 use super::*;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use k256::ecdsa::{Signature, SigningKey, signature::Signer as _};
+use revm::precompile::{PrecompileHalt, PrecompileStatus};
 use vera_crypto::{
     jwt::{DelegationScope, JwtClaims},
     operation::{OperationClaim, OperationId},
@@ -131,7 +132,11 @@ fn all_creation_routes_charge_exact_work_and_preserve_state_one_unit_short() {
     for input in [direct(POLICY), options(), fixture.bearer()] {
         let mut measured = fixture.clone();
         let output = measured.dispatch(&input, 1_000_000).unwrap();
-        assert!(!output.precompile.reverted, "{:?}", output.precompile.bytes);
+        assert!(
+            !output.precompile.status.is_revert(),
+            "{:?}",
+            output.precompile.bytes
+        );
         let required = output.precompile.gas_used;
         assert!(required > WRITE_GAS);
         let mut exact = fixture.clone();
@@ -143,7 +148,7 @@ fn all_creation_routes_charge_exact_work_and_preserve_state_one_unit_short() {
             let mut short = fixture.clone();
             assert!(matches!(
                 short.dispatch(&input, gas),
-                Err(PrecompileError::OutOfGas)
+                Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
             ));
             assert_eq!(short.state(), fixture.state());
         }
@@ -169,11 +174,11 @@ fn options_decode_charges_whitespace_and_malformed_json_before_allocation() {
     .abi_encode();
     assert!(matches!(
         fixture.dispatch(&input, WRITE_GAS + 1_000),
-        Err(PrecompileError::OutOfGas)
+        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
     ));
     assert_eq!(fixture.state(), before);
     let result = fixture.dispatch(&input, 1_000_000).unwrap();
-    assert!(!result.precompile.reverted);
+    assert!(!result.precompile.status.is_revert());
     assert!(result.precompile.gas_used > WRITE_GAS + (128 << 10) / 2);
     for input in [
         IAcp::createPolicyWithOptionsCall {
@@ -184,12 +189,12 @@ fn options_decode_charges_whitespace_and_malformed_json_before_allocation() {
     ] {
         let before = fixture.state();
         let failure = fixture.dispatch(&input, 1_000_000).unwrap();
-        assert!(failure.precompile.reverted);
+        assert!(failure.precompile.status.is_revert());
         assert!(failure.precompile.gas_used > WRITE_GAS);
         assert_eq!(fixture.state(), before);
         assert!(matches!(
             fixture.dispatch(&input, failure.precompile.gas_used - 1),
-            Err(PrecompileError::OutOfGas)
+            Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
         ));
     }
 }
@@ -200,20 +205,21 @@ fn nested_and_repeated_creation_share_remaining_work_and_roll_back_allocations()
     let input = batch(vec![direct(POLICY), batch(vec![options()])]);
     let mut measured = fixture.clone();
     let output = measured.dispatch(&input, 1_000_000).unwrap();
-    assert!(!output.precompile.reverted);
+    assert!(!output.precompile.status.is_revert());
     let mut exact = fixture.clone();
     assert!(
         !exact
             .dispatch(&input, output.precompile.gas_used)
             .unwrap()
             .precompile
-            .reverted
+            .status
+            .is_revert()
     );
     assert_eq!(exact.state(), measured.state());
     let mut short = fixture.clone();
     assert!(matches!(
         short.dispatch(&input, output.precompile.gas_used - 1),
-        Err(PrecompileError::OutOfGas)
+        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
     ));
     assert_eq!(short.state(), fixture.state());
     let large = direct(&format!("{POLICY}# {}", "x".repeat(60 << 10)));
@@ -221,7 +227,7 @@ fn nested_and_repeated_creation_share_remaining_work_and_roll_back_allocations()
     batch::validate(&repeated).unwrap();
     assert!(matches!(
         short.dispatch(&repeated, 1_000_000),
-        Err(PrecompileError::OutOfGas)
+        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
     ));
     assert_eq!(short.state(), fixture.state());
     let malformed = IAcp::createPolicyWithOptionsCall {
@@ -234,7 +240,7 @@ fn nested_and_repeated_creation_share_remaining_work_and_roll_back_allocations()
             1_000_000,
         )
         .unwrap();
-    assert!(failure.precompile.reverted);
+    assert!(failure.precompile.status.is_revert());
     assert!(failure.precompile.gas_used > WRITE_GAS + 2 * READ_GAS);
     assert!(failure.logs.is_empty());
     assert_eq!(short.state(), fixture.state());
@@ -245,7 +251,7 @@ fn authenticated_creation_retry_after_retirement_is_metered_and_does_not_realloc
     let mut fixture = Fixture::new();
     let input = fixture.bearer();
     let original = fixture.dispatch(&input, 1_000_000).unwrap();
-    assert!(!original.precompile.reverted);
+    assert!(!original.precompile.status.is_revert());
     let bytes =
         IAcp::bearerCreatePolicyCall::abi_decode_returns(&original.precompile.bytes).unwrap();
     let policy: PolicyRecord = serde_json::from_slice(&bytes).unwrap();
@@ -268,7 +274,7 @@ fn authenticated_creation_retry_after_retirement_is_metered_and_does_not_realloc
     );
     assert!(matches!(
         fixture.dispatch(&input, retry.precompile.gas_used - 1),
-        Err(PrecompileError::OutOfGas)
+        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
     ));
     assert_eq!(fixture.state(), before);
 }

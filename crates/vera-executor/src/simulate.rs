@@ -111,7 +111,10 @@ pub fn simulate_call<S: StateDbRead>(
 
     match result_and_state.result {
         ExecutionResult::Success {
-            output, gas_used, ..
+            reason: _,
+            output,
+            gas,
+            logs: _,
         } => {
             let bytes = match output {
                 Output::Call(b) => b,
@@ -119,18 +122,18 @@ pub fn simulate_call<S: StateDbRead>(
             };
             Ok(SimulateResult {
                 output: bytes,
-                gas_used,
+                gas_used: gas.tx_gas_used(),
                 success: true,
             })
         }
-        ExecutionResult::Revert { output, gas_used } => Ok(SimulateResult {
+        ExecutionResult::Revert { output, gas, .. } => Ok(SimulateResult {
             output,
-            gas_used,
+            gas_used: gas.tx_gas_used(),
             success: false,
         }),
-        ExecutionResult::Halt { reason, gas_used } => Ok(SimulateResult {
+        ExecutionResult::Halt { reason, gas, .. } => Ok(SimulateResult {
             output: Bytes::from(format!("{reason:?}").into_bytes()),
-            gas_used,
+            gas_used: gas.tx_gas_used(),
             success: false,
         }),
     }

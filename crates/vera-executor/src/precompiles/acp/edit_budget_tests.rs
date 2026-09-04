@@ -1,6 +1,7 @@
 use super::*;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use k256::ecdsa::{Signature, SigningKey, signature::Signer as _};
+use revm::precompile::{PrecompileHalt, PrecompileStatus};
 use vera_crypto::{
     jwt::{DelegationScope, JwtClaims},
     operation::{OperationClaim, OperationId},
@@ -156,7 +157,7 @@ fn direct_and_bearer_policy_edit_accept_exact_work_gas_and_reject_one_less() {
         let input = fixture.edit(EDITED, bearer, false);
         let mut measured = fixture.clone();
         let output = measured.dispatch(&input, 1_000_000).unwrap();
-        assert!(!output.precompile.reverted);
+        assert!(!output.precompile.status.is_revert());
         assert!(output.precompile.gas_used > WRITE_GAS);
         assert_eq!(output.logs.len(), 1);
         // The direct and bearer methods have the same return ABI.
@@ -173,7 +174,7 @@ fn direct_and_bearer_policy_edit_accept_exact_work_gas_and_reject_one_less() {
             let mut low = fixture.clone();
             assert!(matches!(
                 low.dispatch(&input, gas),
-                Err(PrecompileError::OutOfGas)
+                Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
             ));
             assert_eq!(low.state(), fixture.state());
         }
@@ -187,19 +188,19 @@ fn ordinary_failed_edits_charge_completed_work_and_preserve_state() {
         let input = fixture.edit("resources: [", bearer, false);
         let mut measured = fixture.clone();
         let failure = measured.dispatch(&input, 1_000_000).unwrap();
-        assert!(failure.precompile.reverted);
+        assert!(failure.precompile.status.is_revert());
         assert!(failure.precompile.gas_used > WRITE_GAS);
         assert!(failure.logs.is_empty());
         assert_eq!(measured.state(), fixture.state());
         let mut exact = fixture.clone();
         let result = exact.dispatch(&input, failure.precompile.gas_used).unwrap();
-        assert!(result.precompile.reverted);
+        assert!(result.precompile.status.is_revert());
         assert_eq!(result.precompile.gas_used, failure.precompile.gas_used);
         assert_eq!(result.precompile.bytes, failure.precompile.bytes);
         let mut low = fixture.clone();
         assert!(matches!(
             low.dispatch(&input, failure.precompile.gas_used - 1),
-            Err(PrecompileError::OutOfGas)
+            Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
         ));
         assert_eq!(low.state(), fixture.state());
     }
@@ -220,7 +221,7 @@ fn nested_policy_edit_work_uses_remaining_gas_and_rolls_back_preceding_writes() 
     ]);
     let mut measured = fixture.clone();
     let output = measured.dispatch(&input, 1_000_000).unwrap();
-    assert!(!output.precompile.reverted);
+    assert!(!output.precompile.status.is_revert());
     assert_eq!(output.logs.len(), 2);
     let mut edit_only = fixture.clone();
     let edit = edit_only
@@ -232,12 +233,12 @@ fn nested_policy_edit_work_uses_remaining_gas_and_rolls_back_preceding_writes() 
     );
     let mut exact = fixture.clone();
     let result = exact.dispatch(&input, output.precompile.gas_used).unwrap();
-    assert!(!result.precompile.reverted);
+    assert!(!result.precompile.status.is_revert());
     assert_eq!(exact.state(), measured.state());
     let mut low = fixture.clone();
     assert!(matches!(
         low.dispatch(&input, output.precompile.gas_used - 1),
-        Err(PrecompileError::OutOfGas)
+        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
     ));
     assert_eq!(low.state(), fixture.state());
 }
@@ -257,7 +258,7 @@ fn nested_failed_edit_keeps_work_charges_but_no_writes_or_logs() {
     let input = batch(vec![earlier_write(), batch(vec![edit])]);
     let mut nested = fixture.clone();
     let result = nested.dispatch(&input, 1_000_000).unwrap();
-    assert!(result.precompile.reverted);
+    assert!(result.precompile.status.is_revert());
     assert_eq!(
         result.precompile.gas_used,
         2 * READ_GAS + creation_gas + failure.precompile.gas_used
@@ -272,7 +273,7 @@ fn bearer_retry_after_retirement_is_metered_without_reading_current_policy() {
     let input = fixture.edit(EDITED, true, true);
     let first = fixture.dispatch(&input, 1_000_000).unwrap();
     assert!(
-        !first.precompile.reverted,
+        !first.precompile.status.is_revert(),
         "{}",
         String::from_utf8_lossy(&first.precompile.bytes)
     );
@@ -285,13 +286,14 @@ fn bearer_retry_after_retirement_is_metered_without_reading_current_policy() {
             .dispatch(&delete, 1_000_000)
             .unwrap()
             .precompile
-            .reverted
+            .status
+            .is_revert()
     );
     let before = fixture.state();
     let mut measured = fixture.clone();
     let retry = measured.dispatch(&input, 1_000_000).unwrap();
     assert!(
-        !retry.precompile.reverted,
+        !retry.precompile.status.is_revert(),
         "{}",
         String::from_utf8_lossy(&retry.precompile.bytes)
     );
@@ -300,12 +302,12 @@ fn bearer_retry_after_retirement_is_metered_without_reading_current_policy() {
     assert_eq!(measured.state(), before);
     let mut exact = fixture.clone();
     let output = exact.dispatch(&input, retry.precompile.gas_used).unwrap();
-    assert!(!output.precompile.reverted);
+    assert!(!output.precompile.status.is_revert());
     assert_eq!(output.precompile.bytes, first.precompile.bytes);
     assert_eq!(exact.state(), before);
     assert!(matches!(
         fixture.dispatch(&input, retry.precompile.gas_used - 1),
-        Err(PrecompileError::OutOfGas)
+        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
     ));
     assert_eq!(fixture.state(), before);
 }

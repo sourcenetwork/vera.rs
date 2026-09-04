@@ -1,5 +1,6 @@
 //! Policy creation reserves input and storage work across all creation selectors.
 
+use super::oog_dispatch;
 use super::*;
 use vera_modules::acp::{
     PolicyCreateBudget,
@@ -23,24 +24,23 @@ pub(super) fn dispatch(
     input: &[u8],
     gas_limit: u64,
 ) -> DispatchReturn {
-    let budget = PolicyCreateBudget::new(
-        gas_limit
-            .checked_sub(WRITE_GAS)
-            .ok_or(PrecompileError::OutOfGas)?,
-    );
+    let Some(allowance) = gas_limit.checked_sub(WRITE_GAS) else {
+        return Ok(oog_dispatch());
+    };
+    let budget = PolicyCreateBudget::new(allowance);
     // Reserve the whole leaf before any owned ABI or JSON decoding, including
     // options whitespace and fields ultimately rejected by semantic validation.
-    budget
-        .input(input.len())
-        .map_err(|_| PrecompileError::OutOfGas)?;
+    if budget.input(input.len()).is_err() {
+        return Ok(oog_dispatch());
+    }
     let selector: [u8; 4] = input[..4].try_into().expect("dispatch checked selector");
     let result = create(module, vera, block, tx, selector, input, &budget);
     if budget.is_exhausted() {
-        return Err(PrecompileError::OutOfGas);
+        return Ok(oog_dispatch());
     }
-    let gas = WRITE_GAS
-        .checked_add(budget.consumed())
-        .ok_or(PrecompileError::OutOfGas)?;
+    let Some(gas) = WRITE_GAS.checked_add(budget.consumed()) else {
+        return Ok(oog_dispatch());
+    };
     let record = match result {
         Ok(record) => record,
         Err(error) => {
@@ -57,7 +57,7 @@ pub(super) fn dispatch(
                 ACP_ADDRESS,
                 &IAcp::DelegatedPolicyCreated {
                     policyId: record.policy.id.parse().map_err(|_| {
-                        PrecompileError::Other("invalid created policy identifier".into())
+                        PrecompileError::Fatal("invalid created policy identifier".to_string())
                     })?,
                     creator: record.metadata.owner_did,
                 },

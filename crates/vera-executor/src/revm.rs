@@ -249,7 +249,7 @@ impl<S: StateDb> BlockExecutor<S> for RevmExecutor {
                 .replay()
                 .map_err(|e| ExecutionError::TxExecution(format!("{:?}", e)))?;
 
-            let gas_used = result_and_state.result.gas_used();
+            let gas_used = result_and_state.result.tx_gas_used();
             cumulative_gas = cumulative_gas.saturating_add(gas_used);
 
             let receipt =
@@ -546,7 +546,9 @@ pub fn extract_changes(state: &EvmState) -> ChangeSet {
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{Address, Bytes, KECCAK256_EMPTY};
+    use revm::context::result::ResultGas;
     use revm::state::Account;
+    use revm::state::TransactionId;
     use vera_qmdb::ChangeSet;
     use vera_traits::{StateDb, StateDbError, StateDbRead, StateDbWrite};
 
@@ -760,8 +762,7 @@ mod tests {
     fn build_receipt_success() {
         let result = ExecutionResult::Success {
             reason: revm::context::result::SuccessReason::Stop,
-            gas_used: 21000,
-            gas_refunded: 0,
+            gas: ResultGas::default().with_total_gas_spent(21000),
             logs: vec![],
             output: Output::Call(Bytes::new()),
         };
@@ -777,7 +778,8 @@ mod tests {
     #[test]
     fn build_receipt_revert() {
         let result = ExecutionResult::Revert {
-            gas_used: 21000,
+            gas: ResultGas::default().with_total_gas_spent(21000),
+            logs: vec![],
             output: Bytes::new(),
         };
 
@@ -792,7 +794,8 @@ mod tests {
             reason: revm::context::result::HaltReason::OutOfGas(
                 revm::context::result::OutOfGasError::Basic,
             ),
-            gas_used: 21000,
+            gas: ResultGas::default().with_total_gas_spent(21000),
+            logs: vec![],
         };
 
         let receipt = build_receipt(&result, B256::ZERO, 21000, 21000);
@@ -822,7 +825,7 @@ mod tests {
         // Add a storage change
         account.storage.insert(
             U256::from(1),
-            EvmStorageSlot::new_changed(U256::ZERO, U256::from(42), 0),
+            EvmStorageSlot::new_changed(U256::ZERO, U256::from(42), TransactionId::ZERO),
         );
 
         state.insert(Address::ZERO, account);
@@ -855,15 +858,12 @@ mod tests {
 
     #[test]
     fn extract_changes_created_account() {
-        use revm::state::AccountStatus;
-
         let mut state = EvmState::default();
 
         // Created accounts also need to be touched to be processed
-        let account = Account {
-            status: AccountStatus::Created | AccountStatus::Touched,
-            ..Default::default()
-        };
+        let mut account = Account::default();
+        account.mark_created();
+        account.mark_touch();
 
         state.insert(Address::ZERO, account);
 

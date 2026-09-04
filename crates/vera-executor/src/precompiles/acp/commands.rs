@@ -1,6 +1,7 @@
 //! Policy command input and management authorization accounting.
 
 use super::*;
+use super::{is_out_of_gas, oog_dispatch, out_of_gas_error};
 use vera_modules::acp::CommandBudget;
 
 pub(super) const fn handles(selector: [u8; 4]) -> bool {
@@ -37,14 +38,13 @@ pub(super) fn dispatch(
     } else {
         WRITE_GAS
     };
-    let budget = CommandBudget::new(
-        gas_limit
-            .checked_sub(base)
-            .ok_or(PrecompileError::OutOfGas)?,
-    );
-    budget
-        .input(input.len())
-        .map_err(|_| PrecompileError::OutOfGas)?;
+    let Some(allowance) = gas_limit.checked_sub(base) else {
+        return Ok(oog_dispatch());
+    };
+    let budget = CommandBudget::new(allowance);
+    if budget.input(input.len()).is_err() {
+        return Ok(oog_dispatch());
+    }
     // A leaf can alias its dynamic tails. Reserve each owned occurrence before
     // Alloy decoding, in addition to processing the raw calldata and JSON bytes.
     let prepared = reserve_fields(selector, input, &budget);
@@ -52,26 +52,26 @@ pub(super) fn dispatch(
     let result = prepared.and_then(|()| run(module, vera, block, tx, selector, input, &budget));
     if budget.is_exhausted() {
         (*module, *vera) = snapshot;
-        return Err(PrecompileError::OutOfGas);
+        return Ok(oog_dispatch());
     }
-    let gas = base
-        .checked_add(budget.consumed())
-        .ok_or(PrecompileError::OutOfGas)?;
+    let Some(gas) = base.checked_add(budget.consumed()) else {
+        return Ok(oog_dispatch());
+    };
     match result {
         Ok(mut result) => {
-            if result.precompile.reverted {
+            if result.precompile.status.is_revert() {
                 (*module, *vera) = snapshot;
             }
             result.precompile.gas_used = gas;
             Ok(result)
         }
-        Err(PrecompileError::OutOfGas) => {
+        Err(error) if is_out_of_gas(&error) => {
             (*module, *vera) = snapshot;
-            Err(PrecompileError::OutOfGas)
+            Ok(oog_dispatch())
         }
         Err(error) => {
             (*module, *vera) = snapshot;
-            let mut result = err_dispatch(error);
+            let mut result = err_dispatch(super::recoverable_message(&error));
             result.precompile.gas_used = gas;
             Ok(result)
         }
@@ -101,9 +101,7 @@ fn reserve_fields(
     };
     for field in fields {
         let value = leaf::bytes(&input[4..], field * 32)?;
-        budget
-            .input(value.len())
-            .map_err(|_| PrecompileError::OutOfGas)?;
+        budget.input(value.len()).map_err(|_| out_of_gas_error())?;
         let is_string = match selector {
             IAcp::revealRegistrationCall::SELECTOR
             | IAcp::executePolicyCommandCall::SELECTOR
@@ -123,7 +121,7 @@ fn reserve_fields(
                     }
                 })
                 .sum();
-            budget.input(extra).map_err(|_| PrecompileError::OutOfGas)?;
+            budget.input(extra).map_err(|_| out_of_gas_error())?;
         }
     }
     Ok(())
@@ -164,7 +162,11 @@ fn run(
                     record_existed,
                     record,
                 } => (record_existed, record),
-                _ => return Err(PrecompileError::Other("unexpected result variant".into())),
+                _ => {
+                    return Err(PrecompileError::Fatal(
+                        "unexpected result variant".to_string(),
+                    ));
+                }
             };
 
             let event = IAcp::RelationshipSet {
@@ -204,7 +206,11 @@ fn run(
                 vera_modules::acp::types::PolicyCmdResult::DeleteRelationship { record_found } => {
                     record_found
                 }
-                _ => return Err(PrecompileError::Other("unexpected result variant".into())),
+                _ => {
+                    return Err(PrecompileError::Fatal(
+                        "unexpected result variant".to_string(),
+                    ));
+                }
             };
 
             let event = IAcp::RelationshipDeleted {
@@ -247,7 +253,11 @@ fn run(
                     record_existed,
                     record,
                 } => (record_existed, record),
-                _ => return Err(PrecompileError::Other("unexpected result variant".into())),
+                _ => {
+                    return Err(PrecompileError::Fatal(
+                        "unexpected result variant".to_string(),
+                    ));
+                }
             };
 
             let event = IAcp::RelationshipSubjectSet {
@@ -298,7 +308,11 @@ fn run(
                 vera_modules::acp::types::PolicyCmdResult::DeleteRelationship { record_found } => {
                     record_found
                 }
-                _ => return Err(PrecompileError::Other("unexpected result variant".into())),
+                _ => {
+                    return Err(PrecompileError::Fatal(
+                        "unexpected result variant".to_string(),
+                    ));
+                }
             };
 
             let event = IAcp::RelationshipSubjectDeleted {
@@ -335,7 +349,11 @@ fn run(
 
             let record = match result {
                 vera_modules::acp::types::PolicyCmdResult::RegisterObject { record } => record,
-                _ => return Err(PrecompileError::Other("unexpected result variant".into())),
+                _ => {
+                    return Err(PrecompileError::Fatal(
+                        "unexpected result variant".to_string(),
+                    ));
+                }
             };
 
             let event = IAcp::ObjectRegistered {
@@ -371,7 +389,11 @@ fn run(
                     found,
                     relationships_removed,
                 } => (found, relationships_removed),
-                _ => return Err(PrecompileError::Other("unexpected result variant".into())),
+                _ => {
+                    return Err(PrecompileError::Fatal(
+                        "unexpected result variant".to_string(),
+                    ));
+                }
             };
 
             let event = IAcp::ObjectUnregistered {
@@ -407,7 +429,11 @@ fn run(
                     record,
                     relationship_modified,
                 } => (record, relationship_modified),
-                _ => return Err(PrecompileError::Other("unexpected result variant".into())),
+                _ => {
+                    return Err(PrecompileError::Fatal(
+                        "unexpected result variant".to_string(),
+                    ));
+                }
             };
 
             let ret = IAcp::unarchiveObjectCall::abi_encode_returns(&IAcp::unarchiveObjectReturn {
@@ -436,7 +462,11 @@ fn run(
                 vera_modules::acp::types::PolicyCmdResult::CommitRegistrations {
                     registrations_commitment,
                 } => registrations_commitment.id,
-                _ => return Err(PrecompileError::Other("unexpected result variant".into())),
+                _ => {
+                    return Err(PrecompileError::Fatal(
+                        "unexpected result variant".to_string(),
+                    ));
+                }
             };
 
             let ret = IAcp::commitRegistrationsCall::abi_encode_returns(&commitment_id);
@@ -452,9 +482,8 @@ fn run(
             let call = IAcp::revealRegistrationCall::abi_decode(input).map_err(decode_error)?;
             let creator = did_from_signer(&tx_ctx.signer)?;
             let proof: vera_modules::acp::types::RegistrationProof =
-                serde_json::from_slice(&call.proof).map_err(|e| {
-                    PrecompileError::Other(format!("proof JSON decode: {e}").into())
-                })?;
+                serde_json::from_slice(&call.proof)
+                    .map_err(|e| PrecompileError::Fatal(format!("proof JSON decode: {e}")))?;
             let cmd = PolicyCmd::RevealRegistration {
                 registrations_commitment_id: call.commitmentId,
                 proof,
@@ -505,7 +534,11 @@ fn run(
 
             let event = match result {
                 vera_modules::acp::types::PolicyCmdResult::FlagHijackAttempt { event } => event,
-                _ => return Err(PrecompileError::Other("unexpected result variant".into())),
+                _ => {
+                    return Err(PrecompileError::Fatal(
+                        "unexpected result variant".to_string(),
+                    ));
+                }
             };
 
             let ret = IAcp::flagHijackAttemptCall::abi_encode_returns(&json_bytes(&event));
@@ -516,7 +549,7 @@ fn run(
             let call = IAcp::bearerPolicyCmdCall::abi_decode(input).map_err(decode_error)?;
             let policy_id = policy_id_to_string(&call.policyId);
             let cmd: PolicyCmd = serde_json::from_slice(&call.cmd)
-                .map_err(|e| PrecompileError::Other(format!("cmd JSON decode: {e}").into()))?;
+                .map_err(|e| PrecompileError::Fatal(format!("cmd JSON decode: {e}")))?;
 
             let result = match module.bearer_policy_cmd_with_budget(
                 vera,
@@ -538,7 +571,7 @@ fn run(
         IAcp::executePolicyCommandCall::SELECTOR => {
             let call = IAcp::executePolicyCommandCall::abi_decode(input).map_err(decode_error)?;
             let request = serde_json::from_slice(&call.request).map_err(|error| {
-                PrecompileError::Other(format!("invalid policy command: {error}").into())
+                PrecompileError::Fatal(format!("invalid policy command: {error}"))
             })?;
             let actor = did_from_signer(&tx_ctx.signer)?;
             match module.execute_policy_cmd_with_metadata_and_budget(

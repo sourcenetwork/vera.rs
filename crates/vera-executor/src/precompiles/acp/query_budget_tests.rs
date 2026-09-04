@@ -1,4 +1,5 @@
 use super::*;
+use revm::precompile::{PrecompileHalt, PrecompileStatus};
 use vera_modules::acp::{
     pages::RelationshipPageRequest,
     types::{PolicyCommandRequest, SuppliedMetadata},
@@ -151,19 +152,19 @@ fn query_budget_all_collection_routes_enforce_exact_allowance() {
     for call in calls {
         let measured = fixture.dispatch(&call, 1_000_000).unwrap();
         assert!(
-            !measured.precompile.reverted,
+            !measured.precompile.status.is_revert(),
             "{:?}",
             measured.precompile.bytes
         );
         let required = measured.precompile.gas_used;
         assert!(required > READ_GAS);
         let exact = fixture.dispatch(&call, required).unwrap();
-        assert!(!exact.precompile.reverted);
+        assert!(!exact.precompile.status.is_revert());
         assert_eq!(exact.precompile.gas_used, required);
         assert_eq!(exact.precompile.bytes, measured.precompile.bytes);
         assert!(matches!(
             fixture.dispatch(&call, required - 1),
-            Err(PrecompileError::OutOfGas)
+            Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
         ));
     }
     assert_eq!(fixture.module.store().serialize(), before);
@@ -174,7 +175,7 @@ fn query_budget_empty_filtered_results_charge_scans_and_nested_batches_roll_back
     let mut fixture = Fixture::new();
     let read = fixture.filtered();
     let result = fixture.dispatch(&read, 1_000_000).unwrap();
-    assert!(!result.precompile.reverted);
+    assert!(!result.precompile.status.is_revert());
     let bytes =
         IAcp::filterRelationshipsCall::abi_decode_returns(&result.precompile.bytes).unwrap();
     assert_eq!(bytes.as_ref(), b"[]");
@@ -184,11 +185,11 @@ fn query_budget_empty_filtered_results_charge_scans_and_nested_batches_roll_back
     let input = batch(vec![read.clone(), batch(vec![read.clone()])]);
     let exact = READ_GAS * 2 + required * 2;
     let output = fixture.dispatch(&input, exact).unwrap();
-    assert!(!output.precompile.reverted);
+    assert!(!output.precompile.status.is_revert());
     assert_eq!(output.precompile.gas_used, exact);
     assert!(matches!(
         fixture.dispatch(&input, exact - 1),
-        Err(PrecompileError::OutOfGas)
+        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
     ));
     let creation_gas = fixture
         .clone()
@@ -199,14 +200,14 @@ fn query_budget_empty_filtered_results_charge_scans_and_nested_batches_roll_back
     let input = batch(vec![create(), batch(vec![read.clone(), read.clone()])]);
     assert!(matches!(
         fixture.dispatch(&input, exact + creation_gas - 1),
-        Err(PrecompileError::OutOfGas)
+        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
     ));
     assert_eq!(fixture.module.store().serialize(), before);
     let repeated = batch(vec![read; batch::MAX_CALLS - 1]);
     batch::validate(&repeated).unwrap();
     assert!(matches!(
         fixture.dispatch(&repeated, 1_000_000),
-        Err(PrecompileError::OutOfGas)
+        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
     ));
     assert_eq!(fixture.module.store().serialize(), before);
 }
@@ -219,7 +220,7 @@ fn query_budget_ordinary_read_failure_keeps_charges_and_rolls_back_prior_writes(
     }
     .abi_encode();
     let failure = fixture.dispatch(&missing, 1_000_000).unwrap();
-    assert!(failure.precompile.reverted);
+    assert!(failure.precompile.status.is_revert());
     assert!(failure.precompile.gas_used > READ_GAS);
     let before = fixture.module.store().serialize();
     let creation_gas = fixture
@@ -230,7 +231,7 @@ fn query_budget_ordinary_read_failure_keeps_charges_and_rolls_back_prior_writes(
         .gas_used;
     let input = batch(vec![create(), batch(vec![missing])]);
     let result = fixture.dispatch(&input, 1_000_000).unwrap();
-    assert!(result.precompile.reverted);
+    assert!(result.precompile.status.is_revert());
     assert_eq!(
         result.precompile.gas_used,
         2 * READ_GAS + creation_gas + failure.precompile.gas_used
@@ -257,7 +258,7 @@ fn query_budget_has_relationship_preserves_exact_matching_and_actor_validation()
         }
         .abi_encode();
         let result = fixture.dispatch(&call, 1_000_000).unwrap();
-        assert!(!result.precompile.reverted);
+        assert!(!result.precompile.status.is_revert());
         assert_eq!(
             IAcp::hasRelationshipCall::abi_decode_returns(&result.precompile.bytes).unwrap(),
             expected

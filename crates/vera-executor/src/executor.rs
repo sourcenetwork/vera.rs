@@ -329,17 +329,18 @@ impl VeraExecutor {
             .expect("target validated above")
         }));
 
-        if matches!(&dispatch_result, Ok(Ok(result)) if !result.precompile.reverted)
+        if matches!(&dispatch_result, Ok(Ok(result)) if !result.precompile.status.is_revert())
             && !(acp.store().changes_fit_native_bounds(before.0.store())
                 && bulletin.store().changes_fit_native_bounds(before.1.store())
                 && vera.store().changes_fit_native_bounds(before.2.store()))
         {
-            dispatch_result = Ok(Err(PrecompileError::Other(
-                "module record exceeds native storage bounds".into(),
-            )));
+            let mut rejected =
+                crate::precompiles::err_dispatch("module record exceeds native storage bounds");
+            rejected.precompile.gas_used = NATIVE_TX_GAS_LIMIT;
+            dispatch_result = Ok(Ok(rejected));
         }
 
-        if !matches!(&dispatch_result, Ok(Ok(result)) if !result.precompile.reverted) {
+        if !matches!(&dispatch_result, Ok(Ok(result)) if !result.precompile.status.is_revert()) {
             (*acp, *bulletin, *vera) = before;
             journal.journal_mut().checkpoint_revert(checkpoint);
         } else {
@@ -358,7 +359,7 @@ impl VeraExecutor {
         };
 
         match dispatch_result {
-            Ok(Ok(result)) if !result.precompile.reverted => Ok(ExecutionReceipt::new(
+            Ok(Ok(result)) if !result.precompile.status.is_revert() => Ok(ExecutionReceipt::new(
                 tx_hash,
                 true,
                 result.precompile.gas_used,
@@ -488,18 +489,13 @@ impl VeraExecutor {
             // Native module storage is retained even when its account has no balance or code.
             for (address, account) in journaled {
                 if account.is_touched() {
-                    let storage = account
-                        .storage
-                        .into_iter()
-                        .map(|(slot, value)| (slot, value.into()))
-                        .collect();
                     ctx.journal_mut()
                         .db_mut()
                         .cache
                         .accounts
                         .get_mut(&address)
                         .expect("journaled account was loaded into the proposal cache")
-                        .change(account.info, storage);
+                        .change(std::borrow::Cow::Owned(account));
                 }
             }
 
@@ -580,7 +576,7 @@ impl VeraExecutor {
 
             executed_indices.push(i);
 
-            let gas_used = result_and_state.result.gas_used();
+            let gas_used = result_and_state.result.tx_gas_used();
             gas_budget.charge(tx_gas_limit, gas_used)?;
 
             let receipt = build_receipt(
