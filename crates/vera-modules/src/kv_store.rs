@@ -265,6 +265,51 @@ mod tests {
     }
 
     #[test]
+    fn large_forks_preserve_snapshot_and_replay_diffs() {
+        let mut base = InMemoryKvStore::default();
+        for key in 0_u32..2_048 {
+            base.put(&key.to_be_bytes(), key.to_le_bytes().to_vec());
+        }
+        base.reset_dirty();
+        let original = base.serialize();
+        let mut fork = base.clone();
+        let mut expected: BTreeMap<_, _> = base.prefix_scan(b"").into_iter().collect();
+        for key in 0_u32..3_072 {
+            let bytes = key.to_be_bytes();
+            if key % 3 == 0 {
+                fork.delete(&bytes);
+                expected.remove(bytes.as_slice());
+            } else {
+                let value = (key + 1).to_le_bytes().to_vec();
+                fork.put(&bytes, value.clone());
+                expected.insert(bytes.to_vec(), value);
+            }
+        }
+        let mut abandoned = fork.clone();
+        for key in 0_u32..3_072 {
+            abandoned.delete(&key.to_be_bytes());
+        }
+        assert!(abandoned.is_empty());
+        drop(abandoned);
+        assert_eq!(base.serialize(), original);
+        assert!(base.dirty_entries().is_empty());
+        assert_eq!(
+            fork.prefix_scan(b""),
+            expected.into_iter().collect::<Vec<_>>()
+        );
+        let mut replayed = base.clone();
+        for (key, value) in fork.diff_from(&base) {
+            match value {
+                Some(value) => replayed.put(&key, value),
+                None => replayed.delete(&key),
+            }
+        }
+        assert_eq!(replayed.serialize(), fork.serialize());
+        let restored = InMemoryKvStore::deserialize(&fork.serialize()).unwrap();
+        assert!(restored.diff_from(&fork).is_empty());
+    }
+
+    #[test]
     fn dirty_tracks_puts() {
         let mut store = InMemoryKvStore::default();
         store.put(b"a", b"1".to_vec());

@@ -21,7 +21,7 @@ bs58 = "0.5"
 futures.workspace = true
 hex.workspace = true
 # Versions 6 and 7 skip changed keys in ordered diffs across shared leaves.
-imbl = "5.0.0"
+imbl = "7.0.2"
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
