@@ -1,8 +1,8 @@
 use alloy_primitives::B256;
 use commonware_cryptography::sha256::Digest;
 use commonware_glue::stateful::db::{
-    AttachableResolver, BatchContext, DatabaseSet, ManagedDb, Merkleized, Shared, StateSyncDb,
-    SyncEngineConfig, Unmerkleized,
+    AttachableResolver, BatchContext, DatabaseSet, InitError, ManagedDb, Merkleized, Shared,
+    StateSyncDb, SyncEngineConfig, Unmerkleized,
 };
 use commonware_runtime::Handle;
 use commonware_utils::channel::mpsc;
@@ -89,13 +89,33 @@ impl ManagedDb<Ctx> for ModuleDb {
     type Config = VeraExecutor;
     type SyncTarget = ModuleTarget;
 
-    async fn init(_context: Ctx, executor: VeraExecutor) -> Result<Self, Self::Error> {
-        let height = executor.module_height()?;
-        let root = executor.snapshot()?.state_root(height);
-        Ok(Self {
-            executor,
-            target: ModuleTarget { height, root },
-        })
+    async fn init(
+        _context: Ctx,
+        executor: VeraExecutor,
+        expected: Option<ModuleTarget>,
+    ) -> Result<Self, InitError<Self::Error, ModuleTarget>> {
+        if let Some(target) = expected
+            && executor.module_trees().is_some()
+        {
+            executor
+                .recover_modules(target.height, target.root)
+                .map_err(InitError::Database)?;
+        }
+        let height = executor.module_height().map_err(InitError::Database)?;
+        let root = executor
+            .snapshot()
+            .map_err(InitError::Database)?
+            .state_root(height);
+        let target = ModuleTarget { height, root };
+        if let Some(expected) = expected
+            && target != expected
+        {
+            return Err(InitError::TargetMismatch {
+                expected,
+                recovered: target,
+            });
+        }
+        Ok(Self { executor, target })
     }
 
     fn initial_sync_target() -> ModuleTarget {
@@ -134,14 +154,6 @@ impl ManagedDb<Ctx> for ModuleDb {
 
     fn sync_target(&self) -> ModuleTarget {
         self.target
-    }
-
-    async fn rewind_to_target(mut self, target: ModuleTarget) -> Result<Self, Self::Error> {
-        if self.target != target {
-            self.executor.recover_modules(target.height, target.root)?;
-            self.target = target;
-        }
-        Ok(self)
     }
 }
 

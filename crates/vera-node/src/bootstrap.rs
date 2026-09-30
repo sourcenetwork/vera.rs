@@ -4,6 +4,7 @@ use std::{num::NonZeroU64, path::PathBuf};
 
 use commonware_codec::Encode as _;
 use commonware_consensus::types::Epoch;
+use commonware_cryptography::ChaCha20Poly1305;
 use commonware_cryptography::{
     Signer as _,
     bls12381::{
@@ -18,9 +19,12 @@ use commonware_glue::dkg::{
 use commonware_p2p::{Ingress, authenticated::discovery};
 use commonware_parallel::Sequential;
 use commonware_runtime::{Supervisor as _, tokio};
-use commonware_stream::encrypted::Handshake as StreamHandshake;
+use commonware_stream::{
+    cups::{self, Cups},
+    sake::{self, Sake},
+};
 use commonware_utils::{
-    N3f1, NZUsize, TestRng,
+    N3f1, NZU64, NZUsize, TestRng,
     ordered::{Map, Set},
     sequence::Unit,
 };
@@ -30,8 +34,9 @@ use vera_genesis::VeraGenesis;
 
 use crate::{
     BACKFILL_CHANNEL, BROADCAST_CHANNEL, CERTIFICATE_CHANNEL, DKG_CHANNEL, FileSecretStore,
-    MAILBOX_SIZE, MAX_MESSAGE_SIZE, MAX_PARTICIPANTS, MAX_SUPPORTED_MODE, MESSAGE_RATE, NAMESPACE,
-    P2P_SUFFIX, PeerSet, RESOLVER_CHANNEL, REVEAL, SHARING_MODE, VOTE_CHANNEL,
+    IO_BUFFER_SIZE, MAILBOX_SIZE, MAX_MESSAGE_SIZE, MAX_PARTICIPANTS, MAX_SUPPORTED_MODE,
+    MESSAGE_RATE, NAMESPACE, P2P_SUFFIX, PAGE_CACHE_SIZE, PAGE_SIZE, PeerSet, RESOLVER_CHANNEL,
+    REVEAL, SHARING_MODE, VOTE_CHANNEL,
 };
 
 /// Epoch-0 artifact carried by the genesis block.
@@ -80,7 +85,15 @@ pub async fn run_bootstrap(
         .map(|(key, address)| (key.clone(), Ingress::Socket(*address)))
         .collect();
     let mut p2p_config = discovery::Config::local(
-        StreamHandshake::new(signing_key.clone()),
+        Cups::<_, ChaCha20Poly1305>::new(
+            Sake {
+                signer: signing_key.clone(),
+                synchrony_bound: std::time::Duration::from_secs(5),
+                max_handshake_age: std::time::Duration::from_secs(10),
+                version: sake::Version::V1,
+            },
+            cups::Version::V1,
+        ),
         &[NAMESPACE, P2P_SUFFIX].concat(),
         listen,
         dial,
@@ -113,6 +126,16 @@ pub async fn run_bootstrap(
             reveal: REVEAL,
             max_supported_mode: MAX_SUPPORTED_MODE,
             partition_prefix: "bootstrap".to_owned(),
+            page_cache: commonware_runtime::buffer::paged::CacheRef::from_pooler(
+                &context,
+                PAGE_SIZE,
+                PAGE_CACHE_SIZE,
+            ),
+            write_buffer: IO_BUFFER_SIZE,
+            replay_buffer: IO_BUFFER_SIZE,
+            mailbox_size: MAILBOX_SIZE,
+            muxer_size: 128,
+            items_per_section: NZU64!(256),
             participants: participants.clone(),
             directory: Unit,
             blocks_per_epoch,

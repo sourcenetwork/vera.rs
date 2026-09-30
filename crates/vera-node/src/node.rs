@@ -21,6 +21,7 @@ use commonware_consensus::{
     },
     types::{Epoch, FixedEpocher, Height, ViewDelta},
 };
+use commonware_cryptography::ChaCha20Poly1305;
 use commonware_cryptography::{Digestible as _, Signer as _};
 use commonware_glue::{
     dkg::{
@@ -39,7 +40,10 @@ use commonware_p2p::{Ingress, Provider as _, authenticated::discovery};
 use commonware_parallel::{Rayon, Sequential};
 use commonware_runtime::{Handle, Spawner as _, Supervisor as _, buffer::paged::CacheRef, tokio};
 use commonware_storage::{archive::prunable, translator::TwoCap};
-use commonware_stream::encrypted::Handshake as StreamHandshake;
+use commonware_stream::{
+    cups::{self, Cups},
+    sake::{self, Sake},
+};
 use commonware_utils::{NZDuration, NZU64, NZUsize, sequence::Unit};
 use tracing::{error, info};
 use vera_app::{
@@ -145,7 +149,15 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
         .collect();
     let max_peers_per_set = NZUsize!(MAX_PARTICIPANTS.get() as usize);
     let mut p2p_config = discovery::Config::local(
-        StreamHandshake::new(signing_key.clone()),
+        Cups::<_, ChaCha20Poly1305>::new(
+            Sake {
+                signer: signing_key.clone(),
+                synchrony_bound: std::time::Duration::from_secs(5),
+                max_handshake_age: std::time::Duration::from_secs(10),
+                version: sake::Version::V1,
+            },
+            cups::Version::V1,
+        ),
         &[NAMESPACE, P2P_SUFFIX].concat(),
         listen,
         dial,
@@ -274,7 +286,10 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
     )
     .await?;
 
+    let stateful_startup = context.child("stateful_startup");
+    let mut plan = SyncPlan::init(stateful_startup.child("plan"), PARTITION_PREFIX).await;
     let (probe_actor, probe_mailbox) = probe::Actor::new(probe::Config {
+        floor: plan.floor().cloned(),
         context: context.child("dkg_probe"),
         manager: oracle.clone(),
         bootstrap: probe::Bootstrap {
@@ -293,14 +308,12 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
     });
     let probe_handle = probe_actor.start(dkg_probe_network);
 
-    let stateful_startup = context.child("stateful_startup");
     let history = Arc::new(crate::FinalizedHistory::open(
         config.data_dir.join("history"),
         &genesis_block,
     )?);
-    let mut plan = SyncPlan::init(&stateful_startup, PARTITION_PREFIX).await;
-    let completed_sync_height = plan.sync_height();
-    let mut snapshot_sync = plan.should_state_sync(config.snapshot.is_some());
+    let completed_sync_height = plan.completed();
+    let mut snapshot_sync = plan.should_sync(config.snapshot.is_some());
     let mut probe_artifact = None;
     if !snapshot_sync && history.head_height() > 0 && peers.participants.len() > 1 {
         // A completed state sync skips peer synchronization forever, which
@@ -318,8 +331,9 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
                     network_epoch = artifact.floor.proposal.round.epoch().get(),
                     "durable state predates reachable reshare ceremonies; re-arming state sync"
                 );
+                drop(plan);
                 rejoin::reset_sync_bookkeeping(&config.data_dir)?;
-                plan = SyncPlan::init(&stateful_startup, PARTITION_PREFIX).await;
+                plan = SyncPlan::init(stateful_startup.child("plan"), PARTITION_PREFIX).await;
                 snapshot_sync = true;
                 probe_artifact = Some(artifact);
             }
@@ -370,7 +384,7 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
                 artifact.info.output.public().clone(),
             ),
         );
-        plan = plan.with_floor(artifact.floor.clone());
+        plan = plan.set_floor(artifact.floor.clone()).await;
     }
 
     let (marshal_actor, marshal, floor) = MarshalActor::init(
@@ -444,6 +458,10 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
             reveal: REVEAL,
             mailbox_size: MAILBOX_SIZE,
             partition_prefix: format!("{PARTITION_PREFIX}-reshare"),
+            page_cache: page_cache.clone(),
+            write_buffer: IO_BUFFER_SIZE,
+            replay_buffer: IO_BUFFER_SIZE,
+            muxer_size: 128,
             max_participants: MAX_PARTICIPANTS,
             blocks_per_epoch,
             batch_verifier: PhantomData::<commonware_cryptography::ed25519::Batch>,
@@ -572,7 +590,7 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
     let sync_local = local.clone();
     let sync_history_peer = history_peer.clone();
     let sync_status = node_state.clone();
-    let (stateful_actor, stateful_mailbox) = Stateful::init(
+    let (stateful_actor, stateful_mailbox) = Stateful::new(
         context.child("stateful"),
         StatefulConfig {
             application,
@@ -648,8 +666,7 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
                 mailbox_size: NZUsize!(3),
                 replay_buffer: IO_BUFFER_SIZE,
                 write_buffer: IO_BUFFER_SIZE,
-                page_cache_page_size: PAGE_SIZE,
-                page_cache_pages: PAGE_CACHE_SIZE,
+                page_cache: page_cache.clone(),
                 leader_timeout,
                 certification_timeout,
                 timeout_retry,
@@ -680,7 +697,10 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
     let marshal_handle = marshal_actor.start(reporters, buffer, resolver);
     probe_mailbox.attach(marshal.clone());
     if !snapshot_sync {
-        let processed_height = marshal.get_processed_height().await;
+        let processed_height = marshal
+            .get_processed()
+            .await
+            .map(|processed| processed.height());
         let recovered_height = processed_height
             .into_iter()
             .chain(completed_sync_height)

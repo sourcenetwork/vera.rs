@@ -20,7 +20,8 @@ fn proofs_bind_all_namespaces_and_commit_ranges_after_pruning() {
         |context| async move {
             let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
             let set =
-                NativeStateSet::init(context.child("source"), state_config("source", cache)).await;
+                NativeStateSet::init(context.child("source"), state_config("source", cache), None)
+                    .await;
             let initial_root = root(&set).await;
             let initial = SyncProof::capture(&set, initial_root).await.unwrap();
             assert_eq!(

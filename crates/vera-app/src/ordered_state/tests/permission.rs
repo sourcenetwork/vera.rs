@@ -73,6 +73,7 @@ fn synchronized_permission_rpc_verifies_native_evidence_and_subsequent_denial() 
                     let source = OrderedState::init(
                         context.child("source"),
                         config(&context, "source", VeraExecutor::new(DEPLOYMENT)),
+                        None,
                     )
                     .await;
                     let owner = BlsSigner::new(1u64.into(), DEPLOYMENT).unwrap();

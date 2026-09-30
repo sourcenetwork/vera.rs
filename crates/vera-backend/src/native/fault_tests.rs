@@ -4,9 +4,8 @@
 //! design: glue panics rather than acknowledging a revision that is not
 //! durable. Each failure mode runs in a child process that is expected to
 //! die with that panic. The child records its last durable targets in a
-//! sidecar before arming the failure; the parent then reopens the directory,
-//! rewinds to the recorded anchor (the production startup contract), and
-//! verifies the failed revision republishes.
+//! sidecar before arming the failure; the parent then opens storage at that
+//! anchor and verifies the failed revision republishes.
 
 use super::{
     faulty_ctx::{Failure, FaultyCtx},
@@ -60,7 +59,7 @@ fn failed_reader(readers: &FaultyReaders, module: usize) -> &Reader<FaultyDb> {
 
 async fn open(context: &FaultyCtx) -> FaultySet {
     let cache = CacheRef::from_pooler(context, NZU16!(4084), NZUsize!(64));
-    FaultySet::init(context.child("native"), state_config("fault", cache)).await
+    FaultySet::init(context.child("native"), state_config("fault", cache), None).await
 }
 
 fn changes(module: usize, revision: u8) -> vera_modules::module_state::ModuleChanges {
@@ -168,8 +167,14 @@ fn injected_io_failures_are_fatal_and_recovery_republishes_the_anchor() {
         let anchor = read_anchor(&anchor_sidecar);
         let config = tokio::Config::new().with_storage_directory(directory.path());
         tokio::Runner::new(config).start(|context| async move {
-            let set = open(&FaultyCtx::new(context)).await;
-            set.rewind_to_targets(anchor).await;
+            let context = FaultyCtx::new(context);
+            let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+            let set = FaultySet::init(
+                context.child("recovered"),
+                state_config("fault", cache),
+                Some(anchor),
+            )
+            .await;
             let readers = set.readers();
             let acp = readers.0.read().await;
             assert_eq!(

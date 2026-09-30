@@ -63,6 +63,7 @@ fn fork_apply_finalize_and_restart() {
         let set = VeraStateSet::init(
             context.child("set"),
             state_set_config("t", page_cache(&context)),
+            None,
         )
         .await;
 
@@ -112,6 +113,7 @@ fn fork_apply_finalize_and_restart() {
         let set = VeraStateSet::init(
             context.child("set"),
             state_set_config("t", page_cache(&context)),
+            None,
         )
         .await;
         let targets = set.committed_targets().await;

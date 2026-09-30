@@ -35,8 +35,9 @@ Peer response translation preserves Commonware's validation feedback. The sync
 engine's rejection of an invalid proof reaches the original resolver, which can
 block that peer and supply another candidate. Accepting a proof closes the
 request; dropping feedback cancels it without accusing the peer. Translation
-uses a one-entry channel and exits when the consumer closes, including when no
-further candidate arrives. This feedback does not replace root verification or
+uses only the public `Feedback::new`, `accept` and `reject` API, with a one-entry
+channel. It exits when the consumer closes, including when no further candidate
+arrives. This feedback does not replace root verification or
 acknowledge durable storage.
 
 Resharing starts alongside database recovery. When execution state cannot yet
@@ -67,6 +68,27 @@ so stale targets converge without network quiescence.
 it reports the persisted snapshot recovery floor, which can also cover execution
 completed during the original handoff. It is operational status; clients still
 verify revision certificates and permission evidence independently.
+
+## Commonware integration
+
+The pinned fork follows upstream `a41ae43428f04f5cf36986b16c8b87282920a157`.
+Its remaining changes are confined to the QMDB sync engine, the source response
+codec and the stateful peer actor. Verified work survives target updates when the
+retention floor is unchanged. The fork also retains bounded pruning retries and
+target convergence behavior needed by Vera's snapshot recovery. `Pruned` is a fork
+wire extension, not an upstream response.
+
+Recovery supplies the authenticated target when each database opens. Every
+partition must recover that target before the application verifies the combined
+module commitment and hydrates query state. Startup does not first expose the
+latest journal state and then rewind it. The persisted sync floor is also supplied
+to the DKG probe on restart.
+
+Peer transport uses Commonware CUPS V1 with SAKE V1 authentication and
+ChaCha20-Poly1305. Validator and bootstrap binaries must use the same pinned
+Commonware build; mixed-version operation with the previous transport has not
+been qualified. Coordinate the validator upgrade and retain backups before opening
+existing state with the new storage implementation.
 
 ## Transfer bounds
 

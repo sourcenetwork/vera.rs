@@ -226,15 +226,6 @@ pub(super) struct FaultyBlob {
     ctx: FaultyCtx,
 }
 
-impl Clone for FaultyBlob {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            ctx: self.ctx.clone(),
-        }
-    }
-}
-
 impl FaultyBlob {
     fn new(inner: <tokio::Context as Storage>::Blob, ctx: &FaultyCtx) -> Self {
         Self {

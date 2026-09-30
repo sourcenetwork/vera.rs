@@ -67,8 +67,7 @@ fn peer_sync_rejects_a_response_against_a_different_target_root() {
         ::tokio::time::timeout(Duration::from_secs(20), async {
             let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
             let source = Shared::<NativeDb>::init(
-                context.child("source"), state_config("source", cache.clone()).0,
-            ).await;
+                context.child("source"), state_config("source", cache.clone()).0, None,).await;
             let batch = source.new_batches().await.write(b"key".to_vec(), Some(Bytes::from_static(b"value")));
             source.apply(batch.merkleize().await.unwrap()).await;
             assert!(source.finalize().await.durable().await);
@@ -99,8 +98,7 @@ fn pruned_peer_sync_resumes_after_cancellation_and_converges_on_new_target() {
         ::tokio::time::timeout(Duration::from_secs(30), async {
             let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
             let source = Shared::<NativeDb>::init(
-                context.child("source"), state_config("source", cache.clone()).0,
-            ).await;
+                context.child("source"), state_config("source", cache.clone()).0, None,).await;
             for revision in 0..11 {
                 let mut batch = source.new_batches().await;
                 for i in 0..128 {
@@ -169,7 +167,7 @@ fn pruned_peer_sync_resumes_after_cancellation_and_converges_on_new_target() {
                 assert_eq!(replica.get(&format!("key/{i:04}").into_bytes()).await.unwrap(), Some(Bytes::from(vec![10; 256])));
             }
             drop(replica);
-            let reopened = NativeDb::init(context.child("reopened"), replica_config).await.unwrap();
+            let reopened = NativeDb::init(context.child("reopened"), replica_config, None).await.unwrap();
             assert_eq!(reopened.root(), root);
             assert_eq!(reopened.sync_target(), target);
             assert_eq!(reopened.get(&b"key/new".to_vec()).await.unwrap(), Some(Bytes::from_static(b"added")));

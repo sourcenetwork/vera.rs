@@ -128,6 +128,7 @@ fn startup_recovers_each_partial_apply_before_publication() {
                 let state = OrderedState::init(
                     context.child("create"),
                     config(&context, "recover", VeraExecutor::new(DEPLOYMENT)),
+                    None,
                 )
                 .await;
                 state.apply(revision(&state, 1).await).await;
@@ -192,6 +193,7 @@ fn startup_recovers_each_partial_apply_before_publication() {
                 let raw = Box::pin(OrderedDatabases::init(
                     context.child("inspect"),
                     config(&context, "recover", executor.clone()).databases,
+                    None,
                 ))
                 .await;
                 let actual = raw.committed_targets().await;
@@ -260,6 +262,7 @@ fn startup_recovers_each_partial_apply_before_publication() {
                     context.child("reopen"),
                     config(&context, "recover", VeraExecutor::new(DEPLOYMENT))
                         .recover_to(next_target.clone()),
+                    None,
                 )
                 .await;
                 assert_eq!(state.committed_targets().await, next_target);

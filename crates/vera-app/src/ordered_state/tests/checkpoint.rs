@@ -95,6 +95,7 @@ fn checkpoint_rejects_bad_evidence_and_checks_rebuilt_state_before_publication()
                 let source = OrderedState::init(
                     context.child("source"),
                     config(&context, "source", VeraExecutor::new(DEPLOYMENT)),
+                    None,
                 )
                 .await;
                 source.apply(recovery::revision(&source, 1).await).await;
