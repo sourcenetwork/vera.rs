@@ -3,13 +3,19 @@
 /// Solidity ABI interface for the ACP precompile.
 pub mod abi;
 mod amendment_history;
+pub mod catalogue;
 mod command_context;
 mod commitment_expiry;
 mod commitment_lookup;
 mod index_validation;
+mod lifecycle;
+mod management;
+mod metadata;
+pub mod pages;
 mod registration_queries;
 mod relationship_queries;
 mod restoration;
+pub mod theorem;
 pub use registration_queries::{MAX_REGISTRATION_LEAF_BYTES, MAX_REGISTRATION_OBJECTS};
 pub mod decision;
 pub mod delegated_operation;
@@ -43,7 +49,7 @@ use types::{
     AccessDecision, AccessRequest, AcpParams, Actor, AmendmentEvent, DecisionParams,
     GenerateCommitmentResult, Object, ObjectSelector, PolicyCmd, PolicyCmdResult,
     PolicyMarshalingType, PolicyRecord, RecordMetadata, RegistrationProof, RegistrationsCommitment,
-    RelationSelector, RelationshipRecord, RelationshipSelector, SubjectSelector,
+    RelationSelector, RelationshipRecord, RelationshipSelector, SubjectSelector, SuppliedMetadata,
 };
 
 type Result<T> = std::result::Result<T, AcpError>;
@@ -139,10 +145,30 @@ impl AcpModule {
         marshal_type: PolicyMarshalingType,
         metadata: RecordMetadata,
     ) -> Result<PolicyRecord> {
+        self.create_policy_with_options(
+            policy,
+            marshal_type,
+            metadata,
+            None,
+            SuppliedMetadata::default(),
+        )
+    }
+
+    fn create_policy_with_options(
+        &mut self,
+        policy: &str,
+        marshal_type: PolicyMarshalingType,
+        metadata: RecordMetadata,
+        specification: Option<PolicySpecification>,
+        supplied: SuppliedMetadata,
+    ) -> Result<PolicyRecord> {
+        supplied.validate()?;
         let counter = self.next_policy_counter()?;
-        let zanzibar_policy = Self::compile_policy(policy, &marshal_type, counter, None)?;
+        let zanzibar_policy = Self::compile_policy(policy, &marshal_type, counter, specification)?;
 
         let record = PolicyRecord {
+            supplied_metadata: supplied,
+            last_modified: None,
             policy: zanzibar_policy.clone(),
             raw_policy: policy.to_string(),
             marshal_type,
@@ -209,6 +235,14 @@ impl AcpModule {
             }
         }
 
+        if existing_policy.actor.as_ref().map(|actor| &actor.name)
+            != new_zanzibar.actor.as_ref().map(|actor| &actor.name)
+        {
+            return Err(AcpError::InvalidPolicy {
+                reason: "actor resource cannot be renamed".into(),
+            });
+        }
+
         new_zanzibar.id = policy_id.to_string();
 
         // Prune orphaned relationships: relations that existed in old policy but not new.
@@ -229,9 +263,18 @@ impl AcpModule {
                     "relationship record differs from its key".into(),
                 ));
             }
-            if new_zanzibar
-                .get_relation(&relationship.resource, &relationship.relation)
-                .is_none()
+            let removed_subject = match &relationship.subject {
+                acp::Subject::EntitySet {
+                    resource, relation, ..
+                } if !relation.is_empty() => {
+                    new_zanzibar.get_relation(resource, relation).is_none()
+                }
+                _ => false,
+            };
+            if removed_subject
+                || new_zanzibar
+                    .get_relation(&relationship.resource, &relationship.relation)
+                    .is_none()
             {
                 to_delete.push(kv_key.clone());
             }
@@ -242,6 +285,8 @@ impl AcpModule {
         }
 
         let new_record = PolicyRecord {
+            supplied_metadata: existing.supplied_metadata.clone(),
+            last_modified: existing.last_modified.clone(),
             policy: new_zanzibar.clone(),
             raw_policy: policy.to_string(),
             marshal_type,
@@ -347,7 +392,8 @@ impl AcpModule {
             PolicyCmd::SetRelationship(rel) | PolicyCmd::DeleteRelationship(rel) => {
                 Some(rel.object_id.as_str())
             }
-            PolicyCmd::RegisterObject(obj)
+            PolicyCmd::TransferObject { object: obj, .. }
+            | PolicyCmd::RegisterObject(obj)
             | PolicyCmd::ArchiveObject(obj)
             | PolicyCmd::UnarchiveObject(obj) => Some(obj.id.as_str()),
             PolicyCmd::RevealRegistration { proof, .. } => Some(proof.object.id.as_str()),
@@ -363,6 +409,9 @@ impl AcpModule {
             PolicyCmd::DeleteRelationship(rel) => {
                 self.cmd_delete_relationship(creator, policy_id, rel)
             }
+            PolicyCmd::TransferObject { object, new_owner } => self
+                .transfer_object(creator, policy_id, &object, &new_owner.0)
+                .map(|record| PolicyCmdResult::TransferObject { record }),
             PolicyCmd::RegisterObject(obj) => self.cmd_register_object(creator, policy_id, obj),
             PolicyCmd::ArchiveObject(obj) => self.cmd_archive_object(creator, policy_id, obj),
             PolicyCmd::UnarchiveObject(obj) => self.cmd_unarchive_object(creator, policy_id, obj),
@@ -510,6 +559,11 @@ impl AcpModule {
             }
         };
         if let Some(specification) = original_specification {
+            if parsed.spec != PolicySpecification::None && parsed.spec != specification {
+                return Err(AcpError::InvalidPolicy {
+                    reason: "policy specification differs from the required specification".into(),
+                });
+            }
             parsed.spec = specification;
         }
         let built = policy_yaml::build_policy(&parsed, counter).map_err(|error| {
@@ -858,10 +912,6 @@ impl AcpModule {
         Ok(())
     }
 
-    // ── Engine factory ───────────────────────────────────────────────────
-
-    const fn get_acp_engine(&self) {}
-
     // ── PolicyCmd variant handlers ───────────────────────────────────────
 
     fn cmd_set_relationship(
@@ -886,23 +936,10 @@ impl AcpModule {
             });
         }
 
-        // Go-compat (defradb #1060): accept relationships on undeclared relation
-        // names; enforce the #1059 floor (EntitySet reference + subject
-        // restriction) only on declared relations, so vera and defradb make the
-        // same accept/reject decision and don't diverge single- vs cross-node.
-        // An undeclared-relation grant is inert: any access check on it fails
-        // closed because the engine resolves no expression for it.
-        if policy.get_relation(&rel.resource, &rel.relation).is_some()
-            || policy
-                .actor
-                .as_ref()
-                .is_some_and(|actor| actor.name == rel.resource)
-        {
-            rel.validate(&policy)
-                .map_err(|e| AcpError::InvalidAccessRequest {
-                    reason: e.to_string(),
-                })?;
-        }
+        rel.validate(&policy)
+            .map_err(|error| AcpError::InvalidAccessRequest {
+                reason: error.to_string(),
+            })?;
 
         if !self.is_authorized_to_manage(
             creator,
@@ -936,6 +973,7 @@ impl AcpModule {
         };
 
         let record = RelationshipRecord {
+            supplied_metadata: Default::default(),
             policy_id: policy_id.to_string(),
             relationship: rel,
             archived: false,
@@ -1057,6 +1095,7 @@ impl AcpModule {
         };
 
         let record = RelationshipRecord {
+            supplied_metadata: Default::default(),
             policy_id: policy_id.to_string(),
             relationship: owner_rel,
             archived: false,
@@ -1091,7 +1130,7 @@ impl AcpModule {
                 relationships_removed: 0,
             });
         }
-        if owner_rec.metadata.owner_did != creator.to_string() {
+        if !self.check_management_authority(creator, policy_id, &obj, "owner")? {
             return Err(AcpError::Unauthorized {
                 reason: format!(
                     "{} is not the owner of '{}/{}'",
@@ -1282,6 +1321,7 @@ impl AcpModule {
             );
             let storage_key = keys::relationship_storage_key(&owner_rel);
             let record = RelationshipRecord {
+                supplied_metadata: Default::default(),
                 policy_id: policy_id.to_string(),
                 relationship: owner_rel,
                 archived: false,
@@ -1317,6 +1357,7 @@ impl AcpModule {
             creator.clone(),
         );
         let record = RelationshipRecord {
+            supplied_metadata: Default::default(),
             policy_id: policy_id.to_string(),
             relationship: amended_rel,
             archived: false,
@@ -1395,51 +1436,6 @@ impl AcpModule {
         let mut engine = PermissionEngine::new(Arc::new(QmdbZanzibarStore::new(capture)));
         engine.add_policy(policy);
         engine
-    }
-
-    /// Check if creator is authorized to manage the given relation on an object.
-    ///
-    /// Authorization rules (simplified DPI):
-    /// 1. Creator is the policy owner (policy.metadata.owner_did matches).
-    /// 2. Creator has "owner" relation on the object.
-    /// 3. Creator has a managing relation (one that lists target in its `manages`).
-    fn is_authorized_to_manage(
-        &self,
-        creator: &Did,
-        policy_id: &str,
-        policy: &Policy,
-        resource: &str,
-        object_id: &str,
-        relation: &str,
-    ) -> Result<bool> {
-        // Rule 1: policy creator can manage anything.
-        if let Some(rec) = self.get_policy_record(policy_id)?
-            && rec.metadata.owner_did == creator.to_string()
-        {
-            return Ok(true);
-        }
-
-        // Rule 2: object owner can manage any relation on the object.
-        let owner_rel = Relationship::with_entity(resource, object_id, "owner", creator.clone());
-        if let Some(rec) = self.get_relationship(policy_id, &owner_rel)?
-            && !rec.archived
-        {
-            return Ok(true);
-        }
-
-        // Rule 3: creator has a managing relation for the target relation.
-        let managers = policy.get_managers_for_relation(resource, relation);
-        for managing_relation in managers {
-            let managing_rel =
-                Relationship::with_entity(resource, object_id, managing_relation, creator.clone());
-            if let Some(rec) = self.get_relationship(policy_id, &managing_rel)?
-                && !rec.archived
-            {
-                return Ok(true);
-            }
-        }
-
-        Ok(false)
     }
 
     // ── Relationship selector matching ───────────────────────────────────
@@ -1711,7 +1707,7 @@ resources:
             ] {
                 candidate
                     .direct_policy_cmd(&alice(), &policy, command)
-                    .unwrap();
+                    .unwrap_err();
             }
             assert_eq!(candidate.store.serialize(), before);
         }
@@ -2309,58 +2305,22 @@ resources:
     }
 
     #[test]
-    fn accepts_undeclared_relation_but_grant_is_inert() {
+    fn undeclared_relations_are_rejected_without_mutation() {
         let mut module = AcpModule::new();
         let creator = alice();
-        let grantee = bob();
-        let record = module
-            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml)
-            .unwrap();
-        let policy_id = record.policy.id;
-
-        // `bogus` is undeclared. defradb (Go-compat, #1060) accepts it; vera must
-        // too, or single-/cross-node decisions diverge.
-        let rel = Relationship::with_entity("document", "docX", "bogus", grantee.clone());
-        module
-            .direct_policy_cmd(&creator, &policy_id, PolicyCmd::SetRelationship(rel))
-            .expect("undeclared-relation grant is accepted");
-
-        // It is stored.
-        let selector = RelationshipSelector {
-            object_selector: Some(ObjectSelector::Exact(doc("docX"))),
-            relation_selector: Some(RelationSelector::Exact("bogus".into())),
-            subject_selector: None,
-        };
-        assert_eq!(
-            module
-                .query_filter_relationships(&policy_id, &selector)
-                .unwrap()
-                .len(),
-            1,
-            "the undeclared-relation grant is stored"
-        );
-
-        // But it is inert: an access check on the undeclared relation fails
-        // closed (the engine reports RelationNotFound -> deny).
-        let req = AccessRequest {
-            operations: vec![types::Operation {
-                object: doc("docX"),
-                permission: "bogus".into(),
-            }],
-            actor: Actor(grantee),
-        };
-        assert!(
-            module
-                .check_access(
-                    &creator,
-                    &policy_id,
-                    &req,
-                    &decision_block(),
-                    &decision_tx(&creator)
-                )
-                .is_err(),
-            "undeclared-relation grant must not authorize"
-        );
+        let policy = policy_with_grant(&mut module);
+        let before = module.store.serialize();
+        let relationship = Relationship::with_entity("document", "docX", "bogus", bob());
+        for command in [
+            PolicyCmd::SetRelationship(relationship.clone()),
+            PolicyCmd::DeleteRelationship(relationship),
+        ] {
+            assert!(matches!(
+                module.direct_policy_cmd(&creator, &policy, command),
+                Err(AcpError::InvalidAccessRequest { .. })
+            ));
+            assert_eq!(module.store.serialize(), before);
+        }
     }
 
     #[test]
@@ -2371,6 +2331,9 @@ resources:
             .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml)
             .unwrap();
         let policy_id = &record.policy.id;
+        module
+            .direct_policy_cmd(&creator, policy_id, PolicyCmd::RegisterObject(doc("docX")))
+            .unwrap();
         let rel = Relationship::with_entity("document", "docX", "reader", bob());
         module
             .direct_policy_cmd(&creator, policy_id, PolicyCmd::SetRelationship(rel))

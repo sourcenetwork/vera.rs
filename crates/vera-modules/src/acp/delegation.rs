@@ -73,7 +73,9 @@ impl AcpModule {
                 DelegationScope::EditPolicy,
                 DelegatedOperation::EditPolicy(policy_id, policy, &marshal_type).digest()?,
             ),
-            |module, _hub, actor| module.edit_policy(actor, policy_id, policy, marshal_type),
+            |module, _hub, actor| {
+                module.edit_policy_at(actor, policy_id, policy, marshal_type, &context.timestamp)
+            },
         )
     }
 

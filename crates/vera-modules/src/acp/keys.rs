@@ -50,9 +50,14 @@ pub fn relationship_storage_key(relationship: &acp::Relationship) -> String {
     )
 }
 
+/// Exact resource boundary for relationship queries.
+pub fn resource_prefix(resource: &str) -> String {
+    format!("v2/{}/", hex::encode(resource))
+}
+
 /// Exact object boundary, including when identifiers contain path separators.
 pub fn object_prefix(resource: &str, object_id: &str) -> String {
-    format!("v2/{}/{}/", hex::encode(resource), hex::encode(object_id))
+    format!("{}{}/", resource_prefix(resource), hex::encode(object_id))
 }
 
 /// Exact relation boundary within an object.

@@ -10,11 +10,12 @@ impl AcpModule {
         policy_id: &str,
         selector: &RelationshipSelector,
     ) -> Result<Vec<RelationshipRecord>> {
+        self.query_policy(policy_id)?;
         let mut records = Vec::new();
         let mut bytes = 0usize;
         for (count, (key, value)) in self
             .store
-            .prefix_iter(&keys::relationship_policy_prefix(policy_id))
+            .prefix_iter(&Self::relationship_query_prefix(policy_id, selector))
             .enumerate()
         {
             bytes = bytes.saturating_add(key.len()).saturating_add(value.len());
@@ -41,6 +42,22 @@ impl AcpModule {
         }
         Ok(records)
     }
+    pub(super) fn relationship_query_prefix(
+        policy: &str,
+        selector: &RelationshipSelector,
+    ) -> Vec<u8> {
+        let suffix = match &selector.object_selector {
+            Some(ObjectSelector::Exact(object)) => match &selector.relation_selector {
+                Some(RelationSelector::Exact(relation)) => {
+                    keys::relation_prefix(&object.resource, &object.id, relation)
+                }
+                _ => keys::object_prefix(&object.resource, &object.id),
+            },
+            Some(ObjectSelector::ResourcePredicate(resource)) => keys::resource_prefix(resource),
+            _ => return keys::relationship_policy_prefix(policy),
+        };
+        keys::relationship_storage_prefix(policy, &suffix)
+    }
 }
 
 #[cfg(test)]
@@ -58,6 +75,7 @@ mod tests {
     fn insert(module: &mut AcpModule, policy: &str, id: &str) -> Vec<u8> {
         let owner = Did::new("did:key:owner").unwrap();
         let record = RelationshipRecord {
+            supplied_metadata: Default::default(),
             policy_id: policy.into(),
             relationship: Relationship::with_entity("file", id, "owner", owner),
             archived: false,
@@ -79,15 +97,24 @@ mod tests {
     #[test]
     fn relationship_query_bounds_inspected_records_before_filtering() {
         let mut module = AcpModule::new();
+        let policy = module
+            .create_policy(
+                &Did::new("did:key:owner").unwrap(),
+                "name: query\nresources:\n  - name: file\n",
+                PolicyMarshalingType::ShortYaml,
+            )
+            .unwrap()
+            .policy
+            .id;
         for i in 0..1000 {
             insert(&mut module, "other", &i.to_string());
         }
         for i in 0..MAX_RECORDS {
-            insert(&mut module, "selected", &i.to_string());
+            insert(&mut module, &policy, &i.to_string());
         }
         assert_eq!(
             module
-                .query_filter_relationships("selected", &selector())
+                .query_filter_relationships(&policy, &selector())
                 .unwrap()
                 .len(),
             MAX_RECORDS
@@ -96,14 +123,14 @@ mod tests {
         excluded.relation_selector = Some(RelationSelector::Exact("reader".into()));
         assert!(
             module
-                .query_filter_relationships("selected", &excluded)
+                .query_filter_relationships(&policy, &excluded)
                 .unwrap()
                 .is_empty()
         );
-        insert(&mut module, "selected", "overflow");
+        insert(&mut module, &policy, "overflow");
         assert!(
             module
-                .query_filter_relationships("selected", &excluded)
+                .query_filter_relationships(&policy, &excluded)
                 .is_err()
         );
     }
@@ -111,14 +138,23 @@ mod tests {
     #[test]
     fn relationship_query_rejects_corruption_and_oversized_records() {
         let mut module = AcpModule::new();
-        let key = insert(&mut module, "selected", "report");
+        let policy = module
+            .create_policy(
+                &Did::new("did:key:owner").unwrap(),
+                "name: query\nresources:\n  - name: file\n",
+                PolicyMarshalingType::ShortYaml,
+            )
+            .unwrap()
+            .policy
+            .id;
+        let key = insert(&mut module, &policy, "report");
         let valid = module.store.get(&key).unwrap();
         let mut excluded = selector();
         excluded.relation_selector = Some(RelationSelector::Exact("reader".into()));
         module.store.put(&key, valid[..valid.len() - 1].to_vec());
         assert!(
             module
-                .query_filter_relationships("selected", &excluded)
+                .query_filter_relationships(&policy, &excluded)
                 .is_err()
         );
         let mut record: RelationshipRecord = serde_json::from_slice(&valid).unwrap();
@@ -126,21 +162,21 @@ mod tests {
         module.store.put(&key, serde_json::to_vec(&record).unwrap());
         assert!(
             module
-                .query_filter_relationships("selected", &excluded)
+                .query_filter_relationships(&policy, &excluded)
                 .is_err()
         );
-        record.policy_id = "selected".into();
+        record.policy_id = policy.clone();
         record.relationship.object_id = "another".into();
         module.store.put(&key, serde_json::to_vec(&record).unwrap());
         assert!(
             module
-                .query_filter_relationships("selected", &excluded)
+                .query_filter_relationships(&policy, &excluded)
                 .is_err()
         );
         module.store.put(&key, vec![b' '; MAX_BYTES]);
         assert!(
             module
-                .query_filter_relationships("selected", &excluded)
+                .query_filter_relationships(&policy, &excluded)
                 .is_err()
         );
     }

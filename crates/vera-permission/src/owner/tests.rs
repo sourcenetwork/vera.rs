@@ -9,6 +9,7 @@ fn object() -> Object {
 }
 fn record() -> RelationshipRecord {
     RelationshipRecord {
+        supplied_metadata: Default::default(),
         policy_id: "policy".into(),
         relationship: Relationship::with_entity(
             "document",

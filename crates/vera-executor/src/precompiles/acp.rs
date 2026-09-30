@@ -1,5 +1,9 @@
 //! ACP precompile dispatch — ABI decode/encode for all IAcp selectors.
 
+mod lifecycle;
+#[cfg(test)]
+mod lifecycle_tests;
+
 use alloy_primitives::{B256, Bytes};
 use alloy_sol_types::SolCall;
 use identity::Did;
@@ -181,6 +185,9 @@ pub(super) fn dispatch(
     }
     let selector: [u8; 4] = input[..4].try_into().expect("checked length above");
 
+    if lifecycle::handles(selector) {
+        return lifecycle::dispatch(module, block_ctx, tx_ctx, input, gas_limit);
+    }
     match selector {
         // ── Write methods ────────────────────────────────────────────
         IAcp::batchCallsCall::SELECTOR => {
@@ -305,7 +312,17 @@ pub(super) fn dispatch(
             let creator = did_from_signer(&tx_ctx.signer)?;
             let marshal_type = marshal_type_from_u8(call.marshalType);
 
-            let record = match module.create_policy(&creator, &policy_str, marshal_type) {
+            let record = match module.execute_create_policy(
+                &creator,
+                &vera_modules::acp::types::PolicyCreation {
+                    policy: policy_str,
+                    marshal_type,
+                    required_specification: None,
+                    metadata: Default::default(),
+                },
+                block_ctx,
+                tx_ctx,
+            ) {
                 Ok(r) => r,
                 Err(e) => return Ok(err_dispatch(e)),
             };
@@ -334,11 +351,16 @@ pub(super) fn dispatch(
                 .map_err(|_| PrecompileError::Other("invalid UTF-8 in policy".into()))?;
             let marshal_type = marshal_type_from_u8(call.marshalType);
 
-            let (relationships_removed, record) =
-                match module.edit_policy(&creator, &policy_id, &policy_str, marshal_type) {
-                    Ok(r) => r,
-                    Err(e) => return Ok(err_dispatch(e)),
-                };
+            let (relationships_removed, record) = match module.edit_policy_at(
+                &creator,
+                &policy_id,
+                &policy_str,
+                marshal_type,
+                &block_ctx.timestamp,
+            ) {
+                Ok(r) => r,
+                Err(e) => return Ok(err_dispatch(e)),
+            };
 
             let event = IAcp::PolicyEdited {
                 policyId: alloy_primitives::keccak256(policy_id.as_bytes()),
@@ -1154,6 +1176,12 @@ fn build_relationship_selector(
 
     let object_selector = if resource.is_empty() && object_id.is_empty() {
         None
+    } else if resource.is_empty() {
+        return Err(PrecompileError::Other(
+            "object selector requires a resource".into(),
+        ));
+    } else if object_id.is_empty() {
+        Some(ObjectSelector::ResourcePredicate(resource.to_owned()))
     } else {
         Some(ObjectSelector::Exact(Object {
             resource: resource.to_owned(),
@@ -1493,6 +1521,17 @@ resources:
             .create_policy(&creator, CROSS_POLICY_YAML, PolicyMarshalingType::ShortYaml)
             .unwrap();
         let policy_id = record.policy.id;
+        module
+            .direct_policy_cmd(
+                &creator,
+                &policy_id,
+                PolicyCmd::RegisterObject(Object {
+                    resource: "document".into(),
+                    id: "doc1".into(),
+                }),
+            )
+            .unwrap();
+
         let pid = policy_fixed(&policy_id);
 
         let fields = || IAcp::setRelationshipSubjectCall {

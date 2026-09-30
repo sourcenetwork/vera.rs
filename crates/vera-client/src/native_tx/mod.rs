@@ -6,3 +6,5 @@ pub(crate) mod acp;
 pub(crate) mod bulletin;
 /// Vera native write methods (precompile `0x0812`).
 pub(crate) mod vera;
+
+mod acp_lifecycle;

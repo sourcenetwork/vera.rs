@@ -83,6 +83,10 @@ pub enum PolicyCmd {
     SetRelationship(Relationship),
     DeleteRelationship(Relationship),
     RegisterObject(Object),
+    TransferObject {
+        object: Object,
+        new_owner: Actor,
+    },
     ArchiveObject(Object),
     UnarchiveObject(Object),
     CommitRegistrations {
@@ -111,6 +115,9 @@ pub enum PolicyCmdResult {
     RegisterObject {
         record: RelationshipRecord,
     },
+    TransferObject {
+        record: RelationshipRecord,
+    },
     ArchiveObject {
         found: bool,
         relationships_removed: u64,
@@ -131,9 +138,60 @@ pub enum PolicyCmdResult {
     },
 }
 
+/// Caller-supplied record attributes, separate from policy semantics.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuppliedMetadata {
+    #[serde(default)]
+    pub attributes: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub blob: Vec<u8>,
+}
+
+/// Policy creation options shared by native and embedded callers.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PolicyCreation {
+    pub policy: String,
+    pub marshal_type: PolicyMarshalingType,
+    #[serde(default)]
+    pub required_specification: Option<zanzibar::PolicySpecification>,
+    #[serde(default)]
+    pub metadata: SuppliedMetadata,
+}
+
+/// An authenticated command with optional application metadata for the created record.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PolicyCommandRequest {
+    pub command: PolicyCmd,
+    #[serde(default)]
+    pub metadata: SuppliedMetadata,
+}
+
+impl SuppliedMetadata {
+    pub(crate) fn validate(&self) -> Result<(), super::AcpError> {
+        let encoded =
+            serde_json::to_vec(self).map_err(|error| super::AcpError::State(error.to_string()))?;
+        if encoded.len() > 64 << 10 {
+            return Err(super::AcpError::InvalidAccessRequest {
+                reason: "metadata exceeds 64 KiB".into(),
+            });
+        }
+        Ok(())
+    }
+    pub fn is_empty(&self) -> bool {
+        self.attributes.is_empty() && self.blob.is_empty()
+    }
+}
+
 /// A stored policy with metadata.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PolicyRecord {
+    #[serde(default, skip_serializing_if = "SuppliedMetadata::is_empty")]
+    pub supplied_metadata: SuppliedMetadata,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_modified: Option<Timestamp>,
     pub policy: Policy,
     pub raw_policy: String,
     pub marshal_type: PolicyMarshalingType,
@@ -206,6 +264,8 @@ pub struct RelationshipSelector {
 /// A relationship associated with its policy.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RelationshipRecord {
+    #[serde(default, skip_serializing_if = "SuppliedMetadata::is_empty")]
+    pub supplied_metadata: SuppliedMetadata,
     pub policy_id: String,
     pub relationship: Relationship,
     pub archived: bool,

@@ -6,7 +6,7 @@ fn setup() -> (AcpModule, Did, Did, String, Object) {
     let mut module = AcpModule::new();
     let policy = module.create_policy(
         &first,
-        "name: registrations\nresources:\n  - name: file\n    permissions:\n      - name: read\n        expr: owner\n",
+        "name: registrations\nresources:\n  - name: file\n    relations:\n      - name: reader\n    permissions:\n      - name: read\n        expr: owner\n",
         PolicyMarshalingType::ShortYaml,
     ).unwrap().policy.id;
     (
@@ -627,7 +627,7 @@ fn corrupt_policy_and_relationship_records_cannot_authorize_or_be_overwritten() 
             PolicyCmd::DeleteRelationship(grant.clone()),
         ] {
             assert!(matches!(
-                module.direct_policy_cmd(&first, &policy, command),
+                module.direct_policy_cmd(&second, &policy, command),
                 Err(AcpError::State(_))
             ));
             assert_eq!(module.store.serialize(), before);

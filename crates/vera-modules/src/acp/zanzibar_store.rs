@@ -142,6 +142,8 @@ fn default_metadata() -> RecordMetadata {
 impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
     async fn store_policy(&self, policy: &Policy) -> Result<()> {
         let record = PolicyRecord {
+            supplied_metadata: Default::default(),
+            last_modified: None,
             policy: policy.clone(),
             raw_policy: String::new(),
             marshal_type: PolicyMarshalingType::ShortYaml,
@@ -220,6 +222,7 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
 
     async fn store_relationship(&self, policy_id: &str, rel: &Relationship) -> Result<()> {
         let record = RelationshipRecord {
+            supplied_metadata: Default::default(),
             policy_id: policy_id.to_string(),
             relationship: rel.clone(),
             archived: false,
@@ -381,6 +384,7 @@ mod tests {
     /// Seed a relationship record directly into the kv store under vera's keyspace.
     fn seed(store: &mut InMemoryKvStore, rel: &Relationship, archived: bool) {
         let record = RelationshipRecord {
+            supplied_metadata: Default::default(),
             policy_id: POLICY.to_string(),
             relationship: rel.clone(),
             archived,

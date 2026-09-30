@@ -63,6 +63,8 @@ fn fixture(subject: Subject, archived: bool) -> InMemoryKvStore {
     store.put(
         &keys::policy_key(POLICY),
         serde_json::to_vec(&PolicyRecord {
+            supplied_metadata: Default::default(),
+            last_modified: None,
             policy,
             raw_policy: String::new(),
             marshal_type: PolicyMarshalingType::ShortYaml,
@@ -89,6 +91,7 @@ fn fixture(subject: Subject, archived: bool) -> InMemoryKvStore {
         store.put(
             &key,
             serde_json::to_vec(&RelationshipRecord {
+                supplied_metadata: Default::default(),
                 policy_id: POLICY.into(),
                 relationship,
                 archived,

@@ -1,0 +1,934 @@
+[
+  {
+    "name": "lifecycle",
+    "policy": "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n      - name: admin\n        types: [actor, group->member]\n        manages: [reader, owner]\n      - name: parent\n        types: [file]\n    permissions:\n      - name: read\n        expr: reader + parent->read\n      - name: edit\n        expr: writer - reader\n  - name: group\n    relations:\n      - name: member\n        types: [actor]\n",
+    "steps": [
+      {
+        "op": "register",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "register",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:creator",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "edit",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "writer",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "edit",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "delete",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "edit",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "manage",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:creator"
+      },
+      {
+        "op": "transfer",
+        "actor": "did:key:creator",
+        "resource": "file",
+        "object": "report",
+        "relation": "",
+        "subject": "did:key:next"
+      },
+      {
+        "op": "transfer",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "",
+        "subject": "did:key:next"
+      },
+      {
+        "op": "owner",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:next",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "archive",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "archive",
+        "actor": "did:key:next",
+        "resource": "file",
+        "object": "report",
+        "relation": "",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "owner",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "transfer",
+        "actor": "did:key:next",
+        "resource": "file",
+        "object": "report",
+        "relation": "",
+        "subject": "did:key:owner"
+      },
+      {
+        "op": "unarchive",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "unarchive",
+        "actor": "did:key:next",
+        "resource": "file",
+        "object": "report",
+        "relation": "",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "owner",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      }
+    ]
+  },
+  {
+    "name": "userset-management",
+    "policy": "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n      - name: admin\n        types: [actor, group->member]\n        manages: [reader, owner]\n      - name: parent\n        types: [file]\n    permissions:\n      - name: read\n        expr: reader + parent->read\n      - name: edit\n        expr: writer - reader\n  - name: group\n    relations:\n      - name: member\n        types: [actor]\n",
+    "steps": [
+      {
+        "op": "register",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "register",
+        "actor": "did:key:owner",
+        "resource": "group",
+        "object": "admins",
+        "relation": "",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "group",
+        "object": "admins",
+        "relation": "member",
+        "subject": "did:key:manager"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "admin",
+        "subject": "did:key:reader",
+        "subject_resource": "group",
+        "subject_object": "admins",
+        "subject_relation": "member"
+      },
+      {
+        "op": "manage",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:manager"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:manager",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "delete",
+        "actor": "did:key:owner",
+        "resource": "group",
+        "object": "admins",
+        "relation": "member",
+        "subject": "did:key:manager"
+      },
+      {
+        "op": "manage",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:manager"
+      },
+      {
+        "op": "delete",
+        "actor": "did:key:manager",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      }
+    ]
+  },
+  {
+    "name": "empty-policy",
+    "policy": "",
+    "steps": []
+  },
+  {
+    "name": "reserved-owner-relation",
+    "policy": "name: files\nresources:\n  - name: file\n    relations:\n      - name: owner\n",
+    "steps": []
+  },
+  {
+    "name": "permission-owner-reference",
+    "policy": "name: files\nresources:\n  - name: file\n    permissions:\n      - name: read\n        expr: owner\n",
+    "steps": []
+  },
+  {
+    "name": "owner-tuple-source",
+    "policy": "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n      - name: admin\n        types: [actor, group->member]\n        manages: [reader, owner]\n      - name: parent\n        types: [file]\n    permissions:\n      - name: read\n        expr: owner->read\n      - name: edit\n        expr: writer - reader\n  - name: group\n    relations:\n      - name: member\n        types: [actor]\n",
+    "steps": []
+  },
+  {
+    "name": "foreign-owner",
+    "policy": "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n      - name: admin\n        types: [actor, group->member]\n        manages: [reader, owner]\n      - name: parent\n        types: [file]\n    permissions:\n      - name: read\n        expr: parent->owner\n      - name: edit\n        expr: writer - reader\n  - name: group\n    relations:\n      - name: member\n        types: [actor]\n",
+    "steps": []
+  },
+  {
+    "name": "unknown-managed-relation",
+    "policy": "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n      - name: admin\n        types: [actor, group->member]\n        manages: [missing]\n      - name: parent\n        types: [file]\n    permissions:\n      - name: read\n        expr: reader + parent->read\n      - name: edit\n        expr: writer - reader\n  - name: group\n    relations:\n      - name: member\n        types: [actor]\n",
+    "steps": []
+  },
+  {
+    "name": "unknown-expression",
+    "policy": "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n      - name: admin\n        types: [actor, group->member]\n        manages: [reader, owner]\n      - name: parent\n        types: [file]\n    permissions:\n      - name: read\n        expr: missing\n      - name: edit\n        expr: writer - reader\n  - name: group\n    relations:\n      - name: member\n        types: [actor]\n",
+    "steps": []
+  },
+  {
+    "name": "defra-missing-read-write",
+    "policy": "spec: defra\nname: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n      - name: admin\n        types: [actor, group->member]\n        manages: [reader, owner]\n      - name: parent\n        types: [file]\n    permissions:\n      - name: read\n        expr: reader + parent->read\n      - name: edit\n        expr: writer - reader\n  - name: group\n    relations:\n      - name: member\n        types: [actor]\n",
+    "steps": []
+  },
+  {
+    "name": "unknown-specification",
+    "policy": "spec: missing\nname: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n      - name: admin\n        types: [actor, group->member]\n        manages: [reader, owner]\n      - name: parent\n        types: [file]\n    permissions:\n      - name: read\n        expr: reader + parent->read\n      - name: edit\n        expr: writer - reader\n  - name: group\n    relations:\n      - name: member\n        types: [actor]\n",
+    "steps": []
+  },
+  {
+    "name": "duplicate-resource",
+    "policy": "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n      - name: admin\n        types: [actor, group->member]\n        manages: [reader, owner]\n      - name: parent\n        types: [file]\n    permissions:\n      - name: read\n        expr: reader + parent->read\n      - name: edit\n        expr: writer - reader\n  - name: group\n    relations:\n      - name: member\n        types: [actor]\n  - name: file\n",
+    "steps": []
+  },
+  {
+    "name": "policy-edit-metadata",
+    "policy": "name: edits\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n    permissions:\n      - name: read\n        expr: reader\n",
+    "steps": [
+      {
+        "op": "register",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "writer",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "undefined",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "metadata",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader",
+        "blob": "forbidden"
+      },
+      {
+        "op": "metadata",
+        "actor": "did:key:creator",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader",
+        "blob": "notes"
+      },
+      {
+        "op": "policy",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "edit",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader",
+        "policy": "name: edits\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n    permissions:\n      - name: read\n        expr: reader\n"
+      },
+      {
+        "op": "edit",
+        "actor": "did:key:creator",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader",
+        "policy": "name: edits\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n    permissions:\n      - name: read\n        expr: reader\n"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "edit",
+        "actor": "did:key:creator",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader",
+        "policy": "name: edits\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [group->member]\n      - name: writer\n        types: [actor]\n    permissions:\n      - name: read\n        expr: reader\n  - name: group\n    relations:\n      - name: member\n        types: [actor]\n"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "policy",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "edit",
+        "actor": "did:key:creator",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader",
+        "policy": "name: edits\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n    permissions:\n      - name: read\n        expr: reader\n"
+      },
+      {
+        "op": "policy",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      }
+    ]
+  },
+  {
+    "name": "delegated-archive",
+    "policy": "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n      - name: admin\n        types: [actor, group->member]\n        manages: [reader, owner]\n      - name: parent\n        types: [file]\n    permissions:\n      - name: read\n        expr: reader + parent->read\n      - name: edit\n        expr: writer - reader\n  - name: group\n    relations:\n      - name: member\n        types: [actor]\n",
+    "steps": [
+      {
+        "op": "register",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "register",
+        "actor": "did:key:owner",
+        "resource": "group",
+        "object": "admins",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "group",
+        "object": "admins",
+        "relation": "member",
+        "subject": "did:key:manager"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "admin",
+        "subject": "did:key:reader",
+        "subject_resource": "group",
+        "subject_object": "admins",
+        "subject_relation": "member"
+      },
+      {
+        "op": "archive",
+        "actor": "did:key:manager",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "owner",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "unarchive",
+        "actor": "did:key:manager",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "unarchive",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:manager"
+      },
+      {
+        "op": "owner",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      }
+    ]
+  },
+  {
+    "name": "operators-reader + writer",
+    "policy": "name: edits\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n    permissions:\n      - name: read\n        expr: reader + writer\n",
+    "steps": [
+      {
+        "op": "register",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "writer",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "delete",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "*"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      }
+    ]
+  },
+  {
+    "name": "operators-reader & writer",
+    "policy": "name: edits\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n    permissions:\n      - name: read\n        expr: reader & writer\n",
+    "steps": [
+      {
+        "op": "register",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "writer",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "delete",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "*"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      }
+    ]
+  },
+  {
+    "name": "operators-reader - writer",
+    "policy": "name: edits\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n    permissions:\n      - name: read\n        expr: reader - writer\n",
+    "steps": [
+      {
+        "op": "register",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "writer",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "delete",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "*"
+      },
+      {
+        "op": "check",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "read",
+        "subject": "did:key:reader"
+      }
+    ]
+  },
+  {
+    "name": "theorem-assertions",
+    "policy": "name: edits\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n    permissions:\n      - name: read\n        expr: reader\n",
+    "steps": [
+      {
+        "op": "register",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "theorem",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader",
+        "policy": "Authorizations { file:report#read@did:key:reader } Delegations { did:key:owner > file:report#reader }"
+      },
+      {
+        "op": "theorem",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader",
+        "policy": "Authorizations { !file:report#read@did:key:stranger } Delegations {}"
+      },
+      {
+        "op": "theorem",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader",
+        "policy": "Authorizations { file:report#read@did:key:stranger } Delegations {}"
+      },
+      {
+        "op": "theorem",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader",
+        "policy": "Authorizations { file:\"report\"#read@did:key:reader } Delegations {}"
+      }
+    ]
+  },
+  {
+    "name": "incoming-userset-pruning",
+    "policy": "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n      - name: admin\n        types: [actor, group->member]\n        manages: [reader, owner]\n      - name: parent\n        types: [file]\n    permissions:\n      - name: read\n        expr: reader + parent->read\n      - name: edit\n        expr: writer - reader\n  - name: group\n    relations:\n      - name: member\n        types: [actor]\n",
+    "steps": [
+      {
+        "op": "register",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "register",
+        "actor": "did:key:owner",
+        "resource": "group",
+        "object": "admins",
+        "relation": "reader",
+        "subject": "did:key:reader"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "group",
+        "object": "admins",
+        "relation": "member",
+        "subject": "did:key:manager"
+      },
+      {
+        "op": "set",
+        "actor": "did:key:owner",
+        "resource": "file",
+        "object": "report",
+        "relation": "admin",
+        "subject": "did:key:reader",
+        "subject_resource": "group",
+        "subject_object": "admins",
+        "subject_relation": "member"
+      },
+      {
+        "op": "edit",
+        "actor": "did:key:creator",
+        "resource": "file",
+        "object": "report",
+        "relation": "",
+        "subject": "did:key:reader",
+        "policy": "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n      - name: admin\n        types: [actor]\n        manages: [reader, owner]\n      - name: parent\n        types: [file]\n    permissions:\n      - name: read\n        expr: reader + parent->read\n      - name: edit\n        expr: writer - reader\n  - name: group\n"
+      }
+    ]
+  }
+]
