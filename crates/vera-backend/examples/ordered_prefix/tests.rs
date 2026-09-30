@@ -14,7 +14,7 @@ pub(super) async fn write(db: Store, entries: Vec<(Vec<u8>, Option<Bytes>)>) -> 
 fn complete_prefixes_match_all_subsets_and_reject_omissions() {
     run(|context| async move {
         let cfg = config(&context);
-        let mut db = Store::init(context, cfg).await.unwrap();
+        let mut db = Store::init(context, cfg, None).await.unwrap();
         let keys = [b"".as_slice(), b"\0", b"a", b"aa", b"ab", b"b", b"\xff"];
         let prefixes = [
             b"".as_slice(),
@@ -72,10 +72,9 @@ fn complete_prefixes_match_all_subsets_and_reject_omissions() {
                         omitted
                             .entries
                             .iter()
-                            .all(|entry| Store::verify_key_value_proof(
+                            .all(|entry| entry.proof.verify::<Sha256, _>(
                                 entry.key.clone(),
                                 entry.value.clone(),
-                                &entry.proof,
                                 &db.root()
                             ))
                     );
@@ -93,7 +92,7 @@ fn complete_prefixes_match_all_subsets_and_reject_omissions() {
 fn rejects_tampering_and_mixed_revisions() {
     run(|context| async move {
         let cfg = config(&context);
-        let db = Store::init(context, cfg).await.unwrap();
+        let db = Store::init(context, cfg, None).await.unwrap();
         let mut db = write(
             db,
             [

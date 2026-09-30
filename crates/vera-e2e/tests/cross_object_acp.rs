@@ -128,14 +128,7 @@ async fn cross_object_grant_replicates_across_nodes() {
     let client = VeraClient::new(cluster.node(0).rpc_url());
     let signer = EvmSigner::from_hex(HARDHAT_KEY_0, chain_id).expect("valid signer");
 
-    let user_key =
-        k256::ecdsa::SigningKey::from_bytes((&hex::decode(HARDHAT_KEY_0).unwrap()[..]).into())
-            .expect("valid signing key");
-    // A grant target: an arbitrary valid DID acting as a reader of the parent.
-    let alice = vera_crypto::secp256k1::did_from_secp256k1_pubkey(
-        user_key.verifying_key().to_encoded_point(true).as_bytes(),
-    )
-    .expect("valid DID");
+    let alice = "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH";
 
     // ── 1. Create the policy on node 0 (account0 becomes its owner) ──────
     let create = IAcp::createPolicyCall {
@@ -153,11 +146,21 @@ async fn cross_object_grant_replicates_across_nodes() {
     assert_eq!(policy_ids.len(), 1, "exactly one policy expected");
     let policy_id = parse_policy_id(&policy_ids[0]);
 
+    for (resource, object_id) in [("document", "doc1"), ("collection", "col1")] {
+        let register = IAcp::registerObjectCall {
+            policyId: policy_id,
+            resource: resource.into(),
+            objectId: object_id.into(),
+        }
+        .abi_encode();
+        let receipt = broadcast_evm_tx(&cluster, &client, &signer, ACP_ADDRESS, register).await;
+        assert_eq!(receipt.status, 1, "register {resource}/{object_id}");
+    }
+
     // ── 2. Seed the parent edge via setRelationshipSubject ───────────────
     // document:doc1#parent @ collection:col1#reader — a userset subject
     // (subjectKind 3), the cross-object shape the entity-only setRelationship
-    // cannot express. account0 owns the policy, so it is authorized directly:
-    // no bearer token, no re-stringified PolicyCmd — just structured fields.
+    // cannot express. The signer registered both objects and owns them.
     let parent_calldata = IAcp::setRelationshipSubjectCall {
         policyId: policy_id,
         resource: "document".into(),
@@ -182,7 +185,7 @@ async fn cross_object_grant_replicates_across_nodes() {
         resource: "collection".into(),
         objectId: "col1".into(),
         relation: "reader".into(),
-        actor: alice.clone(),
+        actor: alice.into(),
     }
     .abi_encode();
     let grant_receipt = broadcast_evm_tx(&cluster, &client, &signer, ACP_ADDRESS, grant).await;
@@ -215,7 +218,7 @@ async fn cross_object_grant_replicates_across_nodes() {
 
         // The child grant (entity subject) replicated too.
         let has_grant = node
-            .has_relationship(policy_id, "collection", "col1", "reader", &alice)
+            .has_relationship(policy_id, "collection", "col1", "reader", alice)
             .await
             .unwrap_or_else(|e| panic!("node{node_idx} has_relationship(grant): {e}"));
         assert!(
@@ -234,7 +237,7 @@ async fn cross_object_grant_replicates_across_nodes() {
                 vec!["document".into()],
                 vec!["doc1".into()],
                 vec!["read".into()],
-                &alice,
+                alice,
             )
             .await
             .unwrap_or_else(|e| panic!("node{node_idx} verify_access_request(doc1 read): {e}"));
@@ -250,7 +253,7 @@ async fn cross_object_grant_replicates_across_nodes() {
                 vec!["document".into()],
                 vec!["doc2".into()],
                 vec!["read".into()],
-                &alice,
+                alice,
             )
             .await
             .unwrap_or_else(|e| panic!("node{node_idx} verify_access_request(doc2 read): {e}"));
@@ -307,7 +310,7 @@ async fn cross_object_grant_replicates_across_nodes() {
                 vec!["document".into()],
                 vec!["doc1".into()],
                 vec!["read".into()],
-                &alice,
+                alice,
             )
             .await
             .unwrap_or_else(|e| panic!("node{node_idx} verify_access_request(revoked): {e}"));

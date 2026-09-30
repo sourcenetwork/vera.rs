@@ -93,6 +93,17 @@ fn authorization_survives_forks_restart_and_rewind() {
                 .unwrap()
                 .policy
                 .id;
+            first_state
+                .acp
+                .direct_policy_cmd(
+                    &owner,
+                    &policy,
+                    PolicyCmd::RegisterObject(Object {
+                        resource: "document".into(),
+                        id: "report".into(),
+                    }),
+                )
+                .unwrap();
             let blocked = Relationship::new(
                 "document",
                 "report",

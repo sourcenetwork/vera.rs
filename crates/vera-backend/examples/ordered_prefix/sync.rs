@@ -4,7 +4,7 @@ use commonware_glue::stateful::db::{
     DatabaseSet, ManagedDb, Shared, StateSyncDb, SyncEngineConfig, Unmerkleized as _,
 };
 use commonware_runtime::Supervisor as _;
-use commonware_storage::qmdb::sync::{Feedback, Request, Response, Source};
+use commonware_storage::qmdb::sync::{Feedback, Request, Response, Source, source};
 use commonware_utils::channel::{mpsc, oneshot};
 use std::sync::{
     Arc, Mutex,
@@ -30,10 +30,7 @@ impl Source for MeasuredSource {
     type Op = <Set as Source>::Op;
     type Error = <Set as Source>::Error;
 
-    async fn serve(
-        &self,
-        request: Request<Self::Family>,
-    ) -> Result<(Response<Self::Family, Self::Op, Self::Digest>, Feedback), Self::Error> {
+    async fn serve(&self, request: Request<Self::Family>) -> source::Result<Self> {
         let _permit = self.gate.acquire().await.unwrap();
         let (mut response, mut feedback) = self.db.serve(request).await?;
         let count = match &mut response {
@@ -42,11 +39,13 @@ impl Source for MeasuredSource {
                     && let Some(report) = self.tamper.lock().unwrap().take()
                 {
                     operations[0] = operations[1].clone();
-                    feedback = Some(report);
+                    let (_, candidates) = mpsc::channel(1);
+                    feedback = Some(Feedback::new(report, candidates));
                 }
                 operations.len() as u64
             }
             Response::Boundary { .. } => 1,
+            Response::Pruned { .. } => 0,
         };
         self.operations.fetch_add(count, Ordering::Relaxed);
         self.bytes
@@ -191,7 +190,10 @@ fn check_sync(burst: bool, prune: bool) {
             if burst {
                 assert_eq!(measured.operations.load(Ordering::Relaxed), initial_ops);
                 drop(pause);
-                while reached_rx.recv().await.unwrap() != last {}
+                while reached_rx.recv().await.unwrap() != last {
+                    // Coordinated sync parks at a reached target until the caller dispatches again.
+                    updates_tx.send(last.clone()).await.unwrap();
+                }
             }
             let delta_ops = measured.operations.load(Ordering::Relaxed) - initial_ops;
             let delta_bytes = measured.bytes.load(Ordering::Relaxed) - initial_bytes;
@@ -229,7 +231,7 @@ fn check_sync(burst: bool, prune: bool) {
             Some(Bytes::from(vec![7; 256]))
         );
         drop(restored);
-        let reopened = Store::init(context.child("reopened"), destination(&context))
+        let reopened = Store::init(context.child("reopened"), destination(&context), None)
             .await
             .unwrap();
         assert_eq!(reopened.root(), root);

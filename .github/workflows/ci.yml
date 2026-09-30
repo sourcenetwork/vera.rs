@@ -324,6 +324,7 @@ jobs:
           cargo test --frozen -p vera-modules --test acp_go_parity --test acp_v1_lifecycle --test acp_v1_pages --test acp_conformance
           cargo test --frozen -p vera-backend --lib
           cargo test --frozen -p vera-backend --test native_state --test native_hydration --test pruned_hint
+          cargo test --frozen -p vera-backend --example ordered_prefix_baseline
           cargo test --frozen -p vera-e2e --example operation_baseline rejected_updates_preserve_results_and_stop_dependent_submissions
           cargo test --frozen -p vera-node --lib --features regolith-history "history::"
 
