@@ -82,7 +82,7 @@ fn ordered_sync_starts_after_pruned_history() {
 fn check_sync(burst: bool, prune: bool) {
     run(|context| async move {
         let cfg = config(&context);
-        let source = Set::init(context.child("source"), cfg).await;
+        let source = Set::init(context.child("source"), cfg, None).await;
         let mut batch = source.new_batches().await;
         for i in 0..RECORDS {
             batch = batch.write(

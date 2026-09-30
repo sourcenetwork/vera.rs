@@ -60,7 +60,10 @@ impl FloorRefresh {
     /// Stored finalizations were verified against the epoch's registered key
     /// when marshal accepted them, so re-floors stay certificate-authenticated.
     pub(crate) async fn observe(&mut self, marshal: &VeraMarshal) {
-        let processed = marshal.get_processed_height().await;
+        let processed = marshal
+            .get_processed()
+            .await
+            .map(|processed| processed.height());
         let latest = marshal
             .get_info(Identifier::Latest)
             .await

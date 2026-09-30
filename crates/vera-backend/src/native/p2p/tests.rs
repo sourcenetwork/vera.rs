@@ -114,6 +114,7 @@ fn peer_sync_preserves_roots_and_reports_rejected_responses() {
             let source = Shared::<NativeDb>::init(
                 context.child("source"),
                 state_config("source", cache.clone()).0,
+                None,
             )
             .await;
             let batch = source

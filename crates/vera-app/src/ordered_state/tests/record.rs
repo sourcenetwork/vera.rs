@@ -18,6 +18,7 @@ fn native_record_rpc_keeps_the_captured_revision_across_finalization() {
                     let set = OrderedState::init(
                         context.child("records"),
                         config(&context, "records", VeraExecutor::new(DEPLOYMENT)),
+                        None,
                     )
                     .await;
                     let owner = BlsSigner::new(1u64.into(), DEPLOYMENT).unwrap();

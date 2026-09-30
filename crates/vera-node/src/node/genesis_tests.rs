@@ -34,6 +34,7 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
                 let execution = VeraStateSet::init(
                     context.child("partial_execution"),
                     state_set_config(crate::node::PARTITION_PREFIX, cache.clone()),
+                    None,
                 )
                 .await;
                 vera_app::apply_genesis(&execution, &genesis.to_genesis_state().unwrap())
@@ -43,6 +44,7 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
                     let modules = NativeStateSet::init(
                         context.child("partial_modules"),
                         native::state_config(crate::node::PARTITION_PREFIX, cache),
+                        None,
                     )
                     .await;
                     let changes = [
@@ -72,6 +74,7 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
             let modules = NativeStateSet::init(
                 context.child("check_modules"),
                 native::state_config(crate::node::PARTITION_PREFIX, cache.clone()),
+                None,
             )
             .await;
             let state = native::load_modules(&modules).await.unwrap();
@@ -160,6 +163,7 @@ fn journals_without_initialization_intent_are_preserved() {
         let modules = NativeStateSet::init(
             context.child("existing"),
             native::state_config(crate::node::PARTITION_PREFIX, cache),
+            None,
         )
         .await;
         modules
@@ -190,6 +194,7 @@ fn journals_without_initialization_intent_are_preserved() {
         let modules = NativeStateSet::init(
             context.child("check_existing"),
             native::state_config(crate::node::PARTITION_PREFIX, cache),
+            None,
         )
         .await;
         assert_eq!(modules.committed_targets().await, expected);

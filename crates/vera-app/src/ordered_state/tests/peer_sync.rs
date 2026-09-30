@@ -1,10 +1,14 @@
 use super::*;
 
+use commonware_cryptography::ChaCha20Poly1305;
 use commonware_cryptography::{Signer as _, ed25519::PrivateKey};
 use commonware_glue::stateful::db::p2p;
 use commonware_p2p::{Address, AddressableManager as _, authenticated::lookup};
 use commonware_runtime::{Handle, Quota};
-use commonware_stream::encrypted::Handshake as StreamHandshake;
+use commonware_stream::{
+    cups::{self, Cups},
+    sake::{self, Sake},
+};
 use commonware_utils::{NZU32, ordered::Map};
 use vera_backend::p2p::{MAX_FETCH_OPS, MAX_MESSAGE_BYTES, Resolver, WireDatabase};
 
@@ -28,6 +32,7 @@ fn all_partitions_sync_over_authenticated_peers_and_reopen() {
                 let source = OrderedState::init(
                     context.child("source"),
                     config(&context, "source", VeraExecutor::new(DEPLOYMENT)),
+                    None,
                 )
                 .await;
                 source.apply(recovery::revision(&source, 1).await).await;
@@ -50,7 +55,15 @@ fn all_partitions_sync_over_authenticated_peers_and_reopen() {
                 let mut resolvers = Vec::new();
                 for (i, (key, listener)) in keys.into_iter().zip(listeners).enumerate() {
                     let mut cfg = lookup::Config::local(
-                        StreamHandshake::new(key),
+                        Cups::<_, ChaCha20Poly1305>::new(
+                            Sake {
+                                signer: key,
+                                synchrony_bound: std::time::Duration::from_secs(5),
+                                max_handshake_age: std::time::Duration::from_secs(10),
+                                version: sake::Version::V1,
+                            },
+                            cups::Version::V1,
+                        ),
                         b"vera-partition-sync-test",
                         addresses[i],
                         NZUsize!(2),

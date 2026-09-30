@@ -8,7 +8,7 @@ fn byte_budget_batches_small_records_and_splits_large_records() {
     let config = tokio::Config::new().with_storage_directory(directory.path());
     tokio::Runner::new(config).start(|context| async move {
         let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
-        let db = Shared::<NativeDb>::init(context.child("source"), state_config("source", cache).0)
+        let db = Shared::<NativeDb>::init(context.child("source"), state_config("source", cache).0, None)
             .await;
         let mut batch = db.new_batches().await;
         for i in 0..8 {

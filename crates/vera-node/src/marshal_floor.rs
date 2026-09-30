@@ -25,7 +25,12 @@ pub(crate) async fn run<E: commonware_runtime::Clock>(
     let mut maintained = 0u64;
     loop {
         context.sleep(TICK).await;
-        let Some(processed) = marshal.get_processed_height().await.map(|h| h.get()) else {
+        let Some(processed) = marshal
+            .get_processed()
+            .await
+            .map(|processed| processed.height())
+            .map(|h| h.get())
+        else {
             continue;
         };
         let Some(target) = processed.checked_sub(retention) else {

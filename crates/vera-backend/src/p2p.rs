@@ -255,19 +255,30 @@ impl<DB: Partition> Source for Resolver<DB> {
 fn translate_feedback<DB: Partition>(
     feedback: Feedback<Response<mmr::Family, WireOperation<DB>, Digest>>,
 ) -> Feedback<Response<mmr::Family, DB::Op, Digest>> {
-    let (verdict, mut candidates) = feedback.into_parts();
-    let (translated, receiver) = commonware_utils::channel::mpsc::channel(1);
-    // Keep verdicts tied to their original candidates. Closing the consumer
-    // cancels the underlying request even when no further candidate arrives.
+    use commonware_utils::channel::{mpsc, oneshot};
+
+    let (verdict, mut verdict_rx) = oneshot::channel();
+    let (translated, receiver) = mpsc::channel(1);
     tokio::spawn(async move {
+        let mut feedback = feedback;
         loop {
-            let candidate = tokio::select! {
+            match verdict_rx.await {
+                Ok(true) => {
+                    feedback.accept();
+                    break;
+                }
+                Ok(false) => {}
+                Err(_) => break,
+            }
+            // Closing the translated request must also cancel a pending retry.
+            let next = tokio::select! {
                 () = translated.closed() => break,
-                candidate = candidates.recv() => candidate,
+                next = feedback.reject() => next,
             };
-            let Some((response, verdict)) = candidate else {
+            let Some((response, next_feedback)) = next else {
                 break;
             };
+            let (verdict, next_verdict_rx) = oneshot::channel();
             if translated
                 .send((map(response, |op| op.0), verdict))
                 .await
@@ -275,9 +286,11 @@ fn translate_feedback<DB: Partition>(
             {
                 break;
             }
+            feedback = next_feedback;
+            verdict_rx = next_verdict_rx;
         }
     });
-    Feedback::from_parts(verdict, receiver)
+    Feedback::new(verdict, receiver)
 }
 
 impl<DB: Partition> AttachableResolver<DB> for Resolver<DB> {

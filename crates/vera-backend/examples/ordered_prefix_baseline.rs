@@ -126,7 +126,7 @@ fn main() {
     assert!((1..=100_000).contains(&objects) && (1..=10_000).contains(&samples));
     run(|context| async move {
         let cfg = config(&context);
-        let mut db = Store::init(context, cfg).await.unwrap();
+        let mut db = Store::init(context, cfg, None).await.unwrap();
         let value = Bytes::from(vec![7; 256]);
         let translator = index::KeyPrefix::default();
         let mut buckets = BTreeMap::<_, usize>::new();

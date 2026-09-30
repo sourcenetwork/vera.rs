@@ -35,7 +35,7 @@ async fn assert_records(set: &Set, root: Digest, keys: &[&[u8]]) {
 fn pending_forks_do_not_change_committed_proofs() {
     run(|context| async move {
         let cfg = config(&context);
-        let set = Set::init(context, cfg).await;
+        let set = Set::init(context.child("initial"), cfg, None).await;
         let empty_root = set.read().await.root();
         let parent = set
             .new_batches()
@@ -73,7 +73,13 @@ fn pending_forks_do_not_change_committed_proofs() {
         drop(rejected);
         assert_records(&set, selected_root, &[BOB]).await;
 
-        set.rewind_to_targets(parent_target).await;
+        drop(set);
+        let set = Set::init(
+            context.child("recovered"),
+            config(&context),
+            Some(parent_target),
+        )
+        .await;
         assert_records(&set, parent_root, &[ALICE]).await;
     });
 }
@@ -89,7 +95,7 @@ fn recover_checkpoint_after_process_exit() {
         let phase = std::env::var("VERA_PREFIX_RECOVERY_PHASE").unwrap();
         runtime(&directory.join("db")).start(|context| async move {
             let cfg = config(&context);
-            let set = Set::init(context, cfg).await;
+            let set = Set::init(context.child("initial"), cfg, None).await;
             let first = set
                 .new_batches()
                 .await
@@ -143,16 +149,17 @@ fn recover_checkpoint_after_process_exit() {
         let (root, target) = <(Digest, Target)>::decode(bytes.as_slice()).unwrap();
         runtime(&directory.path().join("db")).start(|context| async move {
             let cfg = config(&context);
-            let set = Set::init(context, cfg).await;
+            let set = Set::init(context.child("initial"), cfg, None).await;
             if phase == "durable" {
                 assert_ne!(set.read().await.root(), root);
             }
-            set.rewind_to_targets(target).await;
+            drop(set);
+            let set = Set::init(context.child("recovered"), config(&context), Some(target)).await;
             assert_records(&set, root, &[ALICE]).await;
         });
         runtime(&directory.path().join("db")).start(|context| async move {
             let cfg = config(&context);
-            let set = Set::init(context, cfg).await;
+            let set = Set::init(context.child("initial"), cfg, None).await;
             assert_records(&set, root, &[ALICE]).await;
         });
     }

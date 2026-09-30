@@ -50,6 +50,7 @@ fn one_unproven_pruned_hint_does_not_strand_a_servable_target() {
             let source = Shared::<NativeDb>::init(
                 context.child("source"),
                 state_config("source", cache.clone()).0,
+                None,
             )
             .await;
             let batch = source

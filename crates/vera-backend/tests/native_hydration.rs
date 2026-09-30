@@ -24,6 +24,7 @@ async fn open(context: &tokio::Context) -> NativeStateSet {
     NativeStateSet::init(
         context.child("native"),
         native::state_config("hydrate", cache),
+        None,
     )
     .await
 }
@@ -58,6 +59,7 @@ fn hydration_ignores_inactive_records_after_prune_delete_and_rewind() {
         let set = NativeStateSet::init(
             context.child("native"),
             native::state_config("hydrate", cache),
+            None,
         )
         .await;
         let mut records: [BTreeMap<Vec<u8>, Vec<u8>>; 4] = std::array::from_fn(|_| BTreeMap::new());
@@ -124,7 +126,14 @@ fn hydration_ignores_inactive_records_after_prune_delete_and_rewind() {
             native::load_modules(&set).await.unwrap().serialize_stores(),
             ModuleState::default().serialize_stores()
         );
-        set.rewind_to_targets(target.clone()).await;
+        drop(set);
+        let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+        let set = NativeStateSet::init(
+            context.child("recovered"),
+            native::state_config("hydrate", cache),
+            Some(target.clone()),
+        )
+        .await;
         assert_eq!(
             native::load_modules(&set).await.unwrap().serialize_stores(),
             expected(&records)
@@ -136,6 +145,7 @@ fn hydration_ignores_inactive_records_after_prune_delete_and_rewind() {
         let set = NativeStateSet::init(
             context.child("native"),
             native::state_config("hydrate", cache),
+            None,
         )
         .await;
         assert_eq!(set.committed_targets().await, target);
@@ -154,8 +164,7 @@ fn hydration_rejects_orphaned_token_indexes() {
         let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
         let set = NativeStateSet::init(
             context.child("native"),
-            native::state_config("token-index", cache),
-        )
+            native::state_config("token-index", cache), None,)
         .await;
         let key = vera_modules::vera::keys::jws_token_by_did_key("did:key:issuer", "missing");
         let mut changes: ModuleChanges = std::array::from_fn(|_| Vec::new());
