@@ -98,6 +98,7 @@ async fn init(context: &crate::Ctx) -> NativeStateSet {
     NativeStateSet::init(
         context.child("proof"),
         super::super::state_config("proof", cache),
+        None,
     )
     .await
 }

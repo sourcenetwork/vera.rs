@@ -2,8 +2,8 @@ use std::convert::Infallible;
 
 use commonware_cryptography::sha256::Digest;
 use commonware_glue::stateful::db::{
-    AttachableResolver, BatchContext, ManagedDb, Merkleized, Shared, StateSyncDb, SyncEngineConfig,
-    Unmerkleized,
+    AttachableResolver, BatchContext, InitError, ManagedDb, Merkleized, Shared, StateSyncDb,
+    SyncEngineConfig, Unmerkleized,
 };
 use commonware_runtime::Handle;
 use commonware_utils::channel::{fallible::AsyncFallibleExt as _, mpsc};
@@ -42,8 +42,12 @@ impl ManagedDb<Ctx> for Commitment {
     type SyncTarget = Option<Digest>;
     type Error = Infallible;
 
-    async fn init(_: Ctx, _: ()) -> Result<Self, Infallible> {
-        Ok(Self(None))
+    async fn init(
+        _: Ctx,
+        _: (),
+        expected: Option<Self::SyncTarget>,
+    ) -> Result<Self, InitError<Infallible, Self::SyncTarget>> {
+        Ok(Self(expected.flatten()))
     }
     fn initial_sync_target() -> Self::SyncTarget {
         None
@@ -62,9 +66,6 @@ impl ManagedDb<Ctx> for Commitment {
     }
     fn sync_target(&self) -> Self::SyncTarget {
         self.0
-    }
-    async fn rewind_to_target(self, target: Self::SyncTarget) -> Result<Self, Infallible> {
-        Ok(Self(target))
     }
 }
 

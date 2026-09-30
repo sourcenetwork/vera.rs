@@ -36,8 +36,12 @@ fn competing_proposals_preserve_receipts() {
     let config = tokio::Config::default().with_storage_directory(dir.path().to_path_buf());
     tokio::Runner::new(config).start(|context| async move {
         let page_cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
-        let set =
-            BackendStateSet::init(context.child("set"), state_set_config("app", page_cache)).await;
+        let set = BackendStateSet::init(
+            context.child("set"),
+            state_set_config("app", page_cache),
+            None,
+        )
+        .await;
 
         let (key, from) = signer();
         let genesis_state = GenesisState {
@@ -53,7 +57,7 @@ fn competing_proposals_preserve_receipts() {
         assert!(mempool.insert(tx));
 
         let executor = VeraExecutor::new(CHAIN_ID);
-        let native = ModuleDb::init(context.child("native"), executor.clone())
+        let native = ModuleDb::init(context.child("native"), executor.clone(), None)
             .await
             .unwrap();
         let set: VeraStateSet = (set.0, set.1, set.2, Shared::new("native", native));

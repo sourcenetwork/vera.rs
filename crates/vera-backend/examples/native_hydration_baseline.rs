@@ -41,7 +41,7 @@ fn main() {
     }
     tokio::Runner::new(tokio::Config::new().with_storage_directory(directory)).start(|context| async move {
         let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
-        let set = NativeStateSet::init(context.child("native"), native::state_config("hydration", cache)).await;
+        let set = NativeStateSet::init(context.child("native"), native::state_config("hydration", cache), None).await;
         if mode == "init" {
             for start in (0..records).step_by(1024) {
                 let changes = std::array::from_fn(|module| {
@@ -91,7 +91,7 @@ fn main() {
 
 async fn indexed_or_buffered(db: &Shared<NativeDb>, mode: &str) -> InMemoryKvStore {
     let db = db.read().await;
-    let records = db.stream_range(Vec::new()).await.unwrap();
+    let records = db.stream_range(..);
     if mode == "indexed" {
         return InMemoryKvStore::try_from_stream(records.map_err(|e| e.to_string()))
             .await

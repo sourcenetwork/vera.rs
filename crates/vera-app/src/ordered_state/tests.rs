@@ -156,6 +156,7 @@ fn sync_publishes_latest_modules_before_suffix_execution() {
             let source = OrderedState::init(
                 context.child("source"),
                 config(&context, "source", source_executor.clone()),
+                None,
             )
             .await;
             let signer = BlsSigner::new(1u64.into(), DEPLOYMENT).unwrap();
@@ -396,7 +397,15 @@ fn sync_publishes_latest_modules_before_suffix_execution() {
                     .unwrap(),
                 3
             );
-            destination.rewind_to_targets(target.clone()).await;
+            drop(readers);
+            drop(destination);
+            let destination = OrderedState::init(
+                context.child("recovered"),
+                config(&context, "destination", destination_executor.clone()),
+                Some(target.clone()),
+            )
+            .await;
+            assert_eq!(destination.committed_targets().await, target);
             assert_eq!(
                 destination_executor
                     .modules()
@@ -413,6 +422,7 @@ fn sync_publishes_latest_modules_before_suffix_execution() {
         let state = OrderedState::init(
             context.child("reopen"),
             config(&context, "destination", executor.clone()).recover_to(target.clone()),
+            None,
         )
         .await;
         assert_eq!(state.committed_targets().await, target);

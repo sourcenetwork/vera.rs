@@ -231,10 +231,14 @@ impl OrderedState {
                 "ordered storage cannot attach JMT trees".into(),
             ));
         }
-        let databases = Box::pin(OrderedDatabases::init(context, config.databases)).await;
+        let databases = Box::pin(OrderedDatabases::init(
+            context,
+            config.databases,
+            config.recovery.clone(),
+        ))
+        .await;
         match config.recovery {
             Some(targets) => {
-                databases.rewind_to_targets(targets.clone()).await;
                 if databases.committed_targets().await != targets {
                     return Err(AppError::RootMismatch("ordered recovery targets"));
                 }
@@ -370,16 +374,30 @@ impl DatabaseSet<Ctx> for OrderedState {
     type Config = OrderedConfig;
     type SyncTargets = OrderedTargets;
 
-    async fn init(context: Ctx, config: Self::Config) -> Self {
+    async fn init(
+        context: Ctx,
+        mut config: Self::Config,
+        expected: Option<Self::SyncTargets>,
+    ) -> Self {
         if config.marshal_recovery {
             assert!(
                 config.executor.module_trees().is_none(),
                 "ordered storage cannot attach JMT trees"
             );
-            return Self {
-                databases: Box::pin(OrderedDatabases::init(context, config.databases)).await,
-                executor: config.executor,
-            };
+            let databases =
+                Box::pin(OrderedDatabases::init(context, config.databases, expected)).await;
+            return Self::restore(databases, config.executor)
+                .await
+                .expect("restore authenticated module state");
+        }
+        if let Some(expected) = expected {
+            if let Some(configured) = &config.recovery {
+                assert_eq!(
+                    configured, &expected,
+                    "conflicting ordered recovery targets"
+                );
+            }
+            config.recovery = Some(expected);
         }
         Box::pin(Self::open(context, config))
             .await
@@ -464,14 +482,6 @@ impl DatabaseSet<Ctx> for OrderedState {
 
     async fn committed_targets(&self) -> Self::SyncTargets {
         self.databases.committed_targets().await
-    }
-
-    async fn rewind_to_targets(&self, targets: Self::SyncTargets) {
-        Box::pin(self.databases.rewind_to_targets(targets)).await;
-        Self::check_module_root(&self.databases)
-            .await
-            .expect("validate rewound module root");
-        self.reload().await.expect("reload rewound module state");
     }
 }
 

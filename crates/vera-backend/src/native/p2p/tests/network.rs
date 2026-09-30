@@ -1,4 +1,5 @@
 use super::*;
+use commonware_cryptography::ChaCha20Poly1305;
 use commonware_cryptography::{
     Signer as _,
     ed25519::{PrivateKey, PublicKey},
@@ -6,7 +7,10 @@ use commonware_cryptography::{
 use commonware_p2p::{
     Address, AddressableManager as _, BlockedSubscription, Blocker as _, authenticated::lookup,
 };
-use commonware_stream::encrypted::Handshake as StreamHandshake;
+use commonware_stream::{
+    cups::{self, Cups},
+    sake::{self, Sake},
+};
 
 use commonware_runtime::{Handle, Quota};
 use commonware_utils::{NZU32, ordered::Map};
@@ -41,7 +45,15 @@ impl Peers {
         let mut blocked = Vec::new();
         for (i, (key, listener)) in keys.into_iter().zip(listeners).enumerate() {
             let mut cfg = lookup::Config::local(
-                StreamHandshake::new(key),
+                Cups::<_, ChaCha20Poly1305>::new(
+                    Sake {
+                        signer: key,
+                        synchrony_bound: std::time::Duration::from_secs(5),
+                        max_handshake_age: std::time::Duration::from_secs(10),
+                        version: sake::Version::V1,
+                    },
+                    cups::Version::V1,
+                ),
                 b"vera-native-sync-test",
                 addresses[i],
                 NZUsize!(2),

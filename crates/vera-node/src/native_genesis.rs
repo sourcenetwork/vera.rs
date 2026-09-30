@@ -73,21 +73,16 @@ pub(super) async fn load_or_create(
     let execution = VeraStateSet::init(
         context.child("genesis_execution"),
         state_set_config(super::node::PARTITION_PREFIX, cache.clone()),
+        interrupted.then(VeraStateSet::initial_sync_targets),
     )
     .await;
     let native = NativeStateSet::init(
         context.child("genesis_modules"),
         native::state_config(super::node::PARTITION_PREFIX, cache.clone()),
+        interrupted.then(NativeStateSet::initial_sync_targets),
     )
     .await;
-    if interrupted {
-        execution
-            .rewind_to_targets(VeraStateSet::initial_sync_targets())
-            .await;
-        native
-            .rewind_to_targets(NativeStateSet::initial_sync_targets())
-            .await;
-    } else {
+    if !interrupted {
         ensure!(
             execution.committed_targets().await == VeraStateSet::initial_sync_targets()
                 && native.committed_targets().await == NativeStateSet::initial_sync_targets(),

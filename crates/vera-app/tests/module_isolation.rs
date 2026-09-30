@@ -89,7 +89,8 @@ fn check_pending_branches(persistent: bool) {
         let page_cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
         let set = BackendStateSet::init(
             context.child("set"),
-            state_set_config("modules", page_cache),
+            state_set_config("modules", page_cache.clone()),
+            None,
         )
         .await;
         let (root, targets) = apply_genesis(&set, &GenesisState::default()).await.unwrap();
@@ -105,7 +106,7 @@ fn check_pending_branches(persistent: bool) {
         if let Some(trees) = &trees {
             executor = executor.with_module_trees(trees.clone());
         }
-        let native = ModuleDb::init(context.child("native"), executor.clone())
+        let native = ModuleDb::init(context.child("native"), executor.clone(), None)
             .await
             .unwrap();
         let set: VeraStateSet = (set.0, set.1, set.2, Shared::new("native", native));
@@ -259,7 +260,14 @@ fn check_pending_branches(persistent: bool) {
         if persistent {
             drop(b);
             drop(child_b);
-            set.rewind_to_targets(first_target).await;
+            drop(set);
+            let config = state_set_config("modules", page_cache.clone());
+            let set = VeraStateSet::init(
+                context.child("recovered_first"),
+                (config.0, config.1, config.2, executor.clone()),
+                Some(first_target),
+            )
+            .await;
             assert_eq!(executor.module_height().unwrap(), 1);
             assert_eq!(
                 executor
@@ -271,8 +279,14 @@ fn check_pending_branches(persistent: bool) {
                     .unwrap(),
                 1
             );
-            set.rewind_to_targets(StatefulVeraApp::<NoopSink>::sync_targets(&genesis))
-                .await;
+            drop(set);
+            let config = state_set_config("modules", page_cache);
+            let _set = VeraStateSet::init(
+                context.child("recovered_genesis"),
+                (config.0, config.1, config.2, executor.clone()),
+                Some(StatefulVeraApp::<NoopSink>::sync_targets(&genesis)),
+            )
+            .await;
             assert_eq!(executor.module_height().unwrap(), 0);
             assert!(
                 executor

@@ -41,7 +41,12 @@ resources:
 
 async fn open(context: &tokio::Context) -> NativeStateSet {
     let cache = CacheRef::from_pooler(context, NZU16!(4084), NZUsize!(64));
-    NativeStateSet::init(context.child("native"), native::state_config("test", cache)).await
+    NativeStateSet::init(
+        context.child("native"),
+        native::state_config("test", cache),
+        None,
+    )
+    .await
 }
 
 async fn root(set: &NativeStateSet) -> alloy_primitives::B256 {
@@ -202,7 +207,14 @@ fn authorization_survives_forks_restart_and_rewind() {
         assert_eq!(loaded.serialize_stores(), second_state.serialize_stores());
         assert!(can_read(&loaded, &policy));
         assert_eq!(root(&set).await, second_root);
-        set.rewind_to_targets(first_target).await;
+        drop(set);
+        let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+        let set = NativeStateSet::init(
+            context.child("recovered"),
+            native::state_config("test", cache),
+            Some(first_target),
+        )
+        .await;
         let loaded = native::load_modules(&set).await.unwrap();
         assert_eq!(loaded.serialize_stores(), first_state.serialize_stores());
         assert!(!can_read(&loaded, &policy));

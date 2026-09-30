@@ -17,6 +17,7 @@ fn native_proposals_bind_every_target_and_isolate_competing_execution() {
                 let initialization = OrderedState::init(
                     context.child("state"),
                     config(&context, "state", executor.clone()),
+                    None,
                 );
                 // The actor moves these futures through its startup state machine.
                 // Large inline journal futures previously overflowed the node's stack.
@@ -25,9 +26,14 @@ fn native_proposals_bind_every_target_and_isolate_competing_execution() {
                 let genesis = checkpoint::block(&set, 0).await;
                 type App = StatefulVeraApp<NoopSink, OrderedState>;
                 let genesis_targets = App::sync_targets(&genesis);
-                let recovery = set.rewind_to_targets(genesis_targets.clone());
+                drop(set);
+                let recovery = OrderedState::init(
+                    context.child("recovered_genesis"),
+                    config(&context, "state", executor.clone()).recover_from_marshal(),
+                    Some(genesis_targets.clone()),
+                );
                 assert!(std::mem::size_of_val(&recovery) <= 64 * 1024);
-                recovery.await;
+                let set = recovery.await;
                 let mempool = InMemoryMempool::new();
                 let first = policy(&BlsSigner::new(1u64.into(), DEPLOYMENT).unwrap(), "first");
                 assert!(mempool.insert(first.clone()));
@@ -168,7 +174,16 @@ fn native_proposals_bind_every_target_and_isolate_competing_execution() {
                         .len(),
                     1
                 );
-                set.rewind_to_targets(genesis_targets).await;
+                drop(proposal);
+                drop(competing);
+                drop(set);
+                let recovered = OrderedState::init(
+                    context.child("recovered"),
+                    config(&context, "state", executor.clone()).recover_from_marshal(),
+                    Some(genesis_targets.clone()),
+                )
+                .await;
+                assert_eq!(recovered.committed_targets().await, genesis_targets);
                 assert!(
                     executor
                         .modules()

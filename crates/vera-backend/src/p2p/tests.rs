@@ -55,8 +55,12 @@ fn serving_rejects_code_records_outside_peer_limits() {
     )
     .start(|context| async move {
         let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
-        let db =
-            Shared::<CodeDb>::init(context.child("code"), state_set_config("code", cache).2).await;
+        let db = Shared::<CodeDb>::init(
+            context.child("code"),
+            state_set_config("code", cache).2,
+            None,
+        )
+        .await;
         let key = CodeKey::new([1; 32]);
         for size in [MAX_CODE_BYTES, MAX_CODE_BYTES + 1] {
             let batch = db
@@ -139,4 +143,21 @@ async fn dropping_translated_feedback_cancels_without_a_verdict() {
     })
     .await
     .expect("dropping feedback left the request open");
+}
+
+#[::tokio::test]
+async fn cancelling_translated_retry_closes_the_original_request() {
+    use commonware_utils::channel::{mpsc, oneshot};
+    ::tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        let (verdict, result) = oneshot::channel();
+        let (candidates, receiver) = mpsc::channel(1);
+        let feedback = translate_feedback::<NativeDb>(Feedback::new(verdict, receiver));
+        let retry = ::tokio::spawn(feedback.reject());
+        assert!(!result.await.unwrap());
+        retry.abort();
+        assert!(matches!(retry.await, Err(error) if error.is_cancelled()));
+        candidates.closed().await;
+    })
+    .await
+    .expect("cancelling a retry left the source request open");
 }
