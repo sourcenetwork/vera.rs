@@ -73,10 +73,16 @@ verify revision certificates and permission evidence independently.
 
 The pinned fork follows upstream `a41ae43428f04f5cf36986b16c8b87282920a157`.
 Its remaining changes are confined to the QMDB sync engine, the source response
-codec and the stateful peer actor. Verified work survives target updates when the
-retention floor is unchanged. The fork also retains bounded pruning retries and
-target convergence behavior needed by Vera's snapshot recovery. `Pruned` is a fork
-wire extension, not an upstream response.
+codec, the stateful peer actor and reshare boundary verification. Verified work
+survives target updates when the retention floor is unchanged. The fork also
+retains bounded pruning retries and target convergence behavior needed by Vera's
+snapshot recovery. `Pruned` is a fork wire extension, not an upstream response.
+
+Boundary verification retries a pending epoch-info response every 100 ms while
+the local DKG actor catches up. It still requires independently derived matching
+epoch information before accepting a boundary. Follower responses remain pending,
+and unavailable or mismatched artifacts are rejected. A temporarily early request
+must not leave certification suspended after the DKG state becomes available.
 
 Recovery supplies the authenticated target when each database opens. Every
 partition must recover that target before the application verifies the combined
