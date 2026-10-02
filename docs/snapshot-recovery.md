@@ -71,12 +71,17 @@ verify revision certificates and permission evidence independently.
 
 ## Commonware integration
 
-The pinned fork follows upstream `a41ae43428f04f5cf36986b16c8b87282920a157`.
+The pinned fork follows upstream `ac773de47aa7834620607e70c18941d1c3844f49`.
 Its remaining changes are confined to the QMDB sync engine, the source response
 codec, the stateful peer actor and reshare boundary verification. Verified work
-survives target updates when the retention floor is unchanged. The fork also
-retains bounded pruning retries and target convergence behavior needed by Vera's
-snapshot recovery. `Pruned` is a fork wire extension, not an upstream response.
+survives target updates when the retention floor is unchanged. When the floor
+advances, requests at the new boundary are cancelled so a new boundary request
+is scheduled immediately. Delayed boundary proofs and verified pins
+are covered by real MMR and MMB sync regressions, including root eviction.
+The fork also retains bounded pruning retries and target convergence behavior
+needed by Vera's snapshot recovery. `Pruned` is a fork wire extension, not an
+upstream response. An exhausted invalid source fails with upstream's
+`InvalidResponse` error; only explicit pruning hints receive bounded retries.
 
 Boundary verification retries a pending epoch-info response every 100 ms while
 the local DKG actor catches up. It still requires independently derived matching
@@ -89,6 +94,9 @@ partition must recover that target before the application verifies the combined
 module commitment and hydrates query state. Startup does not first expose the
 latest journal state and then rewind it. The persisted sync floor is also supplied
 to the DKG probe on restart.
+
+The upstream CPU baseline requires AVX2, BMI2 and ADX on x86-64, or NEON
+on AArch64. Deployment hosts must meet this baseline.
 
 Peer transport uses Commonware CUPS V1 with SAKE V1 authentication and
 ChaCha20-Poly1305. Validator and bootstrap binaries must use the same pinned
