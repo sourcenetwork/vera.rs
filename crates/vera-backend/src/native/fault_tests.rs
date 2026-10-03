@@ -142,7 +142,11 @@ fn injected_io_failures_are_fatal_and_recovery_republishes_the_anchor() {
         panic!("injected failure must stop the actor before acknowledgement");
     }
 
-    for (module, code) in [(1, 1u64), (2, 2), (3, 3)] {
+    for (module, code, failure_message) in [
+        (1, 1u64, "database finalize failed"),
+        (2, 2, "database finalize failed"),
+        (3, 3, "database sync failed"),
+    ] {
         let directory = tempfile::tempdir().unwrap();
         let anchor_sidecar = directory.path().join("anchor");
         let output = std::process::Command::new(std::env::current_exe().unwrap())
@@ -159,10 +163,7 @@ fn injected_io_failures_are_fatal_and_recovery_republishes_the_anchor() {
             .unwrap();
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), Some(101), "{module}: {stderr}");
-        assert!(
-            stderr.contains("database sync failed"),
-            "{module}: {stderr}"
-        );
+        assert!(stderr.contains(failure_message), "{module}: {stderr}");
 
         let anchor = read_anchor(&anchor_sidecar);
         let config = tokio::Config::new().with_storage_directory(directory.path());
