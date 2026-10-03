@@ -71,17 +71,19 @@ verify revision certificates and permission evidence independently.
 
 ## Commonware integration
 
-The pinned fork follows upstream `ac773de47aa7834620607e70c18941d1c3844f49`.
-Its remaining changes are confined to the QMDB sync engine, the source response
-codec, the stateful peer actor and reshare boundary verification. Verified work
-survives target updates when the retention floor is unchanged. When the floor
-advances, requests at the new boundary are cancelled so a new boundary request
-is scheduled immediately. Delayed boundary proofs and verified pins
-are covered by real MMR and MMB sync regressions, including root eviction.
-The fork also retains bounded pruning retries and target convergence behavior
-needed by Vera's snapshot recovery. `Pruned` is a fork wire extension, not an
-upstream response. An exhausted invalid source fails with upstream's
-`InvalidResponse` error; only explicit pruning hints receive bounded retries.
+The pinned fork follows upstream `b07d043a815096c57c1da62cde20c9e065b8919c`,
+which includes [Commonware #5044](https://github.com/commonwarexyz/monorepo/pull/5044).
+Upstream preserves verified operations across target updates and keeps pinned
+nodes when the retention floor is unchanged. When the floor advances, it cancels
+requests at the new boundary so a new boundary request is scheduled immediately.
+Upstream MMR and MMB regressions cover delayed boundary responses, root eviction
+and verified operations retained above a moved floor.
+
+The fork's remaining changes cover bounded pruning retries, target convergence,
+the source response codec, peer acceptance of pruning responses and reshare
+boundary verification. `Pruned` is a fork wire extension, not an upstream
+response. An exhausted invalid source fails with upstream's `InvalidResponse`
+error; only explicit pruning hints receive bounded retries.
 
 Boundary verification retries a pending epoch-info response every 100 ms while
 the local DKG actor catches up. It still requires independently derived matching
