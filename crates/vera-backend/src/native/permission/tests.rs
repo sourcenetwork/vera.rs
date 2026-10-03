@@ -139,6 +139,17 @@ fn permission_evidence_replays_deny_and_revocation_at_one_revision() {
             .unwrap()
             .policy
             .id;
+        state
+            .acp
+            .direct_policy_cmd(
+                &owner,
+                &policy,
+                PolicyCmd::RegisterObject(Object {
+                    resource: "document".into(),
+                    id: "report".into(),
+                }),
+            )
+            .unwrap();
         let blocked = Relationship::new(
             "document",
             "report",

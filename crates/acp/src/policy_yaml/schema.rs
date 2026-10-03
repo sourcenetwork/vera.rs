@@ -77,7 +77,7 @@ fn validate_references(
 ) -> Result<()> {
     for relation in relations {
         for managed in &relation.manages {
-            if managed == "owner" || !relations.iter().any(|r| r.name == *managed) {
+            if managed != "owner" && !relations.iter().any(|r| r.name == *managed) {
                 return Err(invalid(format!("invalid managed relation '{managed}'")));
             }
         }

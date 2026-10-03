@@ -34,7 +34,7 @@ fn translated_collisions_preserve_prefix_completeness() {
     );
     run(|context| async move {
         let cfg = config(&context);
-        let db = Store::init(context, cfg).await.unwrap();
+        let db = Store::init(context, cfg, None).await.unwrap();
         let db = tests::write(
             db,
             keys.iter()
@@ -70,7 +70,7 @@ fn reopening_with_a_wider_index_preserves_committed_state() {
         || tokio::Runner::new(tokio::Config::new().with_storage_directory(directory.path()));
     let root = runtime().start(|context| async move {
         let cfg = config(&context);
-        let db = NarrowStore::init(context, cfg).await.unwrap();
+        let db = NarrowStore::init(context, cfg, None).await.unwrap();
         let mut batch = db.new_batch();
         for key in keys() {
             batch = batch.write(key, Some(Bytes::from_static(b"record")));
@@ -81,7 +81,7 @@ fn reopening_with_a_wider_index_preserves_committed_state() {
     });
     runtime().start(|context| async move {
         let cfg = config(&context);
-        let db = Store::init(context, cfg).await.unwrap();
+        let db = Store::init(context, cfg, None).await.unwrap();
         assert_eq!(db.root(), root);
         for key in keys() {
             assert_eq!(

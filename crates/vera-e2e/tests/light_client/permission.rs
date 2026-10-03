@@ -85,6 +85,19 @@ pub(super) async fn check_permissions(
         verify_permission_proof(root, revision.height, policy, &request, &proof, limits).is_err()
     );
 
+    let register = IAcp::registerObjectCall {
+        policyId: parse_policy_id(policy),
+        resource: "document".into(),
+        objectId: "suspensions".into(),
+    }
+    .abi_encode();
+    assert_eq!(
+        broadcast_evm_tx(cluster, client, signer, ACP_ADDRESS, register)
+            .await
+            .status,
+        1
+    );
+
     let edge = IAcp::setRelationshipSubjectCall {
         policyId: parse_policy_id(policy),
         resource: "document".into(),
