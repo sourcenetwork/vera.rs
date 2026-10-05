@@ -80,7 +80,7 @@ jobs:
             python3 tools/performance/record.py \
               --node target/release/verad --runner target/release/examples/operation_baseline \
               --history "$HISTORY_BACKEND" --output "$directory" \
-              3000 50 128 1 normal 100 20 0 "$objects" 32 || result=1
+              3000 50 128 1 normal 100 192 0 "$objects" 256 1 || result=1
             "$RUNNER_TEMP/performance-python/bin/python" tools/performance/report.py "$directory" || result=1
             if [[ -f "$directory/report.md" ]]; then sed '/^!\[/d' "$directory/report.md" >> "$GITHUB_STEP_SUMMARY"; fi
           done
