@@ -48,6 +48,9 @@ pub enum AcpError {
     #[error("command expired at height {height}")]
     CommandExpired { height: u64 },
 
+    #[error("policy edit work allowance exceeded")]
+    PolicyEditBudgetExceeded,
+
     #[error("state error: {0}")]
     State(String),
 }

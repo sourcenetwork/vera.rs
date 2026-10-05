@@ -154,6 +154,43 @@ older namespaces rather than migrating them. Validators and consumers must use
 matching [key and proof formats](native-relationship-keys.md). Receipt and finality
 formats are unchanged.
 
+## Policy edit work accounting
+
+Direct and bearer definition edits consume 5,000 base execution units plus the
+work tracked by `PolicyEditBudget`. The caller owns this allowance separately
+from module snapshots, so reverting an edit or an enclosing batch cannot refund
+completed work. Nested calls receive the remaining batch allowance. Ordinary
+reverted edits retain their base and consumed units; exhausting the allowance
+fails before publishing prepared records or replacing the compiled policy.
+Native failed submissions still consume their full transaction allowance.
+
+Accounting uses encoded bytes, rounded up in groups of 16:
+
+| Work | Units |
+| --- | --- |
+| Point read | 100 + one per byte group, including the key |
+| Prepared write or deletion | 200 + two per byte group, including the key |
+| Definition parsing input | Eight per byte group |
+| Visited relation pair | 32 |
+
+Reads reserve their allowance before copying or decoding records. JSON encoding
+reserves each output byte group before extending its buffer. Only after the
+complete plan and updated policy fit does the module apply writes. Mirrored
+counters give the exact invalidated row count without charging once per physical
+relationship. The timestamped edit path reads and encodes its policy once.
+
+Bearer edits also charge definition bytes before hashing the signed operation.
+Stored outcome reads and writes use the same allowance. An authenticated retry
+can recover its metered outcome after policy retirement without reading or
+recompiling the current policy. Public module convenience methods retain an
+unlimited allowance; runtime dispatch uses the explicit budgeted methods.
+
+Before owned ABI decoding, both edit selectors enforce the existing 64 KiB
+policy-definition bound; bearer edits also enforce the token's 16 KiB bound.
+Definition-byte accounting is not instruction-level compiler metering. Existing
+YAML expansion and policy-validation limits remain independent safeguards.
+Archive and other module operations have separate resource behavior.
+
 ## Batch dispatch limits
 
 Native requests and the optional EVM interface share the same `batchCalls`
