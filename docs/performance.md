@@ -378,6 +378,10 @@ python3 tools/performance/replay.py /tmp/vera-performance-run \
   --output /tmp/vera-workload-replay.html
 ```
 
+PR and main-branch benchmark artifacts include `replay.html` alongside each recorded
+run. Rendering runs after measurements, including for failed runs, so retained
+artifacts show their actual outcomes without adding work to the measured interval.
+
 The output must be a new file. The generator reuses `report.py` correctness gates
 and exits unsuccessfully after writing a clearly labelled failed or incomplete
 report when those gates do not pass. The scrubber shows measured RSS and receipt

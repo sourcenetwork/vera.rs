@@ -86,6 +86,20 @@ jobs:
           done
           exit "$result"
 
+      - name: Render interactive measurements
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          result=0
+          for manifest in performance-results/objects-*/manifest.json; do
+            directory="${manifest%/manifest.json}"
+            python3 tools/performance/replay.py "$directory" \
+              --output "$directory/replay.html" || result=1
+          done
+          exit "$result"
+
       - name: Upload measurements and provenance
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
