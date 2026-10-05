@@ -165,11 +165,15 @@ impl FinalizedSink for NodeSink {
         .expect("persist finalized execution before publication");
         let persisted_elapsed = started.map(|started| started.elapsed());
         self.node_state.inc_finalized();
-        self.node_state.set_view(block.context.round.view().get());
         self.node_state.set_backfilling(false);
 
         let gas_used = receipts.iter().map(|r| r.gas_used).sum();
         index_finalized_block(&self.index, block, self.gas_limit, &receipts, gas_used);
+        self.node_state.record_finalized(
+            block.height,
+            block.context.round.epoch().get(),
+            block.context.round.view().get(),
+        );
         self.node_state.notify_proof_progress();
         if let Some(((started, lookup), persisted)) =
             started.zip(lookup_elapsed).zip(persisted_elapsed)

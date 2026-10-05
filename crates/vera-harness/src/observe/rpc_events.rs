@@ -10,12 +10,12 @@ pub enum RpcEvent {
         /// Block height.
         height: u64,
     },
-    /// Consensus view advanced.
+    /// Consensus view observation changed (including telemetry becoming unavailable).
     ViewAdvanced {
         /// Node index.
         node: usize,
-        /// New view number.
-        view: u64,
+        /// New view number, or unavailable telemetry.
+        view: Option<u64>,
     },
     /// A block was finalized.
     Finalized {
@@ -28,14 +28,14 @@ pub enum RpcEvent {
     PeerCountChanged {
         /// Node index.
         node: usize,
-        /// New peer count.
-        peers: u64,
+        /// New peer count, or unavailable telemetry.
+        peers: Option<u64>,
     },
     /// Leader status changed for a node.
     LeaderChanged {
         /// Node index.
         node: usize,
-        /// Whether this node is now the leader.
-        is_leader: bool,
+        /// Whether this node is now the leader, if observed.
+        is_leader: Option<bool>,
     },
 }

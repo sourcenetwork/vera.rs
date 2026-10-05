@@ -81,11 +81,12 @@ rejected and require an explicit migration decision, not silent reset.
   process; restart is not a guarantee of convergence. `floor_stall_seconds`
   (default 15, zero disables) bounds the quiet period before startup re-floors
   a stalled initialization from the newest stored gossiped finalization.
-- **Finality watchdog** (`watchdog_stall_seconds`, default 600, `0` disables): fails the
-  process after that long without a new finalization while peers stay connected, so supervised
-  restarts re-enter boot-time recovery. It starts after database readiness and
-  arms from retained history or an observed finalization. Snapshot initialization
-  has its separate deadline; supervised restart does not guarantee recovery.
+- **Finality watchdog** (`watchdog_stall_seconds`, default 600, `0` disables):
+  remains unarmed while authenticated connectivity is unavailable. The current
+  Commonware integration does not expose that telemetry, so this setting does
+  not currently trigger supervised recovery. A watchdog that accounts for the
+  active voting quorum still requires implementation and qualification. Snapshot
+  initialization has its separate deadline; supervised restart does not guarantee recovery.
 - **History backend**: default RocksDB; the `regolith-history` build feature
   selects Regolith with synchronous writes. The two backends reject each
   other's directory layouts — pick one per deployment.
@@ -96,8 +97,23 @@ rejected and require an explicit migration decision, not silent reset.
 
 ## Monitoring
 
-- `vera_nodeStatus` over JSON-RPC reports height, view, finalization count and
-  peer count — poll it for liveness and progress alarms.
+- `vera_nodeStatus` reports `finalizedHeight`, `finalizedEpoch` and
+  `finalizedView` from one published execution revision, including restored
+  durable history. They are null until observed. `snapshotRevision` separately
+  records the recovered snapshot floor. Use height changes for progress alarms;
+  `finalizedCount` counts callbacks in this process and is not a height.
+- `currentView`, `isLeader`, `peerCount` and `nullifiedCount` are null because
+  this Commonware integration does not expose the corresponding live observations.
+  Null does not mean zero peers, no nullifications or a known non-leader.
+  `validatorIndex` and `validatorCount` describe startup configuration, not the
+  active membership after operator changes. Rust clients represent unavailable
+  fields as `Option`; JSON consumers must accept null. The compatibility
+  `net_peerCount` method returns resource-unavailable (`-32002`) until an actual
+  count is observed; it does not substitute zero for unknown connectivity.
+- While backfilling, the compatibility `eth_syncing` response uses the published
+  finalized height for `currentBlock`. Its `highestBlock` is only the maximum of
+  that height and the recovered snapshot floor, not an estimate of the network
+  tip. Consensus views and process counters are never used as heights.
 - `RUST_LOG=warn,vera_diagnostics=debug` emits a resource snapshot every 30
   seconds (runtime metrics, resident execution index, cache occupancy,
   history-backend memory counters) plus per-revision apply and publication

@@ -101,8 +101,8 @@ pub struct NodeConfig {
     pub pruning: Option<PruningConfig>,
 
     /// Fail the process after this many seconds without a new finalization
-    /// while peers remain connected, so supervision restarts into rejoin.
-    /// Zero disables the watchdog.
+    /// while peer connectivity is observed, so supervision can attempt rejoin.
+    /// Unavailable connectivity telemetry leaves it unarmed. Zero disables it.
     #[serde(default = "default_watchdog_stall_seconds")]
     pub watchdog_stall_seconds: u64,
 }

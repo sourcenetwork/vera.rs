@@ -114,7 +114,7 @@ Surfaces the tests pin today and what changes:
 |---------|-------|-------|
 | `GossipHeader.signature` | 64-byte array | 96-byte array |
 | `LightBlock` | `signer_indices`, per-validator `signatures`, `validators` | `certificate`, `group_public_key`, `epoch` |
-| `vera_nodeStatus.currentView` | Simplex view | unchanged, from the active epoch engine |
+| `vera_nodeStatus.currentView` | Finalized view mislabeled as current | null until the active engine exposes entered-view telemetry; finalized height/epoch/view are explicit fields |
 | `vera_nodeStatus.backfilling` | marshal backfill flag | unchanged |
 | log `entered epoch` | EpochManager | orchestrator start of epoch N |
 | log `validator set change detected` | FinalizedReporter | deleted; test asserts `entered epoch` count instead |
