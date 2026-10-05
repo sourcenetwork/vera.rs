@@ -1,5 +1,8 @@
 //! ACP precompile dispatch — ABI decode/encode for all IAcp selectors.
 
+mod batch;
+#[cfg(test)]
+mod batch_tests;
 mod lifecycle;
 #[cfg(test)]
 mod lifecycle_tests;
@@ -22,9 +25,9 @@ use super::{
     event_log, json_bytes, ok_dispatch,
 };
 
-/// Flat gas cost for read operations (real metering is Phase 10).
+/// Base gas cost for reads and each batch wrapper.
 const READ_GAS: u64 = 1000;
-/// Flat gas cost for write operations (real metering is Phase 10).
+/// Base gas cost for writes.
 const WRITE_GAS: u64 = 5000;
 
 fn did_from_actor(actor: &str) -> Result<Did, PrecompileError> {
@@ -168,9 +171,26 @@ fn batch_error(index: usize, err: PrecompileError) -> PrecompileError {
     }
 }
 
-/// Dispatch an ABI-encoded call to the ACP module by selector.
-#[allow(clippy::too_many_lines)]
+/// Dispatch an ABI-encoded call after bounding nested batch allocations.
 pub(super) fn dispatch(
+    module: &mut AcpModule,
+    vera: &mut VeraModule,
+    block_ctx: &BlockExecCtx,
+    tx_ctx: &TxExecCtx,
+    input: &[u8],
+    gas_limit: u64,
+) -> DispatchReturn {
+    if input.starts_with(&IAcp::batchCallsCall::SELECTOR) {
+        if gas_limit < READ_GAS {
+            return Err(PrecompileError::OutOfGas);
+        }
+        batch::validate(input)?;
+    }
+    dispatch_validated(module, vera, block_ctx, tx_ctx, input, gas_limit)
+}
+
+#[allow(clippy::too_many_lines)]
+fn dispatch_validated(
     module: &mut AcpModule,
     vera: &mut VeraModule,
     block_ctx: &BlockExecCtx,
@@ -191,15 +211,18 @@ pub(super) fn dispatch(
     match selector {
         // ── Write methods ────────────────────────────────────────────
         IAcp::batchCallsCall::SELECTOR => {
+            if gas_limit < READ_GAS {
+                return Err(PrecompileError::OutOfGas);
+            }
             let call = IAcp::batchCallsCall::abi_decode(input).map_err(decode_error)?;
             let snapshot = (module.clone(), vera.clone());
             let mut results = Vec::with_capacity(call.calls.len());
             let mut logs = Vec::new();
-            let mut gas_used = 0u64;
+            let mut gas_used = READ_GAS;
 
             for (index, inner_call) in call.calls.iter().enumerate() {
                 let remaining_gas = gas_limit.saturating_sub(gas_used);
-                let inner = match dispatch(
+                let inner = match dispatch_validated(
                     module,
                     vera,
                     block_ctx,

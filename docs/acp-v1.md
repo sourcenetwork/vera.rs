@@ -116,6 +116,35 @@ client proof formats are unchanged.
 ACP v1 edits use finalized execution order. They do not implement offline policy
 branch merging, causal policy pins, or the separate ACP v2 design.
 
+## Batch dispatch limits
+
+Native requests and the optional EVM interface share the same `batchCalls`
+validation. Before owned ABI decoding or module mutation, dispatch walks borrowed
+calldata and enforces:
+
+- At most 16 nested batch wrappers, counting the outer wrapper as one.
+- At most 256 calls across the whole tree, including the outer batch, nested
+  wrappers and leaf calls.
+- Root calldata at most `vera_domain::MAX_TX_BYTES` (12 MiB + 4 KiB).
+- At most that same byte budget summed across decoded inner payloads. Each
+  occurrence counts, including repeated ABI offsets pointing to the same bytes.
+
+Checked offsets and lengths reject malformed or oversized inputs before the ABI
+decoder can copy nested payloads. Bounded aliases remain supported. These limits
+are shared by all siblings and nesting levels within one top-level call.
+
+Every batch wrapper consumes 1,000 execution units, including an empty batch,
+in addition to its children's costs. Insufficient wrapper budget fails before
+decoding. Result order and nested return encoding are preserved. A child failure
+rolls back all ACP and identity-module changes in its enclosing batch and discards
+its logs. Failed native dispatch consumes its full allowance as described in
+[execution limits](execution-limits.md).
+
+These checks bound batch nesting and decoded input, not aggregate return/log
+buffers or the work of individual policy operations. Large-policy lifecycle
+costs retain the limitations above. The wrapper charge changes execution results,
+so validators must use matching rules.
+
 ## Validation
 
 `tools/acp-oracle` pins and executes the Go engine to produce the committed
