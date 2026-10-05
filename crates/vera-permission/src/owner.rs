@@ -3,8 +3,8 @@ use vera_modules::acp::{keys, types::RelationshipRecord};
 use zanzibar::{Relationship, Subject};
 
 use crate::{
-    Actor, ModuleId, Object, PERMISSION_LIMITS, PermissionError, PrefixResponse,
-    RECORD_PROOF_BYTES, current::MAX_KEY_BYTES, encoded_size,
+    Actor, Object, PERMISSION_LIMITS, PermissionError, PolicyPrefixResponse, RECORD_PROOF_BYTES,
+    current::MAX_KEY_BYTES, encoded_size,
 };
 
 /// Build the unambiguous storage prefix for one object's owner relations.
@@ -24,7 +24,7 @@ pub fn object_owner_prefix(policy: &str, object: &Object) -> Result<Vec<u8>, Per
     Ok(prefix)
 }
 
-impl PrefixResponse {
+impl PolicyPrefixResponse {
     /// Return the single live owner from complete, finalized evidence.
     /// Archived ownership does not register an object or authorize access.
     pub fn verify_object_owner(
@@ -35,13 +35,11 @@ impl PrefixResponse {
         trusted: &ConsensusPublicKey,
     ) -> Result<Option<Actor>, PermissionError> {
         let prefix = object_owner_prefix(policy, object)?;
-        let evidence = self.verify(
-            ModuleId::Acp,
-            &prefix,
-            minimum_height,
-            trusted,
-            RECORD_PROOF_BYTES,
-        )?;
+        let Some(evidence) =
+            self.verify(policy, &prefix, minimum_height, trusted, RECORD_PROOF_BYTES)?
+        else {
+            return Ok(None);
+        };
         owner(
             evidence
                 .entries

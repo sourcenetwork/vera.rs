@@ -21,10 +21,9 @@ use commonware_storage::{
     },
 };
 
-/// Maximum record key accepted by the native storage and proof codecs.
-pub const MAX_KEY_BYTES: usize = 65_536;
-/// Maximum record value accepted by the native storage and proof codecs.
-pub const MAX_VALUE_BYTES: usize = 1 << 20;
+pub use vera_modules::kv_store::{
+    NATIVE_MAX_KEY_BYTES as MAX_KEY_BYTES, NATIVE_MAX_VALUE_BYTES as MAX_VALUE_BYTES,
+};
 /// Current-state membership evidence, including the authenticated successor key.
 pub type Membership = KeyValueProof<mmr::Family, Vec<u8>, Digest, 32>;
 /// Current-state absence evidence, including the surrounding ordered span.

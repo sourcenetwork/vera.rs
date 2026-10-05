@@ -3,14 +3,15 @@
 `vera-verifier` exposes receipt, current-record, live object-owner, permission and stored access-decision
 verification through the C interface in `crates/vera-verifier/include/vera_verifier.h`. It calls the same
 `ReceiptResponse::verify`, `RecordResponse::verify`,
-`PrefixResponse::verify_object_owner` and `PermissionResponse::verify`
+`PolicyPrefixResponse::verify_object_owner` and `PermissionResponse::verify`
 implementations as Rust clients. Build the shared library with `cargo build -p vera-verifier`.
 
 Each call takes UTF-8 JSON bytes, without a terminating NUL. The caller keeps
 the input alive until `vera_verify` returns and releases the returned buffer
 exactly once with `vera_buffer_free`. The returned length is authoritative;
-the output is not NUL-terminated. Input is limited to `RECEIPT_RESPONSE_BYTES +
-4096`. Receipt decoding also enforces the light-block transaction count limit.
+the output is not NUL-terminated. Input is limited to `MAX_REQUEST_BYTES`
+(`RECEIPT_RESPONSE_BYTES + 4 * MAX_KEY_BYTES + 4096`). Receipt decoding also
+enforces the light-block transaction count limit.
 
 Receipt request:
 
@@ -42,15 +43,26 @@ Current object-owner request:
 {"kind":"object_owner","trusted_key":"<96-byte hex key>","policy_id":"<policy ID>","object":{"resource":"document","id":"report"},"minimum_height":1,"proof":{}}
 ```
 
-`proof` is the `vera_getCurrentPrefixProof` result for
-`object_owner_prefix(policy_id, object)` in the ACP module. The verifier derives
-the prefix again, authenticates complete coverage and the selected revision,
-and returns `{"result":{"height":0,"timestamp":0,"owner":"did:..."}}` with
-verified values. Missing or archived ownership returns a null owner. Invalid
+`proof` is the `vera_getCurrentPolicyPrefixProof` result for the policy and
+`object_owner_prefix(policy_id, object)`. The verifier derives the prefix again,
+authenticates the active policy and complete ownership coverage at the same
+revision, and returns `{"result":{"height":0,"timestamp":0,"owner":"did:..."}}` with
+verified values. An absent policy, missing ownership or archived ownership returns
+a null owner. Raw prefix responses without a policy witness are rejected. Invalid
 owner records or multiple live owners fail verification. This describes live
 registration; it does not return an archived owner as a current registration.
 Minimum height bounds the accepted revision. Callers remain responsible for any
 additional freshness requirement.
+
+Policy relationship page requests use `kind: "policy_prefix_page"`, with
+`trusted_key`, `policy_id`, `request`, `minimum_height` and `proof`. The request is
+an ACP `PrefixPageRequest`; proof is the unmodified
+`vera_getCurrentPolicyPrefixPageProof` result. Success returns `height`,
+`timestamp`, `policy_exists`, `entries` and `continuation`. A certified absent
+policy returns `policy_exists: false`, empty entries and no continuation. The raw
+`prefix_page` request remains a physical storage read. See
+[permission proofs](permission-proofs.md#native-prefix-and-owner-reads) for bounds
+and the fresh-state relationship namespace.
 
 Current permission request:
 

@@ -3,9 +3,7 @@
 use alloy_primitives::{B256, Bytes};
 use alloy_sol_types::{SolCall as _, SolEvent as _};
 use std::time::Duration;
-use vera_client::{
-    ACP_ADDRESS, Actor, BlsSigner, ModuleId, Object, RECORD_PROOF_BYTES, VeraClient,
-};
+use vera_client::{ACP_ADDRESS, Actor, BlsSigner, Object, RECORD_PROOF_BYTES, VeraClient};
 use vera_domain::{ConsensusPublicKey, ExecutionReceipt, NativeTx};
 use vera_e2e::cluster::{ConsensusPreset, KeySet, TestCluster};
 use vera_modules::acp::{abi::IAcp, types::RelationshipRecord};
@@ -256,8 +254,8 @@ resources:
     };
     let prefix = vera_client::object_owner_prefix(&policy, &object).unwrap();
     let ownership = client
-        .read_current_prefix(
-            ModuleId::Acp,
+        .read_current_policy_prefix(
+            &policy,
             &prefix,
             amended_height,
             &trusted,
@@ -273,13 +271,14 @@ resources:
     );
     let records = ownership
         .verify(
-            ModuleId::Acp,
+            &policy,
             &prefix,
             amended_height,
             &trusted,
             RECORD_PROOF_BYTES,
         )
         .unwrap();
+    let records = records.expect("the registration policy is live");
     assert_eq!(records.entries.len(), 1);
     let record: RelationshipRecord = serde_json::from_slice(&records.entries[0].value).unwrap();
     assert_eq!(record.metadata.creation_ts.block_height, early_height);

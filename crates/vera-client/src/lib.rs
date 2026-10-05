@@ -25,6 +25,7 @@ pub mod nodes;
 mod permission;
 /// Certified native policy discovery.
 pub mod policies;
+mod policy_records;
 mod query;
 mod receipt;
 mod record;
@@ -42,7 +43,8 @@ pub mod tokens;
 pub use vera_domain::{ExecutionReceipt, ReceiptResponse, ReceiptResponseError};
 pub use vera_permission::{
     AccessRequest, Actor, ModuleId, Object, Operation, PERMISSION_LIMITS, PermissionLimits,
-    PermissionProof, PermissionRead, PermissionResponse, PrefixProof, PrefixResponse,
+    PermissionProof, PermissionRead, PermissionResponse, PolicyPrefixPageProof,
+    PolicyPrefixPageResponse, PolicyPrefixProof, PolicyPrefixResponse, PrefixProof, PrefixResponse,
     RECORD_PROOF_BYTES, ReadLimits, RecordProof, RecordResponse, object_owner_prefix,
     verify_permission_proof,
 };

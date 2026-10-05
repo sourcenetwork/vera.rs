@@ -122,7 +122,7 @@ fn policy_deletion_indexes_survive_metadata_updates_expiry_and_restore() {
     let mut module = restored(&module);
     module.validate_restored_state().unwrap();
     assert!(module.delete_policy(&did("creator"), &policy).unwrap());
-    let module = restored(&module);
+    let mut module = restored(&module);
     module.validate_restored_state().unwrap();
     for (commitment, amendment) in [expired, active] {
         assert!(module.query_registrations_commitment(commitment).is_err());
@@ -132,6 +132,27 @@ fn policy_deletion_indexes_survive_metadata_updates_expiry_and_restore() {
                 .unwrap()
                 .is_none()
         );
+    }
+    // Logical deletion is immediate; physical ownership indexes remain until cleanup.
+    assert_eq!(
+        module
+            .store()
+            .prefix_iter(&keys::commitment_policy_index_prefix(&policy))
+            .count(),
+        2
+    );
+    for height in 70..90 {
+        module
+            .end_blocker(&BlockExecCtx {
+                timestamp: Timestamp {
+                    seconds: height * 10,
+                    block_height: height,
+                },
+                ..Default::default()
+            })
+            .unwrap();
+        module = restored(&module);
+        module.validate_restored_state().unwrap();
     }
     assert_eq!(
         module
@@ -168,7 +189,7 @@ fn policy_deletion_indexes_survive_metadata_updates_expiry_and_restore() {
 }
 
 #[test]
-fn indexed_policy_deletion_rejects_corruption_before_any_mutation() {
+fn indexed_policy_cleanup_rejects_corruption_without_partial_tick_mutation() {
     let (mut module, policy) = setup();
     registration(&mut module, &policy, "first", 2);
     let last = registration(&mut module, &policy, "last", 2);
@@ -221,13 +242,28 @@ fn indexed_policy_deletion_rejects_corruption_before_any_mutation() {
             None => store.delete(&key),
         }
         let mut candidate = AcpModule::from_store(store);
-        let before = candidate.store().serialize();
-        assert!(
-            candidate.delete_policy(&did("creator"), &policy).is_err(),
-            "{key:?}"
-        );
-        assert_eq!(candidate.store().serialize(), before, "{key:?}");
-        assert!(candidate.query_policy(&policy).is_ok());
+        assert!(candidate.delete_policy(&did("creator"), &policy).unwrap());
+        assert!(candidate.query_policy(&policy).is_err());
+        let mut rejected = false;
+        for height in 10..30 {
+            let before = candidate.store().serialize();
+            if candidate
+                .end_blocker(&BlockExecCtx {
+                    timestamp: Timestamp {
+                        seconds: height * 10,
+                        block_height: height,
+                    },
+                    ..Default::default()
+                })
+                .is_err()
+            {
+                assert_eq!(candidate.store().serialize(), before, "{key:?}");
+                rejected = true;
+                break;
+            }
+        }
+        assert!(rejected, "cleanup accepted corrupt key: {key:?}");
+        assert!(candidate.query_policy(&policy).is_err());
         assert!(candidate.query_policy(&other).is_ok());
     }
 }

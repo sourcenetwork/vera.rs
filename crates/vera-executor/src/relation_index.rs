@@ -33,14 +33,14 @@ pub(crate) fn index_relationships(
     let mut deltas = BTreeMap::<Vec<u8>, i128>::new();
     if initializing {
         // Activation is part of the selected revision, never an out-of-band disk rewrite.
-        for (key, _) in current.prefix_iter(b"relationship/") {
+        for (key, _) in current.prefix_iter(vera_modules::acp::keys::RELATIONSHIP_PREFIX) {
             for prefix in relation_prefixes(key) {
                 *deltas.entry(relation_count_key(prefix)).or_default() += 1;
             }
         }
     } else {
         for (key, value) in entries.iter() {
-            if !key.starts_with(b"relationship/") {
+            if !key.starts_with(vera_modules::acp::keys::RELATIONSHIP_PREFIX) {
                 continue;
             }
             let existed = parent.get(key).map_err(storage_error)?.is_some();

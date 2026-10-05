@@ -3,6 +3,16 @@ use super::*;
 impl AcpModule {
     /// Validate retained ACP records before publishing native recovery state.
     pub fn validate_restored_state(&self) -> Result<()> {
+        if self
+            .store
+            .prefix_iter(b"relationship/")
+            .any(|(key, _)| !key.starts_with(keys::RELATIONSHIP_PREFIX))
+        {
+            return Err(AcpError::State(
+                "unsupported relationship namespace; fresh deployment required".into(),
+            ));
+        }
+        let retired_count = self.validate_retirement_state()?;
         for (key, _) in self.store.prefix_iter(keys::POLICY_PREFIX) {
             let id = std::str::from_utf8(&key[keys::POLICY_PREFIX.len()..])
                 .map_err(|_| AcpError::State("invalid policy key".into()))?;
@@ -33,7 +43,8 @@ impl AcpModule {
                 &record.policy_id,
                 &keys::relationship_storage_key(&record.relationship),
             ) != key
-                || !self.zanzibar_policies.contains_key(&record.policy_id)
+                || !self
+                    .retained_policy_allows(&record.policy_id, retirement::Phase::Relationships)?
             {
                 return Err(AcpError::State(
                     "relationship key or policy mismatch; legacy keys require explicit migration"
@@ -49,7 +60,9 @@ impl AcpModule {
         self.get_params()?;
         self.validate_counter(
             keys::POLICY_COUNTER_KEY,
-            self.zanzibar_policies.len() as u64,
+            (self.zanzibar_policies.len() as u64)
+                .checked_add(retired_count)
+                .ok_or_else(|| AcpError::State("policy count overflow".into()))?,
         )?;
         for (prefix, counter_key) in [
             (

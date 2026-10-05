@@ -16,8 +16,13 @@ impl AcpModule {
         let prefix = keys::commitment_by_commitment_index_prefix(root);
         let mut records = Vec::new();
         let mut bytes = 0usize;
-        for (index, value) in self.store.prefix_iter(&prefix).take(MAX_MATCHES + 1) {
-            if records.len() == MAX_MATCHES {
+        for (count, (index, value)) in self
+            .store
+            .prefix_iter(&prefix)
+            .take(MAX_MATCHES + 1)
+            .enumerate()
+        {
+            if count == MAX_MATCHES {
                 return Err(AcpError::InvalidAccessRequest {
                     reason: "commitment lookup exceeds limit; use certified prefix pages".into(),
                 });
@@ -47,7 +52,9 @@ impl AcpModule {
             if record.id != id || record.commitment != root {
                 return Err(AcpError::State("commitment root index mismatch".into()));
             }
-            records.push(record);
+            if self.get_policy_record(&record.policy_id)?.is_some() {
+                records.push(record);
+            }
         }
         Ok(records)
     }
@@ -57,11 +64,27 @@ impl AcpModule {
 mod tests {
     use super::*;
     fn insert(module: &mut AcpModule, id: u64, root: Vec<u8>) {
+        let policy = module
+            .query_policy_ids()
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| {
+                module
+                    .create_policy(
+                        &Did::new("did:key:owner").unwrap(),
+                        "name: commitments\nresources:\n  - name: file\n",
+                        PolicyMarshalingType::ShortYaml,
+                    )
+                    .unwrap()
+                    .policy
+                    .id
+            });
         module
             .update_commitment(&RegistrationsCommitment {
                 id,
                 commitment: root,
-                policy_id: "policy".into(),
+                policy_id: policy,
                 expired: false,
                 validity: Duration::Seconds(600),
                 metadata: RecordMetadata {

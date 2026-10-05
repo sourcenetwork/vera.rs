@@ -53,5 +53,8 @@ vera-modules.workspace = true
 vera-traits.workspace = true
 
 [dev-dependencies]
+commonware-glue.workspace = true
+commonware-runtime.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }
 jsonrpsee = { workspace = true, features = ["ws-client"] }
