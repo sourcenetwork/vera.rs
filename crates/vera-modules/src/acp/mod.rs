@@ -246,18 +246,17 @@ impl AcpModule {
         new_zanzibar.id = policy_id.to_string();
 
         // Prune orphaned relationships: relations that existed in old policy but not new.
-        let all_rels = self
-            .store
-            .prefix_scan(&keys::relationship_policy_prefix(policy_id));
+        let prefix = keys::relationship_policy_prefix(policy_id);
         let mut to_delete = Vec::new();
-        for (kv_key, value) in &all_rels {
+        for (kv_key, value) in self.store.prefix_iter(&prefix) {
             let record: RelationshipRecord = serde_json::from_slice(value).map_err(|error| {
                 AcpError::State(format!("invalid relationship record: {error}"))
             })?;
             let relationship = &record.relationship;
             if record.policy_id != policy_id
                 || keys::relationship_key(policy_id, &keys::relationship_storage_key(relationship))
-                    != *kv_key
+                    .as_slice()
+                    != kv_key
             {
                 return Err(AcpError::State(
                     "relationship record differs from its key".into(),
@@ -276,7 +275,7 @@ impl AcpModule {
                     .get_relation(&relationship.resource, &relationship.relation)
                     .is_none()
             {
-                to_delete.push(kv_key.clone());
+                to_delete.push(kv_key.to_vec());
             }
         }
         let removed = to_delete.len() as u64;
