@@ -28,6 +28,7 @@ pub(super) async fn exercise(
             },
         )
         .await;
+        wait_for_replica_publication(cluster, minimum).await;
         for index in 0..cluster.node_count() {
             let replica = VeraClient::new(cluster.node(index).rpc_url());
             let (_, allowed) = replica
@@ -80,6 +81,7 @@ pub(super) async fn exercise(
         },
     )
     .await;
+    wait_for_replica_publication(cluster, granted).await;
     for index in 0..cluster.node_count() {
         let replica = VeraClient::new(cluster.node(index).rpc_url());
         let (_, allowed) = replica
