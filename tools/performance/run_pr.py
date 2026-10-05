@@ -9,6 +9,7 @@ import sys
 
 from compare_pr import TAGS, compare
 from record import digest
+from protocol import baseline_incompatible, source_schema, unavailable
 
 
 def main():
@@ -34,6 +35,7 @@ def main():
     for side in sources:
         identity[side] = {
             'source': revisions[side],
+            'proof_schema': source_schema(sources[side], revisions[side]),
             'runner_source': revisions['head'],
             'node_sha256': digest(binaries / side / 'verad'),
             'runner_sha256': runner_sha256,
@@ -43,6 +45,7 @@ def main():
             identity[side]['component_sha256'] = digest(binaries / side / 'component_baseline')
     if not identity['head']['components']:
         raise ValueError('head component benchmark is required')
+    incompatible = baseline_incompatible(identity)
     (output / 'comparison.json').write_text(json.dumps(identity, indent=2) + '\n')
     pipelined = args.consensus == 'pipelined'
     epoch, retained = ('192', '256') if pipelined else ('20', '32')
@@ -57,6 +60,12 @@ def main():
                 subprocess.run([str(binaries / side / 'component_baseline')], cwd=sources[side],
                                stdout=out, stderr=err, check=True, timeout=120)
         for objects in (0, 32):
+            if side == 'base' and incompatible:
+                skipped = destination / f'objects-{objects}'
+                skipped.mkdir()
+                (skipped / 'unavailable.json').write_text(json.dumps(unavailable(identity, objects), indent=2) + '\n')
+                print(f'{tag}/objects-{objects}: incompatible ACP proof schema; baseline not run', flush=True)
+                continue
             command = [sys.executable, str(scripts / 'record.py'), '--node', str(binaries / side / 'verad'),
                        '--runner', str(runner), '--runner-source', str(sources['head']), '--history', 'rocksdb',
                        '--output', str(destination / f'objects-{objects}'), str(args.count), str(args.rate),
@@ -66,6 +75,8 @@ def main():
             failed |= subprocess.run(command, cwd=sources[side], env=environment, check=False).returncode != 0
     # Render only after every timed pass has finished.
     for tag in TAGS:
+        if tag.startswith('base') and incompatible:
+            continue
         for objects in (0, 32):
             failed |= subprocess.run([sys.executable, str(scripts / 'report.py'),
                                       str(output / tag / f'objects-{objects}')], check=False).returncode != 0

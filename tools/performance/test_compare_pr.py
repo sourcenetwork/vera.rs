@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from protocol import SCHEMAS, unavailable
 from compare_pr import COMPONENTS, LIFECYCLE_COMPONENTS, LOGICAL_EDIT_COMPONENTS, TAGS, change, compare, components
 
 
@@ -85,6 +86,75 @@ class CompareTests(unittest.TestCase):
         self.assertFalse(result['errors'])
         self.assertTrue(any('workflows/s' in row['metric'] for row in result['metrics']))
         self.assertIn('Shared workload runner source `head`', (self.root / 'comparison.md').read_text())
+
+    def incompatible_driver(self):
+        self.shared_driver()
+        self.identity['head']['proof_schema'] = dict(SCHEMAS['relationship/v4/'])
+        self.identity['base']['proof_schema'] = dict(SCHEMAS['relationship/v3/'])
+        self.write_identity()
+        for tag in ('base1', 'base2'):
+            for objects in (0, 32):
+                directory = self.root / tag / f'objects-{objects}'
+                directory.mkdir(exist_ok=True)
+                (directory / 'unavailable.json').write_text(json.dumps(unavailable(self.identity, objects)))
+
+    def test_incompatible_schema_reports_head_only_without_baseline_success_or_delta(self):
+        self.incompatible_driver()
+        with patch('compare_pr.load_run', side_effect=self.shared_run_fixture) as load:
+            self.assertFalse(compare(self.root))
+        self.assertEqual({call.args[0].parent.name for call in load.call_args_list}, {'head1', 'head2'})
+        result = json.loads((self.root / 'comparison-report.json').read_text())
+        self.assertEqual(len(result['non_comparable_baselines']), 2)
+        for metric in result['metrics']:
+            if 'ns/op' not in metric['metric']:
+                self.assertEqual(metric['base'], [])
+                self.assertEqual(len(metric['head']), 2)
+                self.assertIsNone(metric['change_percent'])
+                self.assertIn('baseline not run', metric['verdict'])
+        self.assertIn('no baseline success or regression claim', (self.root / 'comparison.md').read_text())
+
+    def test_incompatible_baseline_still_requires_each_valid_head_pass(self):
+        self.incompatible_driver()
+        for failure in ('missing', 'failed', 'provenance'):
+            with self.subTest(failure=failure):
+                def bad(path):
+                    run = list(self.shared_run_fixture(path))
+                    if path.parent.name == 'head2':
+                        if failure == 'missing':
+                            raise FileNotFoundError('head2 missing')
+                        if failure == 'failed':
+                            run[3] = False
+                        else:
+                            run[0]['runner_sha256'] = 'wrong'
+                    return run
+                with patch('compare_pr.load_run', side_effect=bad):
+                    self.assertTrue(compare(self.root))
+                result = json.loads((self.root / 'comparison-report.json').read_text())
+                self.assertEqual(len(result['errors']), 2)
+                self.assertTrue(all('ns/op' in row['metric'] for row in result['metrics']))
+
+    def test_unknown_or_incomplete_schema_metadata_fails(self):
+        self.incompatible_driver()
+        for schema in (None, {}, {'relationship_namespace': 'relationship/v5/', 'policy_generations': 'required'}):
+            self.identity['base']['proof_schema'] = schema
+            self.write_identity()
+            with patch('compare_pr.load_run', side_effect=self.shared_run_fixture):
+                self.assertTrue(compare(self.root))
+        del self.identity['base']['proof_schema']
+        self.write_identity()
+        with patch('compare_pr.load_run', side_effect=self.shared_run_fixture):
+            self.assertTrue(compare(self.root))
+
+    def test_incompatible_baseline_requires_exact_not_run_evidence(self):
+        self.incompatible_driver()
+        directory = self.root / 'base1' / 'objects-0'
+        (directory / 'unavailable.json').write_text('{}')
+        with patch('compare_pr.load_run', side_effect=self.shared_run_fixture):
+            self.assertTrue(compare(self.root))
+        (directory / 'unavailable.json').write_text(json.dumps(unavailable(self.identity, 0)))
+        (directory / 'manifest.json').write_text('{"exit_code":101}')
+        with patch('compare_pr.load_run', side_effect=self.shared_run_fixture):
+            self.assertTrue(compare(self.root))
 
     def test_shared_driver_rejects_missing_dirty_or_misattributed_manifests(self):
         self.shared_driver()

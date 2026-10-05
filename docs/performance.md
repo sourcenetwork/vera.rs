@@ -100,9 +100,17 @@ workflows/s, and peak member RSS appear in the check summary. Every pass must
 satisfy the existing completeness, certificate, replica and hard-restart gates.
 A failed run is never presented as improved performance. Configuration changes
 are listed explicitly and suppress full-stack percentage comparisons. The driver
-also generates genesis/configuration and verifies native receipts and proofs;
-a base revision incompatible with those interfaces fails the comparison. There is
-no fallback to a different workload driver. Block limits printed by the driver
+also generates genesis/configuration and verifies native receipts and proofs.
+Before running workloads, committed ACP source supplies the explicit relationship
+namespace and its matching policy-record schema. Known `relationship/v3/` and
+`relationship/v4/` schemas are incompatible with each other's permission verifier.
+For that boundary, baseline full-stack passes are recorded as **not run** in
+`unavailable.json`; both head passes still require every correctness and recovery
+gate. Reports show head-only values, no baseline success and no full-stack delta.
+Unknown or inconsistent schemas fail. Other interface errors and failures on a
+compatible baseline still fail the job. There is no verifier relaxation or fallback
+to a different workload driver. Component passes retain their existing independent
+fixture and sampling checks. Block limits printed by the driver
 are its compiled configuration assumptions, not measurements of the base node's
 capabilities.
 

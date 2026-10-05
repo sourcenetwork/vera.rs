@@ -7,6 +7,7 @@ from pathlib import Path
 from statistics import median
 
 from report import load_run
+from protocol import baseline_incompatible, validate_unavailable
 
 TAGS = ('head1', 'base1', 'base2', 'head2')
 COMPONENTS = ('native_bls_verify', 'acp_owner_read_capture', 'consensus_certificate_verify')
@@ -92,6 +93,7 @@ def compare(directory):
     identity = json.loads((directory / 'comparison.json').read_text())
     rows, errors, differences = [], [], []
     logical_edit_scaling = {}
+    non_comparable = []
 
     def row(name, values, lower=True, comparable=True):
         base = [values[t] for t in ('base1', 'base2')]
@@ -106,7 +108,9 @@ def compare(directory):
     for objects in (0, 32):
         runs = {}
         try:
-            for tag in TAGS:
+            incompatible = baseline_incompatible(identity)
+            tags = ('head1', 'head2') if incompatible else TAGS
+            for tag in tags:
                 run = load_run(directory / tag / f'objects-{objects}')
                 manifest, config, _, passed, *_ = run
                 side = tag.rstrip('12')
@@ -114,6 +118,24 @@ def compare(directory):
                 if not passed:
                     raise ValueError(f'{tag}: correctness/completeness/recovery gate failed')
                 runs[tag] = run
+            if incompatible:
+                for tag in ('base1', 'base2'):
+                    validate_unavailable(directory / tag / f'objects-{objects}', identity, objects)
+                non_comparable.append({'workload': objects, 'reason': 'incompatible ACP proof schema',
+                                       'base': identity['base']['proof_schema'], 'head': identity['head']['proof_schema'],
+                                       'head_passes': ['head1', 'head2'], 'baseline_status': 'not_run'})
+                prefix = 'registrations' if objects == 0 else 'fixed updates'
+                metrics = {f'{prefix}: completed workflows/s': lambda r: r[2]['completed_workflows_per_second']}
+                for metric in ('scheduled_to_certified_receipt_ms', 'permission_read_ms', 'scheduled_to_workflow_ms'):
+                    metrics[f'{prefix}: {metric} p95'] = lambda r, metric=metric: r[2][metric]['p95']
+                metrics[f'{prefix}: peak member RSS MiB'] = lambda r: max(v for series in r[5].values() for _, v in series)
+                for name, measure in metrics.items():
+                    values = [measure(runs[t]) for t in ('head1', 'head2')]
+                    if any(not math.isfinite(value) or value <= 0 for value in values):
+                        raise ValueError('expected positive finite head measurements')
+                    rows.append({'metric': name, 'base': [], 'head': values, 'change_percent': None,
+                                 'verdict': 'incompatible proof schema; baseline not run; no delta'})
+                continue
             # Queue and protocol limits can change intentionally; show those changes
             # instead of attributing the resulting delta solely to execution speed.
             ignored = {'node_data_dirs', 'signing_seconds', 'update_preparation_seconds', 'signed_bytes'}
@@ -154,7 +176,7 @@ def compare(directory):
     except (OSError, ValueError, KeyError, TypeError) as error:
         errors.append(f'components: {error}')
     result = {'identity': identity, 'metrics': rows, 'errors': errors, 'configuration_differences': differences,
-              'logical_edit_2048_to_32_ratio': logical_edit_scaling}
+              'logical_edit_2048_to_32_ratio': logical_edit_scaling, 'non_comparable_baselines': non_comparable}
     (directory / 'comparison-report.json').write_text(json.dumps(result, indent=2, allow_nan=False) + '\n')
     lines = ['# Vera PR performance', '', f"Base `{identity['base']['source']}` → head `{identity['head']['source']}`", '',
              'Release builds, same runner, head/base/base/head passes. 5% advisory threshold. Overlapping ranges or more than 5% within-revision spread are inconclusive; remaining signals are not statistical confidence.', '',
@@ -167,6 +189,9 @@ def compare(directory):
         delta = '—' if item['change_percent'] is None else f"{item['change_percent']:+.2f}%"
         lines.append(f"| {item['metric']} | {span(item['base'])} | {span(item['head'])} | {delta} | {item['verdict']} |")
     lines += ['', 'Full-stack throughput is offered-load limited. Certificate verification is a local component cost, not consensus finality. ACP capture excludes authenticated storage proof construction. Policy lifecycle timings exclude fixture construction, fork setup, result disposal and restoration checks; they exclude consensus and durable storage. No maximum-capacity or WAN claim.', '']
+    if non_comparable:
+        lines += ['Full-stack baseline not run: incompatible ACP proof schemas. Both head passes must still pass correctness, complete permission verification and recovery; their values above are head-only measurements, with no baseline success or regression claim.', '',
+                  '```json', json.dumps(non_comparable, indent=2), '```', '']
     if logical_edit_scaling:
         ratios = ', '.join(f'{tag} {value:.2f}×' for tag, value in logical_edit_scaling.items())
         lines += [f'Logical edit cost ratio (2,048 / 32 objects): {ratios}. These within-pass module ratios exclude physical cleanup and are not service throughput.', '']
