@@ -372,6 +372,7 @@ jobs:
               --test native_signed_operation
               --test native_bulletin
               --test native_registration
+              --test native_object_archive
               --test native_membership
               --test quorum_recovery
               --test cold_replay
