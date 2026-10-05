@@ -1235,6 +1235,17 @@ mod tests {
         for target in record.relations.active_ids() {
             let mut subjects =
                 relationship_index::live_pairs(store, POLICY, target, &record.relations).unwrap();
+            for subject in &subjects {
+                if !relations.contains(target) || !relations.contains(*subject) {
+                    store.delete(&relationship_index::logical_key(
+                        POLICY,
+                        RelationPair {
+                            target,
+                            subject: *subject,
+                        },
+                    ));
+                }
+            }
             subjects.retain(|subject| relations.contains(target) && relations.contains(*subject));
             let key = relationship_index::active_key(POLICY, target);
             if subjects.is_empty() {

@@ -118,7 +118,11 @@ This is a feature port, not a claim of identical transport or parser behavior:
   catalogues, enumerate relationship pages and combine them with the policy's
   declared resources.
 - [Definition edits](acp-policy-edits.md) retire indexed generation pairs atomically;
-  physical cleanup runs later under the shared cleanup budget. Runtime edits meter
+  physical cleanup runs later under the shared cleanup budget. Logical pair counts
+  provide the exact edit removal count and are cleared on relation retirement;
+  separate physical counts remain until cleanup removes the rows. Recovery requires
+  both indexes to match their rows. This separation does not bound synchronous
+  object archive, which still visits and removes every current grant. Runtime edits meter
   reads, writes and preparation work without visiting every physical relationship.
   This accounting does not meter individual compiler instructions. The lifecycle
   component workload measures edit cost and full deletion teardown, including cleanup.

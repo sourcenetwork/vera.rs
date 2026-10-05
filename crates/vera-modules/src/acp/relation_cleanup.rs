@@ -212,7 +212,7 @@ impl AcpModule {
                     };
                 let Some((items, changes)) = self.prepare_cleanup_relationships(
                     &job.policy,
-                    Some(job.generation),
+                    retirement_cleanup::RelationshipCleanup::Relation(job.generation),
                     &row,
                     JOB_ITEMS - removed,
                     budget,

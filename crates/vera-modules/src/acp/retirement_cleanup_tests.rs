@@ -43,6 +43,10 @@ fn put(module: &mut AcpModule, policy: &str, relationship: Relationship) -> Vec<
     )
 }
 
+fn retained_catalog(module: &AcpModule, policy: &str) -> RelationGenerations {
+    module.retired_policy(policy).unwrap().unwrap().relations
+}
+
 fn first_key(module: &AcpModule, policy: &str) -> Vec<u8> {
     module
         .store
@@ -61,13 +65,19 @@ fn relationship_quantum_combines_pair_writes_and_charges_every_item() {
     let before = module.store.serialize();
     let mut budget = Budget::new();
     let (items, changes) = module
-        .prepare_cleanup_relationships(&policy, None, &first, usize::MAX, &mut budget)
+        .prepare_cleanup_relationships(
+            &policy,
+            RelationshipCleanup::Policy(&retained_catalog(&module, &policy)),
+            &first,
+            usize::MAX,
+            &mut budget,
+        )
         .unwrap()
         .unwrap();
     assert_eq!(items, JOB_ITEMS);
-    assert_eq!(changes.len(), 2 * JOB_ITEMS + 2);
+    assert_eq!(changes.len(), 2 * JOB_ITEMS + 3);
     assert_eq!(budget.items, MAX_ITEMS - JOB_ITEMS);
-    assert_eq!(budget.writes, MAX_WRITES - 2 * JOB_ITEMS - 2);
+    assert_eq!(budget.writes, MAX_WRITES - 2 * JOB_ITEMS - 3);
     assert_eq!(
         module.store.serialize(),
         before,
@@ -106,9 +116,9 @@ fn relationship_batches_fit_remaining_item_write_and_byte_budgets() {
     let before = module.store.serialize();
     for (items, bytes, writes, expected) in [
         (2, MAX_BYTES, MAX_WRITES, 2),
-        (MAX_ITEMS, MAX_BYTES, 3, 0),
-        (MAX_ITEMS, MAX_BYTES, 4, 1),
-        (MAX_ITEMS, MAX_BYTES, 6, 2),
+        (MAX_ITEMS, MAX_BYTES, 4, 0),
+        (MAX_ITEMS, MAX_BYTES, 5, 1),
+        (MAX_ITEMS, MAX_BYTES, 7, 2),
         (MAX_ITEMS, 2 * NATIVE_MAX_VALUE_BYTES + 8192, MAX_WRITES, 2),
         (MAX_ITEMS, MAX_BYTES, MAX_WRITES, 3),
         (MAX_ITEMS, NATIVE_MAX_VALUE_BYTES, MAX_WRITES, 0),
@@ -118,7 +128,13 @@ fn relationship_batches_fit_remaining_item_write_and_byte_budgets() {
         budget.bytes = bytes;
         budget.writes = writes;
         let prepared = module
-            .prepare_cleanup_relationships(&policy, None, &first, JOB_ITEMS, &mut budget)
+            .prepare_cleanup_relationships(
+                &policy,
+                RelationshipCleanup::Policy(&retained_catalog(&module, &policy)),
+                &first,
+                JOB_ITEMS,
+                &mut budget,
+            )
             .unwrap();
         assert_eq!(prepared.as_ref().map_or(0, |(count, _)| *count), expected);
         assert_eq!(budget.items, items - expected);
@@ -137,11 +153,17 @@ fn relationship_batches_stop_at_pair_boundaries() {
     module.delete_policy(&actor(), &policy).unwrap();
     let first = first_key(&module, &policy);
     let (items, changes) = module
-        .prepare_cleanup_relationships(&policy, None, &first, JOB_ITEMS, &mut Budget::new())
+        .prepare_cleanup_relationships(
+            &policy,
+            RelationshipCleanup::Policy(&retained_catalog(&module, &policy)),
+            &first,
+            JOB_ITEMS,
+            &mut Budget::new(),
+        )
         .unwrap()
         .unwrap();
     assert_eq!(items, 2);
-    assert_eq!(changes.len(), 6);
+    assert_eq!(changes.len(), 7);
     assert!(changes.iter().all(|(key, _)| key != &reader));
     RecordStore::apply_records(&mut module.store, changes).unwrap();
     assert_eq!(first_key(&module, &policy), reader);
@@ -221,7 +243,13 @@ fn incoming_userset_cleanup_combines_the_pair_without_touching_new_generations()
     assert_ne!(fresh, first);
     let mut budget = Budget::new();
     let (items, changes) = module
-        .prepare_cleanup_relationships(&policy, Some(pair.subject), &first, JOB_ITEMS, &mut budget)
+        .prepare_cleanup_relationships(
+            &policy,
+            RelationshipCleanup::Relation(pair.subject),
+            &first,
+            JOB_ITEMS,
+            &mut budget,
+        )
         .unwrap()
         .unwrap();
     assert_eq!(items, JOB_ITEMS);
@@ -260,13 +288,19 @@ fn same_object(count: usize) -> (AcpModule, String, Vec<u8>, Vec<u8>) {
 fn same_object_rows_share_one_counter_read_and_write_with_a_tight_write_budget() {
     let (mut module, policy, first, counter) = same_object(JOB_ITEMS + 1);
     let mut budget = Budget::new();
-    budget.writes = JOB_ITEMS + 3;
+    budget.writes = JOB_ITEMS + 4;
     let (items, changes) = module
-        .prepare_cleanup_relationships(&policy, None, &first, JOB_ITEMS, &mut budget)
+        .prepare_cleanup_relationships(
+            &policy,
+            RelationshipCleanup::Policy(&retained_catalog(&module, &policy)),
+            &first,
+            JOB_ITEMS,
+            &mut budget,
+        )
         .unwrap()
         .unwrap();
     assert_eq!(items, JOB_ITEMS);
-    assert_eq!(changes.len(), JOB_ITEMS + 3);
+    assert_eq!(changes.len(), JOB_ITEMS + 4);
     assert_eq!(changes.iter().filter(|(key, _)| key == &counter).count(), 1);
     assert_eq!(budget.writes, 0);
     RecordStore::apply_records(&mut module.store, changes).unwrap();
@@ -290,6 +324,7 @@ fn maximum_value_batch_charges_object_counter_bytes_before_decoding() {
     for key in [
         relationship_index::outgoing_key(&policy, pair),
         relationship_index::incoming_key(&policy, pair),
+        relationship_index::logical_key(&policy, pair),
         counter,
     ] {
         required += 2 * record_size(&key, module.store.get_ref(&key).unwrap()).unwrap();
@@ -300,12 +335,18 @@ fn maximum_value_batch_charges_object_counter_bytes_before_decoding() {
         let mut budget = Budget::new();
         budget.bytes = bytes;
         let prepared = module
-            .prepare_cleanup_relationships(&policy, None, &first, 1, &mut budget)
+            .prepare_cleanup_relationships(
+                &policy,
+                RelationshipCleanup::Policy(&retained_catalog(&module, &policy)),
+                &first,
+                1,
+                &mut budget,
+            )
             .unwrap();
         if bytes == required {
             let (items, changes) = prepared.unwrap();
             assert_eq!(items, 1);
-            assert_eq!(changes.len(), 4);
+            assert_eq!(changes.len(), 5);
             assert_eq!(budget.bytes, 0);
         } else {
             assert!(prepared.is_none());

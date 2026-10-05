@@ -1,4 +1,4 @@
-//! Recovery validation of generation-qualified rows and their physical indexes.
+//! Recovery validation of generation-qualified rows, physical indexes and logical counts.
 
 use super::relation_cleanup::{
     decode_job, generation_suffix, relation_counter, sequence, validate_descriptor,
@@ -115,6 +115,16 @@ impl AcpModule {
             known.insert(key);
         }
         for ((policy, pair), count) in &counts {
+            let (catalog, _) = &catalogs[policy];
+            if catalog.contains(pair.target) && catalog.contains(pair.subject) {
+                let key = relationship_index::logical_key(policy, *pair);
+                if self.store.get_ref(&key) != Some(count.to_be_bytes().as_slice()) {
+                    return Err(AcpError::State(
+                        "restored logical relationship count mismatch".into(),
+                    ));
+                }
+                known.insert(key);
+            }
             for key in [
                 relationship_index::outgoing_key(policy, *pair),
                 relationship_index::incoming_key(policy, *pair),
@@ -272,3 +282,7 @@ fn validate_binding(
 #[cfg(test)]
 #[path = "object_pair_restoration_tests.rs"]
 mod object_pair_tests;
+
+#[cfg(test)]
+#[path = "logical_pair_tests.rs"]
+mod logical_pair_tests;

@@ -268,7 +268,11 @@ fn removed_and_recreated_generations_keep_independent_physical_counts() {
     f.policy.policy = reduced;
     f.policy.relations = relations;
     f.save_policy();
-    // Definition editing owns the current directory cutover, while physical counts remain.
+    // Definition editing clears logical counts and cuts over the current directory.
+    f.store.delete(&relationship_index::logical_key(
+        POLICY,
+        retired.generations,
+    ));
     f.store.delete(&relationship_index::active_key(
         POLICY,
         retired.generations.target,
