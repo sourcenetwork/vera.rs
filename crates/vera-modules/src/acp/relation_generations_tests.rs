@@ -181,7 +181,7 @@ fn malformed_maps_counters_and_duplicate_policy_names_are_rejected() {
         .relations
         .retain(|r| r.name != "owner");
     assert!(RelationGenerations::new(&missing_owner).is_err());
-    let mut actor_owner = policy.clone();
+    let mut actor_owner = policy;
     actor_owner
         .actor
         .as_mut()

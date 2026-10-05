@@ -34,7 +34,10 @@ restoration; there is no implicit migration or fallback.
 ## Editing and cleanup
 
 Each physical relationship contributes to mirrored outgoing and incoming counts
-for its `(target, subject)` pair. Archived records still count. Metadata rewrites
+for its `(target, subject)` pair and one count for that pair under its target
+object. Object counts use `relation_state/{policy}/object/v2/{resource}/{object}/{target:016x}/{subject:016x}`,
+with hex-encoded resource/object components and nonzero eight-byte big-endian values.
+Zero counts are omitted. Archived records still count. Metadata rewrites
 do not increment counts. A separate authenticated directory lists current subject
 identities with records under each target identity.
 
@@ -70,6 +73,23 @@ stores reject it by default; the in-memory module store applies its infallible
 writes together. Module commands and end-of-revision maintenance publish their
 candidate snapshot only after success.
 
+## Object archival
+
+Archival enumerates the target object's occupied generation pairs, skips retired
+pairs, and checks the physical row count of each current pair before removing its
+grants. Unrelated objects do not consume archive planning work or the relationship
+query's bucket limit. Incoming userset references belong to their own target
+objects and remain unchanged.
+
+The response retains the exact count of current relationships removed, including
+the owner relationship that becomes an archived ownership record. Unarchiving
+reactivates that owner without restoring grants. A repeated archive returns zero.
+Prepared grant removals and the owner update publish through the command's atomic
+candidate snapshot; failures preserve the original state.
+
+This remains synchronous work proportional to the object's occupied pairs and
+current rows. It does not establish a fixed total archive-work limit.
+
 ## Reads and recovery
 
 The shared permission evaluator proves the current policy catalog and subject
@@ -89,7 +109,9 @@ still have a continuation. Its cumulative scan cost can include retired rows unt
 cleanup; it is not the module's current-bucket pagination interface.
 
 Restoration checks generation/name bindings, nonreuse bounds, mirrored physical
-counts, active-directory completeness, and durable cleanup descriptors and queues.
+counts, exact object-pair counts, active-directory completeness, and durable cleanup
+descriptors and queues. Missing or orphan object counters are rejected; restoration
+does not rebuild this authenticated index from older snapshots.
 An edit validates the metadata and indexes it touches; it no longer decodes every
 primary relationship solely to detect unrelated corruption. Reads, cleanup and
 restoration reject malformed records they inspect.

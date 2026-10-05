@@ -42,6 +42,7 @@ impl AcpModule {
         let mut known = BTreeSet::new();
         let descriptors = self.validate_relation_jobs(&catalogs, &mut known)?;
         let mut counts = BTreeMap::<(String, RelationPair), u64>::new();
+        let mut object_counts = BTreeMap::<Vec<u8>, u64>::new();
         for (key, bytes) in self.store.prefix_iter(keys::RELATIONSHIP_PREFIX) {
             record_size(key, bytes)?;
             let record: RelationshipRecord = serde_json::from_slice(bytes).map_err(|error| {
@@ -94,12 +95,24 @@ impl AcpModule {
                     }
                 }
             }
+            let count = object_counts.entry(object_pairs::key(&record)).or_default();
+            *count = count
+                .checked_add(1)
+                .ok_or_else(|| AcpError::State("object relationship count overflow".into()))?;
             let count = counts
                 .entry((record.policy_id, record.generations))
                 .or_default();
             *count = count
                 .checked_add(1)
                 .ok_or_else(|| AcpError::State("physical relationship count overflow".into()))?;
+        }
+        for (key, count) in object_counts {
+            if self.store.get_ref(&key) != Some(count.to_be_bytes().as_slice()) {
+                return Err(AcpError::State(
+                    "restored object relationship count mismatch".into(),
+                ));
+            }
+            known.insert(key);
         }
         for ((policy, pair), count) in &counts {
             for key in [
@@ -255,3 +268,7 @@ fn validate_binding(
         "relationship generation has no matching name descriptor".into(),
     ))
 }
+
+#[cfg(test)]
+#[path = "object_pair_restoration_tests.rs"]
+mod object_pair_tests;

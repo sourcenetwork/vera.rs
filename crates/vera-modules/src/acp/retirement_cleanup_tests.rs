@@ -65,9 +65,9 @@ fn relationship_quantum_combines_pair_writes_and_charges_every_item() {
         .unwrap()
         .unwrap();
     assert_eq!(items, JOB_ITEMS);
-    assert_eq!(changes.len(), JOB_ITEMS + 2);
+    assert_eq!(changes.len(), 2 * JOB_ITEMS + 2);
     assert_eq!(budget.items, MAX_ITEMS - JOB_ITEMS);
-    assert_eq!(budget.writes, MAX_WRITES - JOB_ITEMS - 2);
+    assert_eq!(budget.writes, MAX_WRITES - 2 * JOB_ITEMS - 2);
     assert_eq!(
         module.store.serialize(),
         before,
@@ -106,7 +106,9 @@ fn relationship_batches_fit_remaining_item_write_and_byte_budgets() {
     let before = module.store.serialize();
     for (items, bytes, writes, expected) in [
         (2, MAX_BYTES, MAX_WRITES, 2),
-        (MAX_ITEMS, MAX_BYTES, 4, 2),
+        (MAX_ITEMS, MAX_BYTES, 3, 0),
+        (MAX_ITEMS, MAX_BYTES, 4, 1),
+        (MAX_ITEMS, MAX_BYTES, 6, 2),
         (MAX_ITEMS, 2 * NATIVE_MAX_VALUE_BYTES + 8192, MAX_WRITES, 2),
         (MAX_ITEMS, MAX_BYTES, MAX_WRITES, 3),
         (MAX_ITEMS, NATIVE_MAX_VALUE_BYTES, MAX_WRITES, 0),
@@ -139,7 +141,7 @@ fn relationship_batches_stop_at_pair_boundaries() {
         .unwrap()
         .unwrap();
     assert_eq!(items, 2);
-    assert_eq!(changes.len(), 4);
+    assert_eq!(changes.len(), 6);
     assert!(changes.iter().all(|(key, _)| key != &reader));
     RecordStore::apply_records(&mut module.store, changes).unwrap();
     assert_eq!(first_key(&module, &policy), reader);
@@ -223,7 +225,7 @@ fn incoming_userset_cleanup_combines_the_pair_without_touching_new_generations()
         .unwrap()
         .unwrap();
     assert_eq!(items, JOB_ITEMS);
-    assert_eq!(changes.len(), JOB_ITEMS + 2);
+    assert_eq!(changes.len(), 2 * JOB_ITEMS + 2);
     RecordStore::apply_records(&mut module.store, changes).unwrap();
     assert!(module.store.has(&fresh));
     assert_eq!(
@@ -231,4 +233,114 @@ fn incoming_userset_cleanup_combines_the_pair_without_touching_new_generations()
         1
     );
     module.validate_restored_state().unwrap();
+}
+
+fn same_object(count: usize) -> (AcpModule, String, Vec<u8>, Vec<u8>) {
+    let (mut module, policy) = setup(0);
+    for index in 0..count {
+        put(
+            &mut module,
+            &policy,
+            Relationship::with_entity(
+                "file",
+                "shared",
+                "reader",
+                Did::new(format!("did:key:reader-{index}")).unwrap(),
+            ),
+        );
+    }
+    let first = first_key(&module, &policy);
+    let pair = cleanup_pair(&policy, &first).unwrap();
+    let counter = object_pairs::key_from_relationship(&policy, pair, &first).unwrap();
+    module.delete_policy(&actor(), &policy).unwrap();
+    (module, policy, first, counter)
+}
+
+#[test]
+fn same_object_rows_share_one_counter_read_and_write_with_a_tight_write_budget() {
+    let (mut module, policy, first, counter) = same_object(JOB_ITEMS + 1);
+    let mut budget = Budget::new();
+    budget.writes = JOB_ITEMS + 3;
+    let (items, changes) = module
+        .prepare_cleanup_relationships(&policy, None, &first, JOB_ITEMS, &mut budget)
+        .unwrap()
+        .unwrap();
+    assert_eq!(items, JOB_ITEMS);
+    assert_eq!(changes.len(), JOB_ITEMS + 3);
+    assert_eq!(changes.iter().filter(|(key, _)| key == &counter).count(), 1);
+    assert_eq!(budget.writes, 0);
+    RecordStore::apply_records(&mut module.store, changes).unwrap();
+    assert_eq!(
+        module.store.get_ref(&counter),
+        Some(1u64.to_be_bytes().as_slice())
+    );
+    module.validate_restored_state().unwrap();
+}
+
+#[test]
+fn maximum_value_batch_charges_object_counter_bytes_before_decoding() {
+    let (mut module, policy, first, counter) = same_object(2);
+    let mut value = module.store.get(&first).unwrap();
+    value.resize(NATIVE_MAX_VALUE_BYTES, b' ');
+    module.store.put(&first, value);
+    let pair = cleanup_pair(&policy, &first).unwrap();
+    let mut required = keys::policy_key(&policy).len()
+        + record_size(&first, module.store.get_ref(&first).unwrap()).unwrap()
+        + first.len();
+    for key in [
+        relationship_index::outgoing_key(&policy, pair),
+        relationship_index::incoming_key(&policy, pair),
+        counter,
+    ] {
+        required += 2 * record_size(&key, module.store.get_ref(&key).unwrap()).unwrap();
+    }
+    assert!(required < MAX_BYTES);
+    let before = module.store.serialize();
+    for bytes in [required - 1, required] {
+        let mut budget = Budget::new();
+        budget.bytes = bytes;
+        let prepared = module
+            .prepare_cleanup_relationships(&policy, None, &first, 1, &mut budget)
+            .unwrap();
+        if bytes == required {
+            let (items, changes) = prepared.unwrap();
+            assert_eq!(items, 1);
+            assert_eq!(changes.len(), 4);
+            assert_eq!(budget.bytes, 0);
+        } else {
+            assert!(prepared.is_none());
+        }
+        assert_eq!(module.store.serialize(), before);
+    }
+}
+
+#[test]
+fn missing_or_corrupt_object_counters_roll_back_prior_cleanup_batches() {
+    let (mut module, policy) = setup(JOB_ITEMS + 1);
+    module.delete_policy(&actor(), &policy).unwrap();
+    let last = module
+        .store
+        .prefix_iter(&keys::relationship_policy_prefix(&policy))
+        .last()
+        .unwrap()
+        .0
+        .to_vec();
+    let counter =
+        object_pairs::key_from_relationship(&policy, cleanup_pair(&policy, &last).unwrap(), &last)
+            .unwrap();
+    for value in [None, Some(vec![1]), Some(0u64.to_be_bytes().to_vec())] {
+        let mut candidate = module.clone();
+        match value {
+            Some(value) => candidate.store.put(&counter, value),
+            None => candidate.store.delete(&counter),
+        }
+        let before = candidate.store.serialize();
+        assert!(candidate.end_blocker(&BlockExecCtx::default()).is_err());
+        assert_eq!(candidate.store.serialize(), before);
+    }
+    let (mut module, _, _, counter) = same_object(JOB_ITEMS + 1);
+    module.store.put(&counter, 1u64.to_be_bytes().to_vec());
+    let before = module.store.serialize();
+    assert!(module.end_blocker(&BlockExecCtx::default()).is_err());
+    assert_eq!(module.store.serialize(), before);
 }

@@ -3,6 +3,7 @@
 use super::*;
 use crate::kv_store::{NATIVE_MAX_KEY_BYTES, NATIVE_MAX_VALUE_BYTES};
 use retirement::{Phase, QUEUE_PREFIX, RetiredPolicy, queue_key, retired_key};
+use std::collections::BTreeSet;
 
 pub(super) const MAX_ITEMS: usize = 128;
 pub(super) const MAX_BYTES: usize = 4 << 20;
@@ -292,12 +293,30 @@ impl AcpModule {
             .min(budget.writes.saturating_sub(2));
         let prefix = keys::relationship_generation_prefix(policy, pair, "");
         let mut selected = Vec::new();
+        let mut object_counters = BTreeSet::new();
         for (key, value) in self.store.prefix_iter(&prefix).take(limit) {
-            let cost = record_size(key, value)? + key.len();
+            let mut cost = record_size(key, value)? + key.len();
+            let counter = object_pairs::key_from_relationship(policy, pair, key)
+                .map_err(relation_state_error)?;
+            let distinct = !object_counters.contains(&counter);
+            if selected.len() + 1 + 2 + object_counters.len() + usize::from(distinct)
+                > budget.writes
+            {
+                break;
+            }
+            if distinct {
+                let value = self
+                    .store
+                    .get_ref(&counter)
+                    .ok_or_else(|| AcpError::State("cleanup object counter missing".into()))?;
+                relationship_index::decode_count(value).map_err(relation_state_error)?;
+                cost += record_size(&counter, value)? + counter.len() + 8;
+            }
             let Some(remaining) = available.checked_sub(cost) else {
                 break;
             };
             selected.push(key.to_vec());
+            object_counters.insert(counter);
             available = remaining;
         }
         if selected.is_empty() {
@@ -309,8 +328,8 @@ impl AcpModule {
         let capture = read_capture::ReadCapture::new(
             self.store.clone(),
             read_capture::ReadLimits {
-                reads: selected.len() + 3,
-                records: selected.len() + 3,
+                reads: selected.len() + 3 + object_counters.len(),
+                records: selected.len() + 3 + object_counters.len(),
                 bytes: budget.bytes,
             },
         );

@@ -82,7 +82,7 @@ pub fn read_pair_count<S: RecordStore>(store: &S, policy: &str, pair: RelationPa
     }
 }
 
-fn decode_count(bytes: &[u8]) -> Result<u64> {
+pub(super) fn decode_count(bytes: &[u8]) -> Result<u64> {
     let count = bytes
         .try_into()
         .map(u64::from_be_bytes)
