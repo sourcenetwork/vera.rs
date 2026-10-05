@@ -9,6 +9,11 @@
 //!
 //! Requires `cargo build -p verad` before running.
 
+#[path = "support/acp_v1.rs"]
+mod acp_v1;
+#[path = "support/receipt.rs"]
+mod receipt;
+
 use std::time::Duration;
 
 use alloy_primitives::{Address, B256, Bytes, FixedBytes, U256};
@@ -1473,14 +1478,20 @@ async fn canonical_module_test() {
         &e5_receipt,
         &g7_receipt,
     ] {
-        let response = client
-            .read_receipt(receipt.transaction_hash, &trusted)
-            .await
-            .unwrap()
-            .unwrap();
+        let response = receipt::wait_for_proof(&client, receipt.transaction_hash, &trusted).await;
         let verified = response.verify(receipt.transaction_hash, &trusted).unwrap();
         assert_eq!(response.revision.height, receipt.block_number);
         assert_eq!(verified.success(), receipt.status == 1);
         assert_eq!(verified.logs().len(), receipt.logs.len());
+    }
+    let next_owner = BlsSigner::random(chain_id).unwrap();
+    for receipt in acp_v1::lifecycle(&client, &bls_signer, &next_owner).await {
+        let proof = receipt::wait_for_proof(&client, receipt.transaction_hash, &trusted).await;
+        assert!(
+            proof
+                .verify(receipt.transaction_hash, &trusted)
+                .unwrap()
+                .success()
+        );
     }
 }

@@ -66,6 +66,23 @@ impl InMemoryKvStore {
             .map(|(key, value)| (key.as_slice(), value.as_ref()))
     }
 
+    /// Borrow ordered prefix entries starting strictly after a caller-provided key.
+    pub fn prefix_iter_after<'a>(
+        &'a self,
+        prefix: &'a [u8],
+        after: Option<&[u8]>,
+    ) -> impl Iterator<Item = (&'a [u8], &'a [u8])> {
+        use std::ops::Bound::{Excluded, Included, Unbounded};
+        let start = match after {
+            Some(key) if key >= prefix => Excluded(key.to_vec()),
+            _ => Included(prefix.to_vec()),
+        };
+        self.data
+            .range((start, Unbounded))
+            .take_while(move |(key, _)| key.starts_with(prefix))
+            .map(|(key, value)| (key.as_slice(), value.as_ref()))
+    }
+
     /// Construct a store from raw key-value pairs (e.g. loaded from RocksDB raw_kv CF).
     pub fn from_pairs(pairs: Vec<(Vec<u8>, Vec<u8>)>) -> Self {
         Self {

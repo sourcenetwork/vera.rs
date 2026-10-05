@@ -19,6 +19,24 @@ sol! {
 
         // ── Write methods (map to Cosmos Msgs) ──────────────────────────
 
+        event ObjectTransferred(bytes32 indexed policyId, string resource, string objectId, string newOwner);
+        event PolicyDeleted(bytes32 indexed policyId);
+        event PolicyMetadataEdited(bytes32 indexed policyId);
+
+        event PolicyCommandExecuted(bytes32 indexed policyId, string actor);
+        function executePolicyCommand(bytes32 policyId, bytes request) external returns (bytes);
+        function createPolicyWithOptions(bytes request) external returns (bytes);
+        function transferObject(bytes32 policyId, string resource, string objectId, string newOwner) external returns (bytes);
+        function deletePolicy(bytes32 policyId) external returns (bool);
+        function editPolicyMetadata(bytes32 policyId, bytes metadata) external returns (bytes);
+        function evaluateTheorem(bytes32 policyId, string source) external view returns (bytes);
+        function getPolicyCatalogue(bytes32 policyId) external view returns (bytes);
+        function getPoliciesPage(bytes cursor) external view returns (bytes);
+        function getRelationshipsPage(bytes32 policyId, bytes request) external view returns (bytes);
+        function getPolicies() external view returns (bytes);
+        function getObjectRegistration(bytes32 policyId, string resource, string objectId) external view returns (bytes);
+        function checkManagementAuthority(bytes32 policyId, string resource, string objectId, string relation, string actor) external view returns (bool);
+
         function batchCalls(bytes[] calldata calls) external returns (bytes[] results);
         function createPolicy(bytes calldata policy, uint8 marshalType) external returns (bytes);
         function editPolicy(bytes32 policyId, bytes calldata policy, uint8 marshalType) external returns (uint64 relationshipsRemoved, bytes record);

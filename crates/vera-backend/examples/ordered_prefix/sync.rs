@@ -4,7 +4,7 @@ use commonware_glue::stateful::db::{
     DatabaseSet, ManagedDb, Shared, StateSyncDb, SyncEngineConfig, Unmerkleized as _,
 };
 use commonware_runtime::Supervisor as _;
-use commonware_storage::qmdb::sync::{Feedback, Request, Response, Source};
+use commonware_storage::qmdb::sync::{Feedback, Request, Response, Source, source};
 use commonware_utils::channel::{mpsc, oneshot};
 use std::sync::{
     Arc, Mutex,
@@ -21,7 +21,20 @@ struct MeasuredSource {
     gate: ::tokio::sync::Semaphore,
     operations: AtomicU64,
     bytes: AtomicU64,
-    tamper: Mutex<Option<oneshot::Sender<bool>>>,
+    tamper: Mutex<Option<[oneshot::Sender<bool>; 2]>>,
+}
+
+impl MeasuredSource {
+    fn record_response(&self, response: &source::ResponseOf<Self>) {
+        let count = match response {
+            Response::Operations { operations, .. } => operations.len() as u64,
+            Response::Boundary { .. } => 1,
+            Response::Pruned { .. } => 0,
+        };
+        self.operations.fetch_add(count, Ordering::Relaxed);
+        self.bytes
+            .fetch_add(response.encode_size() as u64, Ordering::Relaxed);
+    }
 }
 
 impl Source for MeasuredSource {
@@ -30,27 +43,24 @@ impl Source for MeasuredSource {
     type Op = <Set as Source>::Op;
     type Error = <Set as Source>::Error;
 
-    async fn serve(
-        &self,
-        request: Request<Self::Family>,
-    ) -> Result<(Response<Self::Family, Self::Op, Self::Digest>, Feedback), Self::Error> {
+    async fn serve(&self, request: Request<Self::Family>) -> source::Result<Self> {
         let _permit = self.gate.acquire().await.unwrap();
         let (mut response, mut feedback) = self.db.serve(request).await?;
-        let count = match &mut response {
-            Response::Operations { operations, .. } => {
-                if operations.len() >= 2
-                    && let Some(report) = self.tamper.lock().unwrap().take()
-                {
-                    operations[0] = operations[1].clone();
-                    feedback = Some(report);
-                }
-                operations.len() as u64
-            }
-            Response::Boundary { .. } => 1,
-        };
-        self.operations.fetch_add(count, Ordering::Relaxed);
-        self.bytes
-            .fetch_add(response.encode_size() as u64, Ordering::Relaxed);
+        if let Response::Operations { proof, operations } = &mut response
+            && operations.len() >= 2
+            && let Some([bad, good]) = self.tamper.lock().unwrap().take()
+        {
+            let replacement = Response::Operations {
+                proof: proof.clone(),
+                operations: operations.clone(),
+            };
+            operations[0] = operations[1].clone();
+            self.record_response(&replacement);
+            let (candidates_tx, candidates_rx) = mpsc::channel(1);
+            assert!(candidates_tx.try_send((replacement, good)).is_ok());
+            feedback = Some(Feedback::new(bad, candidates_rx));
+        }
+        self.record_response(&response);
         Ok((response, feedback))
     }
 }
@@ -134,12 +144,13 @@ fn check_sync(burst: bool, prune: bool) {
         );
 
         let (bad_tx, bad_rx) = oneshot::channel();
+        let (good_tx, good_rx) = oneshot::channel();
         let measured = Arc::new(MeasuredSource {
             db: source.clone(),
             gate: ::tokio::sync::Semaphore::new(4),
             operations: AtomicU64::new(0),
             bytes: AtomicU64::new(0),
-            tamper: Mutex::new(Some(bad_tx)),
+            tamper: Mutex::new(Some([bad_tx, good_tx])),
         });
         let (updates_tx, updates_rx) = mpsc::channel(4);
         let (finish_tx, finish_rx) = mpsc::channel(1);
@@ -162,6 +173,7 @@ fn check_sync(burst: bool, prune: bool) {
         );
         let advance = async {
             assert!(!bad_rx.await.unwrap(), "tampered operations were accepted");
+            assert!(good_rx.await.unwrap(), "valid replacement was rejected");
             assert_eq!(reached_rx.recv().await.unwrap(), first);
             let initial_ops = measured.operations.load(Ordering::Relaxed);
             let initial_bytes = measured.bytes.load(Ordering::Relaxed);
@@ -191,7 +203,10 @@ fn check_sync(burst: bool, prune: bool) {
             if burst {
                 assert_eq!(measured.operations.load(Ordering::Relaxed), initial_ops);
                 drop(pause);
-                while reached_rx.recv().await.unwrap() != last {}
+                while reached_rx.recv().await.unwrap() != last {
+                    // Coordinated sync parks at a reached target until the caller dispatches again.
+                    updates_tx.send(last.clone()).await.unwrap();
+                }
             }
             let delta_ops = measured.operations.load(Ordering::Relaxed) - initial_ops;
             let delta_bytes = measured.bytes.load(Ordering::Relaxed) - initial_bytes;
@@ -229,7 +244,7 @@ fn check_sync(burst: bool, prune: bool) {
             Some(Bytes::from(vec![7; 256]))
         );
         drop(restored);
-        let reopened = Store::init(context.child("reopened"), destination(&context))
+        let reopened = Store::init(context.child("reopened"), destination(&context), None)
             .await
             .unwrap();
         assert_eq!(reopened.root(), root);

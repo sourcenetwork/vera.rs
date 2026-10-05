@@ -5,6 +5,7 @@ use commonware_glue::stateful::db::{
     DatabaseSet, ManagedDb, Merkleized as _, Shared, Unmerkleized as _,
 };
 
+use commonware_runtime::Supervisor as _;
 use std::{path::Path, process::Command};
 
 type Set = Shared<Store>;
@@ -146,7 +147,8 @@ fn recover_checkpoint_after_process_exit() {
             String::from_utf8_lossy(&output.stderr)
         );
         let bytes = std::fs::read(directory.path().join("anchor")).unwrap();
-        let (root, target) = <(Digest, Target)>::decode(bytes.as_slice()).unwrap();
+        let (root, target) =
+            <(Digest, Target)>::decode(commonware_codec::Copying(bytes.as_slice())).unwrap();
         runtime(&directory.path().join("db")).start(|context| async move {
             let cfg = config(&context);
             let set = Set::init(context.child("initial"), cfg, None).await;

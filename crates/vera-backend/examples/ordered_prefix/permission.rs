@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use commonware_cryptography::sha256::Digest;
 use commonware_storage::{
     mmr,
-    qmdb::{any::value::VariableEncoding, current::ordered::ExclusionProof},
+    qmdb::{any::value::VariableEncoding, current::ordered::proof::constant::ExclusionProof},
 };
 use vera_modules::{
     acp::{
@@ -65,12 +65,9 @@ impl VerifiedReads {
             match (read, witness) {
                 (RecordRead::Key(key), Witness::Present(entry)) => {
                     if key != &entry.key
-                        || !Store::verify_key_value_proof(
-                            key.clone(),
-                            entry.value.clone(),
-                            &entry.proof,
-                            root,
-                        )
+                        || !entry
+                            .proof
+                            .verify::<Sha256, _>(key.clone(), entry.value.clone(), root)
                     {
                         return Err("invalid point proof");
                     }
@@ -79,7 +76,7 @@ impl VerifiedReads {
                         .insert(key.clone(), Some(entry.value.to_vec()));
                 }
                 (RecordRead::Key(key), Witness::Absent(proof)) => {
-                    if !Store::verify_exclusion_proof(key, proof, root) {
+                    if !proof.verify::<Sha256>(key, root) {
                         return Err("invalid absence proof");
                     }
                     records.points.insert(key.clone(), None);
@@ -147,6 +144,16 @@ fn permission_evaluation_requires_complete_proofs_at_one_root() {
             .unwrap()
             .policy
             .id;
+        module
+            .direct_policy_cmd(
+                &owner,
+                &policy_id,
+                PolicyCmd::RegisterObject(Object {
+                    resource: "document".into(),
+                    id: "report".into(),
+                }),
+            )
+            .unwrap();
         let blocked = Relationship::new(
             "document",
             "report",
@@ -176,7 +183,7 @@ fn permission_evaluation_requires_complete_proofs_at_one_root() {
             }],
         };
         let cfg = config(&context);
-        let mut db = Store::init(context, cfg).await.unwrap();
+        let mut db = Store::init(context, cfg, None).await.unwrap();
         db = tests::write(
             db,
             module

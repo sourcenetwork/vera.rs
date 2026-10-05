@@ -79,7 +79,8 @@ flowchart TB
 ```
 
 ACP is implemented in Rust through the local `acp`, `zanzibar`, and `identity`
-crates. All members re-execute proposals against isolated state before accepting
+crates. See [ACP v1 operations, authority and compatibility](acp-v1.md).
+All members re-execute proposals against isolated state before accepting
 them. Durable finalization precedes publication of query results.
 
 QMDB commits seven persistent partitions: accounts, storage, code, ACP, bulletin,

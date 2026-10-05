@@ -40,7 +40,7 @@ async fn receipt(client: &VeraClient, id: B256, trusted: &ConsensusPublicKey) ->
         }
     })
     .await
-    .expect("certified receipt deadline")
+    .unwrap_or_else(|_| panic!("certified receipt {id} deadline"))
 }
 
 async fn submit(
@@ -240,7 +240,10 @@ async fn admit_member(interrupt: bool, crash_share: bool) {
         ])
         .stdout(Stdio::from(log.try_clone().unwrap()))
         .stderr(Stdio::from(log))
-        .env("RUST_LOG", "info")
+        .env(
+            "RUST_LOG",
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()),
+        )
         .kill_on_drop(true);
     let share_crash_marker = directory.join("secrets.share-crash");
     if crash_share {
