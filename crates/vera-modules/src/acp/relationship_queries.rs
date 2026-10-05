@@ -66,6 +66,7 @@ impl AcpModule {
                 }
             }
         }
+        let active = policy.relations.active_ids();
         let mut limits = read_capture::ReadLimits {
             reads: MAX_DIRECTORY_READS,
             records: MAX_DIRECTORY_READS,
@@ -76,11 +77,11 @@ impl AcpModule {
         for target in targets {
             // Carry the remaining budget into each bounded directory read before decoding it.
             let capture = read_capture::ReadCapture::new(self.store.clone(), limits);
-            let subjects = relationship_index::live_pairs(
+            let subjects = relationship_index::live_pairs_for_active(
                 &capture,
                 &policy.policy.id,
                 target,
-                &policy.relations,
+                &active,
             )
             .map_err(relation_state_error)?;
             limits = capture.remaining_limits().ok_or_else(planning_limit)?;

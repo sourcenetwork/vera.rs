@@ -229,3 +229,6 @@ fn policy_edits_isolate_forks_and_share_unchanged_definitions() {
 
 #[path = "policy_edit_generation_tests.rs"]
 mod generations;
+
+#[path = "policy_edit_schema_tests.rs"]
+mod schema;

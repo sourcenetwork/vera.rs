@@ -81,11 +81,7 @@ impl RelationGenerations {
             return Err(invalid("actor resource cannot be renamed"));
         }
         for resource in &old.resources {
-            if !new
-                .resources
-                .iter()
-                .any(|candidate| candidate.name == resource.name)
-            {
+            if !new_names.contains_key(&resource.name) {
                 return Err(invalid("existing resources cannot be removed"));
             }
         }
