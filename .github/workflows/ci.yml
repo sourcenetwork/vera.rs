@@ -178,8 +178,6 @@ jobs:
     env:
       VERA_E2E_DEADLINE_SCALE: "4"
       VERAD_BINARY: ${{ github.workspace }}/target/debug/verad
-      TMPDIR: ${{ runner.temp }}/vera-e2e-${{ github.run_id }}-${{ github.run_attempt }}-extended
-      VERA_E2E_DIR: ${{ runner.temp }}/vera-e2e-${{ github.run_id }}-${{ github.run_attempt }}-extended/clusters
       VERA_E2E_KEEP: "1"
       RUST_LOG: info
     steps:
@@ -208,7 +206,12 @@ jobs:
 
       - name: Prepare test workspace
         run: |
-          mkdir -p "$TMPDIR"
+          extended_test_dir="$RUNNER_TEMP/vera-e2e-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-extended"
+          mkdir -p "$extended_test_dir"
+          {
+            echo "TMPDIR=$extended_test_dir"
+            echo "VERA_E2E_DIR=$extended_test_dir/clusters"
+          } >> "$GITHUB_ENV"
           python3 .github/scripts/stop-test-nodes.py "$VERAD_BINARY"
 
       - name: Build verad
@@ -234,8 +237,8 @@ jobs:
         with:
           name: extended-e2e-logs-${{ github.run_attempt }}
           path: |
-            ${{ env.TMPDIR }}/test-output.log
-            ${{ env.VERA_E2E_DIR }}/**/logs/*.log
+            ${{ runner.temp }}/vera-e2e-${{ github.run_id }}-${{ github.run_attempt }}-extended/test-output.log
+            ${{ runner.temp }}/vera-e2e-${{ github.run_id }}-${{ github.run_attempt }}-extended/clusters/**/logs/*.log
           if-no-files-found: ignore
 
       - name: Cleanup
@@ -244,7 +247,7 @@ jobs:
           git checkout -- .
           git clean -fd
           python3 .github/scripts/stop-test-nodes.py "$VERAD_BINARY"
-          rm -rf "$TMPDIR"
+          rm -rf "$RUNNER_TEMP/vera-e2e-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-extended"
 
   artifacts:
     name: Release Artifacts
