@@ -7,6 +7,9 @@ use vera_client::{BULLETIN_ADDRESS, BlsSigner, VeraClient};
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, TestCluster};
 use vera_modules::bulletin::abi::IBulletin;
 
+#[path = "quorum_recovery/diagnostics.rs"]
+mod diagnostics;
+
 #[tokio::test]
 async fn minority_write_waits_for_quorum_and_survives_replica_recovery() {
     quorum_recovery(false).await;
@@ -84,22 +87,33 @@ async fn quorum_recovery(pipelined: bool) {
     cluster.restart_node(2).unwrap();
     let outcome = tokio::time::timeout(Duration::from_secs(60), async {
         loop {
-            if let Some(proof) = clients[0].read_receipt(id, &trusted).await.unwrap() {
-                assert!(proof.verify(id, &trusted).unwrap().success());
-                break proof.revision.height;
+            if let Some(proof) = clients[0]
+                .read_receipt(id, &trusted)
+                .await
+                .map_err(|error| error.to_string())?
+            {
+                let receipt = proof
+                    .verify(id, &trusted)
+                    .map_err(|error| error.to_string())?;
+                if !receipt.success() {
+                    return Err("admitted write finalized with a failed receipt".to_owned());
+                }
+                break Ok(proof.revision.height);
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     })
     .await;
-    if outcome.is_err() {
-        for (index, client) in clients[..3].iter().enumerate() {
-            let status = tokio::time::timeout(Duration::from_secs(2), client.node_status()).await;
-            eprintln!("quorum recovery timed out: node={index}, request={id:?}, status={status:?}");
+    let revision = match outcome
+        .map_err(|error| error.to_string())
+        .and_then(|result| result)
+    {
+        Ok(revision) => revision,
+        Err(cause) => {
+            diagnostics::capture(&cluster, id, signer.did(), &trusted, &cause).await;
+            panic!("the surviving replicas must retain and finalize the admitted write: {cause}");
         }
-    }
-    let revision =
-        outcome.expect("the surviving replicas must retain and finalize the admitted write");
+    };
 
     cluster.restart_node(3).unwrap();
     cluster
