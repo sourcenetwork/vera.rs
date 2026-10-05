@@ -91,7 +91,8 @@ impl AcpModule {
         Ok(record)
     }
 
-    /// Delete a policy and its relationship graph. Historical decisions remain auditable.
+    /// Retire a policy immediately and schedule its records for bounded cleanup.
+    /// Historical decisions remain auditable.
     pub fn delete_policy(&mut self, actor: &Did, policy_id: &str) -> Result<bool> {
         let Some(record) = self.get_policy_record(policy_id)? else {
             return Ok(false);
@@ -101,53 +102,9 @@ impl AcpModule {
                 reason: "only the policy creator can delete it".into(),
             });
         }
-        let mut keys: Vec<_> = self
-            .store
-            .prefix_iter(&keys::relationship_policy_prefix(policy_id))
-            .map(|(key, _)| key.to_vec())
-            .collect();
-        let prefix = keys::commitment_policy_index_prefix(policy_id);
-        for (index, value) in self.store.prefix_iter(&prefix) {
-            let id = policy_index_id(&prefix, index, value)?;
-            let commitment = self
-                .get_commitment_by_id(id)?
-                .ok_or_else(|| AcpError::State("indexed commitment missing".into()))?;
-            if commitment.policy_id != policy_id {
-                return Err(AcpError::State("commitment policy index mismatch".into()));
-            }
-            keys.extend([
-                index.to_vec(),
-                keys::commitment_key(id),
-                Self::commitment_expiry_key(&commitment),
-                keys::commitment_by_commitment_index_key(&commitment.commitment, id),
-            ]);
-        }
-        let prefix = keys::amendment_event_policy_index_prefix(policy_id);
-        for (index, value) in self.store.prefix_iter(&prefix) {
-            let id = policy_index_id(&prefix, index, value)?;
-            let event = self
-                .get_amendment_event_by_id(id)?
-                .ok_or_else(|| AcpError::State("indexed amendment missing".into()))?;
-            if event.policy_id != policy_id {
-                return Err(AcpError::State("amendment policy index mismatch".into()));
-            }
-            keys.extend([index.to_vec(), keys::amendment_event_key(id)]);
-        }
-        for key in keys {
-            self.store.delete(&key);
-        }
+        self.retire_policy(policy_id)?;
         self.store.delete(&keys::policy_key(policy_id));
         self.zanzibar_policies.remove(policy_id);
         Ok(true)
     }
-}
-
-fn policy_index_id(prefix: &[u8], key: &[u8], value: &[u8]) -> Result<u64> {
-    let id = key
-        .strip_prefix(prefix)
-        .and_then(|suffix| suffix.try_into().ok())
-        .map(u64::from_be_bytes)
-        .filter(|id| *id != 0 && value.is_empty())
-        .ok_or_else(|| AcpError::State("invalid policy record index".into()))?;
-    Ok(id)
 }

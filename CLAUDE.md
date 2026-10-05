@@ -231,8 +231,10 @@ requires the requested root to remain available.
 `VeraClient::read_current_record` verifies membership or absence against the requested
 module, key and minimum revision. `vera_getCurrentPrefixProof` and
 `VeraClient::read_current_prefix` provide complete native prefixes with the same
-captured-revision guarantees. `PrefixResponse::verify_object_owner` derives live
-ownership from complete owner evidence and treats archived records as unregistered. Standalone `vera_getStateProof` and
+captured-revision guarantees. `PolicyPrefixResponse::verify_object_owner` derives live
+ownership from policy and complete owner evidence at the same certified root.
+Deleted policies and archived records are unregistered; retained cleanup records
+cannot establish ownership. See `docs/native-relationship-keys.md` for the fresh-state cutover. Standalone `vera_getStateProof` and
 `vera_getRelationProof` remain JMT-only and are unavailable on the native node.
 Historical native activity proofs are not retained.
 Proof RPCs share eight in-flight slots per node; blocking historical certificate

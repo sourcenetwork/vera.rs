@@ -34,12 +34,13 @@ impl VeraApiImpl {
         tokio::time::timeout(Duration::from_secs(2), async {
             let (selected, record) = loop {
                 let captured = {
-                    let (a, b, h, n) = tokio::join!(
-                        databases.0.read(),
-                        databases.1.read(),
-                        databases.2.read(),
-                        databases.3.read(),
-                    );
+                    let [a, b, h, n] = vera_backend::native::read_partitions([
+                        &databases.0,
+                        &databases.1,
+                        &databases.2,
+                        &databases.3,
+                    ])
+                    .await;
                     let selected = match index.latest_block() {
                         Some(selected) => selected,
                         None => {

@@ -52,7 +52,7 @@ pub fn evaluate_access_request<S: RecordStore>(
 /// A [`ZanzibarStore`] adapter over vera's module KV store.
 ///
 /// Maps the zanzibar engine's storage interface onto vera's existing
-/// `relationship/{policy_id}/{storage_key}` and `policy/objs/{id}` keyspace, so
+/// `relationship/v3/{policy_id}/{storage_key}` and `policy/objs/{id}` keyspace, so
 /// [`zanzibar::PermissionEngine`] can evaluate permissions (including
 /// `TupleToUserset`) directly over committed module state instead of a
 /// divergent bespoke evaluator.
