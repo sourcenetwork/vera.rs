@@ -17,6 +17,8 @@ pub mod pages;
 mod policy_edit;
 mod policy_edit_budget;
 pub use policy_edit_budget::PolicyEditBudget;
+mod policy_listing;
+pub use policy_listing::PolicyListBudget;
 mod registration_queries;
 mod relation_cleanup;
 mod relation_edits;
@@ -374,33 +376,6 @@ impl AcpModule {
     pub fn query_policy(&self, id: &str) -> Result<PolicyRecord> {
         self.get_policy_record(id)?
             .ok_or_else(|| AcpError::PolicyNotFound { id: id.to_string() })
-    }
-
-    /// List up to 128 policy IDs; larger listings require certified prefix pages.
-    pub fn query_policy_ids(&self) -> Result<Vec<String>> {
-        const MAX_IDS: usize = 128;
-        let prefix = keys::POLICY_PREFIX;
-        let mut ids = Vec::new();
-        for (key, _) in self.store.prefix_iter(prefix).take(MAX_IDS + 1) {
-            if ids.len() == MAX_IDS {
-                return Err(AcpError::InvalidAccessRequest {
-                    reason: "policy listing exceeds limit; use certified prefix pages".into(),
-                });
-            }
-            let id = &key[prefix.len()..];
-            if id.len() != 64
-                || !id
-                    .iter()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
-            {
-                return Err(AcpError::State("invalid stored policy identifier".into()));
-            }
-            let id = String::from_utf8(id.to_vec())
-                .map_err(|_| AcpError::State("invalid stored policy identifier".into()))?;
-            self.get_policy_record(&id)?;
-            ids.push(id);
-        }
-        Ok(ids)
     }
 
     /// Verify an access request without recording a decision.
