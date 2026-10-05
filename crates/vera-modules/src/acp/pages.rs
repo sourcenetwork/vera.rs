@@ -25,7 +25,16 @@ pub struct RelationshipPageRequest {
 impl AcpModule {
     /// Enumerate policies with at most 128 records and 1 MiB inspected per page.
     pub fn query_policies_page(&self, after: Option<&[u8]>) -> Result<RecordPage<PolicyRecord>> {
-        self.record_page(keys::POLICY_PREFIX, after, |key, value| {
+        self.query_policies_page_with_budget(after, &QueryBudget::new(u64::MAX))
+    }
+
+    /// Enumerate one policy page within the caller's remaining read allowance.
+    pub fn query_policies_page_with_budget(
+        &self,
+        after: Option<&[u8]>,
+        budget: &QueryBudget,
+    ) -> Result<RecordPage<PolicyRecord>> {
+        self.record_page(keys::POLICY_PREFIX, after, budget, |key, value| {
             let record: PolicyRecord = serde_json::from_slice(value)
                 .map_err(|error| AcpError::State(format!("invalid policy: {error}")))?;
             if record.policy.id.len() != 64
@@ -50,7 +59,18 @@ impl AcpModule {
         policy_id: &str,
         request: &RelationshipPageRequest,
     ) -> Result<RecordPage<RelationshipRecord>> {
-        let policy = self.query_policy(policy_id)?;
+        self.query_relationships_page_with_budget(policy_id, request, &QueryBudget::new(u64::MAX))
+    }
+
+    /// Charge planning and inspected rows, including filtered rows and empty pages.
+    /// Exhaustion returns an error without publishing a partial page or cursor.
+    pub fn query_relationships_page_with_budget(
+        &self,
+        policy_id: &str,
+        request: &RelationshipPageRequest,
+        budget: &QueryBudget,
+    ) -> Result<RecordPage<RelationshipRecord>> {
+        let policy = self.query_policy_with_budget(policy_id, budget)?;
         let after = request.after.as_deref();
         if after.is_some_and(|key| {
             key.len() > 64 << 10 || !key.starts_with(&keys::relationship_policy_prefix(policy_id))
@@ -66,12 +86,16 @@ impl AcpModule {
         let mut bytes = 0usize;
         let mut count = 0usize;
         let mut previous = None;
-        for prefix in self.relationship_query_prefixes(&policy, &request.selector)? {
+        for prefix in self.relationship_query_prefixes(&policy, &request.selector, budget)? {
             if after.is_some_and(|key| key >= prefix.as_slice() && !key.starts_with(&prefix)) {
                 continue;
             }
             let cursor = after.filter(|key| key.starts_with(&prefix));
+            if let Some(cursor) = cursor {
+                budget.prefix(cursor.len())?;
+            }
             for (key, value) in self.store.prefix_iter_after(&prefix, cursor) {
+                budget.read(key, Some(value))?;
                 let size = key.len().saturating_add(value.len());
                 if size > 1 << 20 {
                     return Err(AcpError::State("record exceeds page budget".into()));
@@ -96,8 +120,10 @@ impl AcpModule {
         &self,
         prefix: &[u8],
         after: Option<&[u8]>,
+        budget: &QueryBudget,
         decode: impl Fn(&[u8], &[u8]) -> Result<Option<T>>,
     ) -> Result<RecordPage<T>> {
+        budget.check()?;
         if after.is_some_and(|key| key.len() > 64 << 10 || !key.starts_with(prefix)) {
             return Err(AcpError::InvalidAccessRequest {
                 reason: "invalid page cursor".into(),
@@ -109,7 +135,12 @@ impl AcpModule {
         };
         let mut bytes = 0usize;
         let mut previous = None;
+        budget.prefix(prefix.len())?;
+        if let Some(cursor) = after {
+            budget.prefix(cursor.len())?;
+        }
         for (count, (key, value)) in self.store.prefix_iter_after(prefix, after).enumerate() {
+            budget.read(key, Some(value))?;
             let size = key.len().saturating_add(value.len());
             if size > 1 << 20 {
                 return Err(AcpError::State("record exceeds page budget".into()));

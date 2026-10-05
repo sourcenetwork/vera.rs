@@ -12,6 +12,9 @@ mod leaf_tests;
 mod lifecycle;
 #[cfg(test)]
 mod lifecycle_tests;
+mod queries;
+#[cfg(test)]
+mod query_budget_tests;
 
 use alloy_primitives::{B256, Bytes};
 use alloy_sol_types::SolCall;
@@ -22,7 +25,7 @@ use vera_modules::acp::types::{
     AccessRequest, AcpParams, Actor, Object, Operation, PolicyCmd, PolicyMarshalingType,
     RelationshipSelector,
 };
-use vera_modules::acp::{AcpModule, PolicyEditBudget, PolicyListBudget};
+use vera_modules::acp::{AcpModule, PolicyEditBudget, QueryBudget};
 use vera_modules::types::{BlockExecCtx, TxExecCtx};
 use vera_modules::vera::VeraModule;
 
@@ -249,6 +252,9 @@ fn dispatch_validated(
     }
     let selector: [u8; 4] = input[..4].try_into().expect("checked length above");
 
+    if queries::handles(selector) {
+        return queries::dispatch(module, input, gas_limit);
+    }
     if lifecycle::handles(selector) {
         return lifecycle::dispatch(module, block_ctx, tx_ctx, input, gas_limit);
     }
@@ -1000,55 +1006,6 @@ fn dispatch_validated(
         }
 
         // ── Read methods ─────────────────────────────────────────────
-        IAcp::hasRelationshipCall::SELECTOR => {
-            if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::hasRelationshipCall::abi_decode(input).map_err(decode_error)?;
-            let policy_id = policy_id_to_string(&call.policyId);
-            let actor_did = did_from_actor(&call.actor)?;
-
-            let selector = RelationshipSelector {
-                object_selector: Some(vera_modules::acp::types::ObjectSelector::Exact(Object {
-                    resource: call.resource,
-                    id: call.objectId,
-                })),
-                relation_selector: Some(vera_modules::acp::types::RelationSelector::Exact(
-                    call.relation,
-                )),
-                subject_selector: Some(vera_modules::acp::types::SubjectSelector::Exact(
-                    acp::Subject::entity(actor_did),
-                )),
-            };
-
-            let rels = match module.query_filter_relationships(&policy_id, &selector) {
-                Ok(r) => r,
-                Err(e) => return Ok(err_dispatch(e)),
-            };
-
-            // Phase 9: verify that query_filter_relationships excludes archived
-            // records. If it doesn't, add `.iter().any(|r| !r.archived)` here.
-            let has = !rels.is_empty();
-            let ret = IAcp::hasRelationshipCall::abi_encode_returns(&has);
-            Ok(ok_dispatch(READ_GAS, ret, vec![]))
-        }
-
-        IAcp::getPolicyCall::SELECTOR => {
-            if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::getPolicyCall::abi_decode(input).map_err(decode_error)?;
-            let policy_id = policy_id_to_string(&call.policyId);
-
-            let record = match module.query_policy(&policy_id) {
-                Ok(r) => r,
-                Err(e) => return Ok(err_dispatch(e)),
-            };
-
-            let ret = IAcp::getPolicyCall::abi_encode_returns(&json_bytes(&record));
-            Ok(ok_dispatch(READ_GAS, ret, vec![]))
-        }
-
         IAcp::getObjectOwnerCall::SELECTOR => {
             if gas_limit < READ_GAS {
                 return Err(PrecompileError::OutOfGas);
@@ -1069,55 +1026,6 @@ fn dispatch_validated(
                 registered,
                 record: json_bytes(&record),
             });
-            Ok(ok_dispatch(READ_GAS, ret, vec![]))
-        }
-
-        IAcp::getPolicyIdsCall::SELECTOR => {
-            if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            // Zero-parameter function — no ABI decoding needed.
-            let mut budget = PolicyListBudget::new(gas_limit - READ_GAS);
-            let ids = module.query_policy_ids_with_budget(&mut budget);
-            if budget.is_exhausted() {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let gas_used = READ_GAS
-                .checked_add(budget.consumed())
-                .ok_or(PrecompileError::OutOfGas)?;
-            let ids = match ids {
-                Ok(ids) => ids,
-                Err(error) => {
-                    let mut result = err_dispatch(error);
-                    result.precompile.gas_used = gas_used;
-                    return Ok(result);
-                }
-            };
-
-            let ret = IAcp::getPolicyIdsCall::abi_encode_returns(&ids);
-            Ok(ok_dispatch(gas_used, ret, vec![]))
-        }
-
-        IAcp::filterRelationshipsCall::SELECTOR => {
-            if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::filterRelationshipsCall::abi_decode(input).map_err(decode_error)?;
-            let policy_id = policy_id_to_string(&call.policyId);
-
-            let selector = build_relationship_selector(
-                &call.resource,
-                &call.objectId,
-                &call.relation,
-                &call.actor,
-            )?;
-
-            let rels = match module.query_filter_relationships(&policy_id, &selector) {
-                Ok(r) => r,
-                Err(e) => return Ok(err_dispatch(e)),
-            };
-
-            let ret = IAcp::filterRelationshipsCall::abi_encode_returns(&json_bytes(&rels));
             Ok(ok_dispatch(READ_GAS, ret, vec![]))
         }
 

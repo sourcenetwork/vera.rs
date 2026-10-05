@@ -239,23 +239,27 @@ fn exact_byte_listing() -> AcpModule {
 fn policy_id_listing_accepts_exact_byte_and_work_limits_and_rejects_one_more() {
     let mut module = exact_byte_listing();
     let before = module.store.serialize();
-    let mut measured = PolicyListBudget::new(u64::MAX);
-    let ids = module.query_policy_ids_with_budget(&mut measured).unwrap();
+    let measured = QueryBudget::new(u64::MAX);
+    let ids = module.query_policy_ids_with_budget(&measured).unwrap();
     assert_eq!(ids, vec![format!("{:064x}", 0), format!("{:064x}", 1)]);
-    assert_eq!(measured.consumed(), 2 * (100 + (1 << 19) / 16));
-    let mut exact = PolicyListBudget::new(measured.consumed());
+    let prefix_cost = 100 + (keys::POLICY_PREFIX.len() as u64).div_ceil(16);
     assert_eq!(
-        module.query_policy_ids_with_budget(&mut exact).unwrap(),
-        ids
+        measured.consumed(),
+        prefix_cost + 2 * (100 + (1 << 19) / 16)
     );
+    let exact = QueryBudget::new(measured.consumed());
+    assert_eq!(module.query_policy_ids_with_budget(&exact).unwrap(), ids);
     assert!(!exact.is_exhausted());
-    let mut short = PolicyListBudget::new(measured.consumed() - 1);
+    let short = QueryBudget::new(measured.consumed() - 1);
     assert!(matches!(
-        module.query_policy_ids_with_budget(&mut short),
-        Err(AcpError::PolicyListBudgetExceeded)
+        module.query_policy_ids_with_budget(&short),
+        Err(AcpError::QueryBudgetExceeded)
     ));
     assert!(short.is_exhausted());
-    assert_eq!(short.consumed(), measured.consumed() / 2);
+    assert_eq!(
+        short.consumed(),
+        prefix_cost + (measured.consumed() - prefix_cost) / 2
+    );
     assert_eq!(module.store.serialize(), before);
 
     let key = keys::policy_key(&ids[1]);
@@ -263,9 +267,9 @@ fn policy_id_listing_accepts_exact_byte_and_work_limits_and_rejects_one_more() {
     value.push(b' ');
     module.store.put(&key, value);
     let over = module.store.serialize();
-    let mut budget = PolicyListBudget::new(u64::MAX);
+    let budget = QueryBudget::new(u64::MAX);
     assert!(matches!(
-        module.query_policy_ids_with_budget(&mut budget),
+        module.query_policy_ids_with_budget(&budget),
         Err(AcpError::InvalidAccessRequest { reason }) if reason.contains("use certified prefix pages")
     ));
     assert_eq!(budget.consumed(), measured.consumed() + 1);
@@ -290,9 +294,9 @@ fn policy_id_listing_preflights_all_bytes_before_decoding_and_preserves_corrupti
     value.push(b' ');
     module.store.put(&second, value.clone());
     let before = module.store.serialize();
-    let mut over = PolicyListBudget::new(u64::MAX);
+    let over = QueryBudget::new(u64::MAX);
     assert!(matches!(
-        module.query_policy_ids_with_budget(&mut over),
+        module.query_policy_ids_with_budget(&over),
         Err(AcpError::InvalidAccessRequest { .. })
     ));
     assert!(over.consumed() > 0);
@@ -301,24 +305,24 @@ fn policy_id_listing_preflights_all_bytes_before_decoding_and_preserves_corrupti
     value.pop();
     module.store.put(&second, value);
     let before = module.store.serialize();
-    let mut charged = PolicyListBudget::new(u64::MAX);
+    let charged = QueryBudget::new(u64::MAX);
     assert!(matches!(
-        module.query_policy_ids_with_budget(&mut charged),
+        module.query_policy_ids_with_budget(&charged),
         Err(AcpError::State(_))
     ));
     assert!(charged.consumed() > 0);
     assert!(!charged.is_exhausted());
-    let mut exhausted = PolicyListBudget::new(0);
+    let exhausted = QueryBudget::new(0);
     assert!(matches!(
-        module.query_policy_ids_with_budget(&mut exhausted),
-        Err(AcpError::PolicyListBudgetExceeded)
+        module.query_policy_ids_with_budget(&exhausted),
+        Err(AcpError::QueryBudgetExceeded)
     ));
     assert!(exhausted.is_exhausted());
     assert_eq!(exhausted.consumed(), 0);
     assert_eq!(module.store.serialize(), before);
     // Reusing the exhausted allowance cannot succeed even after a snapshot change.
     assert!(matches!(
-        AcpModule::new().query_policy_ids_with_budget(&mut exhausted),
-        Err(AcpError::PolicyListBudgetExceeded)
+        AcpModule::new().query_policy_ids_with_budget(&exhausted),
+        Err(AcpError::QueryBudgetExceeded)
     ));
 }

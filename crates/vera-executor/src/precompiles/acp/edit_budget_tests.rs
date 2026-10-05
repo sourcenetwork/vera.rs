@@ -23,7 +23,7 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        let actor = Did::new(&issuer()).unwrap();
+        let actor = Did::new(issuer()).unwrap();
         let mut acp = AcpModule::new();
         let policy = acp.create_policy(&actor, POLICY, FORMAT).unwrap().policy.id;
         for command in [

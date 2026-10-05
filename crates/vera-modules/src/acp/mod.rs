@@ -18,7 +18,8 @@ mod policy_edit;
 mod policy_edit_budget;
 pub use policy_edit_budget::PolicyEditBudget;
 mod policy_listing;
-pub use policy_listing::PolicyListBudget;
+mod query_budget;
+pub use query_budget::QueryBudget;
 mod registration_queries;
 mod relation_cleanup;
 mod relation_edits;
@@ -375,6 +376,17 @@ impl AcpModule {
     #[allow(unused_variables)]
     pub fn query_policy(&self, id: &str) -> Result<PolicyRecord> {
         self.get_policy_record(id)?
+            .ok_or_else(|| AcpError::PolicyNotFound { id: id.to_string() })
+    }
+
+    /// Read and validate a policy after reserving its encoded key/value work.
+    pub fn query_policy_with_budget(&self, id: &str, budget: &QueryBudget) -> Result<PolicyRecord> {
+        let key = keys::policy_key(id);
+        let value = self.store.get_ref(&key);
+        budget.read(&key, value)?;
+        value
+            .map(|bytes| Self::decode_policy_record(id, bytes))
+            .transpose()?
             .ok_or_else(|| AcpError::PolicyNotFound { id: id.to_string() })
     }
 

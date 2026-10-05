@@ -100,11 +100,21 @@ This is a feature port, not a claim of identical transport or parser behavior:
   live RPC calls can observe different revisions. Unpaged queries reject oversized
   results rather than silently truncate. Policy ID listings require at most
   128 records / 1 MiB of stored key/value bytes, checked before decoding any policies;
-  larger listings require certified policy pages. Their execution charge is
-  1,000 base units plus 100 per inspected record and one per 16 encoded key/value
-  bytes, rounded up per record. Count-limit lookahead charges only its key.
-  Exhaustion stops before decoding; ordinary errors retain consumed units, and
-  nested batches share the remaining execution allowance. For larger relationship
+  larger listings require certified policy pages. Policy reads, ID/full-record
+  listings, pages, relationship filters and catalogues share `QueryBudget` work
+  accounting. Runtime dispatch charges 1,000 base units plus 100 per inspected
+  policy, directory or relationship record and one per 16 encoded key/value bytes,
+  rounded up per record. A planned prefix or cursor seek costs 100 plus one per
+  16 bytes, including empty scans. Policy-ID count-limit lookahead charges only its
+  key; page lookahead charges its key and value before testing the page boundary.
+  Relationship suffixes are materialized only after a prefix reserves its work.
+  Read charges precede cloning and decoding; ordinary errors retain consumed
+  units, and nested batches share the remaining execution allowance. These charges
+  preserve existing hard query limits and cursor behavior; insufficient execution
+  allowance returns an error rather than partial results. Public module convenience
+  methods use unlimited execution allowance, while still enforcing hard query limits.
+  This is deterministic work accounting, not an elapsed-time guarantee or a change
+  to certified-proof read limits. For larger relationship
   catalogues, enumerate relationship pages and combine them with the policy's
   declared resources.
 - [Definition edits](acp-policy-edits.md) retire indexed generation pairs atomically;

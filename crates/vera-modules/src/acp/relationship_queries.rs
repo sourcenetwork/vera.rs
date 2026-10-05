@@ -14,18 +14,42 @@ impl AcpModule {
         policy_id: &str,
         selector: &RelationshipSelector,
     ) -> Result<Vec<RelationshipRecord>> {
-        let policy = self.query_policy(policy_id)?;
+        self.query_filter_relationships_with_budget(
+            policy_id,
+            selector,
+            &QueryBudget::new(u64::MAX),
+        )
+    }
+
+    /// Filter current relationships while charging policy, directory, prefix and row work.
+    pub fn query_filter_relationships_with_budget(
+        &self,
+        policy_id: &str,
+        selector: &RelationshipSelector,
+        budget: &QueryBudget,
+    ) -> Result<Vec<RelationshipRecord>> {
+        let policy = self.query_policy_with_budget(policy_id, budget)?;
+        self.filter_relationships_for_policy(&policy, selector, budget)
+    }
+
+    pub(super) fn filter_relationships_for_policy(
+        &self,
+        policy: &PolicyRecord,
+        selector: &RelationshipSelector,
+        budget: &QueryBudget,
+    ) -> Result<Vec<RelationshipRecord>> {
         let mut records = Vec::new();
         let mut bytes = 0usize;
         let mut count = 0usize;
-        for prefix in self.relationship_query_prefixes(&policy, selector)? {
+        for prefix in self.relationship_query_prefixes(policy, selector, budget)? {
             for (key, value) in self.store.prefix_iter(&prefix) {
+                budget.read(key, Some(value))?;
                 bytes = bytes.saturating_add(key.len()).saturating_add(value.len());
                 if count >= MAX_RECORDS || bytes > MAX_BYTES {
                     return Err(AcpError::State("relationship query budget exceeded".into()));
                 }
                 count += 1;
-                let record = Self::decode_current_relationship(&policy, key, value)?;
+                let record = Self::decode_current_relationship(policy, key, value)?;
                 if !record.archived && self.matches_selector(&record, selector) {
                     records.push(record);
                 }
@@ -38,8 +62,11 @@ impl AcpModule {
         &self,
         policy: &PolicyRecord,
         selector: &RelationshipSelector,
+        budget: &QueryBudget,
     ) -> Result<Vec<Vec<u8>>> {
-        let suffix = query_suffix(policy, selector)?;
+        budget.check()?;
+        let suffix_size = query_suffix_size(policy, selector)?;
+        let mut suffix = None;
         let mut targets = std::collections::BTreeSet::new();
         let selected_resource = match &selector.object_selector {
             Some(ObjectSelector::Exact(object)) => Some(object.resource.as_str()),
@@ -73,9 +100,11 @@ impl AcpModule {
             bytes: MAX_BYTES,
         };
         let mut prefixes = Vec::new();
-        let prefix_size = generation_prefix_size(policy).saturating_add(suffix.len());
+        let prefix_size = generation_prefix_size(policy).saturating_add(suffix_size);
         for target in targets {
-            // Carry the remaining budget into each bounded directory read before decoding it.
+            let directory = relationship_index::active_key(&policy.policy.id, target);
+            budget.read(&directory, self.store.get_ref(&directory))?;
+            // Preserve the existing independent directory limits before owned decoding.
             let capture = read_capture::ReadCapture::new(self.store.clone(), limits);
             let subjects = relationship_index::live_pairs_for_active(
                 &capture,
@@ -93,10 +122,12 @@ impl AcpModule {
                     .bytes
                     .checked_sub(prefix_size)
                     .ok_or_else(planning_limit)?;
+                budget.prefix(prefix_size)?;
+                let suffix = suffix.get_or_insert_with(|| query_suffix(selector));
                 prefixes.push(keys::relationship_generation_prefix(
                     &policy.policy.id,
                     RelationPair { target, subject },
-                    &suffix,
+                    suffix.as_str(),
                 ));
             }
         }
@@ -138,7 +169,7 @@ const fn generation_prefix_size(policy: &PolicyRecord) -> usize {
     keys::RELATIONSHIP_PREFIX.len() + policy.policy.id.len() + 1 + 17 + 17
 }
 
-fn query_suffix(policy: &PolicyRecord, selector: &RelationshipSelector) -> Result<String> {
+fn query_suffix_size(policy: &PolicyRecord, selector: &RelationshipSelector) -> Result<usize> {
     let encoded = |value: &str| value.len().saturating_mul(2);
     let suffix_size = match &selector.object_selector {
         Some(ObjectSelector::Exact(object)) => 5usize
@@ -160,7 +191,11 @@ fn query_suffix(policy: &PolicyRecord, selector: &RelationshipSelector) -> Resul
             reason: "relationship query prefix exceeds native key bounds".into(),
         });
     }
-    Ok(match &selector.object_selector {
+    Ok(suffix_size)
+}
+
+fn query_suffix(selector: &RelationshipSelector) -> String {
+    match &selector.object_selector {
         Some(ObjectSelector::Exact(object)) => match &selector.relation_selector {
             Some(RelationSelector::Exact(relation)) => {
                 keys::relation_prefix(&object.resource, &object.id, relation)
@@ -169,7 +204,7 @@ fn query_suffix(policy: &PolicyRecord, selector: &RelationshipSelector) -> Resul
         },
         Some(ObjectSelector::ResourcePredicate(resource)) => keys::resource_prefix(resource),
         _ => String::new(),
-    })
+    }
 }
 
 #[cfg(test)]

@@ -9,12 +9,8 @@ pub(super) const fn handles(selector: [u8; 4]) -> bool {
             | IAcp::transferObjectCall::SELECTOR
             | IAcp::deletePolicyCall::SELECTOR
             | IAcp::editPolicyMetadataCall::SELECTOR
-            | IAcp::getPolicyCatalogueCall::SELECTOR
             | IAcp::checkManagementAuthorityCall::SELECTOR
             | IAcp::getObjectRegistrationCall::SELECTOR
-            | IAcp::getPoliciesPageCall::SELECTOR
-            | IAcp::getRelationshipsPageCall::SELECTOR
-            | IAcp::getPoliciesCall::SELECTOR
             | IAcp::evaluateTheoremCall::SELECTOR
     )
 }
@@ -172,55 +168,6 @@ pub(super) fn dispatch(
                 Ok(value) => Ok(ok_dispatch(
                     gas,
                     IAcp::evaluateTheoremCall::abi_encode_returns(&json_bytes(&value)),
-                    vec![],
-                )),
-                Err(error) => Ok(err_dispatch(error)),
-            }
-        }
-        IAcp::getPolicyCatalogueCall::SELECTOR => {
-            let call = IAcp::getPolicyCatalogueCall::abi_decode(input).map_err(decode_error)?;
-            match module.query_policy_catalogue(&policy_id_to_string(&call.policyId)) {
-                Ok(value) => Ok(ok_dispatch(
-                    gas,
-                    IAcp::getPolicyCatalogueCall::abi_encode_returns(&json_bytes(&value)),
-                    vec![],
-                )),
-                Err(error) => Ok(err_dispatch(error)),
-            }
-        }
-        IAcp::getPoliciesPageCall::SELECTOR => {
-            let call = IAcp::getPoliciesPageCall::abi_decode(input).map_err(decode_error)?;
-            match module
-                .query_policies_page((!call.cursor.is_empty()).then_some(call.cursor.as_ref()))
-            {
-                Ok(value) => Ok(ok_dispatch(
-                    gas,
-                    IAcp::getPoliciesPageCall::abi_encode_returns(&json_bytes(&value)),
-                    vec![],
-                )),
-                Err(error) => Ok(err_dispatch(error)),
-            }
-        }
-        IAcp::getRelationshipsPageCall::SELECTOR => {
-            let call = IAcp::getRelationshipsPageCall::abi_decode(input).map_err(decode_error)?;
-            let request = serde_json::from_slice(&call.request).map_err(|error| {
-                PrecompileError::Other(format!("invalid relationship query: {error}").into())
-            })?;
-            match module.query_relationships_page(&policy_id_to_string(&call.policyId), &request) {
-                Ok(value) => Ok(ok_dispatch(
-                    gas,
-                    IAcp::getRelationshipsPageCall::abi_encode_returns(&json_bytes(&value)),
-                    vec![],
-                )),
-                Err(error) => Ok(err_dispatch(error)),
-            }
-        }
-        IAcp::getPoliciesCall::SELECTOR => {
-            IAcp::getPoliciesCall::abi_decode(input).map_err(decode_error)?;
-            match module.query_policies() {
-                Ok(value) => Ok(ok_dispatch(
-                    gas,
-                    IAcp::getPoliciesCall::abi_encode_returns(&json_bytes(&value)),
                     vec![],
                 )),
                 Err(error) => Ok(err_dispatch(error)),
