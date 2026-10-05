@@ -210,12 +210,19 @@ impl AcpModule {
                         NextRow::BudgetExhausted => break false,
                         NextRow::Row(row) => row,
                     };
-                let Some(changes) = self.prepare_cleanup_relationship(&row, budget)? else {
+                let Some((items, changes)) = self.prepare_cleanup_relationships(
+                    &job.policy,
+                    Some(job.generation),
+                    &row,
+                    JOB_ITEMS - removed,
+                    budget,
+                )?
+                else {
                     break false;
                 };
                 record_store::RecordStore::apply_records(&mut self.store, changes)
                     .map_err(relation_state_error)?;
-                removed += 1;
+                removed += items;
             };
             if complete {
                 self.store.delete(&edits::queue_key(sequence));
