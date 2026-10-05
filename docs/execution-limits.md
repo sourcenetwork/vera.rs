@@ -36,6 +36,26 @@ charged 5,000 leaves 995,000. Another native request cannot fit its full
 allowance. In a deployment permitting EVM execution, a request declaring at
 most 995,000 can still execute.
 
+## Native record bounds
+
+Module changes must fit the native storage codecs: keys at most 64 KiB and
+values at most 1 MiB. Limits apply to stored encodings, so an input that fits the
+request-size limit can still produce an oversized key or value. For example,
+relationship keys contain hexadecimal encodings of object identifiers.
+
+Before accepting a successful native dispatch, execution checks changed records
+against its pre-dispatch snapshot. Oversized records produce an ordinary failed
+receipt: module and account-journal effects and logs are discarded, the native
+sequence is consumed, and the request charges the normal failure allowance.
+Subsequent requests can execute with the remaining revision budget. Optional EVM
+module calls perform the same check before returning success; an oversized write
+fails that call and follows its existing call-frame rollback semantics.
+
+Validation borrows the persistent maps' changed entries, including changes across
+nested batch snapshots. It does not copy record payloads or scan unchanged state.
+The storage backend retains its own checks as a final invariant. These bounds do
+not replace limits on decoding, temporary allocations or aggregate module work.
+
 ## Scope
 
 These units enforce the dispatch accounting contract; they are not elapsed

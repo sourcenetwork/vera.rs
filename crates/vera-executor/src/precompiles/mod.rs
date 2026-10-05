@@ -419,28 +419,36 @@ impl VeraPrecompiles {
         let mut journal = self.journal.lock().unwrap();
         journal.checkpoint()?;
         let (acp, bulletin, vera) = &mut journal.modules;
-        let dispatch_result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            dispatch_to_module(
-                acp,
-                bulletin,
-                vera,
-                inputs.bytecode_address,
-                calldata,
-                block_ctx,
-                tx_ctx,
-                inputs.gas_limit,
-            )
-        })) {
-            Ok(Some(result)) => result,
-            Ok(None) => return Ok((None, vec![])),
-            Err(_) => {
-                tracing::warn!("module call panicked");
-                Err(PrecompileError::Other("module execution failed".into()))
-            }
-        };
+        let mut dispatch_result =
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                dispatch_to_module(
+                    acp,
+                    bulletin,
+                    vera,
+                    inputs.bytecode_address,
+                    calldata,
+                    block_ctx,
+                    tx_ctx,
+                    inputs.gas_limit,
+                )
+            })) {
+                Ok(Some(result)) => result,
+                Ok(None) => return Ok((None, vec![])),
+                Err(_) => {
+                    tracing::warn!("module call panicked");
+                    Err(PrecompileError::Other("module execution failed".into()))
+                }
+            };
 
         if inputs.is_static && journal.changed() {
             return Ok((Some(Self::static_write_error(inputs)), vec![]));
+        }
+        if matches!(&dispatch_result, Ok(result) if !result.precompile.reverted)
+            && !journal.writes_fit_native_bounds()
+        {
+            dispatch_result = Err(PrecompileError::Other(
+                "module record exceeds native storage bounds".into(),
+            ));
         }
         Self::dispatch_result_to_interpreter(inputs, dispatch_result)
     }
