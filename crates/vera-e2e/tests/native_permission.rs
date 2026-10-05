@@ -44,6 +44,34 @@ async fn submit(client: &VeraClient, signer: &BlsSigner, call: impl SolCall) -> 
     receipt.block_number
 }
 
+async fn wait_for_replica_publication(cluster: &TestCluster, minimum: u64) {
+    let clients: Vec<_> = (0..cluster.node_count())
+        .map(|index| VeraClient::new(cluster.node(index).rpc_url()))
+        .collect();
+    let mut observations = vec![String::from("not polled"); clients.len()];
+    // A receipt on one replica does not mean every replica has applied it.
+    // Wait for the fixed revision required by the subsequent proof requests.
+    let result = tokio::time::timeout(vera_e2e::readiness_deadline(), async {
+        loop {
+            let mut ready = true;
+            for (index, client) in clients.iter().enumerate() {
+                let height = client.block_number().await;
+                ready &= matches!(&height, Ok(height) if *height >= minimum);
+                observations[index] = format!("node {index}: {height:?}");
+            }
+            if ready {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+    assert!(
+        result.is_ok(),
+        "replicas did not publish revision {minimum}: {observations:?}"
+    );
+}
+
 async fn current_evidence(
     client: &VeraClient,
     policy: &str,
@@ -265,10 +293,7 @@ async fn permission_lifecycle(pipelined: bool) {
         },
     )
     .await;
-    observed
-        .wait_for_height(denied + 2, Duration::from_secs(30))
-        .await
-        .unwrap();
+    wait_for_replica_publication(&cluster, denied + 2).await;
     assert!(matches!(
         client
             .verify_access_at(
@@ -409,10 +434,7 @@ async fn permission_lifecycle(pipelined: bool) {
         },
     )
     .await;
-    observed
-        .wait_for_height(archived + 2, Duration::from_secs(30))
-        .await
-        .unwrap();
+    wait_for_replica_publication(&cluster, archived + 2).await;
     for index in 0..cluster.node_count() {
         let replica = VeraClient::new(cluster.node(index).rpc_url());
         let current = replica
@@ -472,6 +494,7 @@ async fn permission_lifecycle(pipelined: bool) {
         },
     )
     .await;
+    wait_for_replica_publication(&cluster, deleted).await;
     let live_object = Object {
         resource: "document".into(),
         id: "concurrent-0".into(),
