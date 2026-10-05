@@ -10,6 +10,9 @@ use super::{
 };
 use crate::types::Timestamp;
 
+/// Maximum operations in persisted decisions, access ABI calls and default permission proofs.
+pub const MAX_ACCESS_OPERATIONS: usize = 64;
+
 /// Exact operation identity expected by a decision consumer.
 #[derive(Clone, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 pub struct DecisionRequest {
@@ -48,7 +51,9 @@ impl DecisionRequest {
             ]
         }));
         let field_bytes = fields.try_fold(0usize, |size, field| size.checked_add(field.len()));
-        if self.request.operations.len() > 64 || field_bytes.is_none_or(|size| size > 64 << 10) {
+        if self.request.operations.len() > MAX_ACCESS_OPERATIONS
+            || field_bytes.is_none_or(|size| size > 64 << 10)
+        {
             return Err(invalid("access decision request exceeds limits"));
         }
         let encoded = borsh::to_vec(self).map_err(|e| AcpError::State(e.to_string()))?;

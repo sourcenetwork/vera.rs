@@ -1,6 +1,6 @@
 //! Borrowed batch validation before ABI decoding allocates nested payloads.
 
-use super::{IAcp, PrecompileError, SolCall, batch_error};
+use super::{IAcp, PrecompileError, SolCall, batch_error, leaf};
 
 pub(super) const MAX_DEPTH: usize = 16;
 pub(super) const MAX_CALLS: usize = 256;
@@ -28,7 +28,7 @@ impl Budget {
             .checked_sub(1)
             .ok_or_else(|| limit("call count"))?;
         if !input.starts_with(&IAcp::batchCallsCall::SELECTOR) {
-            return Ok(());
+            return leaf::validate(input, &mut self.bytes);
         }
         if depth == MAX_DEPTH {
             return Err(limit("depth"));
