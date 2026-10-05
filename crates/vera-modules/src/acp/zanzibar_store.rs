@@ -1,6 +1,6 @@
 //! A [`ZanzibarStore`] backed by vera's module KV store.
 
-use std::sync::RwLock;
+use std::{borrow::Cow, sync::RwLock};
 
 use async_trait::async_trait;
 use identity::Did;
@@ -18,7 +18,8 @@ use crate::types::Timestamp;
 
 /// Evaluate an access request from fallible policy and relationship records.
 /// Missing data and incomplete proof coverage remain errors, including on the
-/// subtracting side of an exclusion. Callers must authenticate proof-backed records.
+/// subtracting side of an exclusion. Callers must provide one coherent snapshot
+/// for the whole evaluation and authenticate proof-backed records.
 pub fn evaluate_access_request<S: RecordStore>(
     store: S,
     policy_id: &str,
@@ -27,9 +28,20 @@ pub fn evaluate_access_request<S: RecordStore>(
     let Some(record) = read_policy(&store, policy_id)? else {
         return Ok(false);
     };
-    let mut engine =
-        zanzibar::PermissionEngine::new(std::sync::Arc::new(QmdbZanzibarStore::new(store)));
-    engine.add_policy(&record.policy);
+    // This adapter never leaves the evaluation or receives mutations. The initial
+    // policy point read remains part of captured and replayed proof evidence.
+    let adapter = std::sync::Arc::new(QmdbZanzibarStore {
+        store: RwLock::new(store),
+        evaluation_policy: Some(record),
+    });
+    let mut engine = zanzibar::PermissionEngine::new(adapter.clone());
+    engine.add_policy(
+        &adapter
+            .evaluation_policy
+            .as_ref()
+            .expect("evaluation policy was just installed")
+            .policy,
+    );
     for operation in &request.operations {
         if !engine.check_blocking(
             policy_id,
@@ -57,6 +69,8 @@ pub fn evaluate_access_request<S: RecordStore>(
 #[derive(Debug, Default)]
 pub struct QmdbZanzibarStore<S: RecordStore = InMemoryKvStore> {
     store: RwLock<S>,
+    // Populated only by evaluate_access_request; generic mutable adapters read fresh.
+    evaluation_policy: Option<PolicyRecord>,
 }
 
 impl<S: RecordStore> QmdbZanzibarStore<S> {
@@ -64,7 +78,21 @@ impl<S: RecordStore> QmdbZanzibarStore<S> {
     pub const fn new(store: S) -> Self {
         Self {
             store: RwLock::new(store),
+            evaluation_policy: None,
         }
+    }
+
+    fn policy_record<'a>(
+        &'a self,
+        store: &S,
+        policy_id: &str,
+    ) -> Result<Option<Cow<'a, PolicyRecord>>> {
+        if let Some(policy) = &self.evaluation_policy
+            && policy.policy.id == policy_id
+        {
+            return Ok(Some(Cow::Borrowed(policy)));
+        }
+        Ok(read_policy(store, policy_id)?.map(Cow::Owned))
     }
 
     fn live_records(
@@ -75,7 +103,7 @@ impl<S: RecordStore> QmdbZanzibarStore<S> {
         relation: &str,
     ) -> Result<Vec<RelationshipRecord>> {
         let store = self.store.read().unwrap();
-        let Some(policy) = read_policy(&*store, policy_id)? else {
+        let Some(policy) = self.policy_record(&*store, policy_id)? else {
             return Ok(vec![]);
         };
         let Some(target) = policy.relations.generation(resource, relation) else {
@@ -105,7 +133,7 @@ impl<S: RecordStore> QmdbZanzibarStore<S> {
 
     fn is_live(&self, policy_id: &str, rel: &Relationship) -> Result<bool> {
         let store = self.store.read().unwrap();
-        let Some(policy) = read_policy(&*store, policy_id)? else {
+        let Some(policy) = self.policy_record(&*store, policy_id)? else {
             return Ok(false);
         };
         let Ok(pair) = policy.relations.pair(rel) else {
@@ -458,6 +486,8 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
 
 #[cfg(test)]
 mod tests {
+    mod evaluation;
+
     use std::sync::Arc;
 
     use futures::executor::block_on;
