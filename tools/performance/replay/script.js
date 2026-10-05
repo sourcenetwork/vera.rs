@@ -99,6 +99,13 @@
   text('untimed', data.timeline_available ? fmt(data.untimed_observations) + ' observations without a receipt time' : 'Receipt timeline unavailable for this schedule');
   get('latency-empty').hidden = data.events.length > 0;
   function draw(time) {
+    if (data.status === 'unavailable') {
+      text('clock', 'Unknown');
+      text('receipts', 'Receipt observation times unknown');
+      text('workflows', 'Workflow completion times unknown');
+      get('latency').replaceChildren();
+      return;
+    }
     text('clock', time.toFixed(2) + ' s');
     const observed = data.events.filter(event => event.at <= time);
     text('receipts', observed.length + ' / ' + data.events.length + ' timed receipt observations');
