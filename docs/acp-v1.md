@@ -178,10 +178,20 @@ rolls back all ACP and identity-module changes in its enclosing batch and discar
 its logs. Failed native dispatch consumes its full allowance as described in
 [execution limits](execution-limits.md).
 
-These checks bound batch nesting and decoded input, not aggregate return/log
-buffers or the work of individual policy operations. Large-policy lifecycle
-costs retain the limitations above. The wrapper charge changes execution results,
-so validators must use matching rules.
+Batch assembly also shares a separate 12 MiB + 4 KiB result allowance across
+all siblings and nesting levels, matching `vera_domain::MAX_TX_BYTES`. Before
+retaining each child result, it charges the final ABI `bytes[]` offsets, lengths
+and 32-byte padding. Each nested wrapper's encoding is charged again when copied
+into its parent. Logs charge a fixed 96 bytes for their address and buffer
+structures, plus 32 bytes per topic and their data length; moving a nested log
+to its parent does not charge it again. Revert-message formatting also checks
+its encoded text size before allocation. Exhaustion rolls back the whole batch
+and discards its logs.
+
+This bounds aggregate batch result encoding and log charges, not allocator
+capacity, peak process memory or allocations inside individual leaf calls. Leaf ABI decoding and
+large-policy lifecycle work retain their separate limitations. Batch limits and
+wrapper charges affect execution results, so validators must use matching rules.
 
 ## Validation
 

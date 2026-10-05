@@ -1,6 +1,7 @@
 //! ACP precompile dispatch — ABI decode/encode for all IAcp selectors.
 
 mod batch;
+mod batch_results;
 #[cfg(test)]
 mod batch_tests;
 mod lifecycle;
@@ -140,8 +141,15 @@ fn build_operations(
         .collect())
 }
 
-fn batch_revert(index: usize, gas_used: u64, bytes: &Bytes) -> DispatchResult {
+fn batch_revert(
+    index: usize,
+    gas_used: u64,
+    bytes: &Bytes,
+    budget: &mut batch_results::Budget,
+) -> DispatchReturn {
     let call_number = index + 1;
+    let prefix = format!("batch call {call_number} reverted");
+    budget.revert(&prefix, bytes)?;
     let message = if bytes.is_empty() {
         format!("batch call {call_number} reverted")
     } else {
@@ -151,7 +159,7 @@ fn batch_revert(index: usize, gas_used: u64, bytes: &Bytes) -> DispatchResult {
         )
     };
 
-    DispatchResult {
+    Ok(DispatchResult {
         precompile: PrecompileOutput {
             gas_used,
             gas_refunded: 0,
@@ -159,7 +167,7 @@ fn batch_revert(index: usize, gas_used: u64, bytes: &Bytes) -> DispatchResult {
             reverted: true,
         },
         logs: vec![],
-    }
+    })
 }
 
 fn batch_error(index: usize, err: PrecompileError) -> PrecompileError {
@@ -186,10 +194,18 @@ pub(super) fn dispatch(
         }
         batch::validate(input)?;
     }
-    dispatch_validated(module, vera, block_ctx, tx_ctx, input, gas_limit)
+    dispatch_validated(
+        module,
+        vera,
+        block_ctx,
+        tx_ctx,
+        input,
+        gas_limit,
+        &mut batch_results::Budget::new(),
+    )
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn dispatch_validated(
     module: &mut AcpModule,
     vera: &mut VeraModule,
@@ -197,6 +213,7 @@ fn dispatch_validated(
     tx_ctx: &TxExecCtx,
     input: &[u8],
     gas_limit: u64,
+    result_budget: &mut batch_results::Budget,
 ) -> DispatchReturn {
     if input.len() < 4 {
         return Err(PrecompileError::Other(
@@ -215,6 +232,7 @@ fn dispatch_validated(
                 return Err(PrecompileError::OutOfGas);
             }
             let call = IAcp::batchCallsCall::abi_decode(input).map_err(decode_error)?;
+            result_budget.begin_batch(call.calls.len())?;
             let snapshot = (module.clone(), vera.clone());
             let mut results = Vec::with_capacity(call.calls.len());
             let mut logs = Vec::new();
@@ -229,6 +247,7 @@ fn dispatch_validated(
                     tx_ctx,
                     inner_call.as_ref(),
                     remaining_gas,
+                    result_budget,
                 ) {
                     Ok(inner) => inner,
                     Err(err) => {
@@ -247,9 +266,19 @@ fn dispatch_validated(
 
                 if inner.precompile.reverted {
                     (*module, *vera) = snapshot;
-                    return Ok(batch_revert(index, inner_gas, &inner.precompile.bytes));
+                    return batch_revert(index, inner_gas, &inner.precompile.bytes, result_budget);
                 }
 
+                // Nested logs were already charged where they originated and are only moved here.
+                let new_logs = if inner_call.starts_with(&IAcp::batchCallsCall::SELECTOR) {
+                    &[][..]
+                } else {
+                    inner.logs.as_slice()
+                };
+                if let Err(error) = result_budget.retain(&inner.precompile.bytes, new_logs) {
+                    (*module, *vera) = snapshot;
+                    return Err(batch_error(index, error));
+                }
                 gas_used = inner_gas;
                 results.push(inner.precompile.bytes);
                 logs.extend(inner.logs);

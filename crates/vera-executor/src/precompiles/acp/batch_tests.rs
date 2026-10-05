@@ -307,3 +307,95 @@ fn nested_batch_late_revert_restores_state_logs_and_error_indices() {
     );
     assert_eq!(fixture.state(), before);
 }
+
+fn large_policy_read(fixture: &mut Fixture) -> (Vec<u8>, usize) {
+    // A large YAML comment leaves a small compiled policy and a legitimately retained raw policy.
+    let policy = format!(
+        "name: large\nresources:\n  - name: file\n# {}\n",
+        "x".repeat(60 << 10),
+    );
+    let call = IAcp::createPolicyCall {
+        policy: policy.into_bytes().into(),
+        marshalType: 1,
+    }
+    .abi_encode();
+    let result = fixture.dispatch(&call, WRITE_GAS).unwrap();
+    assert!(!result.precompile.reverted);
+    let record = created(&result.precompile.bytes);
+    let read = IAcp::getPolicyCall {
+        policyId: record.policy.id.parse().unwrap(),
+    }
+    .abi_encode();
+    let result = fixture.dispatch(&read, READ_GAS).unwrap();
+    assert!(!result.precompile.reverted);
+    let per_result = 64 + result.precompile.bytes.len().div_ceil(32) * 32;
+    let max_results = (batch_results::MAX_RESULT_BYTES - 64) / per_result;
+    assert!((4..batch::MAX_CALLS - 2).contains(&max_results));
+    (read, max_results)
+}
+
+#[test]
+fn repeated_policy_reads_stop_before_retaining_an_oversized_batch_result() {
+    let mut fixture = Fixture::new();
+    let (read, count) = large_policy_read(&mut fixture);
+    let input = batch(vec![read.clone(); count]);
+    let result = fixture.dispatch(&input, 1_000_000).unwrap();
+    assert!(!result.precompile.reverted);
+    assert!(result.precompile.bytes.len() <= batch_results::MAX_RESULT_BYTES);
+    assert_eq!(
+        IAcp::batchCallsCall::abi_decode_returns(&result.precompile.bytes)
+            .unwrap()
+            .len(),
+        count
+    );
+    let before = fixture.state();
+    let error = fixture
+        .dispatch(&batch(vec![read; count + 1]), 1_000_000)
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("batch result byte limit exceeded")
+    );
+    assert_eq!(fixture.state(), before);
+}
+
+#[test]
+fn nested_wrappers_share_the_result_budget_even_when_outer_encoding_would_fit() {
+    let mut fixture = Fixture::new();
+    let (read, max_results) = large_policy_read(&mut fixture);
+    let count = max_results / 3 + 1;
+    let flat = fixture
+        .dispatch(&batch(vec![read.clone(); count * 2]), 1_000_000)
+        .unwrap();
+    assert!(!flat.precompile.reverted);
+    assert!(flat.precompile.bytes.len() < batch_results::MAX_RESULT_BYTES);
+    let inner = batch(vec![read; count]);
+    let before = fixture.state();
+    let error = fixture
+        .dispatch(&batch(vec![inner.clone(), inner]), 1_000_000)
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("batch result byte limit exceeded")
+    );
+    assert_eq!(fixture.state(), before);
+}
+
+#[test]
+fn late_result_exhaustion_restores_prior_writes_and_returns_no_logs() {
+    let mut fixture = Fixture::new();
+    let (read, count) = large_policy_read(&mut fixture);
+    let before = fixture.state();
+    let mut calls = vec![create("must-rollback")];
+    calls.extend(std::iter::repeat_n(read, count + 1));
+    // No successful/reverted DispatchResult (and therefore no logs) escapes this error.
+    let error = fixture.dispatch(&batch(calls), 1_000_000).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("batch result byte limit exceeded")
+    );
+    assert_eq!(fixture.state(), before);
+}
