@@ -7,11 +7,11 @@ use identity::Did;
 use zanzibar::error::Result;
 use zanzibar::{ObjectRef, Policy, Relationship, Subject, ZanzibarStore};
 
-use super::keys;
 use super::record_store::RecordStore;
 use super::types::{
     AccessRequest, PolicyMarshalingType, PolicyRecord, RecordMetadata, RelationshipRecord,
 };
+use super::{keys, relationship_mutations};
 use crate::kv_store::InMemoryKvStore;
 use crate::types::Timestamp;
 
@@ -215,7 +215,7 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
             .collect();
         guard.remove_record(&policy_key)?;
         for key in rel_keys {
-            guard.remove_record(&key)?;
+            relationship_mutations::remove(&mut *guard, &key)?;
         }
         Ok(true)
     }
@@ -228,7 +228,6 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
             archived: false,
             metadata: default_metadata(),
         };
-        let bytes = serde_json::to_vec(&record).expect("serialize RelationshipRecord");
         let key = keys::relationship_key(policy_id, &keys::relationship_storage_key(rel));
         let mut guard = self.store.write().unwrap();
         if let Some(existing) = guard.read_record(&key)? {
@@ -239,8 +238,7 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
                 ));
             }
         }
-        guard.write_record(&key, bytes)?;
-        Ok(())
+        relationship_mutations::put(&mut *guard, &record)
     }
 
     async fn delete_relationship(&self, policy_id: &str, rel: &Relationship) -> Result<bool> {
@@ -253,7 +251,7 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
                     "relationship key collision".into(),
                 ));
             }
-            guard.remove_record(&key)?;
+            relationship_mutations::remove(&mut *guard, &key)?;
             Ok(true)
         } else {
             Ok(false)
@@ -359,7 +357,7 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
             }
         }
         for key in keys_to_delete {
-            guard.remove_record(&key)?;
+            relationship_mutations::remove(&mut *guard, &key)?;
         }
         Ok(())
     }
@@ -806,6 +804,25 @@ mod tests {
             !block_on(store.delete_relationship(POLICY, &rel)).unwrap(),
             "deleting an absent relationship returns false"
         );
+    }
+
+    #[test]
+    fn relationship_mutations_preserve_corrupt_records_and_prevalidate_bulk_removal() {
+        let store = QmdbZanzibarStore::<InMemoryKvStore>::default();
+        let first = Relationship::with_entity("document", "doc1", "a", did(ALICE));
+        let last = Relationship::with_entity("document", "doc1", "z", did(ALICE));
+        for relationship in [&first, &last] {
+            block_on(store.store_relationship(POLICY, relationship)).unwrap();
+        }
+        let key = keys::relationship_key(POLICY, &keys::relationship_storage_key(&last));
+        store.store.write().unwrap().put(&key, b"{".to_vec());
+        let before = store.store.read().unwrap().serialize();
+        assert!(block_on(store.store_relationship(POLICY, &last)).is_err());
+        assert_eq!(store.store.read().unwrap().serialize(), before);
+        assert!(block_on(store.delete_relationship(POLICY, &last)).is_err());
+        assert_eq!(store.store.read().unwrap().serialize(), before);
+        assert!(block_on(store.delete_object_relationships(POLICY, "document", "doc1")).is_err());
+        assert_eq!(store.store.read().unwrap().serialize(), before);
     }
 
     #[test]

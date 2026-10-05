@@ -296,10 +296,9 @@ mod tests {
                         "owner",
                         Did::new("did:key:other").unwrap(),
                     );
-                    module.set_relationship(
-                        &policy,
-                        &keys::relationship_storage_key(&other),
-                        &record,
+                    module.store.put(
+                        &keys::relationship_key(&policy, &keys::relationship_storage_key(&other)),
+                        serde_json::to_vec(&record).unwrap(),
                     );
                 }
             }

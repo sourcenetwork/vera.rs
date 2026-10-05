@@ -68,11 +68,7 @@ impl AcpModule {
                 record,
             } => {
                 record.metadata = metadata;
-                self.set_relationship(
-                    policy_id,
-                    &keys::relationship_storage_key(&record.relationship),
-                    record,
-                );
+                self.set_relationship(record);
             }
             PolicyCmdResult::CommitRegistrations {
                 registrations_commitment,
@@ -82,11 +78,7 @@ impl AcpModule {
             }
             PolicyCmdResult::RevealRegistration { record, event } => {
                 record.metadata = metadata;
-                self.set_relationship(
-                    policy_id,
-                    &keys::relationship_storage_key(&record.relationship),
-                    record,
-                );
+                self.set_relationship(record);
                 if let Some(event) = event {
                     event.metadata = event_metadata;
                     self.update_amendment_event(event)?;

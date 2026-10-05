@@ -61,11 +61,7 @@ impl AcpModule {
         record.relationship.subject = acp::Subject::Entity(new_owner.clone());
         record.metadata.owner_did = new_owner.to_string();
         self.delete_relationship(policy_id, &old_key);
-        self.set_relationship(
-            policy_id,
-            &keys::relationship_storage_key(&record.relationship),
-            &record,
-        );
+        self.set_relationship(&record);
         Ok(record)
     }
 
