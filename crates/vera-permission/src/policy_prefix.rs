@@ -3,10 +3,12 @@ use serde::{Deserialize, Serialize};
 use vera_domain::{ConsensusPublicKey, LIGHT_BLOCK_RESPONSE_BYTES, LightBlock, verify_light_block};
 
 use crate::{
-    ModuleId, PERMISSION_LIMITS, PermissionError, PrefixProof, RECORD_PROOF_BYTES, RecordProof,
+    ModuleId, PERMISSION_LIMITS, PermissionError, PrefixProof, RECORD_PROOF_BYTES, ReadLimits,
+    RecordProof,
     current::PrefixEvidence,
     encoded_size,
-    policy::{current_relationship, verify_policy},
+    object_evidence::ObjectEvidence,
+    policy::{current_relationship, relationship_record, verify_policy},
     validate_policy_prefix,
 };
 
@@ -16,6 +18,8 @@ use crate::{
 pub struct PolicyPrefixProof {
     /// The live policy record or certified absence.
     pub policy: RecordProof,
+    /// Same-root incarnation membership or absence for every non-owner target object.
+    pub objects: Vec<RecordProof>,
     /// Complete physical relationship prefix at the same root.
     pub prefix: PrefixProof,
 }
@@ -42,29 +46,30 @@ impl PolicyPrefixProof {
         let evidence = self
             .prefix
             .verify(root, ModuleId::Acp, prefix, maximum_bytes)?;
-        if evidence.entries.len() >= PERMISSION_LIMITS.reads.records {
-            return Err(PermissionError::Limit);
-        }
-        let mut remaining = PERMISSION_LIMITS
-            .reads
-            .bytes
-            .checked_sub(self.policy.key.len())
-            .and_then(|n| n.checked_sub(self.policy.value.as_ref().map_or(0, |v| v.len())))
-            .and_then(|n| n.checked_sub(prefix.len()))
-            .ok_or(PermissionError::Limit)?;
-        for entry in &evidence.entries {
-            remaining = remaining
-                .checked_sub(entry.key.len())
-                .and_then(|n| n.checked_sub(entry.value.len()))
-                .ok_or(PermissionError::Limit)?;
-        }
+        let objects = ObjectEvidence::verify(
+            root,
+            &self.policy,
+            policy,
+            &self.objects,
+            &evidence.entries,
+            ReadLimits {
+                bytes: PERMISSION_LIMITS
+                    .reads
+                    .bytes
+                    .checked_sub(prefix.len())
+                    .ok_or(PermissionError::Limit)?,
+                ..PERMISSION_LIMITS.reads
+            },
+            maximum_bytes,
+        )?;
         let Some(policy_record) = policy_record else {
             return Ok(None);
         };
         for entry in &evidence.entries {
-            if !current_relationship(&policy_record, &entry.key, &entry.value)? {
+            let record = relationship_record(policy, &entry.key, &entry.value)?;
+            if !current_relationship(&policy_record, &record, objects.incarnation(&record)?)? {
                 return Err(PermissionError::Invalid(
-                    "relationship generation is inactive",
+                    "relationship generation or incarnation is inactive",
                 ));
             }
         }

@@ -107,9 +107,12 @@ impl AcpModule {
                             "live relation directory has no physical records".into(),
                         ));
                     }
-                    let count = relationship_index::read_logical_count(&records, policy, pair)
-                        .map_err(relation_state_error)?;
-                    if count != physical {
+                    let count = relationship_index::read_logical_record(&records, policy, pair)
+                        .map_err(relation_state_error)?
+                        .ok_or_else(|| {
+                            AcpError::State("current pair logical count missing".into())
+                        })?;
+                    if count > physical {
                         return Err(AcpError::State(
                             "logical relationship count differs from current rows".into(),
                         ));

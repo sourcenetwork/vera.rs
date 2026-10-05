@@ -9,7 +9,7 @@ pub const POLICY_PREFIX: &[u8] = b"policy/objs/";
 /// Policy autoincrement counter key.
 pub const POLICY_COUNTER_KEY: &[u8] = b"policy/counter/id";
 /// Current native relationship namespace; older namespaces are not migrated.
-pub const RELATIONSHIP_PREFIX: &[u8] = b"relationship/v4/";
+pub const RELATIONSHIP_PREFIX: &[u8] = b"relationship/v5/";
 /// Access decision prefix (string-keyed objects).
 pub const ACCESS_DECISION_PREFIX: &[u8] = b"access_decision/";
 /// Registration commitment prefix (auto-increment objects).
@@ -33,7 +33,7 @@ pub fn policy_key(id: &str) -> Vec<u8> {
 }
 
 /// Canonical native key suffix, independent of the shared engine's storage format.
-pub fn relationship_storage_key(relationship: &acp::Relationship) -> String {
+pub fn relationship_storage_key(relationship: &acp::Relationship, incarnation: u64) -> String {
     use sha2::{Digest, Sha256};
     let mut digest = Sha256::new();
     digest.update(b"vera/acp-subject/v1\0");
@@ -44,7 +44,8 @@ pub fn relationship_storage_key(relationship: &acp::Relationship) -> String {
         relation_prefix(
             &relationship.resource,
             &relationship.object_id,
-            &relationship.relation
+            &relationship.relation,
+            incarnation,
         ),
         hex::encode(digest.finalize())
     )
@@ -52,19 +53,30 @@ pub fn relationship_storage_key(relationship: &acp::Relationship) -> String {
 
 /// Exact resource boundary for relationship queries.
 pub fn resource_prefix(resource: &str) -> String {
-    format!("v2/{}/", hex::encode(resource))
+    format!("v3/{}/", hex::encode(resource))
 }
 
-/// Exact object boundary, including when identifiers contain path separators.
+/// Exact object boundary covering every incarnation, including path separators in identifiers.
 pub fn object_prefix(resource: &str, object_id: &str) -> String {
     format!("{}{}/", resource_prefix(resource), hex::encode(object_id))
 }
 
-/// Exact relation boundary within an object.
-pub fn relation_prefix(resource: &str, object_id: &str, relation: &str) -> String {
+/// Prefix for one physical incarnation of an object's native relationships.
+pub fn object_incarnation_prefix(resource: &str, object_id: &str, incarnation: u64) -> String {
+    format!("{}{incarnation:016x}/", object_prefix(resource, object_id))
+}
+
+/// Prefix for one relation in an object's physical incarnation.
+/// Owner records always use incarnation zero, independently of current object state.
+pub fn relation_prefix(
+    resource: &str,
+    object_id: &str,
+    relation: &str,
+    incarnation: u64,
+) -> String {
     format!(
         "{}{}/",
-        object_prefix(resource, object_id),
+        object_incarnation_prefix(resource, object_id, incarnation),
         hex::encode(relation)
     )
 }
@@ -241,20 +253,42 @@ mod tests {
         let relationship =
             acp::Relationship::new("file", "report/child", "reader", acp::Subject::Wildcard);
         assert_eq!(
-            relationship_storage_key(&relationship),
-            "v2/66696c65/7265706f72742f6368696c64/726561646572/00414ab1420d5a968b2ab88ef68b22497b031cd04a26bf22380cb3f845fa18b1"
+            relationship_storage_key(&relationship, 10),
+            "v3/66696c65/7265706f72742f6368696c64/000000000000000a/726561646572/00414ab1420d5a968b2ab88ef68b22497b031cd04a26bf22380cb3f845fa18b1"
         );
         assert!(
-            !relationship_storage_key(&relationship).starts_with(&object_prefix("file", "report"))
+            !relationship_storage_key(&relationship, 10)
+                .starts_with(&object_prefix("file", "report"))
         );
         assert!(
-            relationship_storage_key(&relationship).starts_with(&relation_prefix(
+            relationship_storage_key(&relationship, 10).starts_with(&relation_prefix(
                 "file",
                 "report/child",
-                "reader"
+                "reader",
+                10,
             ))
         );
         assert_ne!(object_prefix("a/b", "c"), object_prefix("a", "b/c"));
+    }
+
+    #[test]
+    fn relationship_incarnations_have_distinct_delimited_prefixes() {
+        let relationship =
+            acp::Relationship::new("file/雪", "report/child", "reader", acp::Subject::Wildcard);
+        let first = relationship_storage_key(&relationship, 0);
+        let next = relationship_storage_key(&relationship, 1);
+        let last = relationship_storage_key(&relationship, u64::MAX);
+        assert!(first < next && next < last);
+        for suffix in [&first, &next, &last] {
+            assert!(suffix.starts_with(&object_prefix("file/雪", "report/child")));
+            assert!(!suffix.starts_with(&object_prefix("file/雪", "report")));
+        }
+        assert!(first.starts_with(&object_incarnation_prefix("file/雪", "report/child", 0)));
+        assert!(!next.starts_with(&object_incarnation_prefix("file/雪", "report/child", 0)));
+        assert!(last.contains("/ffffffffffffffff/"));
+        let primary = relationship_key("policy-1", &next);
+        assert!(primary.starts_with(b"relationship/v5/policy-1/"));
+        assert!(!primary.starts_with(b"relationship/v4/"));
     }
 
     #[test]

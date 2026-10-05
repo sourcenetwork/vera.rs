@@ -6,6 +6,8 @@ import subprocess
 SCHEMAS = {
     'relationship/v3/': {'relationship_namespace': 'relationship/v3/', 'policy_generations': 'absent'},
     'relationship/v4/': {'relationship_namespace': 'relationship/v4/', 'policy_generations': 'required'},
+    'relationship/v5/': {'relationship_namespace': 'relationship/v5/', 'policy_generations': 'required',
+                         'object_incarnation': 'required'},
 }
 KEYS = 'crates/vera-modules/src/acp/keys.rs'
 TYPES = 'crates/vera-modules/src/acp/types.rs'
@@ -25,6 +27,21 @@ def source_schema(source, revision):
     expected = [] if namespaces[0] == 'relationship/v3/' else ['RelationGenerations']
     if fields != expected:
         raise ValueError('ACP policy record differs from its versioned relationship schema')
+    if namespaces[0] == 'relationship/v5/':
+        # Match only attached attributes, not defaults on unrelated record fields.
+        attached = r'((?:^[ \t]*#\[[^\]]*\][ \t]*\n|^[ \t]*//[^\n]*\n|^[ \t]*\n)*)'
+        records = re.findall(attached + r'^pub struct RelationshipRecord\s*\{(.*?)^\}',
+                             types, re.MULTILINE | re.DOTALL)
+        if len(records) != 1:
+            raise ValueError('unrecognized ACP relationship record schema')
+        attributes, record = records[0]
+        fields = re.findall(attached + r'^[ \t]*pub\s+incarnation\s*:\s*([^,\n]+),',
+                            record, re.MULTILINE)
+        if len(fields) != 1 or fields[0][1].strip() != 'u64':
+            raise ValueError('ACP relationship incarnation must be a required u64')
+        if re.search(r'#\[\s*serde\s*\([^\]]*\b(default|skip|skip_deserializing|deserialize_with|with)\b',
+                     attributes + fields[0][0]):
+            raise ValueError('ACP relationship incarnation must not default or use custom decoding')
     return dict(SCHEMAS[namespaces[0]])
 
 

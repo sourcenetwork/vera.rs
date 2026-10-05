@@ -25,6 +25,7 @@ fn fixture(count: usize) -> (AcpModule, String, RelationshipRecord) {
             acp::Subject::entity_set("group", "staff", "member"),
         );
         let record = RelationshipRecord {
+            incarnation: 0,
             generations: definition.relations.pair(&relationship).unwrap(),
             policy_id: policy.clone(),
             relationship,
@@ -116,15 +117,9 @@ fn corrupt_logical_counts_reject_rewrites_removals_edits_and_restoration_atomica
     let primary = keys::relationship_generation_key(
         &policy,
         row.generations,
-        &keys::relationship_storage_key(&row.relationship),
+        &keys::relationship_storage_key(&row.relationship, row.incarnation),
     );
-    for bytes in [
-        None,
-        Some(vec![1]),
-        Some(0u64.to_be_bytes().to_vec()),
-        Some(1u64.to_be_bytes().to_vec()),
-        Some(u64::MAX.to_be_bytes().to_vec()),
-    ] {
+    for bytes in [None, Some(vec![1]), Some(u64::MAX.to_be_bytes().to_vec())] {
         let mut broken = module.clone();
         match bytes {
             None => broken.store.delete(&key),
@@ -211,11 +206,7 @@ fn retired_policy_gc_rejects_missing_mismatched_and_retired_logical_counts_atomi
     let (mut module, policy, row) = fixture(130);
     module.delete_policy(&owner(), &policy).unwrap();
     let key = relationship_index::logical_key(&policy, row.generations);
-    for value in [
-        None,
-        Some(1u64.to_be_bytes().to_vec()),
-        Some(131u64.to_be_bytes().to_vec()),
-    ] {
+    for value in [None, Some(131u64.to_be_bytes().to_vec())] {
         let mut broken = module.clone();
         match value {
             None => broken.store.delete(&key),
@@ -242,4 +233,17 @@ fn retired_policy_gc_rejects_missing_mismatched_and_retired_logical_counts_atomi
     let before = module.store.serialize();
     assert!(module.end_blocker(&BlockExecCtx::default()).is_err());
     assert_eq!(module.store.serialize(), before);
+}
+
+#[test]
+fn restoration_rejects_validly_encoded_but_inexact_logical_counts() {
+    let (module, policy, row) = fixture(2);
+    for count in [0u64, 1] {
+        let mut broken = module.clone();
+        broken.store.put(
+            &relationship_index::logical_key(&policy, row.generations),
+            count.to_be_bytes().to_vec(),
+        );
+        assert!(restore(&broken).is_err());
+    }
 }

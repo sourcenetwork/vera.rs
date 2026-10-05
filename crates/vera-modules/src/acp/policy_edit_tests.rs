@@ -97,7 +97,7 @@ fn primary_corruption_is_rejected_by_reads_restoration_and_atomic_cleanup() {
         let key = keys::relationship_generation_key(
             &policy,
             pair,
-            &keys::relationship_storage_key(&relationship),
+            &keys::relationship_storage_key(&relationship, 0),
         );
         let mut record: RelationshipRecord =
             serde_json::from_slice(&module.store.get(&key).unwrap()).unwrap();

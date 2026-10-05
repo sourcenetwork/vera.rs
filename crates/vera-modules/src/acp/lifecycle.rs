@@ -129,7 +129,7 @@ impl AcpModule {
         let old_key = keys::relationship_generation_key(
             policy_id,
             record.generations,
-            &keys::relationship_storage_key(&record.relationship),
+            &keys::relationship_storage_key(&record.relationship, record.incarnation),
         );
         record.relationship.subject = acp::Subject::Entity(new_owner.clone());
         record.metadata.owner_did = new_owner.to_string();

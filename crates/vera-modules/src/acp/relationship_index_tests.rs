@@ -79,6 +79,7 @@ impl Fixture {
             Relationship::with_entity("file", object, "reader", Did::new("did:key:owner").unwrap())
         };
         RelationshipRecord {
+            incarnation: 0,
             generations: self.policy.relations.pair(&relationship).unwrap(),
             policy_id: POLICY.into(),
             relationship,

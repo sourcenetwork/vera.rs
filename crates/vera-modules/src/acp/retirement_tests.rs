@@ -463,7 +463,8 @@ fn maximum_native_records_make_bounded_progress_across_cleanup_ticks() {
     let mut module = AcpModule::new();
     let id = policy(&mut module);
     let empty = Relationship::with_entity("file", "", "owner", actor("owner"));
-    let key_overhead = keys::relationship_key(&id, &keys::relationship_storage_key(&empty)).len();
+    let key_overhead =
+        keys::relationship_key(&id, &keys::relationship_storage_key(&empty, 0)).len();
     let object_bytes = ((64 << 10) - key_overhead) / 2;
     let padding = "x".repeat(object_bytes - 2);
     for index in 0..7 {
@@ -638,7 +639,7 @@ fn restore_rejects_legacy_relationship_namespaces_even_beside_current_records() 
     let mut module = AcpModule::new();
     let id = policy(&mut module);
     register(&mut module, &id, "report");
-    assert_eq!(keys::RELATIONSHIP_PREFIX, b"relationship/v4/");
+    assert_eq!(keys::RELATIONSHIP_PREFIX, b"relationship/v5/");
     let (key, value) = module
         .store
         .prefix_iter(&keys::relationship_policy_prefix(&id))
@@ -650,6 +651,7 @@ fn restore_rejects_legacy_relationship_namespaces_even_beside_current_records() 
         b"relationship/".as_slice(),
         b"relationship/v2/".as_slice(),
         b"relationship/v3/".as_slice(),
+        b"relationship/v4/".as_slice(),
     ] {
         let mut candidate = module.clone();
         candidate

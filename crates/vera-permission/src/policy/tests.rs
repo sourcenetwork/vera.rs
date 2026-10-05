@@ -36,6 +36,7 @@ fn policy_prefix_requires_canonical_identity_and_current_namespace() {
         keys::policy_key(&policy),
         format!("relationship/{policy}/").into_bytes(),
         format!("relationship/v3/{policy}/").into_bytes(),
+        format!("relationship/v4/{policy}/").into_bytes(),
         prefix[..prefix.len() - 1].to_vec(),
     ] {
         assert!(validate_policy_prefix(&policy, &invalid).is_err());
@@ -53,6 +54,7 @@ fn complete_policy_prefix_rejects_aggregate_overflow_and_mixed_roots() {
     let prefix = keys::relationship_policy_prefix(&policy);
     let mut proof = PolicyPrefixProof {
         policy: record(&policy),
+        objects: Vec::new(),
         prefix: PrefixProof {
             module: ModuleId::Acp,
             prefix: prefix.clone().into(),
@@ -89,6 +91,7 @@ fn policy_page_rejects_aggregate_overflow_mixed_roots_and_wrong_module() {
     };
     let mut proof = PolicyPrefixPageProof {
         policy: record(&policy),
+        objects: Vec::new(),
         page: PrefixPageProof {
             request: request.clone(),
             roots: [B256::ZERO; 4],
@@ -124,6 +127,7 @@ fn policy_evidence_requires_both_proofs_and_rejects_unknown_fields() {
     let policy = "ab".repeat(32);
     let proof = PolicyPrefixProof {
         policy: record(&policy),
+        objects: Vec::new(),
         prefix: PrefixProof {
             module: ModuleId::Acp,
             prefix: keys::relationship_policy_prefix(&policy).into(),
@@ -136,6 +140,9 @@ fn policy_evidence_requires_both_proofs_and_rejects_unknown_fields() {
     let mut missing = encoded.clone();
     missing.as_object_mut().unwrap().remove("policy");
     assert!(serde_json::from_value::<PolicyPrefixProof>(missing).is_err());
+    let mut missing_objects = encoded.clone();
+    missing_objects.as_object_mut().unwrap().remove("objects");
+    assert!(serde_json::from_value::<PolicyPrefixProof>(missing_objects).is_err());
     let mut unknown = encoded;
     unknown["policy_exists"] = serde_json::json!(true);
     assert!(serde_json::from_value::<PolicyPrefixProof>(unknown).is_err());
@@ -173,6 +180,7 @@ fn generation_fixture() -> (
         zanzibar::Subject::entity_set("group", "staff", "member"),
     );
     let record = RelationshipRecord {
+        incarnation: 0,
         generations: policy.relations.pair(&relationship).unwrap(),
         supplied_metadata: Default::default(),
         policy_id: policy.policy.id.clone(),
@@ -188,7 +196,7 @@ fn relationship_bytes(record: &RelationshipRecord) -> (Vec<u8>, Vec<u8>) {
         keys::relationship_generation_key(
             &record.policy_id,
             record.generations,
-            &keys::relationship_storage_key(&record.relationship),
+            &keys::relationship_storage_key(&record.relationship, record.incarnation),
         ),
         serde_json::to_vec(record).unwrap(),
     )
@@ -241,4 +249,38 @@ fn typed_relationships_bind_the_generation_stamp_and_require_it_in_encoded_rows(
     let mut missing = serde_json::to_value(record).unwrap();
     missing.as_object_mut().unwrap().remove("generations");
     assert!(current_relationship(&policy, &key, &serde_json::to_vec(&missing).unwrap()).is_err());
+}
+
+fn current_relationship(
+    policy: &PolicyRecord,
+    key: &[u8],
+    value: &[u8],
+) -> Result<bool, PermissionError> {
+    let record = relationship_record(&policy.policy.id, key, value)?;
+    super::current_relationship(policy, &record, 0)
+}
+
+#[test]
+fn relationship_incarnations_bind_keys_and_never_reactivate_retired_grants() {
+    let (_, policy, mut record) = generation_fixture();
+    let (old_key, old_value) = relationship_bytes(&record);
+    assert!(!super::current_relationship(&policy, &record, 1).unwrap());
+    record.incarnation = 1;
+    let (key, value) = relationship_bytes(&record);
+    assert_ne!(key, old_key);
+    assert!(relationship_record(&policy.policy.id, &old_key, &value).is_err());
+    assert!(relationship_record(&policy.policy.id, &key, &old_value).is_err());
+    let decoded = relationship_record(&policy.policy.id, &key, &value).unwrap();
+    assert!(super::current_relationship(&policy, &decoded, 1).unwrap());
+    assert!(super::current_relationship(&policy, &decoded, 0).is_err());
+    let mut missing = serde_json::to_value(record).unwrap();
+    missing.as_object_mut().unwrap().remove("incarnation");
+    assert!(
+        relationship_record(
+            &policy.policy.id,
+            &key,
+            &serde_json::to_vec(&missing).unwrap()
+        )
+        .is_err()
+    );
 }

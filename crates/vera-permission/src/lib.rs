@@ -26,6 +26,8 @@ mod decision;
 mod encoded_size;
 pub use decision::{DecisionOperation, DecisionOutcome, DecisionRecord};
 pub use encoded_size::encoded_size;
+mod object_evidence;
+pub use object_evidence::relationship_object_key;
 mod owner;
 pub use owner::object_owner_prefix;
 mod page;

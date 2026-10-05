@@ -57,11 +57,12 @@ Creating a policy does not grant management rights over objects registered by
 other actors. Managers can be recursive usersets, so revoking their group membership
 revokes management authority. Ownership cannot be added or deleted with ordinary
 relationship commands. Transfer changes the owner while preserving registration
-priority and other grants. Archive removes grants and retains the archived owner;
-unarchive restores ownership without restoring deleted grants.
+priority and other grants. Archive invalidates outgoing grants by advancing the
+target object incarnation and retains the archived owner at incarnation zero. Unarchive restores ownership
+without reviving those grants; physical removal runs under the cleanup budget.
 
-Definition edits prune both removed relations and grants whose usersets refer to
-removed relations. Recreating a relation cannot resurrect those deleted edges.
+Definition edits invalidate both removed relations and grants whose usersets refer
+to them. Recreating a relation cannot resurrect those retained physical edges.
 Policy deletion atomically removes the active policy and its authorization
 visibility. Physical records are reclaimed as described below. Historical access
 decisions and finalized receipts remain audit records.
@@ -121,9 +122,11 @@ This is a feature port, not a claim of identical transport or parser behavior:
   physical cleanup runs later under the shared cleanup budget. Logical pair counts
   provide the exact edit removal count and are cleared on relation retirement;
   separate physical counts remain until cleanup removes the rows. Recovery requires
-  both indexes to match their rows. This separation does not bound synchronous
-  object archive, which still visits and removes every current grant. Runtime edits meter
-  reads, writes and preparation work without visiting every physical relationship.
+  both indexes to match their rows. Archive uses exact current object-incarnation
+  counters to invalidate grants without scanning them; it advances the object point,
+  archives the stable owner and queues cleanup atomically. Its count includes the
+  owner; repeating archive returns zero. Runtime edits and archive meter reads,
+  writes and preparation work without visiting every physical relationship.
   This accounting does not meter individual compiler instructions. The lifecycle
   component workload measures edit cost and full deletion teardown, including cleanup.
 
@@ -147,14 +150,17 @@ amendments and policy commands stop being available through policy-aware APIs at
 that execution revision. Recreating the same definition allocates a new policy ID;
 it cannot recover grants from the deleted policy.
 
-Cleanup runs deterministically after each block. A persistent FIFO queue gives a
-policy up to 16 records per visit, with at most eight visits per tick. Across those
-visits, cleanup reserves at most 128 logical records, 4 MiB of inspected and
-written bytes, and 640 writes. Metadata work counts against these budgets.
+Cleanup runs deterministically after each block. Policy, relation-generation and
+object-incarnation queues share at most eight visits per tick, each serving up to
+16 records. The first class rotates with revision height. Across those visits,
+cleanup reserves at most 128 cleanup items, 4 MiB of inspected and written bytes,
+and 640 writes. Metadata work counts against these budgets.
 Unserved jobs keep their turn when the budget runs out, and a maximum-size valid
 native record can make progress with a fresh budget. Cleanup follows the policy's
 relationship, commitment and amendment indexes; it does not scan unrelated
-policies.
+policies. Object cleanup selects an obsolete target incarnation and cannot remove
+newly regranted relationships. Policy deletion retains object-state points until
+its physical relationships and related cleanup metadata are gone.
 
 Commitments are removed with their policy, root and expiry indexes. Expiry of a
 retired commitment cannot recreate those indexes. The retirement marker and queue
@@ -169,10 +175,20 @@ Physical records can remain after logical deletion. Certified ownership and
 relationship clients must verify the policy's presence at the same revision as
 those records, using the [policy proof APIs](permission-proofs.md#native-prefix-and-owner-reads).
 Generic record and prefix evidence authenticates physical storage only.
-Relationships use the fresh-state `relationship/v4/` namespace; restore rejects
-older namespaces rather than migrating them. Validators and consumers must use
+Relationships use the fresh-state `relationship/v5/` namespace, with mandatory
+record incarnation and same-root object witnesses for non-owner reads. Restoration
+rejects older namespaces rather than migrating them. Validators and consumers must use
 matching [key and proof formats](native-relationship-keys.md). Receipt and finality
 formats are unchanged.
+
+Physical pair mirrors and per-object/incarnation counters track retained rows;
+logical pair counts track current relation identities and target incarnation.
+A current pair retains a logical zero while physical rows remain. Archived owners
+retain incarnation zero and remain counted. Restoration validates both count systems, object points and cleanup
+coverage; it does not backfill missing state. Archive and edit inspect selected
+metadata, not every old primary. Corrupt unread obsolete rows may therefore fail
+restoration or cleanup later, while malformed accessed records fail immediately.
+See [archive and cleanup](acp-policy-edits.md#object-archival).
 
 ## Policy edit work accounting
 
@@ -195,8 +211,8 @@ Accounting uses encoded bytes, rounded up in groups of 16:
 
 Reads reserve their allowance before copying or decoding records. JSON encoding
 reserves each output byte group before extending its buffer. Only after the
-complete plan and updated policy fit does the module apply writes. Mirrored
-counters give the exact invalidated row count without charging once per physical
+complete plan and updated policy fit does the module apply writes. Logical
+pair counters give the exact invalidated row count without charging once per physical
 relationship. The timestamped edit path reads and encodes its policy once.
 
 Bearer edits also charge definition bytes before hashing the signed operation.
@@ -282,7 +298,8 @@ per operation. Each operation retains its own evaluator cache and hard step
 limit, while execution work accumulates across them. Native evaluations reuse
 one validated policy within an immutable request snapshot. Generic mutable store
 adapters still read current policy records. Proof capture and verification retain
-their existing read limits and formats; they do not consume native execution gas.
+their existing read limits; required incarnation points share those limits. Proof
+reads do not consume native execution gas.
 This is deterministic work accounting, not an instruction count or latency bound.
 
 ## Management authorization work
@@ -315,11 +332,11 @@ the full native transaction allowance, as before.
 
 Relationship point storage for set/delete, register, transfer, unarchive and reveal
 uses the same allowance, including contextual and supplied-metadata rewrites.
-Policy, existing relationship, mirrored pair-count, subject-directory and object
-pair-count reads reserve work before copying or decoding. Prepared replacements
+Policy, existing relationship, object-incarnation, physical/logical pair-count,
+subject-directory and object-pair-count reads reserve work before copying or decoding. Prepared replacements
 and deletions cost 200 units plus two per 16 encoded key/value bytes; JSON encoding
 reserves bytes before extending its buffer. Primary records, both count mirrors,
-changed directories and object counters each pay once per prepared write. Applying
+changed directories, logical counts and object counters each pay once per prepared write. Applying
 a complete prepared plan does not charge those writes again. Idempotent grants
 still pay for their reads and return the original record; metadata-only rewrites
 validate counters without charging nonexistent counter writes.
@@ -346,10 +363,12 @@ rewrite; unauthorized or corrupt records retain spent read work without publishi
 changes. `get_amendment_event_by_id_with_budget` exposes the paid point lookup;
 the convenience lookup retains an unlimited allowance.
 
-The full archive scan/removals still need separate accounting. Archive's fixed
-owner rewrite is charged; its bulk removal remains synchronous, reports the exact
-removed count and preserves the archived owner. No fanout cap or logical-archive
-substitution is introduced. Proof formats and ownership rules are unchanged.
+Archive shares this allowance for the owner, object state, selected relation and
+object counters, and cleanup metadata. It charges each visited pair and reserves
+all prepared writes before publishing the incarnation change. Logical removal is
+atomic and returns the exact current count; physical deletion uses the independent
+maintenance budget. Authorization and owner identity remain unchanged, while v5
+relationship and object-point evidence prevents obsolete grants from authorizing.
 
 ## Batch dispatch limits
 

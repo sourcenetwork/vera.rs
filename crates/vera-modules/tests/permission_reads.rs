@@ -54,7 +54,7 @@ fn relationship_key(store: &InMemoryKvStore, relationship: &Relationship) -> Vec
     keys::relationship_generation_key(
         POLICY,
         policy.relations.pair(relationship).unwrap(),
-        &keys::relationship_storage_key(relationship),
+        &keys::relationship_storage_key(relationship, 0),
     )
 }
 
@@ -244,7 +244,7 @@ fn capture_keeps_a_snapshot_and_rejects_mutation() {
     let prefix = keys::relationship_generation_prefix(
         POLICY,
         pair,
-        &keys::relation_prefix("document", "report", "blocked"),
+        &keys::relation_prefix("document", "report", "blocked", 0),
     );
     assert!(
         capture

@@ -27,7 +27,7 @@ class RunPrTests(unittest.TestCase):
             source.mkdir()
             (source / 'revision').write_text(side)
             subprocess.run(['git', 'init', '-q', str(source)], check=True)
-            self.write_schema(side, 'relationship/v4/')
+            self.write_schema(side, 'relationship/v5/')
             subprocess.run(['git', 'add', '.'], cwd=source, check=True)
             subprocess.run(['git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
                             '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null',
@@ -51,8 +51,11 @@ print(json.dumps(dict(driver='head',
         source = self.root / side
         (source / KEYS).parent.mkdir(parents=True, exist_ok=True)
         (source / KEYS).write_text(f'pub const RELATIONSHIP_PREFIX: &[u8] = b"{namespace}";\n')
-        fields = '    pub relations: RelationGenerations,\n' if namespace == 'relationship/v4/' else ''
-        (source / TYPES).write_text('pub struct PolicyRecord {\n' + fields + '}\n')
+        fields = '    pub relations: RelationGenerations,\n' if namespace != 'relationship/v3/' else ''
+        record = 'pub struct PolicyRecord {\n' + fields + '}\n'
+        if namespace == 'relationship/v5/':
+            record += 'pub struct RelationshipRecord {\n    pub incarnation: u64,\n}\n'
+        (source / TYPES).write_text(record)
 
     def commit_schema(self, side, namespace):
         self.write_schema(side, namespace)
@@ -133,7 +136,7 @@ print(json.dumps(dict(driver='head',
                 self.assertEqual((row['driver'], row['node']), ('head', 'base'))
 
     def test_incompatible_baseline_is_recorded_without_starting_its_workloads(self):
-        self.commit_schema('base', 'relationship/v3/')
+        self.commit_schema('base', 'relationship/v4/')
         self.measure(workloads=4)
         identity = json.loads((self.output / 'comparison.json').read_text())
         for tag in ('base1', 'base2'):
@@ -148,12 +151,12 @@ print(json.dumps(dict(driver='head',
                 self.assertTrue((self.output / tag / f'objects-{objects}' / 'manifest.json').exists())
 
     def test_incompatible_base_does_not_suppress_head_process_failure(self):
-        self.commit_schema('base', 'relationship/v3/')
+        self.commit_schema('base', 'relationship/v4/')
         self.executable('head', 'operation_baseline', '#!/bin/sh\nexit 1\n')
         self.measure(workloads=4, exit_code=1)
 
     def test_unknown_schema_fails_before_any_pass(self):
-        self.commit_schema('base', 'relationship/v5/')
+        self.commit_schema('base', 'relationship/v6/')
         with self.assertRaisesRegex(ValueError, 'unrecognized ACP relationship'):
             self.measure()
         self.assertFalse((self.output / 'head1').exists())

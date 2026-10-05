@@ -346,7 +346,7 @@ mod tests {
         let original = module.store.clone();
         let owner_relation = Relationship::with_entity("file", "report", "owner", owner.clone());
         let canonical =
-            keys::relationship_key(&policy, &keys::relationship_storage_key(&owner_relation));
+            keys::relationship_key(&policy, &keys::relationship_storage_key(&owner_relation, 0));
         let legacy = keys::relationship_key(&policy, &owner_relation.storage_key());
         let mut legacy_store = original.clone();
         legacy_store.put(&legacy, legacy_store.get(&canonical).unwrap());
@@ -362,9 +362,10 @@ mod tests {
         let policy_key = keys::policy_key(&policy);
         let owner_key = keys::relationship_key(
             &policy,
-            &keys::relationship_storage_key(&Relationship::with_entity(
-                "file", "report", "owner", owner,
-            )),
+            &keys::relationship_storage_key(
+                &Relationship::with_entity("file", "report", "owner", owner),
+                0,
+            ),
         );
         for key in [&policy_key, &owner_key] {
             let bytes = original.get(key).unwrap();

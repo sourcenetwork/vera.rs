@@ -53,7 +53,7 @@ impl AcpModule {
 
     /// Enumerate matching live relationships with bounded planning, including empty results.
     /// Planning permits 256 directory reads, 256 buckets and 1 MiB of directory/prefix bytes;
-    /// each page separately inspects at most 128 records and 1 MiB of row bytes.
+    /// each page separately inspects at most 128 records and 1 MiB including object-state reads.
     pub fn query_relationships_page(
         &self,
         policy_id: &str,
@@ -104,10 +104,22 @@ impl AcpModule {
                     page.next = previous;
                     return Ok(page);
                 }
+                let (record, current, point_bytes) =
+                    self.decode_current_relationship(&policy, key, value, budget)?;
+                let size = size.saturating_add(point_bytes);
+                if size > 1 << 20 {
+                    return Err(AcpError::State(
+                        "record and object state exceed page budget".into(),
+                    ));
+                }
+                if bytes.saturating_add(size) > 1 << 20 {
+                    page.next = previous;
+                    return Ok(page);
+                }
                 bytes += size;
                 count += 1;
-                let record = Self::decode_current_relationship(&policy, key, value)?;
-                if !record.archived && self.matches_selector(&record, &request.selector) {
+                if current && !record.archived && self.matches_selector(&record, &request.selector)
+                {
                     page.records.push(record);
                 }
                 previous = Some(key.to_vec());

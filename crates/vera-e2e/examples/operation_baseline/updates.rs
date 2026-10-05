@@ -158,7 +158,7 @@ pub(super) async fn verify_state(
         );
         let key = vera_modules::acp::keys::relationship_key(
             &reads.policy,
-            &vera_modules::acp::keys::relationship_storage_key(&relationship),
+            &vera_modules::acp::keys::relationship_storage_key(&relationship, 0),
         );
         let response = client
             .read_current_record(

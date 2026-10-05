@@ -208,7 +208,7 @@ fn permission_evidence_replays_deny_and_revocation_at_one_revision() {
         let blocked_prefix = keys::relationship_generation_prefix(
             &policy,
             generations.pair(&blocked).unwrap(),
-            &keys::relation_prefix("document", "report", "blocked"),
+            &keys::relation_prefix("document", "report", "blocked", 0),
         );
         let mut omitted = proof.clone();
         let deny_read = omitted
@@ -740,3 +740,5 @@ fn native_prefixes_bind_complete_coverage_module_and_root() {
 mod page;
 
 mod policy;
+
+mod objects;

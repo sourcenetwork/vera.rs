@@ -70,18 +70,32 @@ pub fn logical_key(policy: &str, pair: RelationPair) -> Vec<u8> {
     .into_bytes()
 }
 
-/// Read a logical count. Zero counts have no stored record.
+/// Read a logical count. Current pairs retain zero while physical rows remain.
 pub fn read_logical_count<S: RecordStore>(
     store: &S,
     policy: &str,
     pair: RelationPair,
 ) -> Result<u64> {
+    read_logical_record(store, policy, pair).map(|count| count.unwrap_or(0))
+}
+
+pub(super) fn decode_logical_count(bytes: &[u8]) -> Result<u64> {
+    bytes
+        .try_into()
+        .map(u64::from_be_bytes)
+        .map_err(|_| invalid("logical relationship count must contain eight bytes"))
+}
+
+pub(super) fn read_logical_record<S: RecordStore>(
+    store: &S,
+    policy: &str,
+    pair: RelationPair,
+) -> Result<Option<u64>> {
     store
         .read_record(&logical_key(policy, pair))?
         .as_deref()
-        .map(decode_count)
+        .map(decode_logical_count)
         .transpose()
-        .map(|count| count.unwrap_or(0))
 }
 
 /// All current subject directories for a policy.
@@ -168,17 +182,19 @@ pub(crate) fn live_pairs_for_active<S: RecordStore>(
 }
 
 /// Prepare count changes for distinct pairs without mutating storage.
-/// `(pair, increase, amount)` includes zero-amount validation for metadata rewrites.
+/// Each delta carries physical and current-logical amounts. Zero-amount plans
+/// still validate existing counters for metadata rewrites.
 pub(super) fn prepare_counts<S: RecordStore>(
     store: &S,
     policy: &str,
-    deltas: &[(RelationPair, bool, u64)],
+    deltas: &[(RelationPair, bool, u64, u64)],
     relations: Option<&RelationGenerations>,
+    update_directories: bool,
 ) -> Result<Vec<RecordChange>> {
     let mut changes = Vec::new();
     let mut directories = BTreeMap::new();
     let active = relations.map(RelationGenerations::active_ids);
-    for (pair, increase, amount) in deltas {
+    for (pair, increase, amount, logical_amount) in deltas {
         let previous = read_pair_count(store, policy, *pair)?;
         if *amount == 0 && previous == 0 {
             return Err(invalid("stored relationship has no physical pair count"));
@@ -192,11 +208,19 @@ pub(super) fn prepare_counts<S: RecordStore>(
         let current = active
             .as_ref()
             .map(|ids| ids.contains(&pair.target) && ids.contains(&pair.subject));
-        if let Some(change) = prepare_logical_count(store, policy, *pair, previous, next, current)?
-        {
+        if let Some(change) = prepare_logical_count(
+            store,
+            policy,
+            *pair,
+            (previous, next),
+            current,
+            (*increase, *logical_amount),
+            *amount == 0,
+        )? {
             changes.push(change);
         }
-        if let Some(active) = &active
+        if update_directories
+            && let Some(active) = &active
             && active.contains(&pair.target)
             && active.contains(&pair.subject)
         {
@@ -248,43 +272,69 @@ pub(super) fn prepare_counts<S: RecordStore>(
     Ok(changes)
 }
 
-/// Logical counts equal physical counts for current relation pairs.
-/// Relation retirement erases logical counts immediately; policy retirement leaves
-/// them for cleanup.
+/// Prepare logical deltas independently of the physical cleanup count.
 fn prepare_logical_count<S: RecordStore>(
     store: &S,
     policy: &str,
     pair: RelationPair,
-    previous_physical: u64,
-    next_physical: u64,
+    physical: (u64, u64),
     current: Option<bool>,
+    delta: (bool, u64),
+    metadata_rewrite: bool,
 ) -> Result<Option<RecordChange>> {
-    let previous = read_logical_count(store, policy, pair)?;
-    if current == Some(false) {
-        if previous != 0 {
-            return Err(invalid("retired relation pair retains a logical count"));
-        }
-        return Ok(None);
-    }
-    // No live policy: only counters retained at policy retirement are decremented.
-    if current.is_none() && previous == 0 {
-        return Ok(None);
-    }
-    if previous != previous_physical {
+    let stored = read_logical_record(store, policy, pair)?;
+    let previous = stored.unwrap_or(0);
+    if previous > physical.0
+        || (current == Some(false) && stored.is_some())
+        || (current == Some(true) && stored.is_some() != (physical.0 > 0))
+    {
         return Err(invalid(
             "logical relationship count differs from current rows",
         ));
     }
-    if previous == next_physical {
+    if current == Some(false) || (current.is_none() && stored.is_none()) {
         return Ok(None);
     }
-    let encoded = next_physical.to_be_bytes();
+    if metadata_rewrite && previous == 0 {
+        return Err(invalid("current relationship has no logical pair count"));
+    }
+    let next = if delta.0 {
+        previous.checked_add(delta.1)
+    } else {
+        previous.checked_sub(delta.1)
+    }
+    .filter(|next| *next <= physical.1)
+    .ok_or_else(|| invalid("logical relationship count overflow or underflow"))?;
+    if previous == next && physical.1 > 0 {
+        return Ok(None);
+    }
+    let encoded = next.to_be_bytes();
     store
         .prepare_write(
             &logical_key(policy, pair),
-            (next_physical > 0).then_some(encoded.as_slice()),
+            (physical.1 > 0).then_some(encoded.as_slice()),
         )
         .map(Some)
+}
+
+/// Subtract a current object's grants while retaining its physical rows.
+pub(super) fn prepare_archive_count<S: RecordStore>(
+    store: &S,
+    policy: &str,
+    pair: RelationPair,
+    amount: u64,
+) -> Result<RecordChange> {
+    let physical = read_pair_count(store, policy, pair)?;
+    prepare_logical_count(
+        store,
+        policy,
+        pair,
+        (physical, physical),
+        Some(true),
+        (false, amount),
+        false,
+    )?
+    .ok_or_else(|| invalid("archive must remove a positive logical count"))
 }
 
 pub(super) fn invalid(message: &str) -> Error {
