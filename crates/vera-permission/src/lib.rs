@@ -50,7 +50,7 @@ pub use response::{PERMISSION_RESPONSE_BYTES, PermissionResponse};
 pub const PERMISSION_LIMITS: PermissionLimits = PermissionLimits {
     reads: vera_modules::acp::read_capture::PERMISSION_READ_LIMITS,
     proof_bytes: 4 << 20,
-    operations: 64,
+    operations: vera_modules::acp::decision::MAX_ACCESS_OPERATIONS,
     request_bytes: 64 << 10,
 };
 

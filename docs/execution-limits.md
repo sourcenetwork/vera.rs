@@ -36,6 +36,21 @@ charged 5,000 leaves 995,000. Another native request cannot fit its full
 allowance. In a deployment permitting EVM execution, a request declaring at
 most 995,000 can still execute.
 
+## ACP string-array decoding
+
+Before owned ABI decoding, `checkAccess` and `verifyAccessRequest` accept at most
+64 entries in each parallel string array; `generateCommitment` accepts at most
+256. Parallel arrays must have equal lengths. The 64-entry ABI cap is new for
+`verifyAccessRequest`, matching persisted decisions and default permission
+proofs; commitment generation already has a 256-object limit.
+
+Strings in these three calls share the existing decoded-byte budget with all
+nested batch payloads. Every occurrence counts separately, including aliased arrays or tails,
+the actor string, and UTF-8 replacement bytes produced by the permissive decoder.
+Validation borrows the input and rejects invalid heads, offsets and lengths
+before owned arrays or strings are allocated. Failures use the existing native
+and EVM error and rollback paths.
+
 ## Native record bounds
 
 Module changes must fit the native storage codecs: keys at most 64 KiB and

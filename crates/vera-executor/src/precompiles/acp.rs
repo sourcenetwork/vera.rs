@@ -4,6 +4,9 @@ mod batch;
 mod batch_results;
 #[cfg(test)]
 mod batch_tests;
+mod leaf;
+#[cfg(test)]
+mod leaf_tests;
 mod lifecycle;
 #[cfg(test)]
 mod lifecycle_tests;
@@ -179,7 +182,7 @@ fn batch_error(index: usize, err: PrecompileError) -> PrecompileError {
     }
 }
 
-/// Dispatch an ABI-encoded call after bounding nested batch allocations.
+/// Dispatch an ABI-encoded call after bounding batch and leaf array allocations.
 pub(super) fn dispatch(
     module: &mut AcpModule,
     vera: &mut VeraModule,
@@ -188,8 +191,13 @@ pub(super) fn dispatch(
     input: &[u8],
     gas_limit: u64,
 ) -> DispatchReturn {
-    if input.starts_with(&IAcp::batchCallsCall::SELECTOR) {
-        if gas_limit < READ_GAS {
+    let preflight_gas = leaf::required_gas(input).or_else(|| {
+        input
+            .starts_with(&IAcp::batchCallsCall::SELECTOR)
+            .then_some(READ_GAS)
+    });
+    if let Some(minimum) = preflight_gas {
+        if gas_limit < minimum {
             return Err(PrecompileError::OutOfGas);
         }
         batch::validate(input)?;
