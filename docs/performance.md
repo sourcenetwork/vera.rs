@@ -17,6 +17,28 @@ first with growing registrations and then with 128 repeatedly updated objects.
 These are fixed-load baselines, not searches for maximum throughput. They are
 not part of every pull request's test loop.
 
+## ACP lifecycle components
+
+`component_baseline` includes policy edits and deletions with 32, 256 and 2,048
+objects. Each object has an owner, a direct grant, an incoming userset grant,
+a registration commitment and an amendment event. A separate case holds the
+target at 32 objects while adding 2,048 objects and their dependent records to
+another policy. This exposes both target-policy cost and work caused by unrelated
+state.
+
+Every measured operation starts from a fresh shared snapshot. Timings exclude
+fixture construction, snapshot cloning, result disposal and restoration checks.
+Before sampling, the fixture checks grant pruning, unchanged unrelated records,
+snapshot isolation, serialization restoration and absence of resurrected grants
+when a removed relation is reintroduced. These are module costs; they exclude
+consensus, durable storage and RPC/proof generation.
+
+Fixture version 2 retains the three existing component measurements and adds eight
+lifecycle measurements. Comparisons with version 1 show the new measurements
+without inventing a baseline; later version 2 comparisons report their deltas.
+Missing measurements or inconsistent fixtures fail the report. The workload does
+not establish a production mutation bound or change the fixed execution charge.
+
 ## Local pipelined load measurement
 
 On September 19, 2026, four validators on one macOS host used RocksDB history,

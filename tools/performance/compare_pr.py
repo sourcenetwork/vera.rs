@@ -10,6 +10,12 @@ from report import load_run
 
 TAGS = ('head1', 'base1', 'base2', 'head2')
 COMPONENTS = ('native_bls_verify', 'acp_owner_read_capture', 'consensus_certificate_verify')
+LIFECYCLE_COMPONENTS = tuple(
+    f'acp_policy_{operation}_{size}'
+    for size in ('32', '256', '2048', '32_unrelated_2048')
+    for operation in ('edit', 'delete')
+)
+COMPONENT_FIXTURES = {1: COMPONENTS, 2: COMPONENTS + LIFECYCLE_COMPONENTS}
 
 
 def change(base, head, lower=True, threshold=5):
@@ -31,13 +37,16 @@ def change(base, head, lower=True, threshold=5):
 
 def components(path):
     rows = [json.loads(line) for line in path.read_text().splitlines()]
-    if not rows or rows[0] != {'format_version': 1, 'fixture_version': 1, 'kind': 'configuration',
-                               'samples': 9, 'sample_ms': 100, 'warmup_ms': 200}:
+    version = rows[0].get('fixture_version') if rows else None
+    if version not in COMPONENT_FIXTURES or rows[0] != {
+            'format_version': 1, 'fixture_version': version, 'kind': 'configuration',
+            'samples': 9, 'sample_ms': 100, 'warmup_ms': 200}:
         raise ValueError('unsupported component fixture or sampling configuration')
+    expected = COMPONENT_FIXTURES[version]
     result = {}
     for row in rows[1:]:
         name = row['name']
-        if name in result or name not in COMPONENTS or row['unit'] != 'ns/op':
+        if name in result or name not in expected or row['unit'] != 'ns/op':
             raise ValueError('duplicate or unknown component measurement')
         samples, counts = row['samples'], row['iterations']
         if len(samples) != 9 or len(counts) != 9 or any(not math.isfinite(x) or x <= 0 for x in samples):
@@ -45,7 +54,7 @@ def components(path):
         if any(not isinstance(x, int) or x <= 0 for x in counts):
             raise ValueError('invalid component iterations')
         result[name] = median(samples)
-    if set(result) != set(COMPONENTS):
+    if set(result) != set(expected):
         raise ValueError('missing component measurement')
     return result
 
@@ -96,12 +105,19 @@ def compare(directory):
             errors.append(f'objects-{objects}: {error}')
     try:
         current = {t: components(directory / t / 'components.jsonl') for t in ('head1', 'head2')}
+        if set(current['head1']) != set(current['head2']):
+            raise ValueError('component fixture changed between head passes')
+        baseline = {}
         if identity['base']['components']:
-            current.update({t: components(directory / t / 'components.jsonl') for t in ('base1', 'base2')})
-            for name in COMPONENTS:
-                row(f'{name}: ns/op', {t: values[name] for t, values in current.items()})
-        else:
-            for name in COMPONENTS:
+            baseline = {t: components(directory / t / 'components.jsonl') for t in ('base1', 'base2')}
+            if set(baseline['base1']) != set(baseline['base2']):
+                raise ValueError('component fixture changed between base passes')
+            if not set(baseline['base1']).issubset(current['head1']):
+                raise ValueError('head removed a component measurement')
+        for name in current['head1']:
+            if baseline and name in baseline['base1']:
+                row(f'{name}: ns/op', {t: values[name] for t, values in (current | baseline).items()})
+            else:
                 rows.append({'metric': f'{name}: ns/op', 'base': [], 'head': [current[t][name] for t in ('head1', 'head2')],
                              'change_percent': None, 'verdict': 'new benchmark; no baseline'})
     except (OSError, ValueError, KeyError, TypeError) as error:
@@ -116,7 +132,7 @@ def compare(directory):
             return f'{min(values):.2f}–{max(values):.2f}' if values else '—'
         delta = '—' if item['change_percent'] is None else f"{item['change_percent']:+.2f}%"
         lines.append(f"| {item['metric']} | {span(item['base'])} | {span(item['head'])} | {delta} | {item['verdict']} |")
-    lines += ['', 'Full-stack throughput is offered-load limited. Certificate verification is a local component cost, not consensus finality. ACP capture excludes authenticated storage proof construction. No maximum-capacity or WAN claim.', '']
+    lines += ['', 'Full-stack throughput is offered-load limited. Certificate verification is a local component cost, not consensus finality. ACP capture excludes authenticated storage proof construction. Policy lifecycle timings exclude fixture construction, fork setup, result disposal and restoration checks; they exclude consensus and durable storage. No maximum-capacity or WAN claim.', '']
     if differences:
         lines += ['Configuration changes (no full-stack deltas):', '', '```json', json.dumps(differences, indent=2), '```', '']
     if errors:

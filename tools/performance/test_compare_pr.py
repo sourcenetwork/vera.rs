@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from compare_pr import COMPONENTS, TAGS, change, compare, components
+from compare_pr import COMPONENTS, LIFECYCLE_COMPONENTS, TAGS, change, compare, components
 
 
 class CompareTests(unittest.TestCase):
@@ -85,6 +85,59 @@ class CompareTests(unittest.TestCase):
         result = json.loads((self.root / 'comparison-report.json').read_text())
         self.assertEqual(result['metrics'][-1]['verdict'], 'new benchmark; no baseline')
         self.assertIsNone(result['metrics'][-1]['change_percent'])
+
+    def write_lifecycle(self, tag, value=100):
+        rows = [dict(self.rows[0], fixture_version=2)] + self.rows[1:]
+        rows += [dict(name=n, unit='ns/op', samples=[value] * 9, iterations=[3] * 9)
+                 for n in LIFECYCLE_COMPONENTS]
+        (self.root / tag / 'components.jsonl').write_text('\n'.join(json.dumps(r) for r in rows))
+
+    def test_new_lifecycle_metrics_preserve_existing_comparisons(self):
+        for tag in ('head1', 'head2'):
+            self.write_lifecycle(tag)
+        with patch('compare_pr.load_run', side_effect=self.run_fixture):
+            self.assertFalse(compare(self.root))
+        result = json.loads((self.root / 'comparison-report.json').read_text())
+        metrics = {row['metric']: row for row in result['metrics']}
+        for name in COMPONENTS:
+            self.assertEqual(metrics[f'{name}: ns/op']['change_percent'], 0)
+        for name in LIFECYCLE_COMPONENTS:
+            row = metrics[f'{name}: ns/op']
+            self.assertIsNone(row['change_percent'])
+            self.assertEqual(row['base'], [])
+            self.assertEqual(row['verdict'], 'new benchmark; no baseline')
+
+    def test_lifecycle_regressions_are_reported(self):
+        for tag in TAGS:
+            self.write_lifecycle(tag, 120 if tag.startswith('head') else 100)
+        with patch('compare_pr.load_run', side_effect=self.run_fixture):
+            self.assertFalse(compare(self.root))
+        result = json.loads((self.root / 'comparison-report.json').read_text())
+        metrics = {row['metric']: row for row in result['metrics']}
+        for name in LIFECYCLE_COMPONENTS:
+            self.assertEqual(metrics[f'{name}: ns/op']['verdict'], 'regression signal')
+
+    def test_missing_lifecycle_measurement_fails(self):
+        self.write_lifecycle('head1')
+        path = self.root / 'head1' / 'components.jsonl'
+        path.write_text('\n'.join(path.read_text().splitlines()[:-1]))
+        with self.assertRaisesRegex(ValueError, 'missing component'):
+            components(path)
+
+    def test_component_fixture_must_match_between_passes(self):
+        self.write_lifecycle('head1')
+        with patch('compare_pr.load_run', side_effect=self.run_fixture):
+            self.assertTrue(compare(self.root))
+        result = json.loads((self.root / 'comparison-report.json').read_text())
+        self.assertEqual(result['errors'], ['components: component fixture changed between head passes'])
+
+    def test_removed_component_measurements_fail(self):
+        for tag in ('base1', 'base2'):
+            self.write_lifecycle(tag)
+        with patch('compare_pr.load_run', side_effect=self.run_fixture):
+            self.assertTrue(compare(self.root))
+        result = json.loads((self.root / 'comparison-report.json').read_text())
+        self.assertEqual(result['errors'], ['components: head removed a component measurement'])
 
     def test_missing_component_fails(self):
         path = self.root / 'head1' / 'components.jsonl'
