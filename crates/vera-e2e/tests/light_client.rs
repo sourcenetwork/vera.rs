@@ -239,10 +239,6 @@ async fn light_client_proof_verification() {
         .unwrap();
     let proof_1 = response.record;
     assert!(proof_1.value.is_some());
-    let reader_prefix = format!(
-        "relationship/v3/{policy_id_str}/{}",
-        vera_modules::acp::keys::relation_prefix("document", "doc1", "reader")
-    );
     let request = permission::request();
     let empty_readers = permission::evidence(&client, policy_id_str, &request, h1).await;
     assert!(
@@ -250,11 +246,7 @@ async fn light_client_proof_verification() {
             .verify(policy_id_str, &request, h1, &trusted_key, PERMISSION_LIMITS)
             .unwrap()
     );
-    assert!(
-        permission::prefix(&empty_readers.proof, &reader_prefix)
-            .entries
-            .is_empty()
-    );
+    permission::assert_absent_relation_directory(&empty_readers.proof, policy_id_str, "reader");
 
     let set_rel_calldata = IAcp::setRelationshipCall {
         policyId: policy_id,
@@ -354,6 +346,7 @@ async fn light_client_proof_verification() {
             )
             .unwrap()
     );
+    let reader_prefix = permission::relation_prefix(&readers.proof, policy_id_str, "reader", None);
     assert_eq!(
         permission::prefix(&readers.proof, &reader_prefix)
             .entries
