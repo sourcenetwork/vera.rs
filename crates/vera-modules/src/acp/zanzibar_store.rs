@@ -25,8 +25,30 @@ pub fn evaluate_access_request<S: RecordStore>(
     policy_id: &str,
     request: &AccessRequest,
 ) -> Result<bool> {
-    let Some(record) = read_policy(&store, policy_id)? else {
+    let Some(engine) = evaluation_engine(store, policy_id, None)? else {
         return Ok(false);
+    };
+    for operation in &request.operations {
+        if !engine.check_blocking(
+            policy_id,
+            &operation.object.resource,
+            &operation.object.id,
+            &operation.permission,
+            &request.actor.0,
+        )? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+pub(super) fn evaluation_engine<S: RecordStore>(
+    store: S,
+    policy_id: &str,
+    meter: Option<std::sync::Arc<dyn zanzibar::engine::EvaluationMeter>>,
+) -> Result<Option<zanzibar::PermissionEngine<QmdbZanzibarStore<S>>>> {
+    let Some(record) = read_policy(&store, policy_id)? else {
+        return Ok(None);
     };
     // This adapter never leaves the evaluation or receives mutations. The initial
     // policy point read remains part of captured and replayed proof evidence.
@@ -42,18 +64,10 @@ pub fn evaluate_access_request<S: RecordStore>(
             .expect("evaluation policy was just installed")
             .policy,
     );
-    for operation in &request.operations {
-        if !engine.check_blocking(
-            policy_id,
-            &operation.object.resource,
-            &operation.object.id,
-            &operation.permission,
-            &request.actor.0,
-        )? {
-            return Ok(false);
-        }
+    if let Some(meter) = meter {
+        engine = engine.with_evaluation_meter(meter);
     }
-    Ok(true)
+    Ok(Some(engine))
 }
 
 /// A [`ZanzibarStore`] adapter over vera's module KV store.
@@ -69,7 +83,7 @@ pub fn evaluate_access_request<S: RecordStore>(
 #[derive(Debug, Default)]
 pub struct QmdbZanzibarStore<S: RecordStore = InMemoryKvStore> {
     store: RwLock<S>,
-    // Populated only by evaluate_access_request; generic mutable adapters read fresh.
+    // Populated only for immutable evaluations; generic mutable adapters read fresh.
     evaluation_policy: Option<PolicyRecord>,
 }
 

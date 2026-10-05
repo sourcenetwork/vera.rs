@@ -207,6 +207,39 @@ Definition-byte accounting is not instruction-level compiler metering. Existing
 YAML expansion and policy-validation limits remain independent safeguards.
 Archive and other module operations have separate resource behavior.
 
+## Permission evaluation work
+
+`verifyAccessRequest`, `checkAccess`, and `bearerCheckAccess` share one execution
+allowance across all operations in a request. Besides their dispatch base, they
+charge request processing at eight units per 16 field bytes (plus 24 bytes per
+operation), 32 units per evaluator step, and encoded reads/writes at the policy
+edit prices above. Reads reserve work before copying or decoding records; decision
+encoding reserves bytes before extending its buffer. Failed reads and decisions
+retain consumed work. A decision is stored only after its complete write fits.
+Bearer outcome reads and writes use the same allowance, including authenticated
+retries after policy retirement. Batch children receive the remaining allowance.
+
+The module exposes caller-owned `PermissionBudget` and explicit
+`query_verify_access_request_with_budget`, `check_access_with_budget`, and
+`bearer_check_access_with_budget` APIs. Cloned budgets share sticky exhaustion;
+module rollback does not restore consumed work. Convenience methods retain an
+unlimited work allowance. Requests permit at most 64 operations and 64 KiB of
+field bytes; recorded decision requests retain their additional 64 KiB encoded limit.
+Direct ABI calls bound decoded strings before allocation, including aliased tails
+and UTF-8 replacement. Bearer calls bound request JSON to 64 KiB and the token
+to 16 KiB before decoding owned values.
+An empty query still succeeds for an existing policy; recorded decisions require
+at least one operation.
+
+Existing hard limits remain separate: 256 point/prefix reads, 4,096 returned
+records and 1 MiB of read bytes per request; evaluator depth 64 and 10,000 steps
+per operation. Each operation retains its own evaluator cache and hard step
+limit, while execution work accumulates across them. Native evaluations reuse
+one validated policy within an immutable request snapshot. Generic mutable store
+adapters still read current policy records. Proof capture and verification retain
+their existing read limits and formats; they do not consume native execution gas.
+This is deterministic work accounting, not an instruction count or latency bound.
+
 ## Batch dispatch limits
 
 Native requests and the optional EVM interface share the same `batchCalls`

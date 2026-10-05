@@ -12,6 +12,9 @@ mod leaf_tests;
 mod lifecycle;
 #[cfg(test)]
 mod lifecycle_tests;
+#[cfg(test)]
+mod permission_budget_tests;
+mod permissions;
 mod queries;
 #[cfg(test)]
 mod query_budget_tests;
@@ -884,83 +887,10 @@ fn dispatch_validated(
             Ok(ok_dispatch(WRITE_GAS, ret, vec![]))
         }
 
-        IAcp::bearerCheckAccessCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::bearerCheckAccessCall::abi_decode(input).map_err(decode_error)?;
-            if call.request.len() > 64 << 10 {
-                return Err(PrecompileError::Other(
-                    "access request exceeds byte limit".into(),
-                ));
-            }
-            let request: AccessRequest =
-                serde_json::from_slice(&call.request).map_err(|error| {
-                    PrecompileError::Other(format!("access request JSON decode: {error}").into())
-                })?;
-            let decision = match module.bearer_check_access(
-                vera,
-                block_ctx,
-                tx_ctx,
-                &call.bearerToken,
-                &policy_id_to_string(&call.policyId),
-                &request,
-            ) {
-                Ok(decision) => decision,
-                Err(error) => return Ok(err_dispatch(error)),
-            };
-            Ok(ok_dispatch(
-                WRITE_GAS,
-                IAcp::bearerCheckAccessCall::abi_encode_returns(&json_bytes(&decision)),
-                vec![],
-            ))
-        }
-
-        IAcp::checkAccessCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::checkAccessCall::abi_decode(input).map_err(decode_error)?;
-            let creator = did_from_signer(&tx_ctx.signer)?;
-            let policy_id = policy_id_to_string(&call.policyId);
-            let actor_did = did_from_actor(&call.actor)?;
-            let operations = build_operations(&call.resources, &call.objectIds, &call.permissions)?;
-            let access_request = AccessRequest {
-                operations,
-                actor: Actor(actor_did),
-            };
-
-            let decision =
-                match module.check_access(&creator, &policy_id, &access_request, block_ctx, tx_ctx)
-                {
-                    Ok(d) => d,
-                    Err(e) => return Ok(err_dispatch(e)),
-                };
-
-            let ret = IAcp::checkAccessCall::abi_encode_returns(&json_bytes(&decision));
-            Ok(ok_dispatch(WRITE_GAS, ret, vec![]))
-        }
-
-        IAcp::verifyAccessRequestCall::SELECTOR => {
-            if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::verifyAccessRequestCall::abi_decode(input).map_err(decode_error)?;
-            let policy_id = policy_id_to_string(&call.policyId);
-            let actor_did = did_from_actor(&call.actor)?;
-            let operations = build_operations(&call.resources, &call.objectIds, &call.permissions)?;
-            let access_request = AccessRequest {
-                operations,
-                actor: Actor(actor_did),
-            };
-
-            let allowed = match module.query_verify_access_request(&policy_id, &access_request) {
-                Ok(v) => v,
-                Err(e) => return Ok(err_dispatch(e)),
-            };
-
-            let ret = IAcp::verifyAccessRequestCall::abi_encode_returns(&allowed);
-            Ok(ok_dispatch(READ_GAS, ret, vec![]))
+        IAcp::bearerCheckAccessCall::SELECTOR
+        | IAcp::checkAccessCall::SELECTOR
+        | IAcp::verifyAccessRequestCall::SELECTOR => {
+            permissions::dispatch(module, vera, block_ctx, tx_ctx, input, gas_limit)
         }
 
         IAcp::bearerPolicyCmdCall::SELECTOR => {

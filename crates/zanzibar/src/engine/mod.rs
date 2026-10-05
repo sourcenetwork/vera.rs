@@ -1,7 +1,7 @@
 mod cache;
 mod evaluate;
 mod limits;
-pub use limits::{MAX_EVALUATION_DEPTH, MAX_EVALUATION_STEPS};
+pub use limits::{EvaluationMeter, MAX_EVALUATION_DEPTH, MAX_EVALUATION_STEPS};
 mod trace;
 
 use std::sync::Arc;
@@ -100,6 +100,7 @@ impl std::fmt::Display for StepResult {
 pub struct PermissionEngine<S: ZanzibarStore + ?Sized> {
     store: Arc<S>,
     pub lookup: PolicyLookupTable,
+    meter: Option<Arc<dyn EvaluationMeter>>,
 }
 
 impl<S: ZanzibarStore + ?Sized> PermissionEngine<S> {
@@ -107,7 +108,14 @@ impl<S: ZanzibarStore + ?Sized> PermissionEngine<S> {
         Self {
             store,
             lookup: PolicyLookupTable::new(),
+            meter: None,
         }
+    }
+
+    /// Attach caller accounting without changing per-check depth or step limits.
+    pub fn with_evaluation_meter(mut self, meter: Arc<dyn EvaluationMeter>) -> Self {
+        self.meter = Some(meter);
+        self
     }
 
     pub fn add_policy(&mut self, policy: &Policy) {
@@ -152,7 +160,7 @@ impl<S: ZanzibarStore + ?Sized> PermissionEngine<S> {
         let node_id = NodeId::new(resource, object_id, relation);
         let trail = NodeTrail::new().with_node(node_id);
 
-        let cache = Arc::new(CheckCache::new());
+        let cache = Arc::new(CheckCache::new(self.meter.clone()));
 
         let (granted, _tainted) = self
             .evaluate_expr_cached(
@@ -196,7 +204,7 @@ impl<S: ZanzibarStore + ?Sized> PermissionEngine<S> {
 
     /// Evaluate a batch with one shared cache and work budget.
     pub async fn check_many(&self, requests: &[PermissionCheckRequest<'_>]) -> Vec<Result<bool>> {
-        let cache = Arc::new(CheckCache::new());
+        let cache = Arc::new(CheckCache::new(self.meter.clone()));
 
         let mut results = Vec::with_capacity(requests.len());
 
@@ -252,7 +260,7 @@ impl<S: ZanzibarStore + ?Sized> PermissionEngine<S> {
         let node_id = NodeId::new(resource, object_id, relation);
         let trail = NodeTrail::new().with_node(node_id);
 
-        let cache = Arc::new(CheckCache::new());
+        let cache = Arc::new(CheckCache::new(self.meter.clone()));
         let mut trace = EvaluationTrace::new();
 
         let granted = self

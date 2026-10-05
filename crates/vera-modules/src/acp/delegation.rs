@@ -4,7 +4,7 @@ use vera_crypto::jwt::DelegationScope;
 
 use super::delegated_operation::DelegatedOperation;
 use super::operation::OperationRecord;
-use super::{AcpError, AcpModule, PolicyEditBudget, Result};
+use super::{AcpError, AcpModule, PermissionBudget, PolicyEditBudget, Result};
 use crate::acp::types::{
     AccessDecision, AccessRequest, PolicyCmd, PolicyCmdResult, PolicyMarshalingType, PolicyRecord,
     RecordMetadata,
@@ -154,11 +154,35 @@ impl AcpModule {
         policy_id: &str,
         request: &AccessRequest,
     ) -> Result<AccessDecision> {
+        self.bearer_check_access_with_budget(
+            vera,
+            context,
+            submission,
+            token,
+            policy_id,
+            request,
+            &PermissionBudget::new(u64::MAX),
+        )
+    }
+
+    /// Record or recover an authenticated decision using one caller-owned allowance.
+    #[allow(clippy::too_many_arguments)]
+    pub fn bearer_check_access_with_budget(
+        &mut self,
+        vera: &mut VeraModule,
+        context: &BlockExecCtx,
+        submission: &TxExecCtx,
+        token: &str,
+        policy_id: &str,
+        request: &AccessRequest,
+        budget: &PermissionBudget,
+    ) -> Result<AccessDecision> {
+        budget.request(policy_id, &submission.signer, request)?;
         let worker =
             Did::new(&submission.signer).map_err(|error| AcpError::InvalidBearerToken {
                 reason: error.to_string(),
             })?;
-        self.with_delegation(
+        let result = self.with_delegation_with_budget(
             vera,
             context,
             submission,
@@ -167,10 +191,14 @@ impl AcpModule {
                 DelegationScope::RecordAccessDecision,
                 DelegatedOperation::CheckAccess(policy_id, request).digest()?,
             ),
+            Some(&budget.records),
             |module, _hub, _caller| {
-                module.check_access(&worker, policy_id, request, context, submission)
+                module.check_access_with_budget(
+                    &worker, policy_id, request, context, submission, budget,
+                )
             },
-        )
+        );
+        budget.finish(result)
     }
 
     pub(crate) fn with_delegation<T: Serialize + DeserializeOwned>(

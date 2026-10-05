@@ -75,6 +75,27 @@ impl PolicyEditBudget {
         self.charge(200u64.saturating_add(bytes.div_ceil(BYTE_QUANTUM).saturating_mul(2)))
     }
 
+    pub(super) fn encode_borsh(
+        &self,
+        key: &[u8],
+        value: &impl borsh::BorshSerialize,
+    ) -> Result<Vec<u8>> {
+        self.write(key, None)?;
+        let mut output = BudgetedEncoding {
+            budget: self,
+            key_bytes: key.len(),
+            bytes: Vec::new(),
+        };
+        borsh::to_writer(&mut output, value).map_err(|error| {
+            if self.is_exhausted() {
+                AcpError::PolicyEditBudgetExceeded
+            } else {
+                AcpError::State(error.to_string())
+            }
+        })?;
+        Ok(output.bytes)
+    }
+
     pub(super) fn encode(&self, key: &[u8], value: &impl Serialize) -> Result<Vec<u8>> {
         self.write(key, None)?;
         let mut output = BudgetedEncoding {

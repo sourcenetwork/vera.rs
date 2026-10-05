@@ -190,9 +190,9 @@ fn leaf_preflight_rejects_malformed_heads_tails_and_parallel_lengths() {
 #[test]
 fn leaf_strings_share_the_batch_expansion_budget_across_nested_calls() {
     let input = aliased(
-        IAcp::verifyAccessRequestCall::SELECTOR,
-        3,
-        64,
+        IAcp::generateCommitmentCall::SELECTOR,
+        2,
+        128,
         &vec![b'x'; 32768],
     );
     batch::validate(&input).unwrap();
@@ -327,5 +327,25 @@ fn edit_abi_preflight_rejects_bad_offsets_and_lengths_without_allocating() {
             assert!(batch::validate(&malformed).is_err());
         }
         assert!(batch::validate(&valid[..4 + policy_head + 31]).is_err());
+    }
+}
+
+#[test]
+fn permission_leaf_bytes_are_bounded_before_alias_or_utf8_expansion() {
+    for selector in [
+        IAcp::checkAccessCall::SELECTOR,
+        IAcp::verifyAccessRequestCall::SELECTOR,
+    ] {
+        for (byte, width) in [(b'x', 1), (0xff, 3)] {
+            let count = 64;
+            let length = ((64 << 10) - ACTOR.len()) / (3 * count * width);
+            let exact = aliased(selector, 3, count, &vec![byte; length]);
+            batch::validate(&exact).unwrap();
+            assert!(owned_strings(&exact).iter().map(String::len).sum::<usize>() <= 64 << 10);
+            let oversized = aliased(selector, 3, count, &vec![byte; length + 1]);
+            assert!(oversized.len() < 64 << 10);
+            error(&oversized, "decoded bytes limit exceeded");
+            error(&batch(vec![oversized]), "decoded bytes limit exceeded");
+        }
     }
 }

@@ -7,7 +7,7 @@ use std::{
 
 use zanzibar::error::{Error, Result};
 
-use super::record_store::RecordStore;
+use super::{PermissionBudget, record_store::RecordStore};
 use crate::kv_store::InMemoryKvStore;
 
 /// A point read or complete prefix enumeration needed by an evaluation.
@@ -52,6 +52,7 @@ struct Capture {
 pub struct ReadCapture {
     snapshot: InMemoryKvStore,
     capture: Arc<Mutex<Capture>>,
+    budget: Option<PermissionBudget>,
 }
 
 impl ReadCapture {
@@ -59,12 +60,23 @@ impl ReadCapture {
     pub fn new(snapshot: InMemoryKvStore, limits: ReadLimits) -> Self {
         Self {
             snapshot,
+            budget: None,
             capture: Arc::new(Mutex::new(Capture {
                 remaining: limits,
                 requests: BTreeSet::new(),
                 failed: false,
             })),
         }
+    }
+
+    pub(super) fn with_budget(
+        snapshot: InMemoryKvStore,
+        limits: ReadLimits,
+        budget: PermissionBudget,
+    ) -> Self {
+        let mut capture = Self::new(snapshot, limits);
+        capture.budget = Some(budget);
+        capture
     }
 
     /// Return the distinct required reads, or an error if capture exceeded its budget.
@@ -112,8 +124,14 @@ impl ReadCapture {
 impl RecordStore for ReadCapture {
     fn read_record(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
         self.read(key, RecordRead::Key, |remaining| {
-            self.snapshot
-                .get_ref(key)
+            let value = self.snapshot.get_ref(key);
+            if let Some(budget) = &self.budget {
+                budget
+                    .records
+                    .read(key, value)
+                    .map_err(|error| Error::Serialization(error.to_string()))?;
+            }
+            value
                 .map(|value| {
                     consume(&mut remaining.records, 1)?;
                     consume(&mut remaining.bytes, value.len())?;
@@ -124,9 +142,21 @@ impl RecordStore for ReadCapture {
     }
 
     fn scan_records(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        if let Some(budget) = &self.budget {
+            budget
+                .records
+                .read(prefix, None)
+                .map_err(|error| Error::Serialization(error.to_string()))?;
+        }
         self.read(prefix, RecordRead::Prefix, |remaining| {
             let mut entries = Vec::new();
             for (key, value) in self.snapshot.prefix_iter(prefix) {
+                if let Some(budget) = &self.budget {
+                    budget
+                        .records
+                        .read(key, Some(value))
+                        .map_err(|error| Error::Serialization(error.to_string()))?;
+                }
                 consume(&mut remaining.records, 1)?;
                 consume(&mut remaining.bytes, key.len())?;
                 consume(&mut remaining.bytes, value.len())?;

@@ -54,6 +54,9 @@ pub enum AcpError {
     #[error("query work allowance exceeded")]
     QueryBudgetExceeded,
 
+    #[error("permission work allowance exceeded")]
+    PermissionBudgetExceeded,
+
     #[error("state error: {0}")]
     State(String),
 }

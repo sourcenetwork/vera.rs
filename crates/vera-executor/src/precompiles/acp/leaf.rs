@@ -5,6 +5,7 @@ use vera_modules::acp::{MAX_REGISTRATION_OBJECTS, decision::MAX_ACCESS_OPERATION
 
 pub(super) fn required_gas(input: &[u8]) -> Option<u64> {
     if input.starts_with(&IAcp::checkAccessCall::SELECTOR)
+        || input.starts_with(&IAcp::bearerCheckAccessCall::SELECTOR)
         || input.starts_with(&IAcp::editPolicyCall::SELECTOR)
         || input.starts_with(&IAcp::bearerEditPolicyCall::SELECTOR)
     {
@@ -23,6 +24,9 @@ pub(super) fn validate(input: &[u8], remaining: &mut usize) -> Result<(), Precom
         || input.starts_with(&IAcp::bearerEditPolicyCall::SELECTOR)
     {
         return policy_edit(input, remaining);
+    }
+    if input.starts_with(&IAcp::bearerCheckAccessCall::SELECTOR) {
+        return bearer_access(input, remaining);
     }
     let (arrays, maximum) = if input.starts_with(&IAcp::generateCommitmentCall::SELECTOR) {
         (2, MAX_REGISTRATION_OBJECTS)
@@ -55,13 +59,36 @@ pub(super) fn validate(input: &[u8], remaining: &mut usize) -> Result<(), Precom
         head.get(..length.checked_mul(32).ok_or_else(invalid)?)
             .ok_or_else(invalid)?;
     }
+    // Permission requests have their own bound, including repeated ABI tails.
+    let allowance = if arrays == 3 {
+        (*remaining).min(64 << 10)
+    } else {
+        *remaining
+    };
+    let mut fields_remaining = allowance;
     for head in &heads[..arrays] {
         for index in 0..count.unwrap_or(0) {
-            string(head, index * 32, remaining)?;
+            string(head, index * 32, &mut fields_remaining)?;
         }
     }
     // The actor string is decoded independently even when it aliases an array tail.
-    string(body, (arrays + 1) * 32, remaining)
+    string(body, (arrays + 1) * 32, &mut fields_remaining)?;
+    charge(remaining, allowance - fields_remaining)
+}
+
+fn bearer_access(input: &[u8], remaining: &mut usize) -> Result<(), PrecompileError> {
+    let body = &input[4..];
+    body.get(..3 * 32).ok_or_else(invalid)?;
+    let request = bytes(body, 64)?;
+    if request.len() > 64 << 10 {
+        return Err(PrecompileError::Other(
+            "access request exceeds byte limit".into(),
+        ));
+    }
+    charge(remaining, request.len())?;
+    let mut token_bytes = 16 * 1024;
+    string(body, 0, &mut token_bytes)?;
+    charge(remaining, 16 * 1024 - token_bytes)
 }
 
 // Match the compiler/JWT hard limits before owned ABI decoding. These bounds

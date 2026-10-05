@@ -17,7 +17,9 @@ pub mod pages;
 mod policy_edit;
 mod policy_edit_budget;
 pub use policy_edit_budget::PolicyEditBudget;
+mod permission_budget;
 mod policy_listing;
+pub use permission_budget::PermissionBudget;
 mod query_budget;
 pub use query_budget::QueryBudget;
 mod registration_queries;
@@ -230,6 +232,42 @@ impl AcpModule {
         block: &BlockExecCtx,
         tx: &TxExecCtx,
     ) -> Result<AccessDecision> {
+        self.check_access_with_budget(
+            creator,
+            policy_id,
+            access_request,
+            block,
+            tx,
+            &PermissionBudget::new(u64::MAX),
+        )
+    }
+
+    /// Record a decision after reserving request, evaluation and encoded-write work.
+    #[allow(clippy::too_many_arguments)]
+    pub fn check_access_with_budget(
+        &mut self,
+        creator: &Did,
+        policy_id: &str,
+        access_request: &AccessRequest,
+        block: &BlockExecCtx,
+        tx: &TxExecCtx,
+        budget: &PermissionBudget,
+    ) -> Result<AccessDecision> {
+        let result =
+            self.check_access_metered(creator, policy_id, access_request, block, tx, budget);
+        budget.finish(result)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn check_access_metered(
+        &mut self,
+        creator: &Did,
+        policy_id: &str,
+        access_request: &AccessRequest,
+        block: &BlockExecCtx,
+        tx: &TxExecCtx,
+        budget: &PermissionBudget,
+    ) -> Result<AccessDecision> {
         if tx.signer != creator.as_str()
             || block.timestamp.block_height == 0
             || block.timestamp.seconds == 0
@@ -238,6 +276,7 @@ impl AcpModule {
                 reason: "invalid decision execution context".into(),
             });
         }
+        budget.request(policy_id, creator.as_str(), access_request)?;
         let expected = decision::DecisionRequest {
             deployment_id: block.deployment_id,
             policy_id: policy_id.into(),
@@ -246,38 +285,7 @@ impl AcpModule {
             request: access_request.clone(),
         };
         let decision_id = expected.id()?;
-        let policy = self
-            .zanzibar_policies
-            .get(policy_id)
-            .cloned()
-            .ok_or_else(|| AcpError::PolicyNotFound {
-                id: policy_id.to_string(),
-            })?;
-
-        let actor_did = &access_request.actor.0;
-        let engine = self.permission_engine(&policy);
-
-        for op in &access_request.operations {
-            let granted = engine
-                .check_blocking(
-                    policy_id,
-                    &op.object.resource,
-                    &op.object.id,
-                    &op.permission,
-                    actor_did,
-                )
-                .map_err(|error| {
-                    AcpError::State(format!("permission evaluation failed: {error}"))
-                })?;
-            if !granted {
-                return Err(AcpError::Unauthorized {
-                    reason: format!(
-                        "actor {} denied {} on {}:{}",
-                        actor_did, op.permission, op.object.resource, op.object.id
-                    ),
-                });
-            }
-        }
+        self.evaluate_permission_request(policy_id, access_request, budget, true)?;
 
         let decision = AccessDecision {
             id: decision_id,
@@ -285,7 +293,7 @@ impl AcpModule {
             creator: creator.to_string(),
             creator_acc_sequence: tx.sequence,
             operations: access_request.operations.clone(),
-            actor: actor_did.to_string(),
+            actor: access_request.actor.0.to_string(),
             params: DecisionParams {
                 decision_expiration_delta: 100,
                 ticket_expiration_delta: 100,
@@ -295,7 +303,9 @@ impl AcpModule {
             issued_height: block.timestamp.block_height,
         };
 
-        self.set_access_decision(&decision)?;
+        let key = keys::access_decision_key(&decision.id);
+        let bytes = budget.records.encode_borsh(&key, &decision)?;
+        self.store.put(&key, bytes);
         Ok(decision)
     }
 
@@ -397,33 +407,65 @@ impl AcpModule {
         policy_id: &str,
         access_request: &AccessRequest,
     ) -> Result<bool> {
-        let policy =
-            self.zanzibar_policies
-                .get(policy_id)
+        self.query_verify_access_request_with_budget(
+            policy_id,
+            access_request,
+            &PermissionBudget::new(u64::MAX),
+        )
+    }
+
+    /// Evaluate permissions with one shared allowance across every requested operation.
+    pub fn query_verify_access_request_with_budget(
+        &self,
+        policy_id: &str,
+        access_request: &AccessRequest,
+        budget: &PermissionBudget,
+    ) -> Result<bool> {
+        budget.request(policy_id, "", access_request)?;
+        let result = self.evaluate_permission_request(policy_id, access_request, budget, false);
+        budget.finish(result)
+    }
+
+    fn evaluate_permission_request(
+        &self,
+        policy_id: &str,
+        request: &AccessRequest,
+        budget: &PermissionBudget,
+        decision: bool,
+    ) -> Result<bool> {
+        let capture = read_capture::ReadCapture::with_budget(
+            self.store.clone(),
+            read_capture::PERMISSION_READ_LIMITS,
+            budget.clone(),
+        );
+        let engine =
+            zanzibar_store::evaluation_engine(capture, policy_id, Some(Arc::new(budget.clone())))
+                .map_err(|error| budget.evaluation_error(error))?
                 .ok_or_else(|| AcpError::PolicyNotFound {
-                    id: policy_id.to_string(),
+                    id: policy_id.into(),
                 })?;
-
-        let actor_did = &access_request.actor.0;
-        let engine = self.permission_engine(policy);
-
-        for op in &access_request.operations {
+        for op in &request.operations {
             let granted = engine
                 .check_blocking(
                     policy_id,
                     &op.object.resource,
                     &op.object.id,
                     &op.permission,
-                    actor_did,
+                    &request.actor.0,
                 )
-                .map_err(|error| {
-                    AcpError::State(format!("permission evaluation failed: {error}"))
-                })?;
+                .map_err(|error| budget.evaluation_error(error))?;
             if !granted {
+                if decision {
+                    return Err(AcpError::Unauthorized {
+                        reason: format!(
+                            "actor {} denied {} on {}:{}",
+                            request.actor.0, op.permission, op.object.resource, op.object.id
+                        ),
+                    });
+                }
                 return Ok(false);
             }
         }
-
         Ok(true)
     }
 
@@ -724,15 +766,6 @@ impl AcpModule {
     // ── Storage — Replay cache ───────────────────────────────────────────
 
     // ── Storage — Access decisions ───────────────────────────────────────
-
-    #[allow(unused_variables)]
-    fn set_access_decision(&mut self, decision: &AccessDecision) -> Result<()> {
-        let bytes = borsh::to_vec(decision)
-            .map_err(|e| AcpError::State(format!("serialize AccessDecision: {e}")))?;
-        self.store
-            .put(&keys::access_decision_key(&decision.id), bytes);
-        Ok(())
-    }
 
     fn get_access_decision(&self, id: &str) -> Result<Option<AccessDecision>> {
         self.store
