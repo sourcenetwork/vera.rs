@@ -66,12 +66,18 @@ fn object_owner_requires_policy_scoped_evidence() {
     let mut request = json!({
         "kind": "object_owner", "trusted_key": "", "policy_id": policy,
         "object": {"resource": "file", "id": "report"}, "minimum_height": 1,
-        "proof": {"revision": revision, "proof": {"policy": policy_record, "prefix": prefix}}
+        "proof": {"revision": revision, "proof": {"policy": policy_record, "objects": [], "prefix": prefix}}
     });
     assert!(matches!(
         serde_json::from_value::<Request>(request.clone()),
         Ok(Request::ObjectOwner { .. })
     ));
+    let mut missing_objects = request.clone();
+    missing_objects["proof"]["proof"]
+        .as_object_mut()
+        .unwrap()
+        .remove("objects");
+    assert!(serde_json::from_value::<Request>(missing_objects).is_err());
     request["proof"] = json!({"revision": revision, "prefix": prefix});
     assert!(serde_json::from_value::<Request>(request.clone()).is_err());
     let output = verify(&serde_json::to_vec(&request).unwrap()).unwrap_err();
