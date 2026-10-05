@@ -368,6 +368,29 @@ scheduling, not isolated disk latency. The height is unknown until a database
 apply has been observed with diagnostics enabled. Diagnostics do not wait for
 or acknowledge a barrier earlier than the normal finalization path.
 
+### Offline measured-run replay
+
+Generate a standalone interactive HTML file from an existing recorded run; this
+requires only Python, with no browser packages or external web dependencies:
+
+```sh
+python3 tools/performance/replay.py /tmp/vera-performance-run \
+  --output /tmp/vera-workload-replay.html
+```
+
+The output must be a new file. The generator reuses `report.py` correctness gates
+and exits unsuccessfully after writing a clearly labelled failed or incomplete
+report when those gates do not pass. The scrubber shows measured RSS and receipt
+observations, with receipt times derived from the known arrival schedule plus
+recorded latency. RSS has a separate elapsed-clock origin; its exact offset is
+unavailable. Missing samples remain gaps; untimed outcomes and post-run proof and
+restart checks are not assigned invented timestamps. At most 1,000 actual receipt
+points are drawn; totals include every observation. Exact recorded source hashes,
+binary hashes and host details remain attached. Build details absent from the
+manifest stay unknown. This is a replay, not live telemetry, a capacity result or
+a measurement of consensus finality. Existing recordings retain their historical
+source identity when rendered by a newer checkout.
+
 ## Interpret the charts
 
 Receipt latency runs from scheduled arrival through verified confirmation. It
