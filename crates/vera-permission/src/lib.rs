@@ -1,6 +1,6 @@
 //! Native permission evidence replayed with the shared ACP evaluator.
 
-use std::{collections::BTreeMap, io::Write, sync::Mutex};
+use std::{collections::BTreeMap, sync::Mutex};
 
 use alloy_primitives::{B256, Bytes};
 use serde::{Deserialize, Serialize};
@@ -23,15 +23,23 @@ pub use vera_modules::types::Timestamp;
 /// Current-state point and complete-prefix evidence over Commonware storage.
 pub mod current;
 mod decision;
+mod encoded_size;
 pub use decision::{DecisionOperation, DecisionOutcome, DecisionRecord};
+pub use encoded_size::encoded_size;
 mod owner;
 pub use owner::object_owner_prefix;
 mod page;
+mod policy;
+mod policy_page;
+mod policy_prefix;
 mod prefix;
 pub use page::{
     MAX_PAGE_RECORDS, PAGE_DATA_BYTES, PAGE_PROOF_BYTES, PAGE_RESPONSE_BYTES, PrefixPageProof,
     PrefixPageRequest, PrefixPageResponse, VerifiedPrefixPage,
 };
+pub use policy::validate_policy_prefix;
+pub use policy_page::{PolicyPrefixPageProof, PolicyPrefixPageResponse};
+pub use policy_prefix::{PolicyPrefixProof, PolicyPrefixResponse};
 pub use prefix::{PrefixProof, PrefixResponse};
 mod record;
 pub use record::{RECORD_PROOF_BYTES, RECORD_RESPONSE_BYTES, RecordProof, RecordResponse};
@@ -142,26 +150,6 @@ pub fn validate_request(
         return Err(PermissionError::Limit);
     }
     encoded_size(&(policy, request), limits.request_bytes).map(|_| ())
-}
-
-/// Check serialized size without allocating another encoded copy.
-pub fn encoded_size(value: &impl Serialize, maximum: usize) -> Result<usize, PermissionError> {
-    struct Budget(usize);
-    impl Write for Budget {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0 = self
-                .0
-                .checked_sub(bytes.len())
-                .ok_or_else(|| std::io::Error::other("size limit"))?;
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    let mut budget = Budget(maximum);
-    serde_json::to_writer(&mut budget, value).map_err(|_| PermissionError::Limit)?;
-    Ok(maximum - budget.0)
 }
 
 /// Verify all evidence at a trusted revision and evaluate the caller's request.

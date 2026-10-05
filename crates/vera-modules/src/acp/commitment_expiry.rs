@@ -38,6 +38,7 @@ impl AcpModule {
         now: &Timestamp,
     ) -> Result<Vec<RegistrationsCommitment>> {
         let mut expired = Vec::new();
+        let mut retired = Vec::new();
         for (prefix, current) in [
             (SECONDS_PREFIX, now.seconds),
             (HEIGHT_PREFIX, now.block_height),
@@ -59,9 +60,26 @@ impl AcpModule {
                 if record.expired || Self::commitment_expiry_key(&record) != index {
                     return Err(AcpError::State("commitment expiry index mismatch".into()));
                 }
-                record.expired = true;
-                expired.push(record);
+                if let Some(policy) = self.retired_policy(&record.policy_id)? {
+                    if policy.phase > retirement::Phase::Commitments {
+                        return Err(AcpError::State(
+                            "retired policy retains a completed commitment phase".into(),
+                        ));
+                    }
+                    self.commitment_cleanup_keys(&record)?;
+                    record.expired = true;
+                    retired.push(record);
+                } else {
+                    record.expired = true;
+                    expired.push(record);
+                }
             }
+        }
+        for record in retired {
+            let bytes = borsh::to_vec(&record)
+                .map_err(|error| AcpError::State(format!("encode retired commitment: {error}")))?;
+            self.store.delete(&Self::commitment_expiry_key(&record));
+            self.store.put(&keys::commitment_key(record.id), bytes);
         }
         for record in &expired {
             self.update_commitment(record)?;

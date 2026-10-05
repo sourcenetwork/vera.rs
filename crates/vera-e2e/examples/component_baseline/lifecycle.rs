@@ -240,7 +240,17 @@ impl Fixture {
     }
 
     fn delete(&self, module: &mut AcpModule) -> bool {
-        module.delete_policy(&self.creator, &self.policy).unwrap()
+        let deleted = module.delete_policy(&self.creator, &self.policy).unwrap();
+        // Include physical cleanup so this metric retains its full-teardown scope.
+        while module.policy_cleanup_pending(&self.policy).unwrap() {
+            module
+                .end_blocker(&BlockExecCtx {
+                    timestamp: revision(6),
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        deleted
     }
 
     fn restore_and_check_unrelated(&self, module: &AcpModule) -> AcpModule {

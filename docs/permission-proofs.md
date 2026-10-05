@@ -2,7 +2,7 @@
 
 The native node serves a finalized revision and its Commonware permission evidence together through `vera_getCurrentPermissionProof`. `vera_getPermissionProof` accepts a caller-selected revision when its evidence is available. `vera_getCurrentRecordProof` provides native record membership and absence; `vera_getCurrentPrefixProof` proves complete current prefixes. The older `vera_getStateProof` and `vera_getRelationProof` endpoints require an explicitly configured legacy JMT server.
 
-On a JMT server, `vera_getRelationProof(prefix, height)` returns every ACP relationship record under a raw prefix, with evidence for completeness at the requested finalized height. `prefix` is a hex byte string beginning with `relationship/` and ending with `/`. For example, a relation prefix has the form `relationship/<policy-id>//rel/<resource>/<object>/<relation>/`.
+On a JMT server, `vera_getRelationProof(prefix, height)` returns every ACP relationship record under a raw prefix, with evidence for completeness at the requested finalized height. `prefix` is a hex byte string beginning with `relationship/v3/` and ending with `/`. A relation prefix has the form `relationship/v3/<policy-id>/v2/<resource-hex>/<object-hex>/<relation-hex>/`; use the canonical key builders.
 
 The response contains `version`, `count`, and `records`. Each uses the existing `ModuleStateProof` encoding. The version proof establishes the relationship-index format. The count proof establishes the number of records under the exact prefix, including archived records. Records must have distinct, ordered keys under that prefix, with an inclusion proof for each value. A missing count means zero only when the format marker is authenticated at the same revision.
 
@@ -14,11 +14,11 @@ The server uses current module keys as enumeration candidates and proves their v
 
 ## Index activation and recovery
 
-Execution initializes relationship-index format 1 in the first selected revision whose parent lacks the marker. It derives counts from the resulting ACP records, so existing relationships are included. The marker and counts are authenticated ACP tree entries under the reserved null-prefixed namespace `vera/relationship_index`. Ordinary module record updates cannot write that namespace. Each later execution derives count changes from record presence before and after the update; changing or archiving a value does not change its count.
+Execution initializes relationship-index format 2 in the first selected revision whose parent lacks the marker. Other retained format markers are rejected. It derives counts from the resulting ACP records, so existing relationships are included. The marker and counts are authenticated ACP tree entries under the reserved null-prefixed namespace `vera/relationship_index`. Ordinary module record updates cannot write that namespace. Each later execution derives count changes from record presence before and after the update; changing or archiving a value does not change its count.
 
-All slash-terminated relationship prefixes are counted, including delimiter ancestors. This preserves raw scan completeness even for legacy keys with extra separators. Counts and records enter the same branch-local tree update and durable revision. Pending alternatives do not change canonical counts, and revision rewind restores both together. Internal index entries are excluded from module record loading.
+All slash-terminated prefixes under `relationship/v3/` are counted, including delimiter ancestors. These counts establish physical scan completeness, including records awaiting policy cleanup. Counts and records enter the same branch-local tree update and durable revision. Pending alternatives do not change canonical counts, and revision rewind restores both together. Internal index entries are excluded from module record loading.
 
-Activation changes consensus execution and the next module commitment. Existing deployments require a coordinated operator upgrade. No disk rewrite changes a previously finalized root; pre-activation revisions remain readable but cannot provide this complete-prefix proof. This index does not replace the underlying storage engine or supply historical key enumeration.
+Activation changes consensus execution and the next module commitment. This format targets fresh state; old relationship namespaces and older index markers have no automatic migration path. No disk rewrite changes a previously finalized root. This index does not replace the underlying storage engine or supply historical key enumeration.
 
 ## Native record reads
 
@@ -69,13 +69,43 @@ scans fail; they do not return a partial list. Selection and certificate lookup
 share a two-second deadline whose exceed is a retryable `RESOURCE_UNAVAILABLE`
 error. Callers supply any additional revision-age policy.
 
-`object_owner_prefix(policy, object)` rejects ambiguous path components.
-`PrefixResponse::verify_object_owner` verifies the complete owner relation,
-checks each record against its canonical key and the requested policy/object,
-and returns the single live actor. Archived records remain in the evidence but
-do not register the object. Empty or entirely archived ownership returns `None`;
-malformed records, conflicting live owners and unavailable evidence are errors.
-Ownership alone does not replace permission evaluation.
+Generic record, prefix and page proofs describe physical storage. Deleted policies
+can retain relationship records while bounded cleanup runs, so physical inclusion
+alone does not establish current ownership or policy membership.
+
+`vera_getCurrentPolicyPrefixProof(policy, prefix, minimum_height)` returns
+`PolicyPrefixResponse`: a finalized `revision` and `proof` containing the policy
+record witness and complete relationship-prefix witness. The server captures both
+under the same partition locks. `VeraClient::read_current_policy_prefix` and
+`PolicyPrefixResponse::verify` authenticate the policy key, relationship prefix,
+identical roots, finality and minimum revision. The policy witness shares the
+existing 4 MiB proof, 4,096-record and 1 MiB read budgets with the prefix; it is not
+an additional allowance. Certified policy absence returns `None`, even when
+physical relationships remain. Invalid or unavailable evidence remains an error.
+
+`object_owner_prefix(policy, object)` constructs the canonical owner prefix.
+`PolicyPrefixResponse::verify_object_owner` also checks each relationship against
+its canonical key and requested policy/object, returning the single live actor.
+Absent policies, empty ownership and entirely archived ownership return `None`.
+Malformed records, conflicting live owners and unavailable evidence are errors.
+Ownership alone does not replace permission evaluation. Set the minimum revision
+to the finalized deletion height when a read must observe that deletion.
+
+`vera_getCurrentPolicyPrefixPageProof(policy, request, minimum_height)` returns
+`PolicyPrefixPageResponse`, pairing the policy witness with one relationship page.
+The request uses the ACP module and a prefix belonging to that policy. Both proofs
+share the existing 8 MiB encoded page-proof budget and one finalized root.
+`VeraClient::read_current_policy_prefix_page` verifies the combined response;
+`read_relationship_page` additionally decodes typed relationship records. Certified
+policy absence yields no records or continuation. The page limits and revision
+rules below still apply; pages do not create a historical snapshot.
+
+These policy-scoped responses replace raw prefix responses for ownership and
+current relationship interpretation. Existing raw proof endpoints remain available
+for storage inspection. Fresh state uses the incompatible outer
+[`relationship/v3/` namespace](native-relationship-keys.md); updating consumers
+requires both its key builders and policy-liveness verification. Receipt and
+finality proof formats are unchanged.
 
 ## Permission requests
 

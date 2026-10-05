@@ -8,8 +8,8 @@
 pub const POLICY_PREFIX: &[u8] = b"policy/objs/";
 /// Policy autoincrement counter key.
 pub const POLICY_COUNTER_KEY: &[u8] = b"policy/counter/id";
-/// Relationship prefix: `relationship/ + policy_id + "/" + storage_key`.
-pub const RELATIONSHIP_PREFIX: &[u8] = b"relationship/";
+/// Current native relationship namespace; older namespaces are not migrated.
+pub const RELATIONSHIP_PREFIX: &[u8] = b"relationship/v3/";
 /// Access decision prefix (string-keyed objects).
 pub const ACCESS_DECISION_PREFIX: &[u8] = b"access_decision/";
 /// Registration commitment prefix (auto-increment objects).
@@ -69,7 +69,7 @@ pub fn relation_prefix(resource: &str, object_id: &str, relation: &str) -> Strin
     )
 }
 
-/// Relationship key: `"relationship/" + policy_id + "/" + storage_key`.
+/// Relationship key: `"relationship/v3/" + policy_id + "/" + storage_key`.
 pub fn relationship_key(policy_id: &str, storage_key: &str) -> Vec<u8> {
     let mut key = Vec::from(RELATIONSHIP_PREFIX);
     key.extend_from_slice(policy_id.as_bytes());

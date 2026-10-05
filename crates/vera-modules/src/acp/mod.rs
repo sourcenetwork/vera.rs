@@ -15,6 +15,8 @@ pub mod pages;
 mod registration_queries;
 mod relationship_queries;
 mod restoration;
+mod retirement;
+mod retirement_cleanup;
 pub mod theorem;
 pub use registration_queries::{MAX_REGISTRATION_LEAF_BYTES, MAX_REGISTRATION_OBJECTS};
 pub mod decision;
@@ -65,7 +67,10 @@ type Result<T> = std::result::Result<T, AcpError>;
 /// ```text
 /// "policy/objs/" + policy_id                           → PolicyRecord (serde_json)
 /// "policy/counter/id"                                  → u64 BE
-/// "relationship/" + policy_id + "/" + storage_key       → RelationshipRecord (serde_json)
+/// "policy/retired/" + policy_id                         → RetiredPolicy (Borsh)
+/// "policy/cleanup/queue/" + BE(sequence)                → policy_id
+/// "policy/cleanup/counter"                             → u64 BE
+/// "relationship/v3/" + policy_id + "/" + storage_key    → RelationshipRecord (serde_json)
 /// "access_decision/" + decision_id                     → AccessDecision (Borsh)
 /// "commitment/objs/" + BE(id)                          → RegistrationsCommitment (Borsh)
 /// "commitment/counter/id"                              → u64 BE
@@ -176,7 +181,9 @@ impl AcpModule {
         };
 
         let policy_id = zanzibar_policy.id.clone();
-        if self.store.has(&keys::policy_key(&policy_id)) {
+        if self.store.has(&keys::policy_key(&policy_id))
+            || self.retired_policy(&policy_id)?.is_some()
+        {
             return Err(AcpError::State("policy identifier already exists".into()));
         }
         self.store
@@ -387,6 +394,7 @@ impl AcpModule {
         policy_id: &str,
         cmd: PolicyCmd,
     ) -> Result<PolicyCmdResult> {
+        self.query_policy(policy_id)?;
         let object_id = match &cmd {
             PolicyCmd::SetRelationship(rel) | PolicyCmd::DeleteRelationship(rel) => {
                 Some(rel.object_id.as_str())
@@ -589,6 +597,9 @@ impl AcpModule {
         policy_id: &str,
         object: &Object,
     ) -> Result<(bool, Option<RelationshipRecord>)> {
+        if self.get_policy_record(policy_id)?.is_none() {
+            return Ok((false, None));
+        }
         let owner_rec = self.registration_owner_record(policy_id, object)?;
 
         match owner_rec {
@@ -600,8 +611,13 @@ impl AcpModule {
     /// Fetch a registration commitment by its autoincrement ID.
     #[allow(unused_variables)]
     pub fn query_registrations_commitment(&self, id: u64) -> Result<RegistrationsCommitment> {
-        self.get_commitment_by_id(id)?
-            .ok_or(AcpError::CommitmentNotFound { id })
+        let record = self
+            .get_commitment_by_id(id)?
+            .ok_or(AcpError::CommitmentNotFound { id })?;
+        if self.get_policy_record(&record.policy_id)?.is_none() {
+            return Err(AcpError::CommitmentNotFound { id });
+        }
+        Ok(record)
     }
 
     /// Find registration commitments matching a commitment byte value.
@@ -640,6 +656,9 @@ impl AcpModule {
     /// List amendment events flagged as hijack attempts for a policy.
     #[allow(unused_variables)]
     pub fn query_hijack_attempts_by_policy(&self, policy_id: &str) -> Result<Vec<AmendmentEvent>> {
+        if self.get_policy_record(policy_id)?.is_none() {
+            return Ok(Vec::new());
+        }
         self.list_hijack_events_by_policy(policy_id)
     }
 
@@ -655,8 +674,12 @@ impl AcpModule {
         &mut self,
         block_ctx: &BlockExecCtx,
     ) -> Result<Vec<RegistrationsCommitment>> {
-        self.prune_operations(block_ctx.timestamp.seconds)?;
-        self.expire_commitments(&block_ctx.timestamp)
+        let mut candidate = self.clone();
+        candidate.prune_operations(block_ctx.timestamp.seconds)?;
+        let expired = candidate.expire_commitments(&block_ctx.timestamp)?;
+        candidate.collect_retired_policies()?;
+        *self = candidate;
+        Ok(expired)
     }
 
     // ── Storage access methods ──────────────────────────────────────────

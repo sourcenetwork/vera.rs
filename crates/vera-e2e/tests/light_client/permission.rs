@@ -167,7 +167,7 @@ pub(super) async fn check_permissions(
         .is_err()
     );
     let blocked_prefix = format!(
-        "relationship/{policy}/{}",
+        "relationship/v3/{policy}/{}",
         vera_modules::acp::keys::relation_prefix("document", "doc1", "blocked")
     );
     assert_eq!(prefix(&denied, &blocked_prefix).entries.len(), 1);

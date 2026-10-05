@@ -12,6 +12,7 @@ use vera_domain::{LightBlock, ModuleId, ModuleStateProof, RelationPrefixProof};
 mod admission_tests;
 mod page;
 mod permission;
+mod policy;
 mod prefix;
 mod receipt;
 mod record;
@@ -20,8 +21,8 @@ mod state_proof;
 use vera_executor::{ModuleTrees, SharedModuleState};
 use vera_indexer::{BlockIndex, LightBlockIndex};
 use vera_permission::{
-    AccessRequest, PermissionProof, PermissionResponse, PrefixPageRequest, PrefixPageResponse,
-    PrefixResponse, RecordResponse,
+    AccessRequest, PermissionProof, PermissionResponse, PolicyPrefixPageResponse,
+    PolicyPrefixResponse, PrefixPageRequest, PrefixPageResponse, PrefixResponse, RecordResponse,
 };
 
 use crate::{
@@ -138,6 +139,24 @@ pub trait VeraApi {
         request: PrefixPageRequest,
         minimum_height: U64,
     ) -> RpcResult<PrefixPageResponse>;
+
+    /// Capture policy liveness and a complete relationship prefix at one finalized revision.
+    #[method(name = "getCurrentPolicyPrefixProof")]
+    async fn get_current_policy_prefix_proof(
+        &self,
+        policy: String,
+        prefix: Bytes,
+        minimum_height: U64,
+    ) -> RpcResult<PolicyPrefixResponse>;
+
+    /// Capture policy liveness and a bounded relationship page at one finalized revision.
+    #[method(name = "getCurrentPolicyPrefixPageProof")]
+    async fn get_current_policy_prefix_page_proof(
+        &self,
+        policy: String,
+        request: PrefixPageRequest,
+        minimum_height: U64,
+    ) -> RpcResult<PolicyPrefixPageResponse>;
 
     /// Returns a light block at the given height.
     ///
@@ -445,6 +464,28 @@ impl VeraApiServer for VeraApiImpl {
     ) -> RpcResult<PrefixPageResponse> {
         let _permit = self.state.proof_permit()?;
         self.current_prefix_page_proof(&request, minimum_height.to())
+            .await
+    }
+
+    async fn get_current_policy_prefix_proof(
+        &self,
+        policy: String,
+        prefix: Bytes,
+        minimum_height: U64,
+    ) -> RpcResult<PolicyPrefixResponse> {
+        let _request = self.state.permission_read_permit()?;
+        self.current_policy_prefix_proof(&policy, &prefix, minimum_height.to())
+            .await
+    }
+
+    async fn get_current_policy_prefix_page_proof(
+        &self,
+        policy: String,
+        request: PrefixPageRequest,
+        minimum_height: U64,
+    ) -> RpcResult<PolicyPrefixPageResponse> {
+        let _request = self.state.permission_read_permit()?;
+        self.current_policy_prefix_page_proof(&policy, &request, minimum_height.to())
             .await
     }
 

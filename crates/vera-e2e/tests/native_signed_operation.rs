@@ -3,7 +3,7 @@
 use alloy_sol_types::SolCall;
 use k256::ecdsa::SigningKey;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use vera_client::{ACP_ADDRESS, BlsSigner, ModuleId, RECORD_PROOF_BYTES, VeraClient};
+use vera_client::{ACP_ADDRESS, BlsSigner, RECORD_PROOF_BYTES, VeraClient};
 use vera_crypto::{
     jwt::{DelegationScope, JwtClaims},
     operation::{OperationClaim, OperationId},
@@ -181,8 +181,8 @@ async fn actor_signed_command_rejects_substitution_and_deduplicates_across_worke
     let retried = submit(&client, &other, &trusted, call(retry, &command), true).await;
     let prefix = vera_client::object_owner_prefix(&policy.policy.id, &object).unwrap();
     let owner = client
-        .read_current_prefix(
-            ModuleId::Acp,
+        .read_current_policy_prefix(
+            &policy.policy.id,
             &prefix,
             retried,
             &trusted,
@@ -201,13 +201,14 @@ async fn actor_signed_command_rejects_substitution_and_deduplicates_across_worke
     );
     let records = owner
         .verify(
-            ModuleId::Acp,
+            &policy.policy.id,
             &prefix,
             retried,
             &trusted,
             RECORD_PROOF_BYTES,
         )
         .unwrap();
+    let records = records.expect("policy remains live");
     assert_eq!(records.entries.len(), 1);
     let record: vera_modules::acp::types::RelationshipRecord =
         serde_json::from_slice(&records.entries[0].value).unwrap();
@@ -321,8 +322,8 @@ async fn actor_signed_command_rejects_substitution_and_deduplicates_across_worke
     .await;
     let prefix = vera_client::object_owner_prefix(&policy.policy.id, &unused_object).unwrap();
     let absent = client
-        .read_current_prefix(
-            ModuleId::Acp,
+        .read_current_policy_prefix(
+            &policy.policy.id,
             &prefix,
             rejected,
             &trusted,

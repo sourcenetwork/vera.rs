@@ -18,7 +18,7 @@ The reference is Go `acp_core` v0.8.2, used by Go Vera at
 | EditPolicyMetadata | `edit_policy_metadata`; replaces supplied attributes/blob |
 | GetPolicy / ListPolicies | `query_policy`, `query_policies`, `query_policies_page` |
 | ValidatePolicy | `query_validate_policy`, `validate_policy_definition` |
-| DeletePolicy | `delete_policy`; policy creator authorization and dependent-record cleanup |
+| DeletePolicy | `delete_policy`; creator-authorized logical deletion and bounded record cleanup |
 | SetRelationship / DeleteRelationship | `execute_policy_cmd`; typed actor, wildcard, object and userset subjects |
 | FilterRelationships | `query_filter_relationships`, `query_relationships_page` with structured selectors |
 | RegisterObject / ArchiveObject / UnarchiveObject | `execute_policy_cmd` |
@@ -62,8 +62,9 @@ unarchive restores ownership without restoring deleted grants.
 
 Definition edits prune both removed relations and grants whose usersets refer to
 removed relations. Recreating a relation cannot resurrect those deleted edges.
-Policy deletion removes its relationships, pending commitments and amendment
-indexes. Historical access decisions and finalized receipts remain audit records.
+Policy deletion atomically removes the active policy and its authorization
+visibility. Physical records are reclaimed as described below. Historical access
+decisions and finalized receipts remain audit records.
 
 Native policy creation records the actual actor, signer, submission and execution
 revision. Definition/metadata edits record their last-modified revision. Optional
@@ -99,11 +100,12 @@ This is a feature port, not a claim of identical transport or parser behavior:
   live RPC calls can observe different revisions. Unpaged queries reject oversized
   results rather than silently truncate. For larger catalogues, enumerate the
   relationship pages and combine them with the policy's declared resources.
-- Policy deletion scans only that policy's relationships and its commitment and
-  amendment indexes; definition edits scan only its relationships. The lifecycle
-  component workload measures these costs. Target-policy size remains unbounded
-  under the fixed execution charge; these measurements do not establish a
-  production mutation limit or load guarantee.
+- Definition edits still scan the target policy's relationships and apply all
+  pruning atomically. Their execution charge does not grow with that work.
+  Scalable, bounded editing remains unresolved; bounded deletion does not qualify
+  large-policy edits or establish a production mutation limit. The lifecycle
+  component workload measures edit cost and full deletion teardown, including
+  cleanup.
 
 The commitment policy index is persisted in authenticated state, including for
 expired commitments. It changes execution roots when commitments are written.
@@ -111,10 +113,46 @@ All validators must use the same indexing rules. Fresh deployments create the
 index with each commitment. Native restoration rejects retained commitments
 without it.
 There is no index backfill or fallback scan. Commitment record encodings and
-client proof formats are unchanged.
+individual record proofs are unchanged.
 
 ACP v1 edits use finalized execution order. They do not implement offline policy
 branch merging, causal policy pins, or the separate ACP v2 design.
+
+## Policy deletion and cleanup
+
+`delete_policy` checks the policy creator, removes the active policy record and
+compiled policy, and enqueues cleanup in one atomic operation. Repeating deletion
+returns `false` without adding another job. Ownership, relationships, commitments,
+amendments and policy commands stop being available through policy-aware APIs at
+that execution revision. Recreating the same definition allocates a new policy ID;
+it cannot recover grants from the deleted policy.
+
+Cleanup runs deterministically after each block. A persistent FIFO queue gives a
+policy up to 16 records per visit, with at most eight visits per tick. Across those
+visits, cleanup reserves at most 128 logical records, 4 MiB of inspected and
+written bytes, and 640 writes. Metadata work counts against these budgets.
+Unserved jobs keep their turn when the budget runs out, and a maximum-size valid
+native record can make progress with a fresh budget. Cleanup follows the policy's
+relationship, commitment and amendment indexes; it does not scan unrelated
+policies.
+
+Commitments are removed with their policy, root and expiry indexes. Expiry of a
+retired commitment cannot recreate those indexes. The retirement marker and queue
+entry disappear when cleanup finishes. Recovery validates their counters,
+references and completed phases. Corruption aborts the maintenance tick without
+publishing partial cleanup, expiry or operation-pruning changes. Cleanup budgets
+are separate from existing expiry and operation-pruning limits and from request
+execution units. The number of ticks required grows with retained data and queued
+policies.
+
+Physical records can remain after logical deletion. Certified ownership and
+relationship clients must verify the policy's presence at the same revision as
+those records, using the [policy proof APIs](permission-proofs.md#native-prefix-and-owner-reads).
+Generic record and prefix evidence authenticates physical storage only.
+Relationships use the fresh-state `relationship/v3/` namespace; restore rejects
+older namespaces rather than migrating them. Validators and consumers must use
+matching [key and proof formats](native-relationship-keys.md). Receipt and finality
+formats are unchanged.
 
 ## Batch dispatch limits
 

@@ -4,12 +4,12 @@ use sha2::{Digest, Sha256};
 
 /// Authenticated format marker, excluded from module record loading.
 pub const RELATION_INDEX_VERSION_KEY: &[u8] = b"\0vera/relationship_index/version";
-/// Index format activated by deterministic execution, including existing records.
-pub const RELATION_INDEX_VERSION: &[u8] = &[1];
+/// Index format activated by deterministic execution, for the current relationship namespace.
+pub const RELATION_INDEX_VERSION: &[u8] = &[2];
 const COUNT_NAMESPACE: &[u8] = b"\0vera/relationship_index/count/";
-const RELATIONSHIP_PREFIX: &[u8] = b"relationship/";
+const RELATIONSHIP_PREFIX: &[u8] = b"relationship/v3/";
 
-/// Whether this prefix has an authenticated count in format 1.
+/// Whether this prefix has an authenticated count in format 2.
 pub fn is_relation_prefix(prefix: &[u8]) -> bool {
     prefix.starts_with(RELATIONSHIP_PREFIX) && prefix.ends_with(b"/")
 }
