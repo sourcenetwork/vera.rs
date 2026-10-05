@@ -1866,13 +1866,22 @@ resources:
             .unwrap();
         let relationship =
             Relationship::with_entity("document", "large", "reader", creator.clone());
-        module.store.put(
-            &keys::relationship_key(
-                &policy.policy.id,
-                &keys::relationship_storage_key(&relationship),
-            ),
-            vec![b' '; read_capture::PERMISSION_READ_LIMITS.bytes + 1],
+        let generations = policy.relations.pair(&relationship).unwrap();
+        let key = keys::relationship_generation_key(
+            &policy.policy.id,
+            generations,
+            &keys::relationship_storage_key(&relationship),
         );
+        module
+            .set_relationship(&RelationshipRecord {
+                generations,
+                supplied_metadata: Default::default(),
+                policy_id: policy.policy.id.clone(),
+                relationship,
+                archived: false,
+                metadata: policy.metadata.clone(),
+            })
+            .unwrap();
         let mut request = AccessRequest {
             operations: vec![types::Operation {
                 object: Object {
@@ -1883,6 +1892,17 @@ resources:
             }],
             actor: Actor(creator.clone()),
         };
+        // No owner record can bypass the reader bucket. Establish that the
+        // indexed current-generation grant is reachable before corrupting it.
+        assert!(
+            module
+                .query_verify_access_request(&policy.policy.id, &request)
+                .unwrap()
+        );
+        module.store.put(
+            &key,
+            vec![b' '; read_capture::PERMISSION_READ_LIMITS.bytes + 1],
+        );
         let before = module.store.serialize();
         for result in [
             module

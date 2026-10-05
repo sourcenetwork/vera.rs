@@ -7,7 +7,11 @@ use vera_client::{
 };
 use vera_domain::{ConsensusPublicKey, verify_light_block};
 use vera_e2e::cluster::TestCluster;
-use vera_modules::acp::abi::IAcp;
+use vera_modules::acp::{
+    abi::IAcp,
+    keys, relationship_index,
+    types::{PolicyRecord, RelationPair},
+};
 
 pub(super) const READER_DID: &str = "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH";
 
@@ -166,10 +170,7 @@ pub(super) async fn check_permissions(
         )
         .is_err()
     );
-    let blocked_prefix = format!(
-        "relationship/v3/{policy}/{}",
-        vera_modules::acp::keys::relation_prefix("document", "doc1", "blocked")
-    );
+    let blocked_prefix = relation_prefix(&denied, policy, "blocked", Some("blocked"));
     assert_eq!(prefix(&denied, &blocked_prefix).entries.len(), 1);
     remove_prefix_records(&mut denied, &blocked_prefix);
     assert!(
@@ -211,6 +212,56 @@ pub(super) async fn evidence(
         )
         .await
         .unwrap()
+}
+
+fn policy_record(proof: &PermissionProof, policy: &str) -> PolicyRecord {
+    let expected = keys::policy_key(policy);
+    let value = proof
+        .reads
+        .iter()
+        .find_map(|read| match read {
+            PermissionRead::CurrentPoint { key, value, .. } if key.as_ref() == expected => {
+                value.as_ref()
+            }
+            _ => None,
+        })
+        .expect("policy from verified permission evidence");
+    serde_json::from_slice(value).unwrap()
+}
+
+pub(super) fn relation_prefix(
+    proof: &PermissionProof,
+    policy: &str,
+    relation: &str,
+    subject_relation: Option<&str>,
+) -> String {
+    let record = policy_record(proof, policy);
+    let pair = RelationPair {
+        target: record.relations.generation("document", relation).unwrap(),
+        subject: subject_relation
+            .map(|name| record.relations.generation("document", name).unwrap())
+            .unwrap_or(0),
+    };
+    String::from_utf8(keys::relationship_generation_prefix(
+        policy,
+        pair,
+        &keys::relation_prefix("document", "doc1", relation),
+    ))
+    .unwrap()
+}
+
+pub(super) fn assert_absent_relation_directory(
+    proof: &PermissionProof,
+    policy: &str,
+    relation: &str,
+) {
+    let record = policy_record(proof, policy);
+    let generation = record.relations.generation("document", relation).unwrap();
+    let expected = relationship_index::active_key(policy, generation);
+    assert!(proof.reads.iter().any(|read| matches!(
+        read,
+        PermissionRead::CurrentPoint { key, value: None, .. } if key.as_ref() == expected
+    )));
 }
 
 pub(super) fn prefix(
