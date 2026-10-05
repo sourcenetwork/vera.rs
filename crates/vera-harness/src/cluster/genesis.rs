@@ -113,7 +113,7 @@ pub struct GenesisBuilder {
     contracts: Vec<GenesisContract>,
     extra_storage: Vec<GenesisStorage>,
     epoch_info: Option<String>,
-    blocks_per_epoch: u64,
+    blocks_per_epoch: Option<u64>,
     simplex: Option<vera_domain::SimplexParameters>,
 }
 
@@ -129,7 +129,7 @@ impl Default for GenesisBuilder {
             contracts: Vec::new(),
             extra_storage: Vec::new(),
             epoch_info: None,
-            blocks_per_epoch: 20,
+            blocks_per_epoch: None,
             simplex: None,
         }
     }
@@ -166,7 +166,7 @@ impl GenesisBuilder {
             contracts: Vec::new(),
             extra_storage: Vec::new(),
             epoch_info: None,
-            blocks_per_epoch: 20,
+            blocks_per_epoch: None,
             simplex: None,
         }
     }
@@ -279,18 +279,25 @@ impl GenesisBuilder {
     /// Set the number of blocks in each DKG epoch.
     #[must_use]
     pub const fn blocks_per_epoch(mut self, blocks_per_epoch: u64) -> Self {
-        self.blocks_per_epoch = blocks_per_epoch;
+        self.blocks_per_epoch = Some(blocks_per_epoch);
         self
     }
 
     /// Configure bounded stable-leader consensus for this deployment.
+    /// Unless explicitly set, the epoch length becomes 192 blocks.
     pub const fn simplex(mut self, parameters: vera_domain::SimplexParameters) -> Self {
         self.simplex = Some(parameters);
         self
     }
 
+    fn epoch_length(&self) -> u64 {
+        self.blocks_per_epoch
+            .unwrap_or(if self.simplex.is_some() { 192 } else { 20 })
+    }
+
     /// Build the genesis configuration.
     pub fn build(self) -> VeraGenesis {
+        let blocks_per_epoch = self.epoch_length();
         VeraGenesis {
             chain_id: self.chain_id,
             operators: self.operators.clone(),
@@ -302,7 +309,7 @@ impl GenesisBuilder {
             contracts: self.contracts,
             extra_storage: self.extra_storage,
             epoch_info: self.epoch_info,
-            blocks_per_epoch: self.blocks_per_epoch,
+            blocks_per_epoch,
             simplex: self.simplex,
         }
     }
@@ -320,7 +327,7 @@ impl GenesisBuilder {
             contracts: self.contracts.clone(),
             extra_storage: self.extra_storage.clone(),
             epoch_info: self.epoch_info.clone(),
-            blocks_per_epoch: self.blocks_per_epoch,
+            blocks_per_epoch: self.epoch_length(),
             simplex: self.simplex,
         };
 
@@ -378,6 +385,47 @@ mod tests {
 
         assert_eq!(genesis.contracts.len(), 1);
         assert_eq!(genesis.extra_storage.len(), 1);
+    }
+
+    #[test]
+    fn pipelined_epoch_default_preserves_explicit_lengths() {
+        let parameters = vera_domain::SimplexParameters::default();
+        assert_eq!(GenesisBuilder::devnet().build().blocks_per_epoch, 20);
+        assert_eq!(
+            GenesisBuilder::devnet()
+                .simplex(parameters)
+                .build()
+                .blocks_per_epoch,
+            192
+        );
+        for builder in [
+            GenesisBuilder::devnet()
+                .blocks_per_epoch(20)
+                .simplex(parameters),
+            GenesisBuilder::devnet()
+                .simplex(parameters)
+                .blocks_per_epoch(20),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            assert_eq!(
+                builder
+                    .build_and_write(dir.path())
+                    .unwrap()
+                    .blocks_per_epoch,
+                20
+            );
+            assert_eq!(builder.build().blocks_per_epoch, 20);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let generated = GenesisBuilder::devnet()
+            .simplex(parameters)
+            .build_and_write(dir.path())
+            .unwrap();
+        let serialized: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.path().join("genesis.json")).unwrap())
+                .unwrap();
+        assert_eq!(generated.blocks_per_epoch, 192);
+        assert_eq!(serialized["blocks_per_epoch"], 192);
     }
 
     #[test]

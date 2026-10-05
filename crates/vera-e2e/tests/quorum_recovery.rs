@@ -21,7 +21,9 @@ async fn quorum_recovery(pipelined: bool) {
     let deployment = if pipelined { 9082 } else { 9081 };
     let mut genesis = GenesisBuilder::devnet();
     if pipelined {
-        genesis = genesis.simplex(vera_domain::SimplexParameters::default());
+        genesis = genesis
+            .blocks_per_epoch(192)
+            .simplex(vera_domain::SimplexParameters::default());
     }
     let trusted = *KeySet::builder()
         .seed(deployment)
@@ -107,7 +109,7 @@ async fn quorum_recovery(pipelined: bool) {
     if pipelined {
         cluster
             .observe(Duration::from_millis(100))
-            .wait_for_height(45, Duration::from_secs(60))
+            .wait_for_height(2 * 192 + 5, Duration::from_secs(240))
             .await
             .unwrap();
     }

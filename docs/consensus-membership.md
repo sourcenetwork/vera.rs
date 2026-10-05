@@ -15,8 +15,14 @@ malformed values and inconsistent array/record links are errors.
 
 The active committee is also bounded by the configured epoch length. Commonware
 requires its dealer quorum to fit between the dealing phase and the final epoch
-artifact. For example, 20 revisions per epoch permit 13 active members; 87 permit
-the protocol maximum of 64. Additions and reactivations that exceed this capacity
+artifact. With rotating leaders, 20 revisions per epoch permit 13 active members;
+87 permit the protocol maximum of 64. With stable leaders, the inclusion window
+must offer each dealer a proposing term because a proposer supplies only its own
+log. For an epoch length `B` and term length `L`, the window has
+`S = B - floor(B / 2) - 1` blocks and permits at most `ceil(S / L)` members,
+capped at 64. This assumes contiguous successful views and ready dealer logs.
+Skipped terms or delayed dealing can still fail a ceremony; the previous voting
+committee and shares remain effective until resharing succeeds. Additions and reactivations that exceed this capacity
 are rejected during command execution. Inactive entries do not use active
 committee capacity. Startup rejects a genesis committee that exceeds it.
 
@@ -78,7 +84,9 @@ member. A subsequent native write finalizes with the incoming member needed for
 quorum. It then kills and restarts the admitted process using its persisted share,
 deactivates and removes the unavailable original member, and verifies the reduced
 committee under the same consensus identity. Finalization continues after a
-second original process stops. Interruption during the admission ceremony,
+second original process stops. The pipelined variant uses 192-block epochs with
+16-view terms and repeats the same effective-membership, polynomial-change,
+restart and required-quorum assertions. Interruption during the admission ceremony,
 power-loss behavior and broader network/storage faults require additional
 qualification.
 
@@ -111,12 +119,21 @@ parameter update, use its certified revision as the minimum for the read.
 A new deployment can enable stable leaders and optimistic validation in genesis:
 
 ```json
+"blocks_per_epoch": 192,
 "simplex": {
   "term_length": 16,
   "optimistic_views": 4,
   "stall_timeout_ms": 5000
 }
 ```
+
+This configuration permits up to six active members. Omitting `blocks_per_epoch`
+retains the rotating deployment default of 20, which is insufficient for four
+members with 16-view terms and is rejected at startup. The test harness generator
+uses 192 when pipelining is selected without an explicit epoch length; explicitly
+configured lengths are preserved and validated by the node. Longer terms or larger
+committees require longer epochs. These settings prevent deterministic capacity
+starvation; they do not guarantee resharing under arbitrary network schedules.
 
 One leader serves each term. Commonware may propose and validate up to the
 configured optimistic distance before receiving the preceding notarizations.
