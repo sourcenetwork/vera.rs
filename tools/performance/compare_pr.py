@@ -64,6 +64,30 @@ def components(path):
     return result
 
 
+
+def validate_provenance(identity, side, tag, manifest):
+    version = identity.get('format_version', 1)
+    if type(version) is not int or version not in (1, 2):
+        raise ValueError('unsupported comparison provenance version')
+    manifest_version = manifest.get('format_version', 1)
+    if type(manifest_version) is not int or manifest_version != version:
+        raise ValueError(f'{tag}: mixed comparison provenance versions')
+    expected = identity[side]
+    if manifest['source'] != expected['source'] or manifest['dirty'] is not False:
+        raise ValueError(f'{tag}: source provenance mismatch')
+    if manifest['node_sha256'] != expected['node_sha256'] or manifest['runner_sha256'] != expected['runner_sha256']:
+        raise ValueError(f'{tag}: binary provenance mismatch')
+    if version == 2:
+        head = identity['head']
+        for revision in ('head', 'base'):
+            if (identity[revision]['runner_source'] != head['source']
+                    or identity[revision]['runner_sha256'] != head['runner_sha256']):
+                raise ValueError('comparison must use one head-built workload runner')
+        if (manifest['format_version'] != 2 or manifest['runner_source'] != head['source']
+                or manifest['runner_dirty'] is not False):
+            raise ValueError(f'{tag}: runner source provenance mismatch')
+
+
 def compare(directory):
     identity = json.loads((directory / 'comparison.json').read_text())
     rows, errors, differences = [], [], []
@@ -86,10 +110,7 @@ def compare(directory):
                 run = load_run(directory / tag / f'objects-{objects}')
                 manifest, config, _, passed, *_ = run
                 side = tag.rstrip('12')
-                if manifest['source'] != identity[side]['source'] or manifest['dirty']:
-                    raise ValueError(f'{tag}: source provenance mismatch')
-                if manifest['node_sha256'] != identity[side]['node_sha256'] or manifest['runner_sha256'] != identity[side]['runner_sha256']:
-                    raise ValueError(f'{tag}: binary provenance mismatch')
+                validate_provenance(identity, side, tag, manifest)
                 if not passed:
                     raise ValueError(f'{tag}: correctness/completeness/recovery gate failed')
                 runs[tag] = run
@@ -138,6 +159,8 @@ def compare(directory):
     lines = ['# Vera PR performance', '', f"Base `{identity['base']['source']}` → head `{identity['head']['source']}`", '',
              'Release builds, same runner, head/base/base/head passes. 5% advisory threshold. Overlapping ranges or more than 5% within-revision spread are inconclusive; remaining signals are not statistical confidence.', '',
              '| Metric | Base pass range | Head pass range | Change | Result |', '|---|---:|---:|---:|---|']
+    if identity.get('format_version', 1) == 2:
+        lines[4:4] = [f"Shared workload runner source `{identity['head'].get('runner_source', 'missing')}`, SHA-256 `{identity['head']['runner_sha256']}`. Component binaries remain revision-specific.", '']
     for item in rows:
         def span(values):
             return f'{min(values):.2f}–{max(values):.2f}' if values else '—'
