@@ -9,10 +9,11 @@ impl AcpModule {
         creator: &Did,
         policy_id: &str,
         obj: Object,
+        budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
         let policy = self.query_policy(policy_id)?;
         let mut owner = self
-            .registration_owner_record(policy_id, &obj)?
+            .registration_owner_record_with_budget(policy_id, &obj, Some(budget))?
             .ok_or_else(|| AcpError::ObjectNotRegistered {
                 resource: obj.resource.clone(),
                 object_id: obj.id.clone(),
@@ -23,7 +24,9 @@ impl AcpModule {
                 relationships_removed: 0,
             });
         }
-        if !self.check_management_authority(creator, policy_id, &obj, "owner")? {
+        if !self
+            .check_management_authority_with_budget(creator, policy_id, &obj, "owner", budget)?
+        {
             return Err(AcpError::Unauthorized {
                 reason: format!(
                     "{} is not the owner of '{}/{}'",

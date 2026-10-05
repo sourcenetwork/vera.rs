@@ -145,6 +145,18 @@ fn oversized_native_registration_rolls_back_and_allows_next_nonce(#[case] batch:
             .all(Vec::is_empty)
     );
 
+    let (healthy_only, _) = executor
+        .execute_with_modules(
+            &state,
+            &context(),
+            std::slice::from_ref(&healthy),
+            failed_modules,
+        )
+        .unwrap();
+    assert_eq!(healthy_only.executed_tx_indices, Some(vec![0]));
+    assert!(healthy_only.receipts[0].success());
+    assert!(healthy_only.gas_used > 5000 && healthy_only.gas_used < NATIVE_LIMIT);
+
     let txs = [failed, healthy];
     let (outcome, next) = executor
         .execute_with_modules(&state, &context(), &txs, parent.clone())
@@ -155,7 +167,7 @@ fn oversized_native_registration_rolls_back_and_allows_next_nonce(#[case] batch:
     assert!(outcome.receipts[0].logs().is_empty());
     assert!(outcome.receipts[1].success());
     assert_eq!(outcome.receipts[1].logs().len(), 1);
-    assert_eq!(outcome.gas_used, NATIVE_LIMIT + 5000);
+    assert_eq!(outcome.gas_used, NATIVE_LIMIT + healthy_only.gas_used);
     let modules = module_state(&next);
     assert_eq!(modules.nonces.get_nonce(&actor).unwrap(), 2);
     for id in [object.as_str(), "rolled-back", "healthy"] {

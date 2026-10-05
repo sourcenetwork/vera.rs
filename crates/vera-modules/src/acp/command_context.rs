@@ -13,6 +13,52 @@ impl AcpModule {
         block: &BlockExecCtx,
         submission: &TxExecCtx,
     ) -> Result<PolicyCmdResult> {
+        self.execute_policy_cmd_with_budget(
+            actor,
+            policy_id,
+            command,
+            block,
+            submission,
+            &CommandBudget::new(u64::MAX),
+        )
+    }
+
+    /// Publish the command and authenticated metadata together, retaining spent work on failure.
+    pub fn execute_policy_cmd_with_budget(
+        &mut self,
+        actor: &Did,
+        policy_id: &str,
+        command: PolicyCmd,
+        block: &BlockExecCtx,
+        submission: &TxExecCtx,
+        budget: &CommandBudget,
+    ) -> Result<PolicyCmdResult> {
+        let mut candidate = self.clone();
+        let result = budget
+            .finish(candidate.apply_contextual_policy_cmd(
+                actor, policy_id, command, block, submission, budget,
+            ))?;
+        *self = candidate;
+        Ok(result)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_contextual_policy_cmd(
+        &mut self,
+        actor: &Did,
+        policy_id: &str,
+        command: PolicyCmd,
+        block: &BlockExecCtx,
+        submission: &TxExecCtx,
+        budget: &CommandBudget,
+    ) -> Result<PolicyCmdResult> {
+        budget.input(
+            actor
+                .as_str()
+                .len()
+                .saturating_add(submission.signer.len())
+                .saturating_add(submission.tx_hash.len()),
+        )?;
         if block.timestamp.block_height == 0
             || submission.tx_hash.len() != 32
             || submission.signer.is_empty()
@@ -60,7 +106,7 @@ impl AcpModule {
             }
             metadata.creation_ts = issued.clone();
         }
-        let mut result = self.direct_policy_cmd(actor, policy_id, command)?;
+        let mut result = self.direct_policy_cmd_with_budget(actor, policy_id, command, budget)?;
         match &mut result {
             PolicyCmdResult::RegisterObject { record }
             | PolicyCmdResult::SetRelationship {

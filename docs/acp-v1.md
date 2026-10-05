@@ -270,6 +270,41 @@ adapters still read current policy records. Proof capture and verification retai
 their existing read limits and formats; they do not consume native execution gas.
 This is deterministic work accounting, not an instruction count or latency bound.
 
+## Management authorization work
+
+Policy commands and `checkManagementAuthority` use a caller-owned `CommandBudget`.
+Writes retain their 5,000-unit dispatch base; the read-only management check uses
+1,000. Raw calldata, each decoded dynamic field occurrence (including aliases and
+UTF-8 replacement), typed command input, and supplied metadata cost eight units
+per 16 bytes. Raw ABI and JSON work is reserved before owned decoding. Metadata
+retains its existing 64 KiB encoded limit, checked without an owned validation copy;
+there is no additional restriction on raw JSON whitespace or escaping.
+
+The initial command policy read, management policy/owner reads, and all evaluator
+reads use the policy-edit read prices. Owner and declared manager checks share one
+allowance, charging 32 units per evaluator step. Management evaluation reuses one
+validated policy in an immutable snapshot. Existing read limits and per-check
+engine depth/step limits remain separate. Exhaustion is sticky and returns
+out-of-gas, never a grant or a successful partial result.
+
+The budgeted module APIs are `direct_policy_cmd_with_budget`,
+`execute_policy_cmd_with_budget`, `execute_policy_cmd_with_metadata_and_budget`,
+`bearer_policy_cmd_with_budget`, `transfer_object_with_budget`, and
+`check_management_authority_with_budget`. Convenience methods retain unlimited
+execution allowances. Commands, contextual/supplied metadata, and delegated
+outcomes publish atomically; rollback never restores spent work. Retained bearer
+outcomes charge reads/writes using the same allowance, and retry authorization
+still precedes outcome recovery. Ordinary dispatch denials retain base and spent
+units, including in nested batches. Failed native transactions continue to charge
+the full native transaction allowance, as before.
+
+This covers command input and management authorization, not every physical
+command read or mutation. Relationship/index rewrites, registration and commitment
+storage work, and archive's object-row scan still need separate accounting.
+Archive still removes grants synchronously, reports the exact removed count and
+preserves the archived owner; no fanout cap or logical-archive substitution is
+introduced. Proof formats and ownership rules are unchanged.
+
 ## Batch dispatch limits
 
 Native requests and the optional EVM interface share the same `batchCalls`

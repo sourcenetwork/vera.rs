@@ -50,7 +50,45 @@ impl AcpModule {
         block: &BlockExecCtx,
         submission: &TxExecCtx,
     ) -> Result<PolicyCmdResult> {
-        request.metadata.validate()?;
+        self.execute_policy_cmd_with_metadata_and_budget(
+            actor,
+            policy_id,
+            request,
+            block,
+            submission,
+            &CommandBudget::new(u64::MAX),
+        )
+    }
+
+    /// Account for supplied input and publish the command with its final metadata atomically.
+    pub fn execute_policy_cmd_with_metadata_and_budget(
+        &mut self,
+        actor: &Did,
+        policy_id: &str,
+        request: types::PolicyCommandRequest,
+        block: &BlockExecCtx,
+        submission: &TxExecCtx,
+        budget: &CommandBudget,
+    ) -> Result<PolicyCmdResult> {
+        let mut candidate = self.clone();
+        let result = budget.finish(candidate.apply_policy_cmd_with_metadata(
+            actor, policy_id, request, block, submission, budget,
+        ))?;
+        *self = candidate;
+        Ok(result)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_policy_cmd_with_metadata(
+        &mut self,
+        actor: &Did,
+        policy_id: &str,
+        request: types::PolicyCommandRequest,
+        block: &BlockExecCtx,
+        submission: &TxExecCtx,
+        budget: &CommandBudget,
+    ) -> Result<PolicyCmdResult> {
+        budget.metadata(&request.metadata)?;
         if !request.metadata.is_empty()
             && !matches!(
                 request.command,
@@ -63,8 +101,14 @@ impl AcpModule {
                 reason: "this command does not accept supplied metadata".into(),
             });
         }
-        let mut result =
-            self.execute_policy_cmd(actor, policy_id, request.command, block, submission)?;
+        let mut result = self.execute_policy_cmd_with_budget(
+            actor,
+            policy_id,
+            request.command,
+            block,
+            submission,
+            budget,
+        )?;
         match &mut result {
             PolicyCmdResult::SetRelationship {
                 record_existed: false,

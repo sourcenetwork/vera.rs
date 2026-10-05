@@ -50,6 +50,14 @@ pub(super) fn evaluation_engine<S: RecordStore>(
     let Some(record) = read_policy(&store, policy_id)? else {
         return Ok(None);
     };
+    Ok(Some(evaluation_engine_for_policy(store, record, meter)))
+}
+
+pub(super) fn evaluation_engine_for_policy<S: RecordStore>(
+    store: S,
+    record: PolicyRecord,
+    meter: Option<std::sync::Arc<dyn zanzibar::engine::EvaluationMeter>>,
+) -> zanzibar::PermissionEngine<QmdbZanzibarStore<S>> {
     // This adapter never leaves the evaluation or receives mutations. The initial
     // policy point read remains part of captured and replayed proof evidence.
     let adapter = std::sync::Arc::new(QmdbZanzibarStore {
@@ -67,7 +75,7 @@ pub(super) fn evaluation_engine<S: RecordStore>(
     if let Some(meter) = meter {
         engine = engine.with_evaluation_meter(meter);
     }
-    Ok(Some(engine))
+    engine
 }
 
 /// A [`ZanzibarStore`] adapter over vera's module KV store.
@@ -171,7 +179,10 @@ impl<S: RecordStore> QmdbZanzibarStore<S> {
     }
 }
 
-fn read_policy<S: RecordStore>(store: &S, policy_id: &str) -> Result<Option<PolicyRecord>> {
+pub(super) fn read_policy<S: RecordStore>(
+    store: &S,
+    policy_id: &str,
+) -> Result<Option<PolicyRecord>> {
     store
         .read_record(&keys::policy_key(policy_id))?
         .map(|bytes| {

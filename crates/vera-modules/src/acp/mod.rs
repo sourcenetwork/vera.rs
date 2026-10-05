@@ -4,7 +4,9 @@
 pub mod abi;
 mod amendment_history;
 pub mod catalogue;
+mod command_budget;
 mod command_context;
+pub use command_budget::CommandBudget;
 mod commitment_expiry;
 mod commitment_lookup;
 mod index_validation;
@@ -61,7 +63,10 @@ use acp::{Policy, Relationship};
 use error::AcpError;
 use identity::Did;
 use sha2::{Digest, Sha256};
-use zanzibar::{PermissionEngine, PolicySpecification};
+#[cfg(test)]
+use zanzibar::PermissionEngine;
+use zanzibar::PolicySpecification;
+#[cfg(test)]
 use zanzibar_store::QmdbZanzibarStore;
 
 use crate::kv_store::{InMemoryKvStore, ModuleKvStore};
@@ -249,8 +254,21 @@ impl AcpModule {
         policy_id: &str,
         cmd: PolicyCmd,
     ) -> Result<PolicyCmdResult> {
+        self.direct_policy_cmd_with_budget(creator, policy_id, cmd, &CommandBudget::new(u64::MAX))
+    }
+
+    /// Execute a command with shared input and management authorization accounting.
+    pub fn direct_policy_cmd_with_budget(
+        &mut self,
+        creator: &Did,
+        policy_id: &str,
+        cmd: PolicyCmd,
+        budget: &CommandBudget,
+    ) -> Result<PolicyCmdResult> {
+        budget.input(creator.as_str().len().saturating_add(policy_id.len()))?;
+        budget.encoded_input(&cmd)?;
         let mut candidate = self.clone();
-        let result = candidate.apply_policy_cmd(creator, policy_id, cmd)?;
+        let result = budget.finish(candidate.apply_policy_cmd(creator, policy_id, cmd, budget))?;
         *self = candidate;
         Ok(result)
     }
@@ -260,7 +278,13 @@ impl AcpModule {
         creator: &Did,
         policy_id: &str,
         cmd: PolicyCmd,
+        budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
+        let policy_key = keys::policy_key(policy_id);
+        budget
+            .permissions
+            .records
+            .read(&policy_key, self.store.get_ref(&policy_key))?;
         self.query_policy(policy_id)?;
         let object_id = match &cmd {
             PolicyCmd::SetRelationship(rel) | PolicyCmd::DeleteRelationship(rel) => {
@@ -279,15 +303,19 @@ impl AcpModule {
             });
         }
         match cmd {
-            PolicyCmd::SetRelationship(rel) => self.cmd_set_relationship(creator, policy_id, rel),
+            PolicyCmd::SetRelationship(rel) => {
+                self.cmd_set_relationship(creator, policy_id, rel, budget)
+            }
             PolicyCmd::DeleteRelationship(rel) => {
-                self.cmd_delete_relationship(creator, policy_id, rel)
+                self.cmd_delete_relationship(creator, policy_id, rel, budget)
             }
             PolicyCmd::TransferObject { object, new_owner } => self
-                .transfer_object(creator, policy_id, &object, &new_owner.0)
+                .transfer_object_with_budget(creator, policy_id, &object, &new_owner.0, budget)
                 .map(|record| PolicyCmdResult::TransferObject { record }),
             PolicyCmd::RegisterObject(obj) => self.cmd_register_object(creator, policy_id, obj),
-            PolicyCmd::ArchiveObject(obj) => self.cmd_archive_object(creator, policy_id, obj),
+            PolicyCmd::ArchiveObject(obj) => {
+                self.cmd_archive_object(creator, policy_id, obj, budget)
+            }
             PolicyCmd::UnarchiveObject(obj) => self.cmd_unarchive_object(creator, policy_id, obj),
             PolicyCmd::CommitRegistrations { commitment } => {
                 self.cmd_commit_registrations(creator, policy_id, commitment)
@@ -849,6 +877,7 @@ impl AcpModule {
         creator: &Did,
         policy_id: &str,
         rel: Relationship,
+        budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
         let policy = self
             .zanzibar_policies
@@ -871,13 +900,15 @@ impl AcpModule {
                 reason: error.to_string(),
             })?;
 
-        if !self.is_authorized_to_manage(
+        if !self.check_management_authority_with_budget(
             creator,
             policy_id,
-            &policy,
-            &rel.resource,
-            &rel.object_id,
+            &Object {
+                resource: rel.resource.clone(),
+                id: rel.object_id.clone(),
+            },
             &rel.relation,
+            budget,
         )? {
             return Err(AcpError::Unauthorized {
                 reason: format!(
@@ -923,15 +954,8 @@ impl AcpModule {
         creator: &Did,
         policy_id: &str,
         rel: Relationship,
+        budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
-        let policy = self
-            .zanzibar_policies
-            .get(policy_id)
-            .cloned()
-            .ok_or_else(|| AcpError::PolicyNotFound {
-                id: policy_id.to_string(),
-            })?;
-
         // Ownership is established at registration and cannot be stripped via a
         // relationship delete (matches defradb).
         if rel.relation == "owner" {
@@ -942,13 +966,15 @@ impl AcpModule {
 
         // Revocation requires the same management authority as granting, so an
         // arbitrary signer cannot revoke a grant or strip a cross-object edge.
-        if !self.is_authorized_to_manage(
+        if !self.check_management_authority_with_budget(
             creator,
             policy_id,
-            &policy,
-            &rel.resource,
-            &rel.object_id,
+            &Object {
+                resource: rel.resource.clone(),
+                id: rel.object_id.clone(),
+            },
             &rel.relation,
+            budget,
         )? {
             return Err(AcpError::Unauthorized {
                 reason: format!(
@@ -1280,7 +1306,8 @@ impl AcpModule {
 
     // ── Permission evaluation ────────────────────────────────────────────
 
-    /// Pin one bounded module snapshot for every operation in the request.
+    /// Construct the unmetered evaluator used by registration conformance fixtures.
+    #[cfg(test)]
     fn permission_engine(
         &self,
         policy: &Policy,

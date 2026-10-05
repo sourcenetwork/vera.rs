@@ -4,6 +4,19 @@ use super::{IAcp, PrecompileError, READ_GAS, SolCall, WRITE_GAS};
 use vera_modules::acp::{MAX_REGISTRATION_OBJECTS, decision::MAX_ACCESS_OPERATIONS};
 
 pub(super) fn required_gas(input: &[u8]) -> Option<u64> {
+    if let Some(selector) = input
+        .get(..4)
+        .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
+        && super::commands::handles(selector)
+    {
+        return Some(
+            if selector == IAcp::checkManagementAuthorityCall::SELECTOR {
+                READ_GAS
+            } else {
+                WRITE_GAS
+            },
+        );
+    }
     if input.starts_with(&IAcp::checkAccessCall::SELECTOR)
         || input.starts_with(&IAcp::bearerCheckAccessCall::SELECTOR)
         || input.starts_with(&IAcp::createPolicyCall::SELECTOR)
@@ -152,7 +165,7 @@ fn policy_edit(input: &[u8], remaining: &mut usize) -> Result<(), PrecompileErro
     Ok(())
 }
 
-fn bytes(input: &[u8], offset: usize) -> Result<&[u8], PrecompileError> {
+pub(super) fn bytes(input: &[u8], offset: usize) -> Result<&[u8], PrecompileError> {
     let tail = input.get(word(input, offset)?..).ok_or_else(invalid)?;
     let length = word(tail, 0)?;
     tail.get(32..)

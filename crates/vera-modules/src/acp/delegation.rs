@@ -4,7 +4,10 @@ use vera_crypto::jwt::DelegationScope;
 
 use super::delegated_operation::DelegatedOperation;
 use super::operation::OperationRecord;
-use super::{AcpError, AcpModule, PermissionBudget, PolicyCreateBudget, PolicyEditBudget, Result};
+use super::{
+    AcpError, AcpModule, CommandBudget, PermissionBudget, PolicyCreateBudget, PolicyEditBudget,
+    Result,
+};
 use crate::acp::types::{
     AccessDecision, AccessRequest, PolicyCmd, PolicyCmdResult, PolicyMarshalingType, PolicyRecord,
     RecordMetadata,
@@ -170,7 +173,37 @@ impl AcpModule {
         policy_id: &str,
         cmd: PolicyCmd,
     ) -> Result<PolicyCmdResult> {
-        self.with_delegation(
+        self.bearer_policy_cmd_with_budget(
+            vera,
+            context,
+            submission,
+            token,
+            policy_id,
+            cmd,
+            &CommandBudget::new(u64::MAX),
+        )
+    }
+
+    /// Authorize and execute a delegated command with caller-owned work accounting.
+    #[allow(clippy::too_many_arguments)]
+    pub fn bearer_policy_cmd_with_budget(
+        &mut self,
+        vera: &mut VeraModule,
+        context: &BlockExecCtx,
+        submission: &TxExecCtx,
+        token: &str,
+        policy_id: &str,
+        cmd: PolicyCmd,
+        budget: &CommandBudget,
+    ) -> Result<PolicyCmdResult> {
+        budget.input(
+            token
+                .len()
+                .saturating_add(policy_id.len())
+                .saturating_add(submission.signer.len()),
+        )?;
+        budget.encoded_input(&cmd)?;
+        let result = self.with_delegation_with_budget(
             vera,
             context,
             submission,
@@ -179,10 +212,14 @@ impl AcpModule {
                 DelegationScope::PolicyCommands,
                 DelegatedOperation::PolicyCommand(policy_id, &cmd).digest()?,
             ),
+            Some(&budget.permissions.records),
             |module, _hub, actor| {
-                module.execute_policy_cmd(actor, policy_id, cmd, context, submission)
+                module.execute_policy_cmd_with_budget(
+                    actor, policy_id, cmd, context, submission, budget,
+                )
             },
-        )
+        );
+        budget.finish(result)
     }
 
     /// Record a decision with caller-bound recovery and the original submitting worker identity.

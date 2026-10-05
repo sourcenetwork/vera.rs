@@ -4,11 +4,8 @@ use vera_modules::acp::types::SuppliedMetadata;
 pub(super) const fn handles(selector: [u8; 4]) -> bool {
     matches!(
         selector,
-        IAcp::executePolicyCommandCall::SELECTOR
-            | IAcp::transferObjectCall::SELECTOR
-            | IAcp::deletePolicyCall::SELECTOR
+        IAcp::deletePolicyCall::SELECTOR
             | IAcp::editPolicyMetadataCall::SELECTOR
-            | IAcp::checkManagementAuthorityCall::SELECTOR
             | IAcp::getObjectRegistrationCall::SELECTOR
             | IAcp::evaluateTheoremCall::SELECTOR
     )
@@ -24,73 +21,13 @@ pub(super) fn dispatch(
     let selector: [u8; 4] = input[..4].try_into().expect("selector checked by parent");
     let write = matches!(
         selector,
-        IAcp::executePolicyCommandCall::SELECTOR
-            | IAcp::transferObjectCall::SELECTOR
-            | IAcp::deletePolicyCall::SELECTOR
-            | IAcp::editPolicyMetadataCall::SELECTOR
+        IAcp::deletePolicyCall::SELECTOR | IAcp::editPolicyMetadataCall::SELECTOR
     );
     let gas = if write { WRITE_GAS } else { READ_GAS };
     if gas_limit < gas {
         return Err(PrecompileError::OutOfGas);
     }
     match selector {
-        IAcp::executePolicyCommandCall::SELECTOR => {
-            let call = IAcp::executePolicyCommandCall::abi_decode(input).map_err(decode_error)?;
-            let request = serde_json::from_slice(&call.request).map_err(|error| {
-                PrecompileError::Other(format!("invalid policy command: {error}").into())
-            })?;
-            let actor = did_from_signer(&tx.signer)?;
-            match module.execute_policy_cmd_with_metadata(
-                &actor,
-                &policy_id_to_string(&call.policyId),
-                request,
-                block,
-                tx,
-            ) {
-                Ok(result) => Ok(ok_dispatch(
-                    gas,
-                    IAcp::executePolicyCommandCall::abi_encode_returns(&json_bytes(&result)),
-                    vec![event_log(
-                        ACP_ADDRESS,
-                        &IAcp::PolicyCommandExecuted {
-                            policyId: call.policyId,
-                            actor: tx.signer.clone(),
-                        },
-                    )],
-                )),
-                Err(error) => Ok(err_dispatch(error)),
-            }
-        }
-
-        IAcp::transferObjectCall::SELECTOR => {
-            let call = IAcp::transferObjectCall::abi_decode(input).map_err(decode_error)?;
-            let actor = did_from_signer(&tx.signer)?;
-            let new_owner = did_from_actor(&call.newOwner)?;
-            let policy = policy_id_to_string(&call.policyId);
-            let command = PolicyCmd::TransferObject {
-                object: Object {
-                    resource: call.resource.clone(),
-                    id: call.objectId.clone(),
-                },
-                new_owner: Actor(new_owner),
-            };
-            match module.execute_policy_cmd(&actor, &policy, command, block, tx) {
-                Ok(record) => Ok(ok_dispatch(
-                    gas,
-                    IAcp::transferObjectCall::abi_encode_returns(&json_bytes(&record)),
-                    vec![event_log(
-                        ACP_ADDRESS,
-                        &IAcp::ObjectTransferred {
-                            policyId: call.policyId,
-                            resource: call.resource,
-                            objectId: call.objectId,
-                            newOwner: call.newOwner,
-                        },
-                    )],
-                )),
-                Err(error) => Ok(err_dispatch(error)),
-            }
-        }
         IAcp::deletePolicyCall::SELECTOR => {
             let call = IAcp::deletePolicyCall::abi_decode(input).map_err(decode_error)?;
             let actor = did_from_signer(&tx.signer)?;
@@ -166,27 +103,7 @@ pub(super) fn dispatch(
                 Err(error) => Ok(err_dispatch(error)),
             }
         }
-        IAcp::checkManagementAuthorityCall::SELECTOR => {
-            let call =
-                IAcp::checkManagementAuthorityCall::abi_decode(input).map_err(decode_error)?;
-            let actor = did_from_actor(&call.actor)?;
-            match module.check_management_authority(
-                &actor,
-                &policy_id_to_string(&call.policyId),
-                &Object {
-                    resource: call.resource,
-                    id: call.objectId,
-                },
-                &call.relation,
-            ) {
-                Ok(value) => Ok(ok_dispatch(
-                    gas,
-                    IAcp::checkManagementAuthorityCall::abi_encode_returns(&value),
-                    vec![],
-                )),
-                Err(error) => Ok(err_dispatch(error)),
-            }
-        }
+
         _ => Err(PrecompileError::Other(
             "unknown ACP lifecycle selector".into(),
         )),

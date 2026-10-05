@@ -67,9 +67,49 @@ impl AcpModule {
         object: &Object,
         new_owner: &Did,
     ) -> Result<RelationshipRecord> {
+        self.transfer_object_with_budget(
+            actor,
+            policy_id,
+            object,
+            new_owner,
+            &CommandBudget::new(u64::MAX),
+        )
+    }
+
+    /// Transfer after budgeted management authorization, without partial owner replacement.
+    pub fn transfer_object_with_budget(
+        &mut self,
+        actor: &Did,
+        policy_id: &str,
+        object: &Object,
+        new_owner: &Did,
+        budget: &CommandBudget,
+    ) -> Result<RelationshipRecord> {
+        let mut candidate = self.clone();
+        let result = budget
+            .finish(candidate.apply_transfer_object(actor, policy_id, object, new_owner, budget))?;
+        *self = candidate;
+        Ok(result)
+    }
+
+    fn apply_transfer_object(
+        &mut self,
+        actor: &Did,
+        policy_id: &str,
+        object: &Object,
+        new_owner: &Did,
+        budget: &CommandBudget,
+    ) -> Result<RelationshipRecord> {
+        budget.input(
+            object
+                .resource
+                .len()
+                .saturating_add(object.id.len())
+                .saturating_add(new_owner.as_str().len()),
+        )?;
         self.validate_registration_object(policy_id, object)?;
         let mut record = self
-            .registration_owner_record(policy_id, object)?
+            .registration_owner_record_with_budget(policy_id, object, Some(budget))?
             .ok_or_else(|| AcpError::ObjectNotRegistered {
                 resource: object.resource.clone(),
                 object_id: object.id.clone(),
@@ -79,7 +119,9 @@ impl AcpModule {
                 reason: "cannot transfer an archived object".into(),
             });
         }
-        if !self.check_management_authority(actor, policy_id, object, "owner")? {
+        if !self
+            .check_management_authority_with_budget(actor, policy_id, object, "owner", budget)?
+        {
             return Err(AcpError::Unauthorized {
                 reason: "actor cannot transfer this object".into(),
             });
