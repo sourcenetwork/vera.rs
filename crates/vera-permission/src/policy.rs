@@ -1,5 +1,8 @@
 use alloy_primitives::B256;
-use vera_modules::acp::{keys, types::PolicyRecord};
+use vera_modules::acp::{
+    keys,
+    types::{PolicyRecord, RelationshipRecord},
+};
 
 use crate::{ModuleId, PermissionError, RecordProof, current::MAX_KEY_BYTES};
 
@@ -28,7 +31,7 @@ pub(super) fn verify_policy(
     root: B256,
     policy: &str,
     maximum_bytes: usize,
-) -> Result<bool, PermissionError> {
+) -> Result<Option<PolicyRecord>, PermissionError> {
     proof.verify(
         root,
         ModuleId::Acp,
@@ -36,13 +39,47 @@ pub(super) fn verify_policy(
         maximum_bytes,
     )?;
     let Some(value) = &proof.value else {
-        return Ok(false);
+        return Ok(None);
     };
     let record: PolicyRecord = serde_json::from_slice(value)
         .map_err(|_| PermissionError::Invalid("policy record encoding"))?;
     if record.policy.id != policy {
         return Err(PermissionError::Invalid(
             "policy record differs from its key",
+        ));
+    }
+    record.relations.validate(&record.policy)?;
+    Ok(Some(record))
+}
+
+/// Check a physical row before exposing it as a current relationship. The policy
+/// must already be authenticated against the same root as this row.
+pub(super) fn current_relationship(
+    policy: &PolicyRecord,
+    key: &[u8],
+    value: &[u8],
+) -> Result<bool, PermissionError> {
+    let record: RelationshipRecord = serde_json::from_slice(value)
+        .map_err(|_| PermissionError::Invalid("relationship record encoding"))?;
+    if record.policy_id != policy.policy.id
+        || keys::relationship_generation_key(
+            &record.policy_id,
+            record.generations,
+            &keys::relationship_storage_key(&record.relationship),
+        ) != key
+    {
+        return Err(PermissionError::Invalid(
+            "relationship record differs from its generation key",
+        ));
+    }
+    if !policy.relations.contains(record.generations.target)
+        || !policy.relations.contains(record.generations.subject)
+    {
+        return Ok(false);
+    }
+    if policy.relations.pair(&record.relationship)? != record.generations {
+        return Err(PermissionError::Invalid(
+            "relationship generations differ from policy",
         ));
     }
     Ok(true)

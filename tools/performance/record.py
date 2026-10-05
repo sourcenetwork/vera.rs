@@ -35,18 +35,23 @@ def main():
     parser.add_argument('--node', required=True, type=Path)
     parser.add_argument('--runner', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--runner-source', type=Path, default=Path.cwd(),
+                        help='Checkout used to build the workload runner; defaults to the node checkout.')
     parser.add_argument('--history', required=True, choices=['rocksdb', 'regolith'])
     parser.add_argument('--rust-log', default='warn,vera_storage=info')
     parser.add_argument('workload_args', nargs='+')
     args = parser.parse_args()
     node, runner = args.node.resolve(strict=True), args.runner.resolve(strict=True)
+    runner_source = args.runner_source.resolve(strict=True)
     args.output.mkdir(parents=True, exist_ok=False)
     manifest = {
-        'format_version': 1,
-        'source_binding': 'Checkout revision; caller must build both binaries from this checkout.',
+        'format_version': 2,
+        'source_binding': 'Node source is the current checkout; runner source is its declared checkout. Caller builds the recorded binaries.',
         'started_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         'source': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
         'dirty': bool(subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'])),
+        'runner_source': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=runner_source, text=True).strip(),
+        'runner_dirty': bool(subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'], cwd=runner_source)),
         'node_sha256': digest(node), 'runner_sha256': digest(runner),
         'history': args.history, 'arguments': args.workload_args,
         'rust_log': args.rust_log,

@@ -76,6 +76,11 @@ impl ReadCapture {
         Ok(capture.requests.iter().cloned().collect())
     }
 
+    pub(crate) fn remaining_limits(&self) -> Option<ReadLimits> {
+        let capture = self.capture.lock().unwrap();
+        (!capture.failed).then_some(capture.remaining)
+    }
+
     fn read<T>(
         &self,
         key: &[u8],

@@ -204,8 +204,10 @@ fn permission_evidence_replays_deny_and_revocation_at_one_revision() {
             duplicate.reads.push(proof.reads[i].clone());
             assert!(verify(&duplicate, root, PERMISSION_LIMITS).is_err());
         }
-        let blocked_prefix = keys::relationship_storage_prefix(
+        let generations = state.acp.query_policy(&policy).unwrap().relations;
+        let blocked_prefix = keys::relationship_generation_prefix(
             &policy,
+            generations.pair(&blocked).unwrap(),
             &keys::relation_prefix("document", "report", "blocked"),
         );
         let mut omitted = proof.clone();

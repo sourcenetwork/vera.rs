@@ -10,11 +10,14 @@ impl AcpModule {
         marshal_type: PolicyMarshalingType,
         modified_at: &Timestamp,
     ) -> Result<(u64, PolicyRecord)> {
-        Self::validate_policy_revision(&self.query_policy(policy_id)?, modified_at)?;
-        let (removed, mut record) = self.edit_policy(actor, policy_id, policy, marshal_type)?;
-        record.last_modified = Some(modified_at.clone());
-        self.set_policy_record(policy_id, &record);
-        Ok((removed, record))
+        self.edit_policy_at_with_budget(
+            actor,
+            policy_id,
+            policy,
+            marshal_type,
+            modified_at,
+            &PolicyEditBudget::new(u64::MAX),
+        )
     }
 
     pub(super) fn validate_policy_revision(
@@ -70,7 +73,7 @@ impl AcpModule {
             | PolicyCmdResult::RegisterObject { record }
             | PolicyCmdResult::RevealRegistration { record, .. } => {
                 record.supplied_metadata = request.metadata;
-                self.set_relationship(record);
+                self.set_relationship(record)?;
             }
             _ => {}
         }

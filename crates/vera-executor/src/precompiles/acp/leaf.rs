@@ -1,10 +1,13 @@
-//! Borrowed bounds for leaf string arrays before Alloy allocates owned values.
+//! Borrowed bounds for leaf dynamic values before Alloy allocates owned values.
 
 use super::{IAcp, PrecompileError, READ_GAS, SolCall, WRITE_GAS};
 use vera_modules::acp::{MAX_REGISTRATION_OBJECTS, decision::MAX_ACCESS_OPERATIONS};
 
 pub(super) fn required_gas(input: &[u8]) -> Option<u64> {
-    if input.starts_with(&IAcp::checkAccessCall::SELECTOR) {
+    if input.starts_with(&IAcp::checkAccessCall::SELECTOR)
+        || input.starts_with(&IAcp::editPolicyCall::SELECTOR)
+        || input.starts_with(&IAcp::bearerEditPolicyCall::SELECTOR)
+    {
         Some(WRITE_GAS)
     } else if input.starts_with(&IAcp::verifyAccessRequestCall::SELECTOR)
         || input.starts_with(&IAcp::generateCommitmentCall::SELECTOR)
@@ -16,6 +19,11 @@ pub(super) fn required_gas(input: &[u8]) -> Option<u64> {
 }
 
 pub(super) fn validate(input: &[u8], remaining: &mut usize) -> Result<(), PrecompileError> {
+    if input.starts_with(&IAcp::editPolicyCall::SELECTOR)
+        || input.starts_with(&IAcp::bearerEditPolicyCall::SELECTOR)
+    {
+        return policy_edit(input, remaining);
+    }
     let (arrays, maximum) = if input.starts_with(&IAcp::generateCommitmentCall::SELECTOR) {
         (2, MAX_REGISTRATION_OBJECTS)
     } else if input.starts_with(&IAcp::checkAccessCall::SELECTOR)
@@ -56,13 +64,40 @@ pub(super) fn validate(input: &[u8], remaining: &mut usize) -> Result<(), Precom
     string(body, (arrays + 1) * 32, remaining)
 }
 
-fn string(input: &[u8], offset: usize, remaining: &mut usize) -> Result<(), PrecompileError> {
+// Match the compiler/JWT hard limits before owned ABI decoding. These bounds
+// remain separate from deterministic edit work accounting and YAML expansion limits.
+fn policy_edit(input: &[u8], remaining: &mut usize) -> Result<(), PrecompileError> {
+    let bearer = input.starts_with(&IAcp::bearerEditPolicyCall::SELECTOR);
+    let body = &input[4..];
+    let fields = if bearer { 4 } else { 3 };
+    body.get(..fields * 32).ok_or_else(invalid)?;
+    let policy = bytes(body, if bearer { 64 } else { 32 })?;
+    if policy.len() > vera_modules::acp::MAX_POLICY_DEFINITION_BYTES {
+        return Err(PrecompileError::Other(
+            "policy definition exceeds 64 KiB".into(),
+        ));
+    }
+    charge(remaining, policy.len())?;
+    if bearer {
+        // Include lossy UTF-8 expansion exactly as Alloy's String decoder does.
+        let mut token_bytes = 16 * 1024;
+        string(body, 0, &mut token_bytes)?;
+        charge(remaining, 16 * 1024 - token_bytes)?;
+    }
+    Ok(())
+}
+
+fn bytes(input: &[u8], offset: usize) -> Result<&[u8], PrecompileError> {
     let tail = input.get(word(input, offset)?..).ok_or_else(invalid)?;
     let length = word(tail, 0)?;
-    let bytes = tail
-        .get(32..)
+    tail.get(32..)
         .and_then(|data| data.get(..length))
-        .ok_or_else(invalid)?;
+        .ok_or_else(invalid)
+}
+
+fn string(input: &[u8], offset: usize, remaining: &mut usize) -> Result<(), PrecompileError> {
+    let bytes = bytes(input, offset)?;
+    let length = bytes.len();
     charge(remaining, length)?;
     // Alloy uses from_utf8_lossy when detokenizing strings. Charge every occurrence
     // and the extra bytes of replacement characters, without allocating a String.

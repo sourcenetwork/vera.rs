@@ -102,14 +102,23 @@ impl AcpModule {
         &mut self,
         actor: &str,
         record: &OperationRecord,
+        budget: Option<&super::PolicyEditBudget>,
     ) -> Result<()> {
         let key = operation_key(actor, record.id)?;
-        let bytes =
-            serde_json::to_vec(record).map_err(|error| AcpError::State(error.to_string()))?;
+        let bytes = match budget {
+            Some(budget) => budget.encode(&key, record)?,
+            None => {
+                serde_json::to_vec(record).map_err(|error| AcpError::State(error.to_string()))?
+            }
+        };
         if bytes.len() > MAX_OPERATION_RECORD_BYTES {
             return Err(AcpError::State(
                 "operation outcome exceeds the record limit".into(),
             ));
+        }
+        if let Some(budget) = budget {
+            budget.read(BYTES_KEY, self.store.get_ref(BYTES_KEY))?;
+            budget.read(BUDGET_KEY, self.store.get_ref(BUDGET_KEY))?;
         }
         let retained = self
             .operation_bytes()?
@@ -120,8 +129,13 @@ impl AcpModule {
                 "operation outcome storage budget reached".into(),
             ));
         }
+        let expiry = expiry_key(record.id, &key);
+        if let Some(budget) = budget {
+            budget.write(&expiry, Some(&key))?;
+            budget.write(BYTES_KEY, Some(&retained.to_be_bytes()))?;
+        }
         self.store.put(&key, bytes);
-        self.store.put(&expiry_key(record.id, &key), key);
+        self.store.put(&expiry, key);
         self.store.put(BYTES_KEY, retained.to_be_bytes().to_vec());
         Ok(())
     }

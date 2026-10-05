@@ -219,8 +219,10 @@ fn permission_evaluation_requires_complete_proofs_at_one_root() {
             let records = VerifiedReads::verify(&incomplete, &old_root).unwrap();
             assert!(evaluate_access_request(records, &policy_id, &request).is_err());
         }
-        let blocked_prefix = keys::relationship_storage_prefix(
+        let generations = module.query_policy(&policy_id).unwrap().relations;
+        let blocked_prefix = keys::relationship_generation_prefix(
             &policy_id,
+            generations.pair(&blocked).unwrap(),
             &keys::relation_prefix("document", "report", "blocked"),
         );
         let mut incomplete_records = VerifiedReads::verify(&reads, &old_root).unwrap();

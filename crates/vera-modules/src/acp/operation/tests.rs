@@ -451,7 +451,7 @@ fn cleanup_is_bounded_and_record_limits_leave_storage_unchanged() {
     };
     for entropy in 1..=OPERATION_PRUNE_LIMIT + 1 {
         record.id = id(u8::try_from(entropy).unwrap(), 200);
-        acp.complete_operation(&actor, &record).unwrap();
+        acp.complete_operation(&actor, &record, None).unwrap();
     }
     let retained = acp.operation_bytes().unwrap();
     let key = operation_key(&actor, record.id).unwrap();
@@ -471,6 +471,6 @@ fn cleanup_is_bounded_and_record_limits_leave_storage_unchanged() {
     assert_eq!(acp.operation_bytes().unwrap(), 0);
     let before = acp.store().serialize();
     record.result = serde_json::Value::String("x".repeat(MAX_OPERATION_RECORD_BYTES));
-    assert!(acp.complete_operation(&actor, &record).is_err());
+    assert!(acp.complete_operation(&actor, &record, None).is_err());
     assert_eq!(acp.store().serialize(), before);
 }

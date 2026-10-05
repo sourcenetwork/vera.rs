@@ -98,14 +98,20 @@ This is a feature port, not a claim of identical transport or parser behavior:
   records rejected by a filter. An empty page can have a continuation cursor.
   Cursors are exclusive storage positions, not revision certificates; repeated
   live RPC calls can observe different revisions. Unpaged queries reject oversized
-  results rather than silently truncate. For larger catalogues, enumerate the
-  relationship pages and combine them with the policy's declared resources.
-- Definition edits still scan the target policy's relationships and apply all
-  pruning atomically. Their execution charge does not grow with that work.
-  Scalable, bounded editing remains unresolved; bounded deletion does not qualify
-  large-policy edits or establish a production mutation limit. The lifecycle
-  component workload measures edit cost and full deletion teardown, including
-  cleanup.
+  results rather than silently truncate. Policy ID listings require at most
+  128 records / 1 MiB of stored key/value bytes, checked before decoding any policies;
+  larger listings require certified policy pages. Their execution charge is
+  1,000 base units plus 100 per inspected record and one per 16 encoded key/value
+  bytes, rounded up per record. Count-limit lookahead charges only its key.
+  Exhaustion stops before decoding; ordinary errors retain consumed units, and
+  nested batches share the remaining execution allowance. For larger relationship
+  catalogues, enumerate relationship pages and combine them with the policy's
+  declared resources.
+- [Definition edits](acp-policy-edits.md) retire indexed generation pairs atomically;
+  physical cleanup runs later under the shared cleanup budget. Runtime edits meter
+  reads, writes and preparation work without visiting every physical relationship.
+  This accounting does not meter individual compiler instructions. The lifecycle
+  component workload measures edit cost and full deletion teardown, including cleanup.
 
 The commitment policy index is persisted in authenticated state, including for
 expired commitments. It changes execution roots when commitments are written.
@@ -149,10 +155,47 @@ Physical records can remain after logical deletion. Certified ownership and
 relationship clients must verify the policy's presence at the same revision as
 those records, using the [policy proof APIs](permission-proofs.md#native-prefix-and-owner-reads).
 Generic record and prefix evidence authenticates physical storage only.
-Relationships use the fresh-state `relationship/v3/` namespace; restore rejects
+Relationships use the fresh-state `relationship/v4/` namespace; restore rejects
 older namespaces rather than migrating them. Validators and consumers must use
 matching [key and proof formats](native-relationship-keys.md). Receipt and finality
 formats are unchanged.
+
+## Policy edit work accounting
+
+Direct and bearer definition edits consume 5,000 base execution units plus the
+work tracked by `PolicyEditBudget`. The caller owns this allowance separately
+from module snapshots, so reverting an edit or an enclosing batch cannot refund
+completed work. Nested calls receive the remaining batch allowance. Ordinary
+reverted edits retain their base and consumed units; exhausting the allowance
+fails before publishing prepared records or replacing the compiled policy.
+Native failed submissions still consume their full transaction allowance.
+
+Accounting uses encoded bytes, rounded up in groups of 16:
+
+| Work | Units |
+| --- | --- |
+| Point read | 100 + one per byte group, including the key |
+| Prepared write or deletion | 200 + two per byte group, including the key |
+| Definition parsing input | Eight per byte group |
+| Visited relation pair | 32 |
+
+Reads reserve their allowance before copying or decoding records. JSON encoding
+reserves each output byte group before extending its buffer. Only after the
+complete plan and updated policy fit does the module apply writes. Mirrored
+counters give the exact invalidated row count without charging once per physical
+relationship. The timestamped edit path reads and encodes its policy once.
+
+Bearer edits also charge definition bytes before hashing the signed operation.
+Stored outcome reads and writes use the same allowance. An authenticated retry
+can recover its metered outcome after policy retirement without reading or
+recompiling the current policy. Public module convenience methods retain an
+unlimited allowance; runtime dispatch uses the explicit budgeted methods.
+
+Before owned ABI decoding, both edit selectors enforce the existing 64 KiB
+policy-definition bound; bearer edits also enforce the token's 16 KiB bound.
+Definition-byte accounting is not instruction-level compiler metering. Existing
+YAML expansion and policy-validation limits remain independent safeguards.
+Archive and other module operations have separate resource behavior.
 
 ## Batch dispatch limits
 
@@ -202,3 +245,6 @@ pagination and native-dispatch tests cover metadata, ownership, revocation,
 corruption, bounds, gas rejection and batch rollback. The canonical four-member
 integration test exercises the new native client calls and verifies their finality
 receipts. CI runs the fixture replay without requiring Go.
+
+See [policy edits and relation generations](acp-policy-edits.md) for bounded
+definition editing, exact removal counts, current-query selection and cleanup.
