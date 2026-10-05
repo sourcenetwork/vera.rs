@@ -239,8 +239,13 @@ impl AcpModule {
             Some(existing.policy.specification),
         )?;
 
+        let new_resources: std::collections::BTreeSet<_> = new_zanzibar
+            .resources
+            .iter()
+            .map(|resource| resource.name.as_str())
+            .collect();
         for resource in &existing.policy.resources {
-            if new_zanzibar.get_resource(&resource.name).is_none() {
+            if !new_resources.contains(resource.name.as_str()) {
                 return Err(AcpError::InvalidPolicy {
                     reason: format!(
                         "resource '{}' cannot be removed from an existing policy",

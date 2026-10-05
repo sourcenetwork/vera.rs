@@ -1,6 +1,6 @@
 //! Mirrored physical pair counts and authenticated current subject directories.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use zanzibar::error::{Error, Result};
 
@@ -104,7 +104,15 @@ pub fn live_pairs<S: RecordStore>(
     target: u64,
     relations: &RelationGenerations,
 ) -> Result<Vec<u64>> {
-    let active = relations.active_ids();
+    live_pairs_for_active(store, policy, target, &relations.active_ids())
+}
+
+pub(crate) fn live_pairs_for_active<S: RecordStore>(
+    store: &S,
+    policy: &str,
+    target: u64,
+    active: &BTreeSet<u64>,
+) -> Result<Vec<u64>> {
     if !active.contains(&target) {
         return Err(invalid("relationship directory target is inactive"));
     }
@@ -140,6 +148,7 @@ pub(super) fn prepare_counts<S: RecordStore>(
 ) -> Result<Vec<RecordChange>> {
     let mut changes = Vec::new();
     let mut directories = BTreeMap::new();
+    let active = relations.map(RelationGenerations::active_ids);
     for (pair, increase, amount) in deltas {
         let previous = read_pair_count(store, policy, *pair)?;
         if *amount == 0 && previous == 0 {
@@ -151,14 +160,17 @@ pub(super) fn prepare_counts<S: RecordStore>(
             previous.checked_sub(*amount)
         }
         .ok_or_else(|| invalid("relationship pair count overflow or underflow"))?;
-        if let Some(relations) = relations
-            && relations.contains(pair.target)
-            && relations.contains(pair.subject)
+        if let Some(active) = &active
+            && active.contains(&pair.target)
+            && active.contains(&pair.subject)
         {
             if let std::collections::btree_map::Entry::Vacant(entry) =
                 directories.entry(pair.target)
             {
-                entry.insert((live_pairs(store, policy, pair.target, relations)?, false));
+                entry.insert((
+                    live_pairs_for_active(store, policy, pair.target, active)?,
+                    false,
+                ));
             }
             let (subjects, changed) = directories.get_mut(&pair.target).expect("directory loaded");
             let present = subjects.binary_search(&pair.subject);

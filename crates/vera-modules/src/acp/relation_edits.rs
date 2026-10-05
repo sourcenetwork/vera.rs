@@ -2,7 +2,7 @@
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::record_store::{RecordChange, RecordStore};
 use super::*;
@@ -71,9 +71,22 @@ impl AcpModule {
         }
         let mut removed = 0u64;
         let mut changes = Vec::new();
-        for target in old.active_ids() {
-            let subjects = relationship_index::live_pairs(&self.store, policy, target, old)
-                .map_err(relation_state_error)?;
+        let old_active = old.active_ids();
+        let new_active = new.active_ids();
+        let retired_names: BTreeMap<_, _> = old
+            .active
+            .iter()
+            .flat_map(|(resource, relations)| {
+                relations.iter().map(move |(relation, generation)| {
+                    (*generation, (resource.as_str(), relation.as_str()))
+                })
+            })
+            .filter(|(generation, _)| retired.contains(generation))
+            .collect();
+        for &target in &old_active {
+            let subjects =
+                relationship_index::live_pairs_for_active(&self.store, policy, target, &old_active)
+                    .map_err(relation_state_error)?;
             let mut remaining = Vec::new();
             for subject in &subjects {
                 if retired.contains(&target) || retired.contains(subject) {
@@ -123,7 +136,7 @@ impl AcpModule {
             .unwrap_or(0);
         let previous_sequence = sequence;
         for generation in retired {
-            if new.contains(*generation) || *generation == 0 || *generation >= old.next {
+            if new_active.contains(generation) || *generation == 0 || *generation >= old.next {
                 return Err(AcpError::State(
                     "invalid removed relation generation".into(),
                 ));
@@ -146,15 +159,9 @@ impl AcpModule {
             if !physical {
                 continue;
             }
-            let (resource, relation) = old
-                .active
-                .iter()
-                .find_map(|(resource, relations)| {
-                    relations
-                        .iter()
-                        .find(|(_, id)| **id == *generation)
-                        .map(|(relation, _)| (resource.clone(), relation.clone()))
-                })
+            let (resource, relation) = retired_names
+                .get(generation)
+                .copied()
                 .ok_or_else(|| AcpError::State("removed relation name missing".into()))?;
             sequence = sequence
                 .checked_add(1)
@@ -167,8 +174,8 @@ impl AcpModule {
             let descriptor = RetiredRelation {
                 sequence,
                 generation: *generation,
-                resource,
-                relation,
+                resource: resource.to_owned(),
+                relation: relation.to_owned(),
             };
             let job = RelationJob {
                 policy: policy.into(),
