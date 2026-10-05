@@ -65,10 +65,15 @@ impl AcpModule {
         old: &RelationGenerations,
         new: &RelationGenerations,
         retired: &BTreeSet<u64>,
+        budget: &PolicyEditBudget,
     ) -> Result<(u64, Vec<RecordChange>)> {
         if retired.is_empty() {
             return Ok((0, Vec::new()));
         }
+        let records = policy_edit_budget::EditRecords {
+            store: &self.store,
+            budget,
+        };
         let mut removed = 0u64;
         let mut changes = Vec::new();
         let old_active = old.active_ids();
@@ -85,13 +90,14 @@ impl AcpModule {
             .collect();
         for &target in &old_active {
             let subjects =
-                relationship_index::live_pairs_for_active(&self.store, policy, target, &old_active)
+                relationship_index::live_pairs_for_active(&records, policy, target, &old_active)
                     .map_err(relation_state_error)?;
             let mut remaining = Vec::new();
             for subject in &subjects {
+                budget.pair()?;
                 if retired.contains(&target) || retired.contains(subject) {
                     let count = relationship_index::read_pair_count(
-                        &self.store,
+                        &records,
                         policy,
                         RelationPair {
                             target,
@@ -113,19 +119,21 @@ impl AcpModule {
             }
             if remaining != subjects {
                 let value = if remaining.is_empty() {
+                    budget.write(&relationship_index::active_key(policy, target), None)?;
                     None
                 } else {
                     Some(
-                        serde_json::to_vec(&remaining)
-                            .map_err(|e| AcpError::State(e.to_string()))?,
+                        budget
+                            .encode(&relationship_index::active_key(policy, target), &remaining)?,
                     )
                 };
                 changes.push((relationship_index::active_key(policy, target), value));
             }
         }
-        let mut sequence = self
-            .store
-            .get_ref(COUNTER_KEY)
+        let mut sequence = records
+            .read_record(COUNTER_KEY)
+            .map_err(relation_state_error)?
+            .as_deref()
             .map(|bytes| {
                 bytes
                     .try_into()
@@ -141,21 +149,19 @@ impl AcpModule {
                     "invalid removed relation generation".into(),
                 ));
             }
-            if self.store.has(&retired_relation_key(policy, *generation)) {
+            if records
+                .read_record(&retired_relation_key(policy, *generation))
+                .map_err(relation_state_error)?
+                .is_some()
+            {
                 return Err(AcpError::State(
                     "relation generation is already retired".into(),
                 ));
             }
-            let physical = self
-                .store
-                .prefix_iter(&relationship_index::outgoing_prefix(policy, *generation))
-                .next()
-                .is_some()
-                || self
-                    .store
-                    .prefix_iter(&relationship_index::incoming_prefix(policy, *generation))
-                    .next()
-                    .is_some();
+            let physical = records
+                .first_exists(&relationship_index::outgoing_prefix(policy, *generation))?
+                || records
+                    .first_exists(&relationship_index::incoming_prefix(policy, *generation))?;
             if !physical {
                 continue;
             }
@@ -166,7 +172,11 @@ impl AcpModule {
             sequence = sequence
                 .checked_add(1)
                 .ok_or_else(|| AcpError::State("relation cleanup counter exhausted".into()))?;
-            if self.store.has(&queue_key(sequence)) {
+            if records
+                .read_record(&queue_key(sequence))
+                .map_err(relation_state_error)?
+                .is_some()
+            {
                 return Err(AcpError::State(
                     "relation cleanup sequence already exists".into(),
                 ));
@@ -183,14 +193,15 @@ impl AcpModule {
             };
             changes.push((
                 retired_relation_key(policy, *generation),
-                Some(serde_json::to_vec(&descriptor).map_err(|e| AcpError::State(e.to_string()))?),
+                Some(budget.encode(&retired_relation_key(policy, *generation), &descriptor)?),
             ));
             changes.push((
                 queue_key(sequence),
-                Some(serde_json::to_vec(&job).map_err(|e| AcpError::State(e.to_string()))?),
+                Some(budget.encode(&queue_key(sequence), &job)?),
             ));
         }
         if sequence != previous_sequence {
+            budget.write(COUNTER_KEY, Some(&sequence.to_be_bytes()))?;
             changes.push((COUNTER_KEY.to_vec(), Some(sequence.to_be_bytes().to_vec())));
         }
         Ok((removed, changes))

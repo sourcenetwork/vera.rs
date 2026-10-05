@@ -4,6 +4,8 @@ mod batch;
 mod batch_results;
 #[cfg(test)]
 mod batch_tests;
+#[cfg(test)]
+mod edit_budget_tests;
 mod leaf;
 #[cfg(test)]
 mod leaf_tests;
@@ -15,12 +17,12 @@ use alloy_primitives::{B256, Bytes};
 use alloy_sol_types::SolCall;
 use identity::Did;
 use revm::precompile::{PrecompileError, PrecompileOutput};
-use vera_modules::acp::AcpModule;
 use vera_modules::acp::abi::IAcp;
 use vera_modules::acp::types::{
     AccessRequest, AcpParams, Actor, Object, Operation, PolicyCmd, PolicyMarshalingType,
     RelationshipSelector,
 };
+use vera_modules::acp::{AcpModule, PolicyEditBudget};
 use vera_modules::types::{BlockExecCtx, TxExecCtx};
 use vera_modules::vera::VeraModule;
 
@@ -33,6 +35,23 @@ use super::{
 const READ_GAS: u64 = 1000;
 /// Base gas cost for writes.
 const WRITE_GAS: u64 = 5000;
+
+// Keep work charges on ordinary reverts; snapshots restore state, never spent gas.
+fn edit_gas(budget: &PolicyEditBudget) -> Result<u64, PrecompileError> {
+    if budget.is_exhausted() {
+        return Err(PrecompileError::OutOfGas);
+    }
+    WRITE_GAS
+        .checked_add(budget.consumed())
+        .ok_or(PrecompileError::OutOfGas)
+}
+
+fn edit_error(error: impl core::fmt::Display, budget: &PolicyEditBudget) -> DispatchReturn {
+    let gas_used = edit_gas(budget)?;
+    let mut result = err_dispatch(error);
+    result.precompile.gas_used = gas_used;
+    Ok(result)
+}
 
 fn did_from_actor(actor: &str) -> Result<Did, PrecompileError> {
     Did::new(actor).map_err(|e| PrecompileError::Other(format!("actor DID: {e}").into()))
@@ -331,11 +350,12 @@ fn dispatch_validated(
             if gas_limit < WRITE_GAS {
                 return Err(PrecompileError::OutOfGas);
             }
+            let budget = PolicyEditBudget::new(gas_limit - WRITE_GAS);
             let call = IAcp::bearerEditPolicyCall::abi_decode(input).map_err(decode_error)?;
             let policy = std::str::from_utf8(&call.policy)
                 .map_err(|_| PrecompileError::Other("invalid UTF-8 in policy".into()))?;
             let policy_id = policy_id_to_string(&call.policyId);
-            let (removed, record) = match module.bearer_edit_policy(
+            let (removed, record) = match module.bearer_edit_policy_with_budget(
                 vera,
                 block_ctx,
                 tx_ctx,
@@ -343,9 +363,10 @@ fn dispatch_validated(
                 &policy_id,
                 policy,
                 marshal_type_from_u8(call.marshalType),
+                &budget,
             ) {
                 Ok(result) => result,
-                Err(error) => return Ok(err_dispatch(error)),
+                Err(error) => return edit_error(error, &budget),
             };
             let event = IAcp::PolicyEdited {
                 policyId: alloy_primitives::keccak256(policy_id.as_bytes()),
@@ -353,7 +374,7 @@ fn dispatch_validated(
                 relationshipsRemoved: alloy_primitives::U256::from(removed),
             };
             Ok(ok_dispatch(
-                WRITE_GAS,
+                edit_gas(&budget)?,
                 IAcp::bearerEditPolicyCall::abi_encode_returns(&IAcp::bearerEditPolicyReturn {
                     relationshipsRemoved: removed,
                     record: json_bytes(&record),
@@ -404,22 +425,24 @@ fn dispatch_validated(
             if gas_limit < WRITE_GAS {
                 return Err(PrecompileError::OutOfGas);
             }
+            let budget = PolicyEditBudget::new(gas_limit - WRITE_GAS);
             let call = IAcp::editPolicyCall::abi_decode(input).map_err(decode_error)?;
             let creator = did_from_signer(&tx_ctx.signer)?;
             let policy_id = policy_id_to_string(&call.policyId);
-            let policy_str = String::from_utf8(call.policy.to_vec())
+            let policy_str = std::str::from_utf8(&call.policy)
                 .map_err(|_| PrecompileError::Other("invalid UTF-8 in policy".into()))?;
             let marshal_type = marshal_type_from_u8(call.marshalType);
 
-            let (relationships_removed, record) = match module.edit_policy_at(
+            let (relationships_removed, record) = match module.edit_policy_at_with_budget(
                 &creator,
                 &policy_id,
-                &policy_str,
+                policy_str,
                 marshal_type,
                 &block_ctx.timestamp,
+                &budget,
             ) {
                 Ok(r) => r,
-                Err(e) => return Ok(err_dispatch(e)),
+                Err(e) => return edit_error(e, &budget),
             };
 
             let event = IAcp::PolicyEdited {
@@ -432,7 +455,7 @@ fn dispatch_validated(
                 record: json_bytes(&record),
             });
             Ok(ok_dispatch(
-                WRITE_GAS,
+                edit_gas(&budget)?,
                 ret,
                 vec![event_log(ACP_ADDRESS, &event)],
             ))

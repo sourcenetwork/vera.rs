@@ -4,7 +4,7 @@ use vera_crypto::jwt::DelegationScope;
 
 use super::delegated_operation::DelegatedOperation;
 use super::operation::OperationRecord;
-use super::{AcpError, AcpModule, Result};
+use super::{AcpError, AcpModule, PolicyEditBudget, Result};
 use crate::acp::types::{
     AccessDecision, AccessRequest, PolicyCmd, PolicyCmdResult, PolicyMarshalingType, PolicyRecord,
     RecordMetadata,
@@ -64,7 +64,39 @@ impl AcpModule {
         policy: &str,
         marshal_type: PolicyMarshalingType,
     ) -> Result<(u64, PolicyRecord)> {
-        self.with_delegation(
+        self.bearer_edit_policy_with_budget(
+            vera,
+            context,
+            submission,
+            token,
+            policy_id,
+            policy,
+            marshal_type,
+            &PolicyEditBudget::new(u64::MAX),
+        )
+    }
+
+    /// Apply or recover a delegated edit within a caller-owned work allowance.
+    /// Cached outcomes are metered without depending on the current policy's liveness.
+    #[allow(clippy::too_many_arguments)]
+    pub fn bearer_edit_policy_with_budget(
+        &mut self,
+        vera: &mut VeraModule,
+        context: &BlockExecCtx,
+        submission: &TxExecCtx,
+        token: &str,
+        policy_id: &str,
+        policy: &str,
+        marshal_type: PolicyMarshalingType,
+        budget: &PolicyEditBudget,
+    ) -> Result<(u64, PolicyRecord)> {
+        if policy.len() > super::MAX_POLICY_DEFINITION_BYTES {
+            return Err(AcpError::InvalidPolicy {
+                reason: "policy definition exceeds 64 KiB".into(),
+            });
+        }
+        budget.definition(policy.len())?;
+        self.with_delegation_with_budget(
             vera,
             context,
             submission,
@@ -73,8 +105,16 @@ impl AcpModule {
                 DelegationScope::EditPolicy,
                 DelegatedOperation::EditPolicy(policy_id, policy, &marshal_type).digest()?,
             ),
+            Some(budget),
             |module, _hub, actor| {
-                module.edit_policy_at(actor, policy_id, policy, marshal_type, &context.timestamp)
+                module.edit_policy_at_with_budget(
+                    actor,
+                    policy_id,
+                    policy,
+                    marshal_type,
+                    &context.timestamp,
+                    budget,
+                )
             },
         )
     }
@@ -142,6 +182,22 @@ impl AcpModule {
         delegated: (DelegationScope, [u8; 32]),
         operation: impl FnOnce(&mut Self, &mut VeraModule, &Did) -> Result<T>,
     ) -> Result<T> {
+        self.with_delegation_with_budget(
+            vera, context, submission, token, delegated, None, operation,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn with_delegation_with_budget<T: Serialize + DeserializeOwned>(
+        &mut self,
+        vera: &mut VeraModule,
+        context: &BlockExecCtx,
+        submission: &TxExecCtx,
+        token: &str,
+        delegated: (DelegationScope, [u8; 32]),
+        budget: Option<&PolicyEditBudget>,
+        operation: impl FnOnce(&mut Self, &mut VeraModule, &Did) -> Result<T>,
+    ) -> Result<T> {
         let invalid = |error: crate::vera::error::VeraError| AcpError::InvalidBearerToken {
             reason: error.to_string(),
         };
@@ -163,6 +219,10 @@ impl AcpModule {
                 return Err(AcpError::State(
                     "missing authenticated submission identifier".into(),
                 ));
+            }
+            if let Some(budget) = budget {
+                let key = super::operation::operation_key(actor.as_ref(), request.id)?;
+                budget.read(&key, self.store.get_ref(&key))?;
             }
             if let Some(record) = self.operation(actor.as_ref(), request.id)? {
                 if record.id != request.id || record.digest != delegated.1 {
@@ -191,6 +251,7 @@ impl AcpModule {
                         result: serde_json::to_value(&result)
                             .map_err(|error| AcpError::State(error.to_string()))?,
                     },
+                    budget,
                 )?;
             }
             vera.store_or_update_jws_token(

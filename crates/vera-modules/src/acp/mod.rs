@@ -12,6 +12,9 @@ mod lifecycle;
 mod management;
 mod metadata;
 pub mod pages;
+mod policy_edit;
+mod policy_edit_budget;
+pub use policy_edit_budget::PolicyEditBudget;
 mod registration_queries;
 mod relation_cleanup;
 mod relation_edits;
@@ -62,6 +65,9 @@ use types::{
 };
 
 type Result<T> = std::result::Result<T, AcpError>;
+
+/// Maximum encoded source bytes accepted by policy creation and replacement.
+pub const MAX_POLICY_DEFINITION_BYTES: usize = 64 << 10;
 
 /// Access Control Policy module.
 ///
@@ -207,88 +213,6 @@ impl AcpModule {
             .insert(policy_id, Arc::new(zanzibar_policy));
 
         Ok(record)
-    }
-
-    /// Replace a policy's definition, pruning relationships that no longer fit.
-    /// This edits the current record without an expected-parent check or a policy
-    /// revision DAG; callers must not use it to reconcile offline policy branches.
-    #[allow(unused_variables)]
-    pub fn edit_policy(
-        &mut self,
-        creator: &Did,
-        policy_id: &str,
-        policy: &str,
-        marshal_type: PolicyMarshalingType,
-    ) -> Result<(u64, PolicyRecord)> {
-        let existing =
-            self.get_policy_record(policy_id)?
-                .ok_or_else(|| AcpError::PolicyNotFound {
-                    id: policy_id.to_string(),
-                })?;
-
-        if existing.metadata.owner_did != creator.to_string() {
-            return Err(AcpError::Unauthorized {
-                reason: "only the policy creator can edit it".into(),
-            });
-        }
-
-        let mut new_zanzibar = Self::compile_policy(
-            policy,
-            &marshal_type,
-            0,
-            Some(existing.policy.specification),
-        )?;
-
-        let new_resources: std::collections::BTreeSet<_> = new_zanzibar
-            .resources
-            .iter()
-            .map(|resource| resource.name.as_str())
-            .collect();
-        for resource in &existing.policy.resources {
-            if !new_resources.contains(resource.name.as_str()) {
-                return Err(AcpError::InvalidPolicy {
-                    reason: format!(
-                        "resource '{}' cannot be removed from an existing policy",
-                        resource.name
-                    ),
-                });
-            }
-        }
-        if existing.policy.actor.as_ref().map(|actor| &actor.name)
-            != new_zanzibar.actor.as_ref().map(|actor| &actor.name)
-        {
-            return Err(AcpError::InvalidPolicy {
-                reason: "actor resource cannot be renamed".into(),
-            });
-        }
-        new_zanzibar.id = policy_id.to_string();
-        let (relations, retired) = existing
-            .relations
-            .updated(&existing.policy, &new_zanzibar)
-            .map_err(relation_state_error)?;
-        let (removed, changes) =
-            self.prepare_relation_edit(policy_id, &existing.relations, &relations, &retired)?;
-        let new_record = PolicyRecord {
-            relations,
-            supplied_metadata: existing.supplied_metadata.clone(),
-            last_modified: existing.last_modified.clone(),
-            policy: new_zanzibar.clone(),
-            raw_policy: policy.to_string(),
-            marshal_type,
-            metadata: existing.metadata,
-        };
-        for (key, value) in changes {
-            match value {
-                Some(value) => self.store.put(&key, value),
-                None => self.store.delete(&key),
-            }
-        }
-
-        self.set_policy_record(policy_id, &new_record);
-        self.zanzibar_policies
-            .insert(policy_id.to_string(), Arc::new(new_zanzibar));
-
-        Ok((removed, new_record))
     }
 
     /// Evaluate an access check and persist the decision.
@@ -541,7 +465,7 @@ impl AcpModule {
         counter: u64,
         original_specification: Option<PolicySpecification>,
     ) -> Result<Policy> {
-        if policy.len() > 64 * 1024 {
+        if policy.len() > MAX_POLICY_DEFINITION_BYTES {
             return Err(AcpError::InvalidPolicy {
                 reason: "policy definition exceeds 64 KiB".into(),
             });
@@ -693,19 +617,21 @@ impl AcpModule {
     fn get_policy_record(&self, id: &str) -> Result<Option<PolicyRecord>> {
         self.store
             .get_ref(&keys::policy_key(id))
-            .map(|bytes| {
-                let record: PolicyRecord = serde_json::from_slice(bytes)
-                    .map_err(|e| AcpError::State(format!("invalid policy record: {e}")))?;
-                if record.policy.id != id {
-                    return Err(AcpError::State("policy record identity mismatch".into()));
-                }
-                record
-                    .relations
-                    .validate(&record.policy)
-                    .map_err(relation_state_error)?;
-                Ok(record)
-            })
+            .map(|bytes| Self::decode_policy_record(id, bytes))
             .transpose()
+    }
+
+    fn decode_policy_record(id: &str, bytes: &[u8]) -> Result<PolicyRecord> {
+        let record: PolicyRecord = serde_json::from_slice(bytes)
+            .map_err(|error| AcpError::State(format!("invalid policy record: {error}")))?;
+        if record.policy.id != id {
+            return Err(AcpError::State("policy record identity mismatch".into()));
+        }
+        record
+            .relations
+            .validate(&record.policy)
+            .map_err(relation_state_error)?;
+        Ok(record)
     }
 
     fn set_policy_record(&mut self, id: &str, record: &PolicyRecord) {
