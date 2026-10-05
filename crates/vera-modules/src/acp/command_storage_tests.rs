@@ -43,6 +43,7 @@ fn reads(record: &RelationshipRecord) -> Vec<Vec<u8>> {
         primary(record),
         relationship_index::outgoing_key(&record.policy_id, record.generations),
         relationship_index::incoming_key(&record.policy_id, record.generations),
+        relationship_index::logical_key(&record.policy_id, record.generations),
         relationship_index::active_key(&record.policy_id, record.generations.target),
         object_pairs::key(record),
     ]
@@ -84,7 +85,7 @@ fn central_point_plans_pay_each_primary_counter_and_directory_once() {
             relationship_mutations::put(&mut expected.store, &record).unwrap();
         }
         let changes = expected.store.diff_from(&current.store);
-        assert_eq!(changes.len(), if phase == 1 { 1 } else { 5 });
+        assert_eq!(changes.len(), if phase == 1 { 1 } else { 6 });
         let cost = price(&current.store, &reads(&record), &changes);
         let mut exact = current.clone();
         let budget = CommandBudget::new(cost);

@@ -1,4 +1,4 @@
-//! Mirrored physical pair counts and authenticated current subject directories.
+//! Physical pair counts, current logical counts and authenticated subject directories.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -53,6 +53,35 @@ pub fn incoming_key(policy: &str, pair: RelationPair) -> Vec<u8> {
         pair.subject, pair.target
     )
     .into_bytes()
+}
+
+/// Logical counts for relation pairs still current in the policy catalogue.
+/// Retired policies retain these counters until their physical rows are removed.
+pub fn logical_policy_prefix(policy: &str) -> Vec<u8> {
+    format!("relation_state/{policy}/logical/").into_bytes()
+}
+
+/// Current logical count, independent of the physical cleanup counters.
+pub fn logical_key(policy: &str, pair: RelationPair) -> Vec<u8> {
+    format!(
+        "relation_state/{policy}/logical/{:016x}/{:016x}",
+        pair.target, pair.subject
+    )
+    .into_bytes()
+}
+
+/// Read a logical count. Zero counts have no stored record.
+pub fn read_logical_count<S: RecordStore>(
+    store: &S,
+    policy: &str,
+    pair: RelationPair,
+) -> Result<u64> {
+    store
+        .read_record(&logical_key(policy, pair))?
+        .as_deref()
+        .map(decode_count)
+        .transpose()
+        .map(|count| count.unwrap_or(0))
 }
 
 /// All current subject directories for a policy.
@@ -160,6 +189,13 @@ pub(super) fn prepare_counts<S: RecordStore>(
             previous.checked_sub(*amount)
         }
         .ok_or_else(|| invalid("relationship pair count overflow or underflow"))?;
+        let current = active
+            .as_ref()
+            .map(|ids| ids.contains(&pair.target) && ids.contains(&pair.subject));
+        if let Some(change) = prepare_logical_count(store, policy, *pair, previous, next, current)?
+        {
+            changes.push(change);
+        }
         if let Some(active) = &active
             && active.contains(&pair.target)
             && active.contains(&pair.subject)
@@ -210,6 +246,45 @@ pub(super) fn prepare_counts<S: RecordStore>(
         });
     }
     Ok(changes)
+}
+
+/// Logical counts equal physical counts for current relation pairs.
+/// Relation retirement erases logical counts immediately; policy retirement leaves
+/// them for cleanup.
+fn prepare_logical_count<S: RecordStore>(
+    store: &S,
+    policy: &str,
+    pair: RelationPair,
+    previous_physical: u64,
+    next_physical: u64,
+    current: Option<bool>,
+) -> Result<Option<RecordChange>> {
+    let previous = read_logical_count(store, policy, pair)?;
+    if current == Some(false) {
+        if previous != 0 {
+            return Err(invalid("retired relation pair retains a logical count"));
+        }
+        return Ok(None);
+    }
+    // No live policy: only counters retained at policy retirement are decremented.
+    if current.is_none() && previous == 0 {
+        return Ok(None);
+    }
+    if previous != previous_physical {
+        return Err(invalid(
+            "logical relationship count differs from current rows",
+        ));
+    }
+    if previous == next_physical {
+        return Ok(None);
+    }
+    let encoded = next_physical.to_be_bytes();
+    store
+        .prepare_write(
+            &logical_key(policy, pair),
+            (next_physical > 0).then_some(encoded.as_slice()),
+        )
+        .map(Some)
 }
 
 pub(super) fn invalid(message: &str) -> Error {

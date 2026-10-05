@@ -11,6 +11,11 @@ pub(super) const MAX_WRITES: usize = 640;
 pub(super) const MAX_JOBS: usize = 8;
 pub(super) const JOB_ITEMS: usize = 16;
 
+pub(super) enum RelationshipCleanup<'a> {
+    Policy(&'a RelationGenerations),
+    Relation(u64),
+}
+
 enum CleanupResult {
     Complete,
     QuantumComplete,
@@ -149,7 +154,7 @@ impl AcpModule {
                 let batch = if retired.phase == Phase::Relationships {
                     self.prepare_cleanup_relationships(
                         policy,
-                        None,
+                        RelationshipCleanup::Policy(&retired.relations),
                         key,
                         JOB_ITEMS - removed,
                         budget,
@@ -246,25 +251,34 @@ impl AcpModule {
     }
 
     /// Prepare a byte-fitting prefix of one physical pair without crossing a job quantum.
-    /// `generation` is absent only for a logically deleted policy; otherwise the caller
-    /// has validated that this generation is retired in the current policy catalogue.
+    /// A policy scope carries its retained catalogue; a relation scope identifies
+    /// a generation the caller validated as retired in the current policy catalogue.
     pub(super) fn prepare_cleanup_relationships(
         &self,
         policy: &str,
-        generation: Option<u64>,
+        scope: RelationshipCleanup<'_>,
         first_key: &[u8],
         limit: usize,
         budget: &mut Budget,
     ) -> Result<Option<(usize, Vec<record_store::RecordChange>)>> {
         let pair = cleanup_pair(policy, first_key)?;
-        if generation.is_some_and(|id| pair.target != id && pair.subject != id) {
-            return Err(AcpError::State(
-                "cleanup relationship is not retired".into(),
-            ));
-        }
+        let (policy_retired, current_pair) = match scope {
+            RelationshipCleanup::Policy(catalog) => (
+                true,
+                catalog.contains(pair.target) && catalog.contains(pair.subject),
+            ),
+            RelationshipCleanup::Relation(id) => {
+                if pair.target != id && pair.subject != id {
+                    return Err(AcpError::State(
+                        "cleanup relationship is not retired".into(),
+                    ));
+                }
+                (false, false)
+            }
+        };
         let policy_key = keys::policy_key(policy);
         let policy_bytes = self.store.get_ref(&policy_key);
-        if policy_bytes.is_some() != generation.is_some() {
+        if policy_bytes.is_some() == policy_retired {
             return Err(AcpError::State("cleanup policy state mismatch".into()));
         }
         let counters = [
@@ -273,24 +287,41 @@ impl AcpModule {
         ];
         let mut read_bytes = record_size(&policy_key, policy_bytes.unwrap_or_default())?;
         let mut write_bytes = 0;
+        let mut physical_count = None;
         for key in &counters {
             let value = self.store.get_ref(key).unwrap_or_default();
-            if value.len() != 8 {
-                return Err(AcpError::State(
-                    "cleanup pair counter missing or invalid".into(),
-                ));
+            let count = relationship_index::decode_count(value).map_err(relation_state_error)?;
+            if physical_count.is_some_and(|previous| previous != count) {
+                return Err(AcpError::State("cleanup pair count mirrors differ".into()));
             }
+            physical_count = Some(count);
             read_bytes += record_size(key, value)?;
             // A surviving pair writes eight bytes; an exhausted pair writes only its key.
             write_bytes += key.len() + 8;
         }
+        let logical_key = relationship_index::logical_key(policy, pair);
+        let logical_value = self.store.get_ref(&logical_key);
+        read_bytes += record_size(&logical_key, logical_value.unwrap_or_default())?;
+        let logical_count = logical_value
+            .map(relationship_index::decode_count)
+            .transpose()
+            .map_err(relation_state_error)?;
+        if logical_count != current_pair.then_some(physical_count.unwrap()) {
+            return Err(AcpError::State(
+                "cleanup logical count differs from retained catalogue".into(),
+            ));
+        }
+        if logical_value.is_some() {
+            write_bytes += logical_key.len() + 8;
+        }
+        let counter_writes = 2 + usize::from(logical_value.is_some());
         let Some(mut available) = budget.bytes.checked_sub(read_bytes + write_bytes) else {
             return Ok(None);
         };
         let limit = limit
             .min(JOB_ITEMS)
             .min(budget.items)
-            .min(budget.writes.saturating_sub(2));
+            .min(budget.writes.saturating_sub(counter_writes));
         let prefix = keys::relationship_generation_prefix(policy, pair, "");
         let mut selected = Vec::new();
         let mut object_counters = BTreeSet::new();
@@ -299,7 +330,7 @@ impl AcpModule {
             let counter = object_pairs::key_from_relationship(policy, pair, key)
                 .map_err(relation_state_error)?;
             let distinct = !object_counters.contains(&counter);
-            if selected.len() + 1 + 2 + object_counters.len() + usize::from(distinct)
+            if selected.len() + 1 + counter_writes + object_counters.len() + usize::from(distinct)
                 > budget.writes
             {
                 break;
@@ -328,8 +359,8 @@ impl AcpModule {
         let capture = read_capture::ReadCapture::new(
             self.store.clone(),
             read_capture::ReadLimits {
-                reads: selected.len() + 3 + object_counters.len(),
-                records: selected.len() + 3 + object_counters.len(),
+                reads: selected.len() + 4 + object_counters.len(),
+                records: selected.len() + 4 + object_counters.len(),
                 bytes: budget.bytes,
             },
         );
