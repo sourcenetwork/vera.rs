@@ -357,7 +357,16 @@ writing (including blocking-pool scheduling), and query-index publication. These
 durations include lock waits and executor scheduling; database apply is not a
 disk-only measurement. Use this target without `vera_diagnostics` to avoid the
 per-receipt trace. It observes existing ordering and never publishes an index
-before its history write succeeds.
+before its history write succeeds. Both publication and general diagnostics also
+record marshal tip/block delivery to the stateful mailbox, its feedback, and sink
+entry/completion. A tip is not a durable block delivery or an application
+acknowledgement; missing delivery does not identify a network failure.
+
+Durability completion records the original barrier result, time from its first
+poll, and time since synchronization began. These are observed waits, including
+scheduling, not isolated disk latency. The height is unknown until a database
+apply has been observed with diagnostics enabled. Diagnostics do not wait for
+or acknowledge a barrier earlier than the normal finalization path.
 
 ## Interpret the charts
 

@@ -39,6 +39,7 @@ type Config = <OrderedDatabases as DatabaseSet<Ctx>>::Config;
 pub type OrderedTargets = <OrderedDatabases as DatabaseSet<Ctx>>::SyncTargets;
 
 mod commitment;
+mod durability;
 #[cfg(feature = "fault-injection")]
 mod faults;
 pub use commitment::Commitment;
@@ -116,6 +117,7 @@ pub struct OrderedSealed {
 pub struct OrderedState {
     databases: OrderedDatabases,
     executor: VeraExecutor,
+    diagnostic_height: std::sync::Arc<parking_lot::Mutex<Option<u64>>>,
 }
 
 impl std::fmt::Debug for OrderedPending {
@@ -270,6 +272,7 @@ impl OrderedState {
         let set = Self {
             databases,
             executor,
+            diagnostic_height: std::sync::Arc::default(),
         };
         set.reload().await?;
         Ok(set)
@@ -453,6 +456,7 @@ impl DatabaseSet<Ctx> for OrderedState {
             .expect("publish applied module state");
         if let Some((started, applied)) = started.zip(applied) {
             let publication = started.elapsed() - applied;
+            *self.diagnostic_height.lock() = Some(batches.height);
             tracing::debug!(target: "vera_diagnostics", height = batches.height,
                 database_apply_us = applied.as_micros(),
                 publication_us = publication.as_micros(),
@@ -465,14 +469,20 @@ impl DatabaseSet<Ctx> for OrderedState {
     }
 
     async fn finalize(&self) -> Barrier {
-        let started = tracing::enabled!(target: "vera_diagnostics", tracing::Level::DEBUG)
-            .then(std::time::Instant::now);
+        let started = (tracing::enabled!(target: "vera_diagnostics", tracing::Level::DEBUG)
+            || tracing::enabled!(target: "vera_publication_diagnostics", tracing::Level::DEBUG))
+        .then(std::time::Instant::now);
         let barrier = Box::pin(self.databases.finalize()).await;
-        if let Some(started) = started {
-            tracing::debug!(target: "vera_diagnostics", sync_start_us = started.elapsed().as_micros(),
-                "finalized state synchronization started");
-        }
-        barrier
+        let Some(started) = started else {
+            return barrier;
+        };
+        let height = *self.diagnostic_height.lock();
+        let sync_start_us = started.elapsed().as_micros();
+        tracing::debug!(target: "vera_diagnostics", ?height, sync_start_us,
+            "finalized state synchronization started");
+        tracing::debug!(target: "vera_publication_diagnostics", ?height, sync_start_us,
+            "finalized state synchronization started");
+        durability::observe(barrier, height, started)
     }
 
     async fn prune(&self, targets: &Self::SyncTargets) {

@@ -708,7 +708,7 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
         orchestrator_actor.start(vote_network, certificate_network, resolver_network);
 
     let reporters = Reporters::from((
-        stateful_mailbox.clone(),
+        crate::finalization_diagnostics::Reporter::new(stateful_mailbox.clone()),
         Reporters::from((orchestrator_mailbox, reshare_mailbox)),
     ));
     let marshal_handle = marshal_actor.start(reporters, buffer, resolver);
