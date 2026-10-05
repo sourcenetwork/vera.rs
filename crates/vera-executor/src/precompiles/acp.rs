@@ -4,6 +4,9 @@ mod batch;
 mod batch_results;
 #[cfg(test)]
 mod batch_tests;
+mod creation;
+#[cfg(test)]
+mod creation_tests;
 #[cfg(test)]
 mod edit_budget_tests;
 mod leaf;
@@ -255,6 +258,9 @@ fn dispatch_validated(
     }
     let selector: [u8; 4] = input[..4].try_into().expect("checked length above");
 
+    if creation::handles(selector) {
+        return creation::dispatch(module, vera, block_ctx, tx_ctx, input, gas_limit);
+    }
     if queries::handles(selector) {
         return queries::dispatch(module, input, gas_limit);
     }
@@ -324,37 +330,6 @@ fn dispatch_validated(
             Ok(ok_dispatch(gas_used, ret, logs))
         }
 
-        IAcp::bearerCreatePolicyCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::bearerCreatePolicyCall::abi_decode(input).map_err(decode_error)?;
-            let policy = std::str::from_utf8(&call.policy)
-                .map_err(|_| PrecompileError::Other("invalid UTF-8 in policy".into()))?;
-            let record = match module.bearer_create_policy(
-                vera,
-                block_ctx,
-                tx_ctx,
-                &call.bearerToken,
-                policy,
-                marshal_type_from_u8(call.marshalType),
-            ) {
-                Ok(record) => record,
-                Err(error) => return Ok(err_dispatch(error)),
-            };
-            let event = IAcp::DelegatedPolicyCreated {
-                policyId: record.policy.id.parse().map_err(|_| {
-                    PrecompileError::Other("invalid created policy identifier".into())
-                })?,
-                creator: record.metadata.owner_did.clone(),
-            };
-            Ok(ok_dispatch(
-                WRITE_GAS,
-                IAcp::bearerCreatePolicyCall::abi_encode_returns(&json_bytes(&record)),
-                vec![event_log(ACP_ADDRESS, &event)],
-            ))
-        }
-
         IAcp::bearerEditPolicyCall::SELECTOR => {
             if gas_limit < WRITE_GAS {
                 return Err(PrecompileError::OutOfGas);
@@ -388,44 +363,6 @@ fn dispatch_validated(
                     relationshipsRemoved: removed,
                     record: json_bytes(&record),
                 }),
-                vec![event_log(ACP_ADDRESS, &event)],
-            ))
-        }
-
-        IAcp::createPolicyCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::createPolicyCall::abi_decode(input).map_err(decode_error)?;
-            let policy_str = String::from_utf8(call.policy.to_vec())
-                .map_err(|_| PrecompileError::Other("invalid UTF-8 in policy".into()))?;
-            let creator = did_from_signer(&tx_ctx.signer)?;
-            let marshal_type = marshal_type_from_u8(call.marshalType);
-
-            let record = match module.execute_create_policy(
-                &creator,
-                &vera_modules::acp::types::PolicyCreation {
-                    policy: policy_str,
-                    marshal_type,
-                    required_specification: None,
-                    metadata: Default::default(),
-                },
-                block_ctx,
-                tx_ctx,
-            ) {
-                Ok(r) => r,
-                Err(e) => return Ok(err_dispatch(e)),
-            };
-
-            let policy_id = record.policy.id.clone();
-            let event = IAcp::PolicyCreated {
-                policyId: alloy_primitives::keccak256(policy_id.as_bytes()),
-                creator: tx_ctx.signer.clone(),
-            };
-            let ret = IAcp::createPolicyCall::abi_encode_returns(&json_bytes(&record));
-            Ok(ok_dispatch(
-                WRITE_GAS,
-                ret,
                 vec![event_log(ACP_ADDRESS, &event)],
             ))
         }

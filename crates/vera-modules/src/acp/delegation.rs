@@ -4,7 +4,7 @@ use vera_crypto::jwt::DelegationScope;
 
 use super::delegated_operation::DelegatedOperation;
 use super::operation::OperationRecord;
-use super::{AcpError, AcpModule, PermissionBudget, PolicyEditBudget, Result};
+use super::{AcpError, AcpModule, PermissionBudget, PolicyCreateBudget, PolicyEditBudget, Result};
 use crate::acp::types::{
     AccessDecision, AccessRequest, PolicyCmd, PolicyCmdResult, PolicyMarshalingType, PolicyRecord,
     RecordMetadata,
@@ -23,12 +23,41 @@ impl AcpModule {
         policy: &str,
         marshal_type: PolicyMarshalingType,
     ) -> Result<PolicyRecord> {
+        self.bearer_create_policy_with_budget(
+            vera,
+            context,
+            submission,
+            token,
+            policy,
+            marshal_type,
+            &PolicyCreateBudget::new(u64::MAX),
+        )
+    }
+
+    /// Create or recover an authenticated policy outcome within one shared allowance.
+    #[allow(clippy::too_many_arguments)]
+    pub fn bearer_create_policy_with_budget(
+        &mut self,
+        vera: &mut VeraModule,
+        context: &BlockExecCtx,
+        submission: &TxExecCtx,
+        token: &str,
+        policy: &str,
+        marshal_type: PolicyMarshalingType,
+        budget: &PolicyCreateBudget,
+    ) -> Result<PolicyRecord> {
         if submission.tx_hash.len() != 32 {
             return Err(AcpError::State(
                 "missing authenticated submission identifier".into(),
             ));
         }
-        self.with_delegation(
+        if policy.len() > super::MAX_POLICY_DEFINITION_BYTES {
+            return Err(AcpError::InvalidPolicy {
+                reason: "policy definition exceeds 64 KiB".into(),
+            });
+        }
+        budget.input(policy.len())?;
+        let result = self.with_delegation_with_budget(
             vera,
             context,
             submission,
@@ -37,8 +66,16 @@ impl AcpModule {
                 DelegationScope::CreatePolicy,
                 DelegatedOperation::CreatePolicy(policy, &marshal_type).digest()?,
             ),
+            Some(&budget.records),
             |module, _hub, actor| {
-                module.create_policy_with_metadata(
+                budget.input(
+                    actor
+                        .as_str()
+                        .len()
+                        .saturating_add(submission.signer.len())
+                        .saturating_add(submission.tx_hash.len()),
+                )?;
+                module.create_policy_with_options_and_budget(
                     policy,
                     marshal_type,
                     RecordMetadata {
@@ -47,9 +84,13 @@ impl AcpModule {
                         tx_signer: submission.signer.clone(),
                         owner_did: actor.to_string(),
                     },
+                    None,
+                    &Default::default(),
+                    budget,
                 )
             },
-        )
+        );
+        budget.finish(result)
     }
 
     /// Edit a policy using the actor's ownership and the worker's delegation.

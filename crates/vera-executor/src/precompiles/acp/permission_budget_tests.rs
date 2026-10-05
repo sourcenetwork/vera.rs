@@ -222,8 +222,14 @@ fn permission_budget_nested_checks_share_remaining_allowance_and_restore_prior_w
         .unwrap()
         .precompile
         .gas_used;
+    let creation_gas = fixture
+        .clone()
+        .dispatch(&create(), 1_000_000)
+        .unwrap()
+        .precompile
+        .gas_used;
     let input = batch(vec![create(), batch(vec![query.clone(), query.clone()])]);
-    let required = WRITE_GAS + 2 * READ_GAS + 2 * cost;
+    let required = creation_gas + 2 * READ_GAS + 2 * cost;
     let result = fixture.clone().dispatch(&input, required).unwrap();
     assert!(!result.precompile.reverted);
     assert_eq!(result.precompile.gas_used, required);
@@ -256,6 +262,12 @@ fn permission_budget_denial_retains_work_and_does_not_mask_exhaustion() {
             .dispatch(&query, output.precompile.gas_used - 1),
         Err(PrecompileError::OutOfGas)
     ));
+    let creation_gas = fixture
+        .clone()
+        .dispatch(&create(), 1_000_000)
+        .unwrap()
+        .precompile
+        .gas_used;
     for bearer in [false, true] {
         let call = fixture.decision(bearer, "did:key:stranger");
         let failure = fixture.clone().dispatch(&call, 1_000_000).unwrap();
@@ -268,7 +280,7 @@ fn permission_budget_denial_retains_work_and_does_not_mask_exhaustion() {
         assert!(result.precompile.reverted);
         assert_eq!(
             result.precompile.gas_used,
-            WRITE_GAS + 2 * READ_GAS + failure.precompile.gas_used
+            creation_gas + 2 * READ_GAS + failure.precompile.gas_used
         );
         assert!(result.logs.is_empty());
         assert_eq!(nested.state(), fixture.state());

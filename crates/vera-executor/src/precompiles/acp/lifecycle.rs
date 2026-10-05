@@ -5,7 +5,6 @@ pub(super) const fn handles(selector: [u8; 4]) -> bool {
     matches!(
         selector,
         IAcp::executePolicyCommandCall::SELECTOR
-            | IAcp::createPolicyWithOptionsCall::SELECTOR
             | IAcp::transferObjectCall::SELECTOR
             | IAcp::deletePolicyCall::SELECTOR
             | IAcp::editPolicyMetadataCall::SELECTOR
@@ -26,7 +25,6 @@ pub(super) fn dispatch(
     let write = matches!(
         selector,
         IAcp::executePolicyCommandCall::SELECTOR
-            | IAcp::createPolicyWithOptionsCall::SELECTOR
             | IAcp::transferObjectCall::SELECTOR
             | IAcp::deletePolicyCall::SELECTOR
             | IAcp::editPolicyMetadataCall::SELECTOR
@@ -64,28 +62,6 @@ pub(super) fn dispatch(
             }
         }
 
-        IAcp::createPolicyWithOptionsCall::SELECTOR => {
-            let call =
-                IAcp::createPolicyWithOptionsCall::abi_decode(input).map_err(decode_error)?;
-            let request = serde_json::from_slice(&call.request).map_err(|error| {
-                PrecompileError::Other(format!("invalid policy request: {error}").into())
-            })?;
-            let actor = did_from_signer(&tx.signer)?;
-            match module.execute_create_policy(&actor, &request, block, tx) {
-                Ok(record) => Ok(ok_dispatch(
-                    gas,
-                    IAcp::createPolicyWithOptionsCall::abi_encode_returns(&json_bytes(&record)),
-                    vec![event_log(
-                        ACP_ADDRESS,
-                        &IAcp::PolicyCreated {
-                            policyId: alloy_primitives::keccak256(record.policy.id.as_bytes()),
-                            creator: tx.signer.clone(),
-                        },
-                    )],
-                )),
-                Err(error) => Ok(err_dispatch(error)),
-            }
-        }
         IAcp::transferObjectCall::SELECTOR => {
             let call = IAcp::transferObjectCall::abi_decode(input).map_err(decode_error)?;
             let actor = did_from_signer(&tx.signer)?;

@@ -5,6 +5,7 @@ use vera_modules::acp::{
 };
 use vera_modules::types::Timestamp;
 
+#[derive(Clone)]
 struct Fixture {
     module: AcpModule,
     vera: VeraModule,
@@ -189,9 +190,15 @@ fn query_budget_empty_filtered_results_charge_scans_and_nested_batches_roll_back
         fixture.dispatch(&input, exact - 1),
         Err(PrecompileError::OutOfGas)
     ));
+    let creation_gas = fixture
+        .clone()
+        .dispatch(&create(), 1_000_000)
+        .unwrap()
+        .precompile
+        .gas_used;
     let input = batch(vec![create(), batch(vec![read.clone(), read.clone()])]);
     assert!(matches!(
-        fixture.dispatch(&input, exact + WRITE_GAS - 1),
+        fixture.dispatch(&input, exact + creation_gas - 1),
         Err(PrecompileError::OutOfGas)
     ));
     assert_eq!(fixture.module.store().serialize(), before);
@@ -215,12 +222,18 @@ fn query_budget_ordinary_read_failure_keeps_charges_and_rolls_back_prior_writes(
     assert!(failure.precompile.reverted);
     assert!(failure.precompile.gas_used > READ_GAS);
     let before = fixture.module.store().serialize();
+    let creation_gas = fixture
+        .clone()
+        .dispatch(&create(), 1_000_000)
+        .unwrap()
+        .precompile
+        .gas_used;
     let input = batch(vec![create(), batch(vec![missing])]);
     let result = fixture.dispatch(&input, 1_000_000).unwrap();
     assert!(result.precompile.reverted);
     assert_eq!(
         result.precompile.gas_used,
-        2 * READ_GAS + WRITE_GAS + failure.precompile.gas_used
+        2 * READ_GAS + creation_gas + failure.precompile.gas_used
     );
     assert!(result.logs.is_empty());
     assert_eq!(fixture.module.store().serialize(), before);

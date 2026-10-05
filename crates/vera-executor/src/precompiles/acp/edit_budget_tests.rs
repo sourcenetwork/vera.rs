@@ -208,6 +208,12 @@ fn ordinary_failed_edits_charge_completed_work_and_preserve_state() {
 #[test]
 fn nested_policy_edit_work_uses_remaining_gas_and_rolls_back_preceding_writes() {
     let fixture = Fixture::new();
+    let creation_gas = fixture
+        .clone()
+        .dispatch(&earlier_write(), 1_000_000)
+        .unwrap()
+        .precompile
+        .gas_used;
     let input = batch(vec![
         earlier_write(),
         batch(vec![fixture.edit(EDITED, false, false)]),
@@ -222,7 +228,7 @@ fn nested_policy_edit_work_uses_remaining_gas_and_rolls_back_preceding_writes() 
         .unwrap();
     assert_eq!(
         output.precompile.gas_used,
-        2 * READ_GAS + WRITE_GAS + edit.precompile.gas_used
+        2 * READ_GAS + creation_gas + edit.precompile.gas_used
     );
     let mut exact = fixture.clone();
     let result = exact.dispatch(&input, output.precompile.gas_used).unwrap();
@@ -239,6 +245,12 @@ fn nested_policy_edit_work_uses_remaining_gas_and_rolls_back_preceding_writes() 
 #[test]
 fn nested_failed_edit_keeps_work_charges_but_no_writes_or_logs() {
     let fixture = Fixture::new();
+    let creation_gas = fixture
+        .clone()
+        .dispatch(&earlier_write(), 1_000_000)
+        .unwrap()
+        .precompile
+        .gas_used;
     let edit = fixture.edit("resources: [", true, false);
     let mut single = fixture.clone();
     let failure = single.dispatch(&edit, 1_000_000).unwrap();
@@ -248,7 +260,7 @@ fn nested_failed_edit_keeps_work_charges_but_no_writes_or_logs() {
     assert!(result.precompile.reverted);
     assert_eq!(
         result.precompile.gas_used,
-        2 * READ_GAS + WRITE_GAS + failure.precompile.gas_used
+        2 * READ_GAS + creation_gas + failure.precompile.gas_used
     );
     assert!(result.logs.is_empty());
     assert_eq!(nested.state(), fixture.state());

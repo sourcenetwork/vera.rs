@@ -9,6 +9,24 @@ impl AcpModule {
         block: &BlockExecCtx,
         submission: &TxExecCtx,
     ) -> Result<PolicyRecord> {
+        self.execute_create_policy_with_budget(
+            actor,
+            request,
+            block,
+            submission,
+            &PolicyCreateBudget::new(u64::MAX),
+        )
+    }
+
+    /// Create at the authenticated revision with explicit input and storage accounting.
+    pub fn execute_create_policy_with_budget(
+        &mut self,
+        actor: &Did,
+        request: &types::PolicyCreation,
+        block: &BlockExecCtx,
+        submission: &TxExecCtx,
+        budget: &PolicyCreateBudget,
+    ) -> Result<PolicyRecord> {
         if submission.signer != actor.as_str()
             || submission.tx_hash.len() != 32
             || block.timestamp.block_height == 0
@@ -18,7 +36,14 @@ impl AcpModule {
                 reason: "invalid policy creation context".into(),
             });
         }
-        self.create_policy_with_options(
+        budget.input(
+            actor
+                .as_str()
+                .len()
+                .saturating_add(submission.signer.len())
+                .saturating_add(submission.tx_hash.len()),
+        )?;
+        let result = self.create_policy_with_options_and_budget(
             &request.policy,
             request.marshal_type.clone(),
             RecordMetadata {
@@ -28,8 +53,10 @@ impl AcpModule {
                 owner_did: actor.to_string(),
             },
             request.required_specification,
-            request.metadata.clone(),
-        )
+            &request.metadata,
+            budget,
+        );
+        budget.finish(result)
     }
 
     /// Transfer a live registration without changing its priority or other grants.

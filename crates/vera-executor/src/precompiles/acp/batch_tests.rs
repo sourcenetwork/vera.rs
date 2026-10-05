@@ -45,6 +45,7 @@ fn error(input: &[u8], expected: &str) {
     assert!(result.contains(expected), "{result}");
 }
 
+#[derive(Clone)]
 struct Fixture {
     acp: AcpModule,
     vera: VeraModule,
@@ -243,9 +244,15 @@ fn empty_batch_charges_before_preflight_and_rolls_back_when_nested_gas_runs_out(
             .unwrap()
             .is_empty()
     );
+    let creation_gas = fixture
+        .clone()
+        .dispatch(&create("earlier"), 1_000_000)
+        .unwrap()
+        .precompile
+        .gas_used;
     let input = batch(vec![create("earlier"), empty()]);
     assert!(matches!(
-        fixture.dispatch(&input, WRITE_GAS + READ_GAS * 2 - 1),
+        fixture.dispatch(&input, creation_gas + READ_GAS * 2 - 1),
         Err(PrecompileError::OutOfGas)
     ));
     assert_eq!(fixture.state(), before);
@@ -259,7 +266,18 @@ fn nested_batch_preserves_result_order_and_charges_every_wrapper() {
         batch(vec![create("second"), empty()]),
         create("third"),
     ]);
-    let gas = WRITE_GAS * 3 + READ_GAS * 3;
+    let mut writes = fixture.clone();
+    let gas = ["first", "second", "third"]
+        .into_iter()
+        .map(|name| {
+            writes
+                .dispatch(&create(name), 1_000_000)
+                .unwrap()
+                .precompile
+                .gas_used
+        })
+        .sum::<u64>()
+        + READ_GAS * 3;
     let result = fixture.dispatch(&input, gas).unwrap();
     assert!(!result.precompile.reverted);
     assert_eq!(result.precompile.gas_used, gas);
@@ -304,6 +322,17 @@ fn nested_batch_late_revert_restores_state_logs_and_error_indices() {
             .abi_encode(),
         ]),
     ]);
+    let mut writes = fixture.clone();
+    let creation_gas = ["first", "second"]
+        .into_iter()
+        .map(|name| {
+            writes
+                .dispatch(&create(name), 1_000_000)
+                .unwrap()
+                .precompile
+                .gas_used
+        })
+        .sum::<u64>();
     let result = fixture.dispatch(&input, 1_000_000).unwrap();
     assert!(result.precompile.reverted);
     assert!(result.logs.is_empty());
@@ -318,7 +347,7 @@ fn nested_batch_late_revert_restores_state_logs_and_error_indices() {
         .gas_used;
     assert_eq!(
         result.precompile.gas_used,
-        WRITE_GAS * 2 + READ_GAS * 2 + read_gas
+        creation_gas + READ_GAS * 2 + read_gas
     );
     assert!(
         String::from_utf8_lossy(&result.precompile.bytes)
@@ -338,7 +367,7 @@ fn large_policy_read(fixture: &mut Fixture) -> (Vec<u8>, usize, u64) {
         marshalType: 1,
     }
     .abi_encode();
-    let result = fixture.dispatch(&call, WRITE_GAS).unwrap();
+    let result = fixture.dispatch(&call, 1_000_000).unwrap();
     assert!(!result.precompile.reverted);
     let record = created(&result.precompile.bytes);
     let read = IAcp::getPolicyCall {
@@ -351,7 +380,13 @@ fn large_policy_read(fixture: &mut Fixture) -> (Vec<u8>, usize, u64) {
     let max_results = (batch_results::MAX_RESULT_BYTES - 64) / per_result;
     assert!((4..batch::MAX_CALLS - 2).contains(&max_results));
     // Leave enough execution allowance to exercise the independent result-byte limit.
-    let gas = 3 * READ_GAS + WRITE_GAS + (max_results as u64 + 1) * result.precompile.gas_used;
+    let creation_gas = fixture
+        .clone()
+        .dispatch(&create("must-rollback"), 1_000_000)
+        .unwrap()
+        .precompile
+        .gas_used;
+    let gas = 3 * READ_GAS + creation_gas + (max_results as u64 + 1) * result.precompile.gas_used;
     (read, max_results, gas)
 }
 

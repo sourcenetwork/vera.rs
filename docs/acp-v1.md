@@ -207,6 +207,36 @@ Definition-byte accounting is not instruction-level compiler metering. Existing
 YAML expansion and policy-validation limits remain independent safeguards.
 Archive and other module operations have separate resource behavior.
 
+## Policy creation work
+
+`createPolicy`, `createPolicyWithOptions`, and `bearerCreatePolicy` charge their
+5,000-unit dispatch base plus a caller-owned creation allowance. Each reserves
+leaf calldata processing at eight units per 16 bytes before owned ABI or JSON
+decoding. The module separately reserves definition processing before compilation,
+borrowed metadata fields before validation/cloning, and policy-counter and
+live/retired-identifier reads before decoding. Record reads and prepared writes
+use the [policy edit prices](#policy-edit-work-accounting). The complete encoded
+policy and counter update must fit before either is written or the cache changes.
+A failed creation therefore leaves policy allocation unchanged.
+
+Bearer creation also charges definition bytes before operation hashing and shares
+the allowance with retained-outcome reads/writes. An authenticated retry can read
+its original outcome after policy retirement without creating another policy.
+Ordinary failures retain completed work; exhaustion remains outside rollback and
+propagates through enclosing batches. Module callers can use `PolicyCreateBudget`
+and the `create_policy_with_budget`, `execute_create_policy_with_budget`, or
+`bearer_create_policy_with_budget` method. Convenience methods retain an unlimited
+work allowance.
+
+Existing semantic limits remain 64 KiB per definition and 64 KiB of JSON-encoded
+supplied metadata. Metadata-size validation counts encoding without allocating a
+second copy. Direct/bearer definition and bearer token limits are checked before
+owned ABI decoding. Options JSON retains the transaction/batch byte bound and is
+charged in full, including whitespace and escape spelling; its decoded fields
+then undergo normal semantic validation. Parser expansion limits are unchanged.
+Creation accounting does not meter every compiler instruction or the remaining
+relationship/registration mutation paths.
+
 ## Permission evaluation work
 
 `verifyAccessRequest`, `checkAccess`, and `bearerCheckAccess` share one execution

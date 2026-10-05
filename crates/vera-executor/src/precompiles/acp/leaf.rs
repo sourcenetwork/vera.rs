@@ -6,6 +6,9 @@ use vera_modules::acp::{MAX_REGISTRATION_OBJECTS, decision::MAX_ACCESS_OPERATION
 pub(super) fn required_gas(input: &[u8]) -> Option<u64> {
     if input.starts_with(&IAcp::checkAccessCall::SELECTOR)
         || input.starts_with(&IAcp::bearerCheckAccessCall::SELECTOR)
+        || input.starts_with(&IAcp::createPolicyCall::SELECTOR)
+        || input.starts_with(&IAcp::createPolicyWithOptionsCall::SELECTOR)
+        || input.starts_with(&IAcp::bearerCreatePolicyCall::SELECTOR)
         || input.starts_with(&IAcp::editPolicyCall::SELECTOR)
         || input.starts_with(&IAcp::bearerEditPolicyCall::SELECTOR)
     {
@@ -20,6 +23,12 @@ pub(super) fn required_gas(input: &[u8]) -> Option<u64> {
 }
 
 pub(super) fn validate(input: &[u8], remaining: &mut usize) -> Result<(), PrecompileError> {
+    if input.starts_with(&IAcp::createPolicyCall::SELECTOR)
+        || input.starts_with(&IAcp::bearerCreatePolicyCall::SELECTOR)
+        || input.starts_with(&IAcp::createPolicyWithOptionsCall::SELECTOR)
+    {
+        return policy_create(input, remaining);
+    }
     if input.starts_with(&IAcp::editPolicyCall::SELECTOR)
         || input.starts_with(&IAcp::bearerEditPolicyCall::SELECTOR)
     {
@@ -89,6 +98,35 @@ fn bearer_access(input: &[u8], remaining: &mut usize) -> Result<(), PrecompileEr
     let mut token_bytes = 16 * 1024;
     string(body, 0, &mut token_bytes)?;
     charge(remaining, 16 * 1024 - token_bytes)
+}
+
+fn policy_create(input: &[u8], remaining: &mut usize) -> Result<(), PrecompileError> {
+    let bearer = input.starts_with(&IAcp::bearerCreatePolicyCall::SELECTOR);
+    let options = input.starts_with(&IAcp::createPolicyWithOptionsCall::SELECTOR);
+    let body = &input[4..];
+    let fields = if bearer {
+        3
+    } else if options {
+        1
+    } else {
+        2
+    };
+    body.get(..fields * 32).ok_or_else(invalid)?;
+    let payload = bytes(body, if bearer { 32 } else { 0 })?;
+    if !options && payload.len() > vera_modules::acp::MAX_POLICY_DEFINITION_BYTES {
+        return Err(PrecompileError::Other(
+            "policy definition exceeds 64 KiB".into(),
+        ));
+    }
+    // Raw options JSON retains the transaction bound; semantic field limits are
+    // applied after metered decode, so whitespace/escape spelling stays supported.
+    charge(remaining, payload.len())?;
+    if bearer {
+        let mut token_bytes = 16 * 1024;
+        string(body, 0, &mut token_bytes)?;
+        charge(remaining, 16 * 1024 - token_bytes)?;
+    }
+    Ok(())
 }
 
 // Match the compiler/JWT hard limits before owned ABI decoding. These bounds

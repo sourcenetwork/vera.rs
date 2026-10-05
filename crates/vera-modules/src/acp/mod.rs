@@ -14,6 +14,9 @@ mod metadata;
 mod object_archive;
 mod object_pairs;
 pub mod pages;
+mod policy_create;
+mod policy_create_budget;
+pub use policy_create_budget::PolicyCreateBudget;
 mod policy_edit;
 mod policy_edit_budget;
 pub use policy_edit_budget::PolicyEditBudget;
@@ -149,78 +152,6 @@ impl AcpModule {
     }
 
     // ── Msg handlers ────────────────────────────────────────────────────
-
-    /// Parse, validate, and store a new access control policy.
-    #[allow(unused_variables)]
-    pub fn create_policy(
-        &mut self,
-        creator: &Did,
-        policy: &str,
-        marshal_type: PolicyMarshalingType,
-    ) -> Result<PolicyRecord> {
-        self.create_policy_with_metadata(
-            policy,
-            marshal_type,
-            RecordMetadata {
-                creation_ts: Timestamp::default(),
-                tx_hash: Vec::new(),
-                tx_signer: String::new(),
-                owner_did: creator.to_string(),
-            },
-        )
-    }
-
-    fn create_policy_with_metadata(
-        &mut self,
-        policy: &str,
-        marshal_type: PolicyMarshalingType,
-        metadata: RecordMetadata,
-    ) -> Result<PolicyRecord> {
-        self.create_policy_with_options(
-            policy,
-            marshal_type,
-            metadata,
-            None,
-            SuppliedMetadata::default(),
-        )
-    }
-
-    fn create_policy_with_options(
-        &mut self,
-        policy: &str,
-        marshal_type: PolicyMarshalingType,
-        metadata: RecordMetadata,
-        specification: Option<PolicySpecification>,
-        supplied: SuppliedMetadata,
-    ) -> Result<PolicyRecord> {
-        supplied.validate()?;
-        let counter = self.next_policy_counter()?;
-        let zanzibar_policy = Self::compile_policy(policy, &marshal_type, counter, specification)?;
-
-        let record = PolicyRecord {
-            relations: RelationGenerations::new(&zanzibar_policy).map_err(relation_state_error)?,
-            supplied_metadata: supplied,
-            last_modified: None,
-            policy: zanzibar_policy.clone(),
-            raw_policy: policy.to_string(),
-            marshal_type,
-            metadata,
-        };
-
-        let policy_id = zanzibar_policy.id.clone();
-        if self.store.has(&keys::policy_key(&policy_id))
-            || self.retired_policy(&policy_id)?.is_some()
-        {
-            return Err(AcpError::State("policy identifier already exists".into()));
-        }
-        self.store
-            .put(keys::POLICY_COUNTER_KEY, counter.to_be_bytes().to_vec());
-        self.set_policy_record(&policy_id, &record);
-        self.zanzibar_policies
-            .insert(policy_id, Arc::new(zanzibar_policy));
-
-        Ok(record)
-    }
 
     /// Evaluate an access check and persist the decision.
     #[allow(unused_variables)]
