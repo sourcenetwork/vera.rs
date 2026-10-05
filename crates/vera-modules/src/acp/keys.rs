@@ -164,6 +164,22 @@ pub fn commitment_by_commitment_index_prefix(root: &[u8]) -> Vec<u8> {
     key
 }
 
+/// Commitment policy-index key: `"commitment/indexes/policy/idx/" + policy_id + "/" + BE(id)`.
+pub fn commitment_policy_index_key(policy_id: &str, id: u64) -> Vec<u8> {
+    let mut key = commitment_policy_index_prefix(policy_id);
+    key.extend_from_slice(&id.to_be_bytes());
+    key
+}
+
+/// Prefix for scanning all commitments, including expired records, under a policy.
+pub fn commitment_policy_index_prefix(policy_id: &str) -> Vec<u8> {
+    let mut key = Vec::from(COMMITMENT_PREFIX);
+    key.extend_from_slice(b"indexes/policy/idx/");
+    key.extend_from_slice(policy_id.as_bytes());
+    key.push(b'/');
+    key
+}
+
 /// Amendment event policy-index key: `"amendment_event/indexes/policy/idx/" + policy_id + "/" + BE(id)`.
 pub fn amendment_event_policy_index_key(policy_id: &str, id: u64) -> Vec<u8> {
     let mut key = amendment_event_policy_index_prefix(policy_id);
@@ -210,6 +226,21 @@ mod tests {
         let key = access_decision_key("ABCDEF123");
         assert!(key.starts_with(ACCESS_DECISION_PREFIX));
         assert_eq!(&key[ACCESS_DECISION_PREFIX.len()..], b"ABCDEF123");
+    }
+
+    #[test]
+    fn commitment_policy_index_has_a_delimited_policy_and_ordered_id() {
+        assert_eq!(
+            commitment_policy_index_key("policy", 42),
+            b"commitment/indexes/policy/idx/policy/\x00\x00\x00\x00\x00\x00\x00\x2a"
+        );
+        assert!(
+            !commitment_policy_index_key("policy-other", 42)
+                .starts_with(&commitment_policy_index_prefix("policy"))
+        );
+        assert!(
+            commitment_policy_index_key("policy", 255) < commitment_policy_index_key("policy", 256)
+        );
     }
 
     #[test]

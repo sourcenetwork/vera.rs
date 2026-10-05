@@ -25,12 +25,30 @@ impl AcpModule {
                         id,
                     ))
                     != Some(&[])
+                || self
+                    .store
+                    .get_ref(&keys::commitment_policy_index_key(&record.policy_id, id))
+                    != Some(&[])
                 || (!record.expired
                     && self.store.get_ref(&Self::commitment_expiry_key(&record)) != Some(&[]))
             {
                 return Err(AcpError::State(
                     "commitment policy or index mismatch".into(),
                 ));
+            }
+        }
+        let mut policies = keys::commitment_policy_index_prefix("");
+        policies.pop();
+        for (key, value) in self.store.prefix_iter(&policies) {
+            let id = index_id(key)?;
+            let record = self
+                .get_commitment_by_id(id)?
+                .ok_or_else(|| AcpError::State("commitment policy index record missing".into()))?;
+            if !value.is_empty()
+                || keys::commitment_policy_index_key(&record.policy_id, id) != key
+                || !self.zanzibar_policies.contains_key(&record.policy_id)
+            {
+                return Err(AcpError::State("commitment policy index mismatch".into()));
             }
         }
         let mut roots = keys::commitment_by_commitment_index_prefix(&[]);

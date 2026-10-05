@@ -106,35 +106,32 @@ impl AcpModule {
             .prefix_iter(&keys::relationship_policy_prefix(policy_id))
             .map(|(key, _)| key.to_vec())
             .collect();
-        for (key, value) in self
-            .store
-            .prefix_iter(&[keys::COMMITMENT_PREFIX, keys::OBJS_SUBPREFIX].concat())
-        {
-            let commitment: RegistrationsCommitment = borsh::from_slice(value)
-                .map_err(|error| AcpError::State(format!("invalid commitment: {error}")))?;
-            if keys::commitment_key(commitment.id) != key {
-                return Err(AcpError::State("commitment key mismatch".into()));
+        let prefix = keys::commitment_policy_index_prefix(policy_id);
+        for (index, value) in self.store.prefix_iter(&prefix) {
+            let id = policy_index_id(&prefix, index, value)?;
+            let commitment = self
+                .get_commitment_by_id(id)?
+                .ok_or_else(|| AcpError::State("indexed commitment missing".into()))?;
+            if commitment.policy_id != policy_id {
+                return Err(AcpError::State("commitment policy index mismatch".into()));
             }
-            if commitment.policy_id == policy_id {
-                keys.extend([
-                    key.to_vec(),
-                    Self::commitment_expiry_key(&commitment),
-                    keys::commitment_by_commitment_index_key(&commitment.commitment, commitment.id),
-                ]);
-            }
+            keys.extend([
+                index.to_vec(),
+                keys::commitment_key(id),
+                Self::commitment_expiry_key(&commitment),
+                keys::commitment_by_commitment_index_key(&commitment.commitment, id),
+            ]);
         }
-        for (key, value) in self.store.prefix_iter(&Self::amendment_event_objs_prefix()) {
-            let event: AmendmentEvent = borsh::from_slice(value)
-                .map_err(|error| AcpError::State(format!("invalid amendment: {error}")))?;
-            if keys::amendment_event_key(event.id) != key {
-                return Err(AcpError::State("amendment key mismatch".into()));
+        let prefix = keys::amendment_event_policy_index_prefix(policy_id);
+        for (index, value) in self.store.prefix_iter(&prefix) {
+            let id = policy_index_id(&prefix, index, value)?;
+            let event = self
+                .get_amendment_event_by_id(id)?
+                .ok_or_else(|| AcpError::State("indexed amendment missing".into()))?;
+            if event.policy_id != policy_id {
+                return Err(AcpError::State("amendment policy index mismatch".into()));
             }
-            if event.policy_id == policy_id {
-                keys.extend([
-                    key.to_vec(),
-                    keys::amendment_event_policy_index_key(policy_id, event.id),
-                ]);
-            }
+            keys.extend([index.to_vec(), keys::amendment_event_key(id)]);
         }
         for key in keys {
             self.store.delete(&key);
@@ -143,4 +140,14 @@ impl AcpModule {
         self.zanzibar_policies.remove(policy_id);
         Ok(true)
     }
+}
+
+fn policy_index_id(prefix: &[u8], key: &[u8], value: &[u8]) -> Result<u64> {
+    let id = key
+        .strip_prefix(prefix)
+        .and_then(|suffix| suffix.try_into().ok())
+        .map(u64::from_be_bytes)
+        .filter(|id| *id != 0 && value.is_empty())
+        .ok_or_else(|| AcpError::State("invalid policy record index".into()))?;
+    Ok(id)
 }

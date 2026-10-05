@@ -3,7 +3,8 @@ use vera_modules::acp::{
     pages::{RecordPage, RelationshipPageRequest},
     theorem::TheoremReport,
     types::{
-        PolicyCommandRequest, PolicyCreation, PolicyRecord, RelationshipRecord, SuppliedMetadata,
+        PolicyCmdResult, PolicyCommandRequest, PolicyCreation, PolicyRecord, RelationshipRecord,
+        SuppliedMetadata,
     },
 };
 use vera_modules::types::Timestamp;
@@ -47,6 +48,19 @@ impl Fixture {
         .unwrap();
         assert!(!output.precompile.reverted, "{:?}", output.precompile.bytes);
         output.precompile.bytes
+    }
+    fn command(&mut self, policy: B256, command: PolicyCmd) -> PolicyCmdResult {
+        let output = self.call(IAcp::executePolicyCommandCall {
+            policyId: policy,
+            request: serde_json::to_vec(&PolicyCommandRequest {
+                command,
+                metadata: Default::default(),
+            })
+            .unwrap()
+            .into(),
+        });
+        let bytes = IAcp::executePolicyCommandCall::abi_decode_returns(&output).unwrap();
+        serde_json::from_slice(&bytes).unwrap()
     }
     fn create(&mut self) -> alloy_primitives::B256 {
         let output = self.call(IAcp::createPolicyWithOptionsCall {
@@ -181,6 +195,51 @@ fn native_lifecycle_dispatch_preserves_metadata_and_enforces_ownership() {
 fn failed_batch_restores_deleted_policy_and_low_gas_cannot_mutate() {
     let mut f = Fixture::new();
     let policy = f.create();
+    let object = Object {
+        resource: "file".into(),
+        id: "report".into(),
+    };
+    let generated = f
+        .acp
+        .query_generate_commitment(
+            &hex::encode(policy),
+            std::slice::from_ref(&object),
+            &Actor(Did::new(&f.tx.signer).unwrap()),
+        )
+        .unwrap();
+    let PolicyCmdResult::CommitRegistrations {
+        registrations_commitment,
+    } = f.command(
+        policy,
+        PolicyCmd::CommitRegistrations {
+            commitment: generated.commitment,
+        },
+    )
+    else {
+        panic!("expected commitment")
+    };
+    f.tx.signer = "did:key:later-owner".into();
+    f.block.timestamp = Timestamp {
+        seconds: 20,
+        block_height: 2,
+    };
+    f.command(policy, PolicyCmd::RegisterObject(object));
+    f.tx.signer = "did:key:owner".into();
+    f.block.timestamp = Timestamp {
+        seconds: 30,
+        block_height: 3,
+    };
+    assert!(matches!(
+        f.command(
+            policy,
+            PolicyCmd::RevealRegistration {
+                registrations_commitment_id: registrations_commitment.id,
+                proof: generated.proofs[0].clone(),
+            }
+        ),
+        PolicyCmdResult::RevealRegistration { event: Some(_), .. }
+    ));
+    f.acp.validate_restored_state().unwrap();
     let before = f.acp.store().serialize();
     let deletion = IAcp::deletePolicyCall { policyId: policy }.abi_encode();
     assert!(matches!(
@@ -205,6 +264,7 @@ fn failed_batch_restores_deleted_policy_and_low_gas_cannot_mutate() {
     assert!(result.precompile.reverted);
     assert!(result.logs.is_empty());
     assert_eq!(f.acp.store().serialize(), before);
+    f.acp.validate_restored_state().unwrap();
 }
 
 #[test]

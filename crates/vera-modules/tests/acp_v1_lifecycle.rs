@@ -59,6 +59,9 @@ fn restored(module: &AcpModule) -> AcpModule {
 #[path = "support/acp_v1_metadata.rs"]
 mod metadata;
 
+#[path = "support/acp_v1_deletion.rs"]
+mod deletion;
+
 #[test]
 fn policy_creator_cannot_manage_another_actors_object() {
     let (mut module, policy) = setup();

@@ -832,6 +832,10 @@ impl AcpModule {
                 &previous.commitment,
                 previous.id,
             ));
+            self.store.delete(&keys::commitment_policy_index_key(
+                &previous.policy_id,
+                previous.id,
+            ));
         }
         if !commitment.expired {
             self.store
@@ -839,6 +843,10 @@ impl AcpModule {
         }
         self.store.put(
             &keys::commitment_by_commitment_index_key(&commitment.commitment, commitment.id),
+            Vec::new(),
+        );
+        self.store.put(
+            &keys::commitment_policy_index_key(&commitment.policy_id, commitment.id),
             Vec::new(),
         );
         self.store.put(&keys::commitment_key(commitment.id), bytes);
