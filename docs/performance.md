@@ -17,6 +17,15 @@ first with growing registrations and then with 128 repeatedly updated objects.
 These are fixed-load baselines, not searches for maximum throughput. They are
 not part of every pull request's test loop.
 
+Before final-state reconciliation, `operation_baseline` selects the highest
+measured receipt revision and waits up to 30 seconds for that exact receipt on
+every replica. It compares the transaction hash, block hash, height and status
+before checking final ownership and permissions. Earlier receipts alone do not
+establish that later updates are visible. The `replica_state_barrier` record
+reports the selected receipt, replica count and wait duration separately from
+workload latency and throughput. Existing receipt, state and restart assertions
+remain required.
+
 ## ACP lifecycle components
 
 `component_baseline` includes policy edits and deletions with 32, 256 and 2,048

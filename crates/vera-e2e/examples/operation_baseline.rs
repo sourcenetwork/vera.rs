@@ -3,6 +3,8 @@
 
 #[path = "operation_baseline/driver.rs"]
 mod driver;
+#[path = "operation_baseline/replica_barrier.rs"]
+mod replica_barrier;
 #[path = "operation_baseline/resources.rs"]
 mod resources;
 #[path = "operation_baseline/retention.rs"]
@@ -314,6 +316,17 @@ async fn main() {
     let replica_clients: Vec<_> = (0..cluster.node_count())
         .map(|i| VeraClient::new(cluster.node(i).rpc_url()))
         .collect();
+    if let Some(evidence) = replica_barrier::synchronize(
+        &replica_clients,
+        observations
+            .iter()
+            .filter_map(driver::Observation::measured_anchor),
+    )
+    .await
+    .expect("replica final-state barrier")
+    {
+        println!("{evidence}");
+    }
     let verification_concurrency = (rpc_connections.get() as usize).min(8);
     let mut checks = stream::iter(observations.iter())
         .map(|observation| driver::verify(&replica_clients, policy_id, observation))
