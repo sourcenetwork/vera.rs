@@ -66,6 +66,93 @@ class CompareTests(unittest.TestCase):
             with patch('compare_pr.load_run', side_effect=bad):
                 self.assertTrue(compare(self.root))
 
+    def shared_driver(self):
+        self.identity['format_version'] = 2
+        for side in ('head', 'base'):
+            self.identity[side].update(runner_source='head', runner_sha256='shared-driver')
+        self.write_identity()
+
+    def shared_run_fixture(self, path):
+        run = self.run_fixture(path)
+        run[0].update(format_version=2, runner_source='head', runner_sha256='shared-driver', runner_dirty=False)
+        return run
+
+    def test_shared_driver_accepts_distinct_node_revisions(self):
+        self.shared_driver()
+        with patch('compare_pr.load_run', side_effect=self.shared_run_fixture):
+            self.assertFalse(compare(self.root))
+        result = json.loads((self.root / 'comparison-report.json').read_text())
+        self.assertFalse(result['errors'])
+        self.assertTrue(any('workflows/s' in row['metric'] for row in result['metrics']))
+        self.assertIn('Shared workload runner source `head`', (self.root / 'comparison.md').read_text())
+
+    def test_shared_driver_rejects_missing_dirty_or_misattributed_manifests(self):
+        self.shared_driver()
+        for key, value in [('runner_source', 'base'), ('runner_dirty', True), ('format_version', 1),
+                           ('runner_source', None), ('runner_dirty', None)]:
+            with self.subTest(key=key, value=value):
+                def bad(path):
+                    run = self.shared_run_fixture(path)
+                    if value is None:
+                        run[0].pop(key)
+                    else:
+                        run[0][key] = value
+                    return run
+                with patch('compare_pr.load_run', side_effect=bad):
+                    self.assertTrue(compare(self.root))
+                result = json.loads((self.root / 'comparison-report.json').read_text())
+                self.assertEqual(len(result['errors']), 2)
+                self.assertTrue(all('ns/op' in row['metric'] for row in result['metrics']))
+
+    def test_shared_driver_requires_boolean_clean_flags(self):
+        self.shared_driver()
+        for key in ('dirty', 'runner_dirty'):
+            for value in (None, 0, '', [], {}):
+                with self.subTest(key=key, value=value):
+                    def bad(path):
+                        run = self.shared_run_fixture(path)
+                        run[0][key] = value
+                        return run
+                    with patch('compare_pr.load_run', side_effect=bad):
+                        self.assertTrue(compare(self.root))
+                    result = json.loads((self.root / 'comparison-report.json').read_text())
+                    self.assertEqual(len(result['errors']), 2)
+                    self.assertTrue(all('ns/op' in row['metric'] for row in result['metrics']))
+
+    def test_version_two_manifests_cannot_use_historical_comparison_rules(self):
+        self.shared_driver()
+        for version in (None, 1):
+            with self.subTest(version=version):
+                if version is None:
+                    self.identity.pop('format_version')
+                else:
+                    self.identity['format_version'] = version
+                self.write_identity()
+                def bad(path):
+                    run = self.shared_run_fixture(path)
+                    run[0]['runner_dirty'] = True
+                    return run
+                with patch('compare_pr.load_run', side_effect=bad):
+                    self.assertTrue(compare(self.root))
+                result = json.loads((self.root / 'comparison-report.json').read_text())
+                self.assertTrue(all('mixed comparison provenance versions' in error for error in result['errors']))
+
+    def test_shared_driver_rejects_two_runners_even_with_matching_side_manifests(self):
+        for key, value in [('runner_source', 'base'), ('runner_sha256', 'old-driver')]:
+            with self.subTest(key=key):
+                self.shared_driver()
+                self.identity['base'][key] = value
+                self.write_identity()
+                def bad(path):
+                    run = self.shared_run_fixture(path)
+                    if path.parent.name.startswith('base'):
+                        run[0][key] = value
+                    return run
+                with patch('compare_pr.load_run', side_effect=bad):
+                    self.assertTrue(compare(self.root))
+                result = json.loads((self.root / 'comparison-report.json').read_text())
+                self.assertTrue(all('one head-built workload runner' in error for error in result['errors']))
+
     def test_configuration_changes_suppress_deltas(self):
         def changed(path):
             run = self.run_fixture(path)

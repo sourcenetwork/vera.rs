@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure already-built revisions on one runner; never compile between passes."""
+"""Measure prebuilt node revisions with one head workload driver and no intervening builds."""
 import argparse
 import json
 import os
@@ -26,12 +26,17 @@ def main():
     scripts = Path(__file__).resolve().parent
     sources = {'head': args.head.resolve(), 'base': args.base.resolve()}
     binaries = args.binaries.resolve()
-    identity = {}
-    for side, source in sources.items():
+    runner = binaries / 'head' / 'operation_baseline'
+    runner_sha256 = digest(runner)
+    revisions = {side: subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip()
+                 for side, source in sources.items()}
+    identity = {'format_version': 2}
+    for side in sources:
         identity[side] = {
-            'source': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip(),
+            'source': revisions[side],
+            'runner_source': revisions['head'],
             'node_sha256': digest(binaries / side / 'verad'),
-            'runner_sha256': digest(binaries / side / 'operation_baseline'),
+            'runner_sha256': runner_sha256,
             'components': (binaries / side / 'component_baseline').is_file(),
         }
         if identity[side]['components']:
@@ -53,7 +58,7 @@ def main():
                                stdout=out, stderr=err, check=True, timeout=120)
         for objects in (0, 32):
             command = [sys.executable, str(scripts / 'record.py'), '--node', str(binaries / side / 'verad'),
-                       '--runner', str(binaries / side / 'operation_baseline'), '--history', 'rocksdb',
+                       '--runner', str(runner), '--runner-source', str(sources['head']), '--history', 'rocksdb',
                        '--output', str(destination / f'objects-{objects}'), str(args.count), str(args.rate),
                        '128', '1', 'normal', '100', epoch, '0', str(objects), retained,
                        '1' if pipelined else '0']

@@ -85,9 +85,12 @@ change.
 
 The [PR performance workflow](../.github/workflows/performance-pr.yml) measures
 code-changing same-repository PRs on one hosted Linux runner. It checks out the
-exact PR head and base-tip revisions, builds both with Rust 1.98.0 in the release
-profile, and preserves separate binaries before timing. Four passes run in
-head/base/base/head order with no compilation or chart rendering between them.
+exact PR head and base-tip revisions and builds both node binaries with Rust
+1.98.0 in the release profile. One head-built `operation_baseline` drives both
+revisions, giving them identical workload generation and correctness checks.
+Component executables remain specific to each revision. All binaries are preserved
+before four passes run in head/base/base/head order, with no compilation or chart
+rendering between them.
 Fork PRs cannot run this job because the locked dependencies require credentials.
 
 Each pass measures 600 operations at 20 offered arrivals/s on four local
@@ -96,7 +99,12 @@ verified permission reads. Receipt, permission and full-workflow p95, completed
 workflows/s, and peak member RSS appear in the check summary. Every pass must
 satisfy the existing completeness, certificate, replica and hard-restart gates.
 A failed run is never presented as improved performance. Configuration changes
-are listed explicitly and suppress full-stack percentage comparisons.
+are listed explicitly and suppress full-stack percentage comparisons. The driver
+also generates genesis/configuration and verifies native receipts and proofs;
+a base revision incompatible with those interfaces fails the comparison. There is
+no fallback to a different workload driver. Block limits printed by the driver
+are its compiled configuration assumptions, not measurements of the base node's
+capabilities.
 
 The component executable separately measures native BLS request verification,
 ACP owner-read evaluation with read capture, and consensus-certificate verification
@@ -113,14 +121,18 @@ Otherwise, separated ranges are labelled improvement or regression **signals**, 
 statistical confidence. Performance changes are advisory on shared runners;
 missing measurements, build failures and failed correctness gates fail the job.
 The workflow summary and 30-day artifacts contain pass ranges, raw measurements,
-source revisions, binary hashes, workload configuration, host provenance and
-per-pass charts. The workflow has read-only repository permissions and does not
+separate node and workload-runner source revisions, binary hashes, workload
+configuration, host provenance and per-pass charts. Version 2 comparison records
+require the same head-sourced driver hash for every pass and reject dirty or
+misattributed sources. Historical version 1 artifacts retain their original
+per-revision runner identities when re-read. The workflow has read-only repository permissions and does not
 post comments or publish a site. Throughput at this fixed offered rate is not a
 maximum-throughput benchmark.
 
 Run the same comparison locally after building each revision into separate
-`binaries/head` and `binaries/base` directories (containing `verad`,
-`operation_baseline`, and `component_baseline` when available):
+`binaries/head` and `binaries/base` directories. Each contains its own `verad` and
+`component_baseline` when available; the head component executable is required.
+Only `binaries/head` needs `operation_baseline`:
 
 ```sh
 python tools/performance/run_pr.py --head /path/to/head --base /path/to/base \
@@ -134,7 +146,8 @@ full-stack runs.
 
 Each artifact includes:
 
-- Checkout revision, binary hashes, platform, CPU count, memory, runner image,
+- Node and runner checkout revisions, their dirty status and binary hashes,
+  platform, CPU count, memory, runner image,
   load averages, backend selection, exact arguments, and process exit status.
 - Raw versioned JSONL observations, including rejection, uncertainty, throttling,
   and incomplete workflows.
