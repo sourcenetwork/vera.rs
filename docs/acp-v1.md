@@ -98,14 +98,20 @@ This is a feature port, not a claim of identical transport or parser behavior:
   records rejected by a filter. An empty page can have a continuation cursor.
   Cursors are exclusive storage positions, not revision certificates; repeated
   live RPC calls can observe different revisions. Unpaged queries reject oversized
-  results rather than silently truncate. For larger catalogues, enumerate the
-  relationship pages and combine them with the policy's declared resources.
-- Definition edits still scan the target policy's relationships and apply all
-  pruning atomically. Their execution charge does not grow with that work.
-  Scalable, bounded editing remains unresolved; bounded deletion does not qualify
-  large-policy edits or establish a production mutation limit. The lifecycle
-  component workload measures edit cost and full deletion teardown, including
-  cleanup.
+  results rather than silently truncate. Policy ID listings require at most
+  128 records / 1 MiB of stored key/value bytes, checked before decoding any policies;
+  larger listings require certified policy pages. Their execution charge is
+  1,000 base units plus 100 per inspected record and one per 16 encoded key/value
+  bytes, rounded up per record. Count-limit lookahead charges only its key.
+  Exhaustion stops before decoding; ordinary errors retain consumed units, and
+  nested batches share the remaining execution allowance. For larger relationship
+  catalogues, enumerate relationship pages and combine them with the policy's
+  declared resources.
+- [Definition edits](acp-policy-edits.md) retire indexed generation pairs atomically;
+  physical cleanup runs later under the shared cleanup budget. Runtime edits meter
+  reads, writes and preparation work without visiting every physical relationship.
+  This accounting does not meter individual compiler instructions. The lifecycle
+  component workload measures edit cost and full deletion teardown, including cleanup.
 
 The commitment policy index is persisted in authenticated state, including for
 expired commitments. It changes execution roots when commitments are written.

@@ -399,3 +399,108 @@ fn late_result_exhaustion_restores_prior_writes_and_returns_no_logs() {
     );
     assert_eq!(fixture.state(), before);
 }
+
+fn large_policy_listing(fixture: &mut Fixture, count: usize) -> Vec<u8> {
+    let actor = Did::new(&fixture.tx.signer).unwrap();
+    let policy = format!(
+        "name: listing\nresources:\n  - name: file\n# {}\n",
+        "x".repeat(60 << 10),
+    );
+    for _ in 0..count {
+        fixture
+            .acp
+            .create_policy(&actor, &policy, PolicyMarshalingType::ShortYaml)
+            .unwrap();
+    }
+    IAcp::getPolicyIdsCall {}.abi_encode()
+}
+
+#[test]
+fn policy_id_listing_charges_exact_work_and_repeated_batches_exhaust_remaining_gas() {
+    let mut fixture = Fixture::new();
+    let read = large_policy_listing(&mut fixture, 16);
+    let before = fixture.state();
+    let measured = fixture.dispatch(&read, 1_000_000).unwrap();
+    assert!(!measured.precompile.reverted);
+    let required = measured.precompile.gas_used;
+    assert!(required > 60_000);
+    assert_eq!(
+        IAcp::getPolicyIdsCall::abi_decode_returns(&measured.precompile.bytes)
+            .unwrap()
+            .len(),
+        16
+    );
+    assert_eq!(
+        fixture
+            .dispatch(&read, required)
+            .unwrap()
+            .precompile
+            .gas_used,
+        required
+    );
+    assert!(matches!(
+        fixture.dispatch(&read, required - 1),
+        Err(PrecompileError::OutOfGas)
+    ));
+    let nested = batch(vec![read.clone(), batch(vec![read.clone()])]);
+    let exact = READ_GAS * 2 + required * 2;
+    assert_eq!(
+        fixture
+            .dispatch(&nested, exact)
+            .unwrap()
+            .precompile
+            .gas_used,
+        exact
+    );
+    assert!(matches!(
+        fixture.dispatch(&nested, exact - 1),
+        Err(PrecompileError::OutOfGas)
+    ));
+    let input = batch(vec![read.clone(); batch::MAX_CALLS - 1]);
+    batch::validate(&input).unwrap();
+    assert!(matches!(
+        fixture.dispatch(&input, 1_000_000),
+        Err(PrecompileError::OutOfGas)
+    ));
+    assert_eq!(fixture.state(), before);
+    let mut calls = vec![create("prior-write")];
+    calls.extend(std::iter::repeat_n(read, batch::MAX_CALLS - 2));
+    assert!(matches!(
+        fixture.dispatch(&batch(calls), 1_000_000),
+        Err(PrecompileError::OutOfGas)
+    ));
+    assert_eq!(fixture.state(), before);
+}
+
+#[test]
+fn oversized_policy_id_listing_keeps_read_charges_and_rolls_back_earlier_batch_writes() {
+    let mut fixture = Fixture::new();
+    let read = large_policy_listing(&mut fixture, 18);
+    let before = fixture.state();
+    let result = fixture.dispatch(&read, 1_000_000).unwrap();
+    assert!(result.precompile.reverted);
+    assert!(result.precompile.gas_used > READ_GAS);
+    assert!(
+        String::from_utf8_lossy(&result.precompile.bytes).contains("use certified prefix pages")
+    );
+    let input = batch(vec![read.clone(); batch::MAX_CALLS - 1]);
+    batch::validate(&input).unwrap();
+    let repeated = fixture.dispatch(&input, 1_000_000).unwrap();
+    assert!(repeated.precompile.reverted);
+    assert_eq!(
+        repeated.precompile.gas_used,
+        READ_GAS + result.precompile.gas_used
+    );
+    assert!(
+        String::from_utf8_lossy(&repeated.precompile.bytes).starts_with("batch call 1 reverted:")
+    );
+    assert!(repeated.logs.is_empty());
+    assert_eq!(fixture.state(), before);
+    let result = fixture
+        .dispatch(&batch(vec![create("prior-write"), read]), 1_000_000)
+        .unwrap();
+    assert!(result.precompile.reverted);
+    assert!(result.precompile.gas_used > READ_GAS + WRITE_GAS);
+    assert!(result.logs.is_empty());
+    assert_eq!(fixture.state(), before);
+}

@@ -22,7 +22,7 @@ use vera_modules::acp::types::{
     AccessRequest, AcpParams, Actor, Object, Operation, PolicyCmd, PolicyMarshalingType,
     RelationshipSelector,
 };
-use vera_modules::acp::{AcpModule, PolicyEditBudget};
+use vera_modules::acp::{AcpModule, PolicyEditBudget, PolicyListBudget};
 use vera_modules::types::{BlockExecCtx, TxExecCtx};
 use vera_modules::vera::VeraModule;
 
@@ -1077,13 +1077,25 @@ fn dispatch_validated(
                 return Err(PrecompileError::OutOfGas);
             }
             // Zero-parameter function — no ABI decoding needed.
-            let ids = match module.query_policy_ids() {
-                Ok(r) => r,
-                Err(e) => return Ok(err_dispatch(e)),
+            let mut budget = PolicyListBudget::new(gas_limit - READ_GAS);
+            let ids = module.query_policy_ids_with_budget(&mut budget);
+            if budget.is_exhausted() {
+                return Err(PrecompileError::OutOfGas);
+            }
+            let gas_used = READ_GAS
+                .checked_add(budget.consumed())
+                .ok_or(PrecompileError::OutOfGas)?;
+            let ids = match ids {
+                Ok(ids) => ids,
+                Err(error) => {
+                    let mut result = err_dispatch(error);
+                    result.precompile.gas_used = gas_used;
+                    return Ok(result);
+                }
             };
 
             let ret = IAcp::getPolicyIdsCall::abi_encode_returns(&ids);
-            Ok(ok_dispatch(READ_GAS, ret, vec![]))
+            Ok(ok_dispatch(gas_used, ret, vec![]))
         }
 
         IAcp::filterRelationshipsCall::SELECTOR => {

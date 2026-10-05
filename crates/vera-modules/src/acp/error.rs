@@ -51,6 +51,9 @@ pub enum AcpError {
     #[error("policy edit work allowance exceeded")]
     PolicyEditBudgetExceeded,
 
+    #[error("policy listing work allowance exceeded")]
+    PolicyListBudgetExceeded,
+
     #[error("state error: {0}")]
     State(String),
 }
