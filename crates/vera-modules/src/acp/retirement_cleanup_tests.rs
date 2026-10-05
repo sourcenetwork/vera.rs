@@ -28,6 +28,7 @@ fn setup(count: usize) -> (AcpModule, String) {
 fn put(module: &mut AcpModule, policy: &str, relationship: Relationship) -> Vec<u8> {
     let definition = module.query_policy(policy).unwrap();
     let record = RelationshipRecord {
+        incarnation: 0,
         generations: definition.relations.pair(&relationship).unwrap(),
         relationship,
         policy_id: policy.into(),
@@ -39,7 +40,7 @@ fn put(module: &mut AcpModule, policy: &str, relationship: Relationship) -> Vec<
     keys::relationship_generation_key(
         policy,
         record.generations,
-        &keys::relationship_storage_key(&record.relationship),
+        &keys::relationship_storage_key(&record.relationship, record.incarnation),
     )
 }
 
@@ -319,6 +320,7 @@ fn maximum_value_batch_charges_object_counter_bytes_before_decoding() {
     module.store.put(&first, value);
     let pair = cleanup_pair(&policy, &first).unwrap();
     let mut required = keys::policy_key(&policy).len()
+        + object_state::key(&policy, "file", "shared").len()
         + record_size(&first, module.store.get_ref(&first).unwrap()).unwrap()
         + first.len();
     for key in [

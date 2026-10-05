@@ -245,7 +245,7 @@ pub(super) fn relation_prefix(
     String::from_utf8(keys::relationship_generation_prefix(
         policy,
         pair,
-        &keys::relation_prefix("document", "doc1", relation),
+        &keys::relation_prefix("document", "doc1", relation, 0),
     ))
     .unwrap()
 }

@@ -24,6 +24,7 @@ fn fixture() -> (AcpModule, Did, String, Object) {
 fn put(module: &mut AcpModule, policy: &str, relationship: Relationship) -> RelationshipRecord {
     let definition = module.query_policy(policy).unwrap();
     let record = RelationshipRecord {
+        incarnation: object_state::for_relationship(&module.store, policy, &relationship).unwrap(),
         generations: definition.relations.pair(&relationship).unwrap(),
         policy_id: policy.into(),
         relationship,
@@ -53,7 +54,7 @@ fn row_key(record: &RelationshipRecord) -> Vec<u8> {
     keys::relationship_generation_key(
         &record.policy_id,
         record.generations,
-        &keys::relationship_storage_key(&record.relationship),
+        &keys::relationship_storage_key(&record.relationship, record.incarnation),
     )
 }
 
@@ -101,8 +102,8 @@ fn archive_removes_only_outgoing_grants_and_retains_ownership() {
     );
     assert_eq!(archive(&mut module, &owner, &policy, &object), 3);
     for record in [&grant, &userset] {
-        assert!(!module.store.has(&row_key(record)));
-        assert!(!module.store.has(&object_pairs::key(record)));
+        assert!(module.store.has(&row_key(record)));
+        assert!(module.store.has(&object_pairs::key(record)));
     }
     for record in [&incoming, &unrelated] {
         assert!(module.store.has(&row_key(record)));
@@ -188,7 +189,7 @@ fn archive_excludes_retired_pairs_without_reviving_them_on_unarchive() {
         assert_eq!(archive(&mut module, &owner, &policy, &object), 2);
         assert!(module.store.has(&row_key(&old)));
         assert!(module.store.has(&object_pairs::key(&old)));
-        assert!(!module.store.has(&row_key(&fresh)));
+        assert!(module.store.has(&row_key(&fresh)));
         module.validate_restored_state().unwrap();
         module
             .direct_policy_cmd(&owner, &policy, PolicyCmd::UnarchiveObject(object.clone()))
@@ -207,7 +208,7 @@ fn archive_excludes_retired_pairs_without_reviving_them_on_unarchive() {
 }
 
 #[test]
-fn invalid_object_pair_count_or_primary_row_cannot_publish_partial_archive() {
+fn invalid_accessed_archive_indexes_cannot_publish_partial_archive() {
     let (mut module, owner, policy, object) = fixture();
     let grant = put(
         &mut module,
@@ -224,7 +225,7 @@ fn invalid_object_pair_count_or_primary_row_cannot_publish_partial_archive() {
         .registration_owner_record(&policy, &object)
         .unwrap()
         .unwrap();
-    for corruption in 0..7 {
+    for corruption in [0, 1, 2, 3, 6] {
         let mut candidate = module.clone();
         match corruption {
             0 => candidate.store.put(&counter, 2u64.to_be_bytes().to_vec()),

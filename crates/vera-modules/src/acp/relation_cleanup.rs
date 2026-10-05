@@ -308,6 +308,49 @@ impl AcpModule {
             validate_directory(key, value, policy, catalog)?;
             return Ok(Some(vec![key.to_vec()]));
         }
+        if key.starts_with(&object_cleanup::marker_prefix(policy)) {
+            let job = object_cleanup::decode(value)?;
+            let state_key = object_state::key(policy, &job.object.resource, &job.object.id);
+            let counter_bytes = self.store.get_ref(object_cleanup::COUNTER_KEY);
+            if !budget.reserve(
+                0,
+                record_size(
+                    &state_key,
+                    self.store.get_ref(&state_key).unwrap_or_default(),
+                )? + record_size(
+                    object_cleanup::COUNTER_KEY,
+                    counter_bytes.unwrap_or_default(),
+                )?,
+                0,
+            ) {
+                return Ok(None);
+            }
+            let incarnation =
+                object_state::read(&self.store, policy, &job.object.resource, &job.object.id)
+                    .map_err(relation_state_error)?;
+            if job.incarnation >= incarnation {
+                return Err(AcpError::State(
+                    "cleanup object incarnation is not retired".into(),
+                ));
+            }
+            if job.policy != policy
+                || object_cleanup::marker_key(policy, &job.object, job.incarnation) != key
+                || !catalog.active.contains_key(&job.object.resource)
+                || job.sequence
+                    > object_cleanup::counter(&self.store).map_err(relation_state_error)?
+            {
+                return Err(AcpError::State("cleanup object descriptor mismatch".into()));
+            }
+            let queue = object_cleanup::queue_key(job.sequence);
+            let queued = self.store.get_ref(&queue);
+            if !budget.reserve(0, record_size(&queue, queued.unwrap_or_default())?, 0) {
+                return Ok(None);
+            }
+            if queued.is_some_and(|bytes| bytes != value) {
+                return Err(AcpError::State("cleanup object queue mismatch".into()));
+            }
+            return Ok(Some(vec![key.to_vec(), queue]));
+        }
         let prefix = edits::retired_relation_prefix(policy);
         if key.starts_with(&prefix) {
             let generation = generation_suffix(&prefix, key)?;

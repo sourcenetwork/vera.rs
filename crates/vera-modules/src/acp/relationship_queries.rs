@@ -8,7 +8,7 @@ const MAX_DIRECTORY_READS: usize = 256;
 impl AcpModule {
     /// Filter current generation buckets with bounded planning and row inspection.
     /// Planning permits 256 directory reads, 256 buckets and 1 MiB of directory/prefix bytes.
-    /// Row inspection separately permits 128 records and 1 MiB.
+    /// Row inspection separately permits 128 records and 1 MiB including object-state reads.
     pub fn query_filter_relationships(
         &self,
         policy_id: &str,
@@ -49,8 +49,13 @@ impl AcpModule {
                     return Err(AcpError::State("relationship query budget exceeded".into()));
                 }
                 count += 1;
-                let record = Self::decode_current_relationship(policy, key, value)?;
-                if !record.archived && self.matches_selector(&record, selector) {
+                let (record, current, point_bytes) =
+                    self.decode_current_relationship(policy, key, value, budget)?;
+                bytes = bytes.saturating_add(point_bytes);
+                if bytes > MAX_BYTES {
+                    return Err(AcpError::State("relationship query budget exceeded".into()));
+                }
+                if current && !record.archived && self.matches_selector(&record, selector) {
                     records.push(record);
                 }
             }
@@ -66,7 +71,8 @@ impl AcpModule {
     ) -> Result<Vec<Vec<u8>>> {
         budget.check()?;
         let suffix_size = query_suffix_size(policy, selector)?;
-        let mut suffix = None;
+        let mut suffixes = std::collections::BTreeMap::new();
+        let mut object_incarnation = None;
         let mut targets = std::collections::BTreeSet::new();
         let selected_resource = match &selector.object_selector {
             Some(ObjectSelector::Exact(object)) => Some(object.resource.as_str()),
@@ -102,6 +108,25 @@ impl AcpModule {
         let mut prefixes = Vec::new();
         let prefix_size = generation_prefix_size(policy).saturating_add(suffix_size);
         for target in targets {
+            let incarnation = if target == 0 {
+                0
+            } else if let Some(ObjectSelector::Exact(object)) = &selector.object_selector {
+                if let Some(incarnation) = object_incarnation {
+                    incarnation
+                } else {
+                    let (incarnation, bytes) = self.query_object_incarnation(
+                        &policy.policy.id,
+                        &object.resource,
+                        &object.id,
+                        budget,
+                    )?;
+                    limits.bytes = limits.bytes.checked_sub(bytes).ok_or_else(planning_limit)?;
+                    object_incarnation = Some(incarnation);
+                    incarnation
+                }
+            } else {
+                0
+            };
             let directory = relationship_index::active_key(&policy.policy.id, target);
             budget.read(&directory, self.store.get_ref(&directory))?;
             // Preserve the existing independent directory limits before owned decoding.
@@ -123,7 +148,9 @@ impl AcpModule {
                     .checked_sub(prefix_size)
                     .ok_or_else(planning_limit)?;
                 budget.prefix(prefix_size)?;
-                let suffix = suffix.get_or_insert_with(|| query_suffix(selector));
+                let suffix = suffixes
+                    .entry(incarnation)
+                    .or_insert_with(|| query_suffix(selector, incarnation));
                 prefixes.push(keys::relationship_generation_prefix(
                     &policy.policy.id,
                     RelationPair { target, subject },
@@ -135,13 +162,16 @@ impl AcpModule {
     }
 
     pub(super) fn decode_current_relationship(
+        &self,
         policy: &PolicyRecord,
         key: &[u8],
         value: &[u8],
-    ) -> Result<RelationshipRecord> {
+        budget: &QueryBudget,
+    ) -> Result<(RelationshipRecord, bool, usize)> {
         let record: RelationshipRecord = serde_json::from_slice(value)
             .map_err(|e| AcpError::State(format!("invalid relationship record: {e}")))?;
         if record.policy_id != policy.policy.id
+            || (record.relationship.relation == "owner" && record.incarnation != 0)
             || policy
                 .relations
                 .pair(&record.relationship)
@@ -150,14 +180,52 @@ impl AcpModule {
             || keys::relationship_generation_key(
                 &record.policy_id,
                 record.generations,
-                &keys::relationship_storage_key(&record.relationship),
+                &keys::relationship_storage_key(&record.relationship, record.incarnation),
             ) != key
         {
             return Err(AcpError::State(
                 "relationship record identity mismatch".into(),
             ));
         }
-        Ok(record)
+        let (incarnation, bytes) = if record.relationship.relation == "owner" {
+            (0, 0)
+        } else {
+            self.query_object_incarnation(
+                &record.policy_id,
+                &record.relationship.resource,
+                &record.relationship.object_id,
+                budget,
+            )?
+        };
+        if record.incarnation > incarnation {
+            return Err(AcpError::State(
+                "relationship incarnation was never allocated".into(),
+            ));
+        }
+        let current = record.incarnation == incarnation;
+        Ok((record, current, bytes))
+    }
+
+    fn query_object_incarnation(
+        &self,
+        policy: &str,
+        resource: &str,
+        object: &str,
+        budget: &QueryBudget,
+    ) -> Result<(u64, usize)> {
+        object_state::validate_key(policy, resource, object).map_err(relation_state_error)?;
+        let key = object_state::key(policy, resource, object);
+        let value = self.store.get_ref(&key);
+        budget.read(&key, value)?;
+        let bytes = key
+            .len()
+            .saturating_add(value.map_or(0, |value| value.len()));
+        let incarnation = value
+            .map(object_state::decode)
+            .transpose()
+            .map_err(relation_state_error)?
+            .unwrap_or(0);
+        Ok((incarnation, bytes))
     }
 }
 
@@ -172,7 +240,7 @@ const fn generation_prefix_size(policy: &PolicyRecord) -> usize {
 fn query_suffix_size(policy: &PolicyRecord, selector: &RelationshipSelector) -> Result<usize> {
     let encoded = |value: &str| value.len().saturating_mul(2);
     let suffix_size = match &selector.object_selector {
-        Some(ObjectSelector::Exact(object)) => 5usize
+        Some(ObjectSelector::Exact(object)) => 22usize
             .saturating_add(encoded(&object.resource))
             .saturating_add(encoded(&object.id))
             .saturating_add(match &selector.relation_selector {
@@ -194,13 +262,13 @@ fn query_suffix_size(policy: &PolicyRecord, selector: &RelationshipSelector) -> 
     Ok(suffix_size)
 }
 
-fn query_suffix(selector: &RelationshipSelector) -> String {
+fn query_suffix(selector: &RelationshipSelector, incarnation: u64) -> String {
     match &selector.object_selector {
         Some(ObjectSelector::Exact(object)) => match &selector.relation_selector {
             Some(RelationSelector::Exact(relation)) => {
-                keys::relation_prefix(&object.resource, &object.id, relation)
+                keys::relation_prefix(&object.resource, &object.id, relation, incarnation)
             }
-            _ => keys::object_prefix(&object.resource, &object.id),
+            _ => keys::object_incarnation_prefix(&object.resource, &object.id, incarnation),
         },
         Some(ObjectSelector::ResourcePredicate(resource)) => keys::resource_prefix(resource),
         _ => String::new(),
@@ -222,6 +290,7 @@ mod tests {
     fn insert(module: &mut AcpModule, policy: &str, id: &str) -> Vec<u8> {
         let owner = Did::new("did:key:owner").unwrap();
         let record = RelationshipRecord {
+            incarnation: 0,
             generations: RelationPair {
                 target: 0,
                 subject: 0,
@@ -239,7 +308,7 @@ mod tests {
         };
         let key = keys::relationship_key(
             policy,
-            &keys::relationship_storage_key(&record.relationship),
+            &keys::relationship_storage_key(&record.relationship, record.incarnation),
         );
         if module.query_policy(policy).is_ok() {
             module.set_relationship(&record).unwrap();
@@ -368,6 +437,7 @@ mod tests {
             acp::Subject::entity_set("file", "source", format!("g{subject}")),
         );
         let record = RelationshipRecord {
+            incarnation: 0,
             generations: definition.relations.pair(&relationship).unwrap(),
             policy_id: policy.into(),
             relationship,
@@ -508,3 +578,7 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "relationship_query_incarnation_tests.rs"]
+mod incarnation_tests;

@@ -160,7 +160,7 @@ fn archived_owner_count_survives_unarchive_and_registration_rejection() {
             ..
         }
     ));
-    assert!(!module.store.has(&object_pairs::key(&grant)));
+    assert!(module.store.has(&object_pairs::key(&grant)));
     let archived = module
         .registration_owner_record(&policy, &object)
         .unwrap()
@@ -190,7 +190,7 @@ fn archived_owner_count_survives_unarchive_and_registration_rejection() {
         module.store.get_ref(&object_pairs::key(&archived)),
         Some(1u64.to_be_bytes().as_slice())
     );
-    assert!(!module.store.has(&object_pairs::key(&grant)));
+    assert!(module.store.has(&object_pairs::key(&grant)));
     restored(&module).validate_restored_state().unwrap();
 }
 

@@ -10,9 +10,9 @@ use crate::kv_store::InMemoryKvStore;
 /// Kept private to command persistence: planners prepare every change through
 /// this adapter before passing the complete plan back to its atomic apply.
 /// Direct writes remain rejected by RecordStore's defaults.
-struct CommandRecords<'a> {
-    store: &'a mut InMemoryKvStore,
-    budget: &'a CommandBudget,
+pub(super) struct CommandRecords<'a> {
+    pub(super) store: &'a mut InMemoryKvStore,
+    pub(super) budget: &'a CommandBudget,
 }
 
 impl RecordStore for CommandRecords<'_> {

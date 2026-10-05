@@ -19,7 +19,7 @@ pub fn object_owner_prefix(policy: &str, object: &Object) -> Result<Vec<u8>, Per
     Relationship::try_new(&object.resource, &object.id, "owner", Subject::Wildcard)?;
     let prefix = keys::relationship_storage_prefix(
         policy,
-        &keys::relation_prefix(&object.resource, &object.id, "owner"),
+        &keys::relation_prefix(&object.resource, &object.id, "owner", 0),
     );
     if prefix.len() > MAX_KEY_BYTES {
         return Err(PermissionError::Limit);
@@ -64,7 +64,8 @@ fn owner<'a>(
         let record: RelationshipRecord = serde_json::from_slice(value)
             .map_err(|_| PermissionError::Invalid("owner record encoding"))?;
         let relation = &record.relationship;
-        if record.policy_id != policy
+        if record.incarnation != 0
+            || record.policy_id != policy
             || record.generations
                 != (RelationPair {
                     target: 0,
@@ -73,7 +74,10 @@ fn owner<'a>(
             || relation.resource != object.resource
             || relation.object_id != object.id
             || relation.relation != "owner"
-            || keys::relationship_key(policy, &keys::relationship_storage_key(relation)) != key
+            || keys::relationship_key(
+                policy,
+                &keys::relationship_storage_key(relation, record.incarnation),
+            ) != key
         {
             return Err(PermissionError::Invalid(
                 "owner record differs from its key",

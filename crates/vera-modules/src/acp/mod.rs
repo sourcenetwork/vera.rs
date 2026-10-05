@@ -17,7 +17,9 @@ mod lifecycle;
 mod management;
 mod metadata;
 mod object_archive;
+mod object_cleanup;
 mod object_pairs;
+pub mod object_state;
 pub mod pages;
 mod policy_create;
 mod policy_create_budget;
@@ -101,7 +103,7 @@ pub const MAX_POLICY_DEFINITION_BYTES: usize = 64 << 10;
 /// "policy/retired/" + policy_id                         → RetiredPolicy (Borsh)
 /// "policy/cleanup/queue/" + BE(sequence)                → policy_id
 /// "policy/cleanup/counter"                             → u64 BE
-/// "relationship/v4/" + policy_id + "/" + pair + storage_key → RelationshipRecord (serde_json)
+/// "relationship/v5/" + policy_id + "/" + pair + storage_key → RelationshipRecord (serde_json)
 /// "relation_state/" + policy_id + "/" + index_key       → pair counts, current directories, retired names
 /// "relation_cleanup/queue/" + BE(sequence)             → RelationJob (serde_json)
 /// "access_decision/" + decision_id                     → AccessDecision (Borsh)
@@ -588,12 +590,14 @@ impl AcpModule {
         candidate.prune_operations(block_ctx.timestamp.seconds)?;
         let expired = candidate.expire_commitments(&block_ctx.timestamp)?;
         let mut budget = retirement_cleanup::Budget::new();
-        if block_ctx.timestamp.block_height.is_multiple_of(2) {
-            candidate.collect_retired_policies(&mut budget)?;
-            candidate.collect_retired_relations(&mut budget)?;
-        } else {
-            candidate.collect_retired_relations(&mut budget)?;
-            candidate.collect_retired_policies(&mut budget)?;
+        let collectors = [
+            Self::collect_retired_policies,
+            Self::collect_retired_relations,
+            Self::collect_retired_objects,
+        ];
+        let first = (block_ctx.timestamp.block_height % 3) as usize;
+        for offset in 0..collectors.len() {
+            collectors[(first + offset) % collectors.len()](&mut candidate, &mut budget)?;
         }
         *self = candidate;
         Ok(expired)
@@ -674,10 +678,12 @@ impl AcpModule {
         let Ok(pair) = policy.relations.pair(relationship) else {
             return Ok(None);
         };
+        let incarnation =
+            self.relationship_incarnation_with_budget(policy_id, relationship, budget)?;
         let key = keys::relationship_generation_key(
             policy_id,
             pair,
-            &keys::relationship_storage_key(relationship),
+            &keys::relationship_storage_key(relationship, incarnation),
         );
         let bytes = self.store.get_ref(&key);
         if let Some(budget) = budget {
@@ -690,6 +696,7 @@ impl AcpModule {
                 if record.policy_id != policy_id
                     || record.relationship != *relationship
                     || record.generations != pair
+                    || record.incarnation != incarnation
                 {
                     return Err(AcpError::State(
                         "relationship record identity mismatch".into(),
@@ -698,6 +705,27 @@ impl AcpModule {
                 Ok(record)
             })
             .transpose()
+    }
+
+    fn relationship_incarnation_with_budget(
+        &self,
+        policy: &str,
+        relationship: &Relationship,
+        budget: Option<&CommandBudget>,
+    ) -> Result<u64> {
+        if relationship.relation == "owner" {
+            return Ok(0);
+        }
+        object_state::validate_key(policy, &relationship.resource, &relationship.object_id)
+            .map_err(relation_state_error)?;
+        let key = object_state::key(policy, &relationship.resource, &relationship.object_id);
+        let value = self.store.get_ref(&key);
+        if let Some(budget) = budget {
+            budget.permissions.records.read(&key, value)?;
+        }
+        value
+            .map_or(Ok(0), object_state::decode)
+            .map_err(relation_state_error)
     }
 
     fn relationship_pair(
@@ -841,6 +869,11 @@ impl AcpModule {
         };
 
         let record = RelationshipRecord {
+            incarnation: self.relationship_incarnation_with_budget(
+                policy_id,
+                &rel,
+                Some(budget),
+            )?,
             generations: self.relationship_pair(policy_id, &rel, budget)?,
             supplied_metadata: Default::default(),
             policy_id: policy_id.to_string(),
@@ -898,7 +931,7 @@ impl AcpModule {
             let key = keys::relationship_generation_key(
                 policy_id,
                 record.generations,
-                &keys::relationship_storage_key(&record.relationship),
+                &keys::relationship_storage_key(&record.relationship, record.incarnation),
             );
             self.remove_relationship_key_with_budget(&key, budget)?;
         }
@@ -917,7 +950,7 @@ impl AcpModule {
         budget: Option<&CommandBudget>,
     ) -> Result<()> {
         // Archiving preserves ownership; only unarchive may reactivate it.
-        let owner_prefix = keys::relation_prefix(&obj.resource, &obj.id, "owner");
+        let owner_prefix = keys::relation_prefix(&obj.resource, &obj.id, "owner", 0);
         let scan_prefix = keys::relationship_storage_prefix(policy_id, &owner_prefix);
         if let Some(budget) = budget {
             budget.permissions.records.read(&scan_prefix, None)?;
@@ -981,6 +1014,7 @@ impl AcpModule {
         };
 
         let record = RelationshipRecord {
+            incarnation: 0,
             generations: self.relationship_pair(policy_id, &owner_rel, budget)?,
             supplied_metadata: Default::default(),
             policy_id: policy_id.to_string(),
@@ -1137,6 +1171,7 @@ impl AcpModule {
                 creator.clone(),
             );
             let record = RelationshipRecord {
+                incarnation: 0,
                 generations: self.relationship_pair(policy_id, &owner_rel, budget)?,
                 supplied_metadata: Default::default(),
                 policy_id: policy_id.to_string(),
@@ -1174,6 +1209,7 @@ impl AcpModule {
             creator.clone(),
         );
         let record = RelationshipRecord {
+            incarnation: 0,
             generations: self.relationship_pair(policy_id, &amended_rel, budget)?,
             supplied_metadata: Default::default(),
             policy_id: policy_id.to_string(),
@@ -1198,7 +1234,7 @@ impl AcpModule {
             &keys::relationship_generation_key(
                 policy_id,
                 existing.generations,
-                &keys::relationship_storage_key(&existing.relationship),
+                &keys::relationship_storage_key(&existing.relationship, existing.incarnation),
             ),
             budget,
         )?;
@@ -1662,10 +1698,11 @@ resources:
         let key = keys::relationship_generation_key(
             &policy.policy.id,
             generations,
-            &keys::relationship_storage_key(&relationship),
+            &keys::relationship_storage_key(&relationship, 0),
         );
         module
             .set_relationship(&RelationshipRecord {
+                incarnation: 0,
                 generations,
                 supplied_metadata: Default::default(),
                 policy_id: policy.policy.id.clone(),

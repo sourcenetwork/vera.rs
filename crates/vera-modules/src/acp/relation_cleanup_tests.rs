@@ -42,6 +42,7 @@ fn put_row(module: &mut AcpModule, policy: &str, index: usize) -> Vec<u8> {
         Subject::entity_set("group", "staff", "member"),
     );
     let record = RelationshipRecord {
+        incarnation: 0,
         generations: definition.relations.pair(&relationship).unwrap(),
         relationship,
         policy_id: policy.into(),
@@ -53,7 +54,7 @@ fn put_row(module: &mut AcpModule, policy: &str, index: usize) -> Vec<u8> {
     keys::relationship_generation_key(
         policy,
         record.generations,
-        &keys::relationship_storage_key(&record.relationship),
+        &keys::relationship_storage_key(&record.relationship, record.incarnation),
     )
 }
 fn setup(module: &mut AcpModule, count: usize) -> String {

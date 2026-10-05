@@ -79,11 +79,12 @@ fn current_relationships(
 
 fn decode(policy: &str, key: &[u8], value: &[u8]) -> Result<RelationshipRecord, ClientError> {
     let record: RelationshipRecord = serde_json::from_slice(value)?;
-    if record.policy_id != policy
+    if (record.relationship.relation == "owner" && record.incarnation != 0)
+        || record.policy_id != policy
         || keys::relationship_generation_key(
             policy,
             record.generations,
-            &keys::relationship_storage_key(&record.relationship),
+            &keys::relationship_storage_key(&record.relationship, record.incarnation),
         ) != key
     {
         return Err(ClientError::InvalidResponse(
@@ -150,7 +151,7 @@ mod tests {
             .unwrap();
         let key = keys::relationship_key(
             &policy,
-            &keys::relationship_storage_key(&record.relationship),
+            &keys::relationship_storage_key(&record.relationship, record.incarnation),
         );
         let bytes = serde_json::to_vec(&record).unwrap();
         assert_eq!(

@@ -1,10 +1,13 @@
+use std::collections::BTreeSet;
+
 use alloy_primitives::B256;
 use commonware_codec::Encode as _;
 use vera_modules::acp::keys;
 use vera_permission::{
-    ModuleId, PAGE_PROOF_BYTES, PERMISSION_LIMITS, PermissionError, PolicyPrefixPageProof,
-    PolicyPrefixProof, PrefixPageProof, PrefixPageRequest, PrefixProof, RECORD_PROOF_BYTES,
-    encoded_size, validate_policy_prefix,
+    ModuleId, PAGE_DATA_BYTES, PAGE_PROOF_BYTES, PERMISSION_LIMITS, PermissionError,
+    PolicyPrefixPageProof, PolicyPrefixProof, PrefixPageProof, PrefixPageRequest, PrefixProof,
+    RECORD_PROOF_BYTES, ReadLimits, RecordProof, current::Entry, encoded_size,
+    relationship_object_key, validate_policy_prefix,
 };
 
 use super::{BackendError, NativeDb, record_proof_at};
@@ -25,6 +28,7 @@ pub async fn policy_prefix_proof_at(
     )
     .await?;
     let mut remaining = PERMISSION_LIMITS.reads;
+    remaining.reads -= 2;
     remaining.records = remaining
         .records
         .checked_sub(1)
@@ -42,6 +46,7 @@ pub async fn policy_prefix_proof_at(
             proof: Default::default(),
         },
         policy: record,
+        objects: Vec::new(),
     };
     let overhead = encoded_size(&proof, RECORD_PROOF_BYTES)?;
     let evidence = super::permission::prefix_proof(
@@ -52,6 +57,16 @@ pub async fn policy_prefix_proof_at(
     )
     .await?;
     proof.prefix.proof = evidence.encode().into();
+    let mut bytes = RECORD_PROOF_BYTES - encoded_size(&proof, RECORD_PROOF_BYTES)?;
+    proof.objects = capture_objects(
+        databases,
+        expected,
+        policy,
+        &evidence.entries,
+        &mut remaining,
+        &mut bytes,
+    )
+    .await?;
     proof.verify(expected, policy, prefix, RECORD_PROOF_BYTES)?;
     Ok(proof)
 }
@@ -82,6 +97,7 @@ pub async fn policy_prefix_page_at(
             proof: Default::default(),
         },
         policy: record,
+        objects: Vec::new(),
     };
     let overhead = encoded_size(&proof, PAGE_PROOF_BYTES)?;
     let evidence = super::permission::page_proof(
@@ -91,6 +107,78 @@ pub async fn policy_prefix_page_at(
     )
     .await?;
     proof.page.proof = evidence.encode().into();
+    let mut remaining = ReadLimits {
+        bytes: PAGE_DATA_BYTES,
+        ..PERMISSION_LIMITS.reads
+    };
+    remaining.reads -= 2;
+    charge(
+        &mut remaining.records,
+        usize::from(proof.policy.value.is_some()),
+    )?;
+    charge(
+        &mut remaining.bytes,
+        proof.policy.key.len() + proof.policy.value.as_ref().map_or(0, |value| value.len()),
+    )?;
+    charge(
+        &mut remaining.bytes,
+        request.prefix.len() + request.start.len(),
+    )?;
+    for entry in &evidence.entries {
+        charge(&mut remaining.records, 1)?;
+        charge(&mut remaining.bytes, entry.key.len() + entry.value.len())?;
+    }
+    let mut bytes = PAGE_PROOF_BYTES - encoded_size(&proof, PAGE_PROOF_BYTES)?;
+    proof.objects = capture_objects(
+        databases,
+        expected,
+        policy,
+        &evidence.entries,
+        &mut remaining,
+        &mut bytes,
+    )
+    .await?;
     proof.verify(expected, policy, request, PAGE_PROOF_BYTES)?;
     Ok(proof)
+}
+
+async fn capture_objects(
+    databases: [&NativeDb; 4],
+    root: B256,
+    policy: &str,
+    entries: &[Entry],
+    remaining: &mut ReadLimits,
+    bytes: &mut usize,
+) -> Result<Vec<RecordProof>, BackendError> {
+    let mut keys = BTreeSet::new();
+    for entry in entries {
+        if let Some(key) = relationship_object_key(policy, &entry.key, &entry.value)?
+            && !keys.contains(&key)
+        {
+            charge(&mut remaining.reads, 1)?;
+            charge(&mut remaining.bytes, key.len())?;
+            keys.insert(key);
+        }
+    }
+    let mut objects = Vec::with_capacity(keys.len());
+    for key in keys {
+        let proof = record_proof_at(databases, root, ModuleId::Acp, &key).await?;
+        if let Some(value) = &proof.value {
+            charge(&mut remaining.records, 1)?;
+            charge(&mut remaining.bytes, value.len())?;
+        }
+        charge(
+            bytes,
+            encoded_size(&proof, *bytes)? + usize::from(!objects.is_empty()),
+        )?;
+        objects.push(proof);
+    }
+    Ok(objects)
+}
+
+fn charge(remaining: &mut usize, amount: usize) -> Result<(), PermissionError> {
+    *remaining = remaining
+        .checked_sub(amount)
+        .ok_or(PermissionError::Limit)?;
+    Ok(())
 }

@@ -89,8 +89,8 @@ class CompareTests(unittest.TestCase):
 
     def incompatible_driver(self):
         self.shared_driver()
-        self.identity['head']['proof_schema'] = dict(SCHEMAS['relationship/v4/'])
-        self.identity['base']['proof_schema'] = dict(SCHEMAS['relationship/v3/'])
+        self.identity['head']['proof_schema'] = dict(SCHEMAS['relationship/v5/'])
+        self.identity['base']['proof_schema'] = dict(SCHEMAS['relationship/v4/'])
         self.write_identity()
         for tag in ('base1', 'base2'):
             for objects in (0, 32):
