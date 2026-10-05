@@ -98,14 +98,30 @@ This is a feature port, not a claim of identical transport or parser behavior:
   records rejected by a filter. An empty page can have a continuation cursor.
   Cursors are exclusive storage positions, not revision certificates; repeated
   live RPC calls can observe different revisions. Unpaged queries reject oversized
-  results rather than silently truncate. For larger catalogues, enumerate the
-  relationship pages and combine them with the policy's declared resources.
-- Definition edits still scan the target policy's relationships and apply all
-  pruning atomically. Their execution charge does not grow with that work.
-  Scalable, bounded editing remains unresolved; bounded deletion does not qualify
-  large-policy edits or establish a production mutation limit. The lifecycle
-  component workload measures edit cost and full deletion teardown, including
-  cleanup.
+  results rather than silently truncate. Policy ID listings require at most
+  128 records / 1 MiB of stored key/value bytes, checked before decoding any policies;
+  larger listings require certified policy pages. Policy reads, ID/full-record
+  listings, pages, relationship filters and catalogues share `QueryBudget` work
+  accounting. Runtime dispatch charges 1,000 base units plus 100 per inspected
+  policy, directory or relationship record and one per 16 encoded key/value bytes,
+  rounded up per record. A planned prefix or cursor seek costs 100 plus one per
+  16 bytes, including empty scans. Policy-ID count-limit lookahead charges only its
+  key; page lookahead charges its key and value before testing the page boundary.
+  Relationship suffixes are materialized only after a prefix reserves its work.
+  Read charges precede cloning and decoding; ordinary errors retain consumed
+  units, and nested batches share the remaining execution allowance. These charges
+  preserve existing hard query limits and cursor behavior; insufficient execution
+  allowance returns an error rather than partial results. Public module convenience
+  methods use unlimited execution allowance, while still enforcing hard query limits.
+  This is deterministic work accounting, not an elapsed-time guarantee or a change
+  to certified-proof read limits. For larger relationship
+  catalogues, enumerate relationship pages and combine them with the policy's
+  declared resources.
+- [Definition edits](acp-policy-edits.md) retire indexed generation pairs atomically;
+  physical cleanup runs later under the shared cleanup budget. Runtime edits meter
+  reads, writes and preparation work without visiting every physical relationship.
+  This accounting does not meter individual compiler instructions. The lifecycle
+  component workload measures edit cost and full deletion teardown, including cleanup.
 
 The commitment policy index is persisted in authenticated state, including for
 expired commitments. It changes execution roots when commitments are written.
@@ -149,10 +165,162 @@ Physical records can remain after logical deletion. Certified ownership and
 relationship clients must verify the policy's presence at the same revision as
 those records, using the [policy proof APIs](permission-proofs.md#native-prefix-and-owner-reads).
 Generic record and prefix evidence authenticates physical storage only.
-Relationships use the fresh-state `relationship/v3/` namespace; restore rejects
+Relationships use the fresh-state `relationship/v4/` namespace; restore rejects
 older namespaces rather than migrating them. Validators and consumers must use
 matching [key and proof formats](native-relationship-keys.md). Receipt and finality
 formats are unchanged.
+
+## Policy edit work accounting
+
+Direct and bearer definition edits consume 5,000 base execution units plus the
+work tracked by `PolicyEditBudget`. The caller owns this allowance separately
+from module snapshots, so reverting an edit or an enclosing batch cannot refund
+completed work. Nested calls receive the remaining batch allowance. Ordinary
+reverted edits retain their base and consumed units; exhausting the allowance
+fails before publishing prepared records or replacing the compiled policy.
+Native failed submissions still consume their full transaction allowance.
+
+Accounting uses encoded bytes, rounded up in groups of 16:
+
+| Work | Units |
+| --- | --- |
+| Point read | 100 + one per byte group, including the key |
+| Prepared write or deletion | 200 + two per byte group, including the key |
+| Definition parsing input | Eight per byte group |
+| Visited relation pair | 32 |
+
+Reads reserve their allowance before copying or decoding records. JSON encoding
+reserves each output byte group before extending its buffer. Only after the
+complete plan and updated policy fit does the module apply writes. Mirrored
+counters give the exact invalidated row count without charging once per physical
+relationship. The timestamped edit path reads and encodes its policy once.
+
+Bearer edits also charge definition bytes before hashing the signed operation.
+Stored outcome reads and writes use the same allowance. An authenticated retry
+can recover its metered outcome after policy retirement without reading or
+recompiling the current policy. Public module convenience methods retain an
+unlimited allowance; runtime dispatch uses the explicit budgeted methods.
+
+Before owned ABI decoding, both edit selectors enforce the existing 64 KiB
+policy-definition bound; bearer edits also enforce the token's 16 KiB bound.
+Definition-byte accounting is not instruction-level compiler metering. Existing
+YAML expansion and policy-validation limits remain independent safeguards.
+Archive and other module operations have separate resource behavior.
+
+## Policy creation work
+
+`createPolicy`, `createPolicyWithOptions`, and `bearerCreatePolicy` charge their
+5,000-unit dispatch base plus a caller-owned creation allowance. Each reserves
+leaf calldata processing at eight units per 16 bytes before owned ABI or JSON
+decoding. The module separately reserves definition processing before compilation,
+borrowed metadata fields before validation/cloning, and policy-counter and
+live/retired-identifier reads before decoding. Record reads and prepared writes
+use the [policy edit prices](#policy-edit-work-accounting). The complete encoded
+policy and counter update must fit before either is written or the cache changes.
+A failed creation therefore leaves policy allocation unchanged.
+
+Bearer creation also charges definition bytes before operation hashing and shares
+the allowance with retained-outcome reads/writes. An authenticated retry can read
+its original outcome after policy retirement without creating another policy.
+Ordinary failures retain completed work; exhaustion remains outside rollback and
+propagates through enclosing batches. Module callers can use `PolicyCreateBudget`
+and the `create_policy_with_budget`, `execute_create_policy_with_budget`, or
+`bearer_create_policy_with_budget` method. Convenience methods retain an unlimited
+work allowance.
+
+Existing semantic limits remain 64 KiB per definition and 64 KiB of JSON-encoded
+supplied metadata. Metadata-size validation counts encoding without allocating a
+second copy. Direct/bearer definition and bearer token limits are checked before
+owned ABI decoding. Options JSON retains the transaction/batch byte bound and is
+charged in full, including whitespace and escape spelling; its decoded fields
+then undergo normal semantic validation. Parser expansion limits are unchanged.
+Creation accounting does not meter every compiler instruction or the remaining
+relationship/registration mutation paths.
+
+## Permission evaluation work
+
+`verifyAccessRequest`, `checkAccess`, and `bearerCheckAccess` share one execution
+allowance across all operations in a request. Besides their dispatch base, they
+charge request processing at eight units per 16 field bytes (plus 24 bytes per
+operation), 32 units per evaluator step, and encoded reads/writes at the policy
+edit prices above. Reads reserve work before copying or decoding records; decision
+encoding reserves bytes before extending its buffer. Failed reads and decisions
+retain consumed work. A decision is stored only after its complete write fits.
+Bearer outcome reads and writes use the same allowance, including authenticated
+retries after policy retirement. Batch children receive the remaining allowance.
+
+The module exposes caller-owned `PermissionBudget` and explicit
+`query_verify_access_request_with_budget`, `check_access_with_budget`, and
+`bearer_check_access_with_budget` APIs. Cloned budgets share sticky exhaustion;
+module rollback does not restore consumed work. Convenience methods retain an
+unlimited work allowance. Requests permit at most 64 operations and 64 KiB of
+field bytes; recorded decision requests retain their additional 64 KiB encoded limit.
+Direct ABI calls bound decoded strings before allocation, including aliased tails
+and UTF-8 replacement. Bearer calls bound request JSON to 64 KiB and the token
+to 16 KiB before decoding owned values.
+An empty query still succeeds for an existing policy; recorded decisions require
+at least one operation.
+
+Existing hard limits remain separate: 256 point/prefix reads, 4,096 returned
+records and 1 MiB of read bytes per request; evaluator depth 64 and 10,000 steps
+per operation. Each operation retains its own evaluator cache and hard step
+limit, while execution work accumulates across them. Native evaluations reuse
+one validated policy within an immutable request snapshot. Generic mutable store
+adapters still read current policy records. Proof capture and verification retain
+their existing read limits and formats; they do not consume native execution gas.
+This is deterministic work accounting, not an instruction count or latency bound.
+
+## Management authorization work
+
+Policy commands and `checkManagementAuthority` use a caller-owned `CommandBudget`.
+Writes retain their 5,000-unit dispatch base; the read-only management check uses
+1,000. Raw calldata, each decoded dynamic field occurrence (including aliases and
+UTF-8 replacement), typed command input, and supplied metadata cost eight units
+per 16 bytes. Raw ABI and JSON work is reserved before owned decoding. Metadata
+retains its existing 64 KiB encoded limit, checked without an owned validation copy;
+there is no additional restriction on raw JSON whitespace or escaping.
+
+The initial command policy read, management policy/owner reads, and all evaluator
+reads use the policy-edit read prices. Owner and declared manager checks share one
+allowance, charging 32 units per evaluator step. Management evaluation reuses one
+validated policy in an immutable snapshot. Existing read limits and per-check
+engine depth/step limits remain separate. Exhaustion is sticky and returns
+out-of-gas, never a grant or a successful partial result.
+
+The budgeted module APIs are `direct_policy_cmd_with_budget`,
+`execute_policy_cmd_with_budget`, `execute_policy_cmd_with_metadata_and_budget`,
+`bearer_policy_cmd_with_budget`, `transfer_object_with_budget`, and
+`check_management_authority_with_budget`. Convenience methods retain unlimited
+execution allowances. Commands, contextual/supplied metadata, and delegated
+outcomes publish atomically; rollback never restores spent work. Retained bearer
+outcomes charge reads/writes using the same allowance, and retry authorization
+still precedes outcome recovery. Ordinary dispatch denials retain base and spent
+units, including in nested batches. Failed native transactions continue to charge
+the full native transaction allowance, as before.
+
+Relationship point storage for set/delete, register, transfer, unarchive and reveal
+uses the same allowance, including contextual and supplied-metadata rewrites.
+Policy, existing relationship, mirrored pair-count, subject-directory and object
+pair-count reads reserve work before copying or decoding. Prepared replacements
+and deletions cost 200 units plus two per 16 encoded key/value bytes; JSON encoding
+reserves bytes before extending its buffer. Primary records, both count mirrors,
+changed directories and object counters each pay once per prepared write. Applying
+a complete prepared plan does not charge those writes again. Idempotent grants
+still pay for their reads and return the original record; metadata-only rewrites
+validate counters without charging nonexistent counter writes.
+
+Reveal also charges its commitment and policy-liveness reads, amendment counter
+and collision reads, and the amendment record/index writes. Exhaustion during a
+late metadata or amendment rewrite restores every earlier command change and
+preserves the spent allowance. The public `RecordStore` preparation hooks retain
+unmetered defaults for generic stores and maintenance; the command-only adapter
+uses them explicitly and rejects direct unprepared writes.
+
+Commitment creation/index maintenance, hijack-flag record writes and the full
+archive scan/removals still need separate accounting. Archive's fixed owner
+rewrite is charged; its bulk removal remains synchronous, reports the exact
+removed count and preserves the archived owner. No fanout cap or logical-archive
+substitution is introduced. Proof formats and ownership rules are unchanged.
 
 ## Batch dispatch limits
 
@@ -202,3 +370,6 @@ pagination and native-dispatch tests cover metadata, ownership, revocation,
 corruption, bounds, gas rejection and batch rollback. The canonical four-member
 integration test exercises the new native client calls and verifies their finality
 receipts. CI runs the fixture replay without requiring Go.
+
+See [policy edits and relation generations](acp-policy-edits.md) for bounded
+definition editing, exact removal counts, current-query selection and cleanup.

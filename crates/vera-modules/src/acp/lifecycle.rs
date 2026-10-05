@@ -9,6 +9,24 @@ impl AcpModule {
         block: &BlockExecCtx,
         submission: &TxExecCtx,
     ) -> Result<PolicyRecord> {
+        self.execute_create_policy_with_budget(
+            actor,
+            request,
+            block,
+            submission,
+            &PolicyCreateBudget::new(u64::MAX),
+        )
+    }
+
+    /// Create at the authenticated revision with explicit input and storage accounting.
+    pub fn execute_create_policy_with_budget(
+        &mut self,
+        actor: &Did,
+        request: &types::PolicyCreation,
+        block: &BlockExecCtx,
+        submission: &TxExecCtx,
+        budget: &PolicyCreateBudget,
+    ) -> Result<PolicyRecord> {
         if submission.signer != actor.as_str()
             || submission.tx_hash.len() != 32
             || block.timestamp.block_height == 0
@@ -18,7 +36,14 @@ impl AcpModule {
                 reason: "invalid policy creation context".into(),
             });
         }
-        self.create_policy_with_options(
+        budget.input(
+            actor
+                .as_str()
+                .len()
+                .saturating_add(submission.signer.len())
+                .saturating_add(submission.tx_hash.len()),
+        )?;
+        let result = self.create_policy_with_options_and_budget(
             &request.policy,
             request.marshal_type.clone(),
             RecordMetadata {
@@ -28,8 +53,10 @@ impl AcpModule {
                 owner_did: actor.to_string(),
             },
             request.required_specification,
-            request.metadata.clone(),
-        )
+            &request.metadata,
+            budget,
+        );
+        budget.finish(result)
     }
 
     /// Transfer a live registration without changing its priority or other grants.
@@ -40,9 +67,49 @@ impl AcpModule {
         object: &Object,
         new_owner: &Did,
     ) -> Result<RelationshipRecord> {
+        self.transfer_object_with_budget(
+            actor,
+            policy_id,
+            object,
+            new_owner,
+            &CommandBudget::new(u64::MAX),
+        )
+    }
+
+    /// Transfer after budgeted management authorization, without partial owner replacement.
+    pub fn transfer_object_with_budget(
+        &mut self,
+        actor: &Did,
+        policy_id: &str,
+        object: &Object,
+        new_owner: &Did,
+        budget: &CommandBudget,
+    ) -> Result<RelationshipRecord> {
+        let mut candidate = self.clone();
+        let result = budget
+            .finish(candidate.apply_transfer_object(actor, policy_id, object, new_owner, budget))?;
+        *self = candidate;
+        Ok(result)
+    }
+
+    fn apply_transfer_object(
+        &mut self,
+        actor: &Did,
+        policy_id: &str,
+        object: &Object,
+        new_owner: &Did,
+        budget: &CommandBudget,
+    ) -> Result<RelationshipRecord> {
+        budget.input(
+            object
+                .resource
+                .len()
+                .saturating_add(object.id.len())
+                .saturating_add(new_owner.as_str().len()),
+        )?;
         self.validate_registration_object(policy_id, object)?;
         let mut record = self
-            .registration_owner_record(policy_id, object)?
+            .registration_owner_record_with_budget(policy_id, object, Some(budget))?
             .ok_or_else(|| AcpError::ObjectNotRegistered {
                 resource: object.resource.clone(),
                 object_id: object.id.clone(),
@@ -52,16 +119,22 @@ impl AcpModule {
                 reason: "cannot transfer an archived object".into(),
             });
         }
-        if !self.check_management_authority(actor, policy_id, object, "owner")? {
+        if !self
+            .check_management_authority_with_budget(actor, policy_id, object, "owner", budget)?
+        {
             return Err(AcpError::Unauthorized {
                 reason: "actor cannot transfer this object".into(),
             });
         }
-        let old_key = keys::relationship_storage_key(&record.relationship);
+        let old_key = keys::relationship_generation_key(
+            policy_id,
+            record.generations,
+            &keys::relationship_storage_key(&record.relationship),
+        );
         record.relationship.subject = acp::Subject::Entity(new_owner.clone());
         record.metadata.owner_did = new_owner.to_string();
-        self.delete_relationship(policy_id, &old_key);
-        self.set_relationship(&record);
+        self.remove_relationship_key_with_budget(&old_key, budget)?;
+        self.set_relationship_with_budget(&record, budget)?;
         Ok(record)
     }
 

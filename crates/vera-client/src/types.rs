@@ -153,28 +153,37 @@ mod opt_hex_u64 {
 pub struct NodeStatus {
     /// Chain ID.
     pub chain_id: u64,
-    /// This validator's index.
+    /// This node's validator index in its startup configuration.
     pub validator_index: u32,
-    /// Total number of validators.
+    /// Startup validator count, not the active epoch membership.
     #[serde(default)]
     pub validator_count: u32,
     /// Seconds since node started.
     pub uptime_secs: u64,
-    /// Current consensus view number.
-    pub current_view: u64,
-    /// Number of finalized blocks.
+    /// Entered consensus view, or null when live consensus telemetry is unavailable.
+    pub current_view: Option<u64>,
+    /// Latest published finalized execution height, including restored durable history.
+    pub finalized_height: Option<u64>,
+    /// Epoch of `finalized_height`; reported together with its view.
+    pub finalized_epoch: Option<u64>,
+    /// View of `finalized_height`, not the live consensus view.
+    pub finalized_view: Option<u64>,
+    /// Finalized callbacks processed in this run; this is not a height.
     pub finalized_count: u64,
-    /// Number of blocks proposed by this node.
+    /// Number of blocks proposed by this node in this run.
     pub proposed_count: u64,
-    /// Number of nullified rounds.
-    pub nullified_count: u64,
-    /// Number of connected peers.
-    pub peer_count: u64,
-    /// Whether this node is the current leader.
-    pub is_leader: bool,
+    /// Number of nullified rounds, or null when unobserved.
+    pub nullified_count: Option<u64>,
+    /// Authenticated connected peer count, or null when unobserved.
+    pub peer_count: Option<u64>,
+    /// Leadership in the entered consensus view, or null when unobserved.
+    pub is_leader: Option<bool>,
     /// Whether this node is backfilling historical blocks.
     #[serde(default)]
     pub backfilling: bool,
+    /// Revision recovered through snapshot transfer, or its persisted startup floor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_revision: Option<u64>,
 }
 
 /// Serde helper for hex-encoded u64 fields in RPC responses.
@@ -222,7 +231,7 @@ mod tests {
     fn node_status_default() {
         let status = NodeStatus::default();
         assert_eq!(status.chain_id, 0);
-        assert!(!status.is_leader);
+        assert!(status.is_leader.is_none());
         assert!(!status.backfilling);
         assert_eq!(status.validator_count, 0);
     }
@@ -234,18 +243,29 @@ mod tests {
             validator_index: 2,
             validator_count: 4,
             uptime_secs: 3600,
-            current_view: 100,
+            current_view: None,
+            finalized_height: Some(500),
+            finalized_epoch: Some(5),
+            finalized_view: Some(100),
             finalized_count: 50,
             proposed_count: 10,
-            nullified_count: 5,
-            peer_count: 3,
-            is_leader: true,
+            nullified_count: None,
+            peer_count: None,
+            is_leader: None,
             backfilling: false,
+            snapshot_revision: Some(450),
         };
         let json = serde_json::to_string(&status).unwrap();
         let parsed: NodeStatus = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.chain_id, 1337);
-        assert!(parsed.is_leader);
+        assert!(parsed.is_leader.is_none());
+        assert!(parsed.current_view.is_none());
+        assert!(parsed.peer_count.is_none());
+        assert!(parsed.nullified_count.is_none());
+        assert_eq!(parsed.finalized_height, Some(500));
+        assert_eq!(parsed.finalized_epoch, Some(5));
+        assert_eq!(parsed.finalized_view, Some(100));
+        assert_eq!(parsed.snapshot_revision, Some(450));
         assert_eq!(parsed.finalized_count, 50);
         assert_eq!(parsed.validator_count, 4);
         assert!(!parsed.backfilling);
@@ -267,6 +287,12 @@ mod tests {
         let parsed: NodeStatus = serde_json::from_value(json).unwrap();
         assert_eq!(parsed.validator_count, 0);
         assert!(!parsed.backfilling);
+        assert_eq!(parsed.current_view, Some(100));
+        assert_eq!(parsed.is_leader, Some(true));
+        assert!(parsed.finalized_height.is_none());
+        assert!(parsed.finalized_epoch.is_none());
+        assert!(parsed.finalized_view.is_none());
+        assert!(parsed.snapshot_revision.is_none());
     }
 
     #[test]

@@ -45,6 +45,7 @@ fn error(input: &[u8], expected: &str) {
     assert!(result.contains(expected), "{result}");
 }
 
+#[derive(Clone)]
 struct Fixture {
     acp: AcpModule,
     vera: VeraModule,
@@ -131,14 +132,15 @@ fn batch_call_limit_counts_the_root_nested_wrappers_and_all_siblings() {
     let input = batch(vec![first.clone(), second]);
     batch::validate(&input).unwrap();
     let mut fixture = Fixture::new();
-    let result = fixture
-        .dispatch(&input, READ_GAS * batch::MAX_CALLS as u64)
-        .unwrap();
+    let leaf_gas = fixture
+        .dispatch(&leaf, 1_000_000)
+        .unwrap()
+        .precompile
+        .gas_used;
+    let expected_gas = 3 * READ_GAS + 253 * leaf_gas;
+    let result = fixture.dispatch(&input, expected_gas).unwrap();
     assert!(!result.precompile.reverted);
-    assert_eq!(
-        result.precompile.gas_used,
-        READ_GAS * batch::MAX_CALLS as u64
-    );
+    assert_eq!(result.precompile.gas_used, expected_gas);
     error(
         &batch(vec![first, batch(vec![leaf; 128])]),
         "call count limit exceeded",
@@ -207,9 +209,15 @@ fn batch_preflight_preserves_bounded_aliases_unaligned_offsets_and_unpadded_byte
     let decoded = IAcp::batchCallsCall::abi_decode(&input).unwrap();
     assert_eq!(decoded.calls, vec![Bytes::from(leaf.clone()); 2]);
     let mut fixture = Fixture::new();
-    let result = fixture.dispatch(&input, READ_GAS * 3).unwrap();
+    let leaf_gas = fixture
+        .dispatch(&leaf, 1_000_000)
+        .unwrap()
+        .precompile
+        .gas_used;
+    let expected_gas = READ_GAS + 2 * leaf_gas;
+    let result = fixture.dispatch(&input, expected_gas).unwrap();
     assert!(!result.precompile.reverted);
-    assert_eq!(result.precompile.gas_used, READ_GAS * 3);
+    assert_eq!(result.precompile.gas_used, expected_gas);
 
     let mut unaligned = aliased(&leaf, 1);
     unaligned.insert(100, 0);
@@ -236,9 +244,15 @@ fn empty_batch_charges_before_preflight_and_rolls_back_when_nested_gas_runs_out(
             .unwrap()
             .is_empty()
     );
+    let creation_gas = fixture
+        .clone()
+        .dispatch(&create("earlier"), 1_000_000)
+        .unwrap()
+        .precompile
+        .gas_used;
     let input = batch(vec![create("earlier"), empty()]);
     assert!(matches!(
-        fixture.dispatch(&input, WRITE_GAS + READ_GAS * 2 - 1),
+        fixture.dispatch(&input, creation_gas + READ_GAS * 2 - 1),
         Err(PrecompileError::OutOfGas)
     ));
     assert_eq!(fixture.state(), before);
@@ -252,7 +266,18 @@ fn nested_batch_preserves_result_order_and_charges_every_wrapper() {
         batch(vec![create("second"), empty()]),
         create("third"),
     ]);
-    let gas = WRITE_GAS * 3 + READ_GAS * 3;
+    let mut writes = fixture.clone();
+    let gas = ["first", "second", "third"]
+        .into_iter()
+        .map(|name| {
+            writes
+                .dispatch(&create(name), 1_000_000)
+                .unwrap()
+                .precompile
+                .gas_used
+        })
+        .sum::<u64>()
+        + READ_GAS * 3;
     let result = fixture.dispatch(&input, gas).unwrap();
     assert!(!result.precompile.reverted);
     assert_eq!(result.precompile.gas_used, gas);
@@ -297,10 +322,33 @@ fn nested_batch_late_revert_restores_state_logs_and_error_indices() {
             .abi_encode(),
         ]),
     ]);
+    let mut writes = fixture.clone();
+    let creation_gas = ["first", "second"]
+        .into_iter()
+        .map(|name| {
+            writes
+                .dispatch(&create(name), 1_000_000)
+                .unwrap()
+                .precompile
+                .gas_used
+        })
+        .sum::<u64>();
     let result = fixture.dispatch(&input, 1_000_000).unwrap();
     assert!(result.precompile.reverted);
     assert!(result.logs.is_empty());
-    assert_eq!(result.precompile.gas_used, WRITE_GAS * 2 + READ_GAS * 2);
+    let missing = IAcp::getPolicyCall {
+        policyId: B256::ZERO,
+    }
+    .abi_encode();
+    let read_gas = fixture
+        .dispatch(&missing, 1_000_000)
+        .unwrap()
+        .precompile
+        .gas_used;
+    assert_eq!(
+        result.precompile.gas_used,
+        creation_gas + READ_GAS * 2 + read_gas
+    );
     assert!(
         String::from_utf8_lossy(&result.precompile.bytes)
             .starts_with("batch call 2 reverted: batch call 2 reverted:")
@@ -308,7 +356,7 @@ fn nested_batch_late_revert_restores_state_logs_and_error_indices() {
     assert_eq!(fixture.state(), before);
 }
 
-fn large_policy_read(fixture: &mut Fixture) -> (Vec<u8>, usize) {
+fn large_policy_read(fixture: &mut Fixture) -> (Vec<u8>, usize, u64) {
     // A large YAML comment leaves a small compiled policy and a legitimately retained raw policy.
     let policy = format!(
         "name: large\nresources:\n  - name: file\n# {}\n",
@@ -319,27 +367,35 @@ fn large_policy_read(fixture: &mut Fixture) -> (Vec<u8>, usize) {
         marshalType: 1,
     }
     .abi_encode();
-    let result = fixture.dispatch(&call, WRITE_GAS).unwrap();
+    let result = fixture.dispatch(&call, 1_000_000).unwrap();
     assert!(!result.precompile.reverted);
     let record = created(&result.precompile.bytes);
     let read = IAcp::getPolicyCall {
         policyId: record.policy.id.parse().unwrap(),
     }
     .abi_encode();
-    let result = fixture.dispatch(&read, READ_GAS).unwrap();
+    let result = fixture.dispatch(&read, 1_000_000).unwrap();
     assert!(!result.precompile.reverted);
     let per_result = 64 + result.precompile.bytes.len().div_ceil(32) * 32;
     let max_results = (batch_results::MAX_RESULT_BYTES - 64) / per_result;
     assert!((4..batch::MAX_CALLS - 2).contains(&max_results));
-    (read, max_results)
+    // Leave enough execution allowance to exercise the independent result-byte limit.
+    let creation_gas = fixture
+        .clone()
+        .dispatch(&create("must-rollback"), 1_000_000)
+        .unwrap()
+        .precompile
+        .gas_used;
+    let gas = 3 * READ_GAS + creation_gas + (max_results as u64 + 1) * result.precompile.gas_used;
+    (read, max_results, gas)
 }
 
 #[test]
 fn repeated_policy_reads_stop_before_retaining_an_oversized_batch_result() {
     let mut fixture = Fixture::new();
-    let (read, count) = large_policy_read(&mut fixture);
+    let (read, count, gas) = large_policy_read(&mut fixture);
     let input = batch(vec![read.clone(); count]);
-    let result = fixture.dispatch(&input, 1_000_000).unwrap();
+    let result = fixture.dispatch(&input, gas).unwrap();
     assert!(!result.precompile.reverted);
     assert!(result.precompile.bytes.len() <= batch_results::MAX_RESULT_BYTES);
     assert_eq!(
@@ -350,7 +406,7 @@ fn repeated_policy_reads_stop_before_retaining_an_oversized_batch_result() {
     );
     let before = fixture.state();
     let error = fixture
-        .dispatch(&batch(vec![read; count + 1]), 1_000_000)
+        .dispatch(&batch(vec![read; count + 1]), gas)
         .unwrap_err();
     assert!(
         error
@@ -363,17 +419,17 @@ fn repeated_policy_reads_stop_before_retaining_an_oversized_batch_result() {
 #[test]
 fn nested_wrappers_share_the_result_budget_even_when_outer_encoding_would_fit() {
     let mut fixture = Fixture::new();
-    let (read, max_results) = large_policy_read(&mut fixture);
+    let (read, max_results, gas) = large_policy_read(&mut fixture);
     let count = max_results / 3 + 1;
     let flat = fixture
-        .dispatch(&batch(vec![read.clone(); count * 2]), 1_000_000)
+        .dispatch(&batch(vec![read.clone(); count * 2]), gas)
         .unwrap();
     assert!(!flat.precompile.reverted);
     assert!(flat.precompile.bytes.len() < batch_results::MAX_RESULT_BYTES);
     let inner = batch(vec![read; count]);
     let before = fixture.state();
     let error = fixture
-        .dispatch(&batch(vec![inner.clone(), inner]), 1_000_000)
+        .dispatch(&batch(vec![inner.clone(), inner]), gas)
         .unwrap_err();
     assert!(
         error
@@ -386,16 +442,121 @@ fn nested_wrappers_share_the_result_budget_even_when_outer_encoding_would_fit() 
 #[test]
 fn late_result_exhaustion_restores_prior_writes_and_returns_no_logs() {
     let mut fixture = Fixture::new();
-    let (read, count) = large_policy_read(&mut fixture);
+    let (read, count, gas) = large_policy_read(&mut fixture);
     let before = fixture.state();
     let mut calls = vec![create("must-rollback")];
     calls.extend(std::iter::repeat_n(read, count + 1));
     // No successful/reverted DispatchResult (and therefore no logs) escapes this error.
-    let error = fixture.dispatch(&batch(calls), 1_000_000).unwrap_err();
+    let error = fixture.dispatch(&batch(calls), gas).unwrap_err();
     assert!(
         error
             .to_string()
             .contains("batch result byte limit exceeded")
     );
+    assert_eq!(fixture.state(), before);
+}
+
+fn large_policy_listing(fixture: &mut Fixture, count: usize) -> Vec<u8> {
+    let actor = Did::new(&fixture.tx.signer).unwrap();
+    let policy = format!(
+        "name: listing\nresources:\n  - name: file\n# {}\n",
+        "x".repeat(60 << 10),
+    );
+    for _ in 0..count {
+        fixture
+            .acp
+            .create_policy(&actor, &policy, PolicyMarshalingType::ShortYaml)
+            .unwrap();
+    }
+    IAcp::getPolicyIdsCall {}.abi_encode()
+}
+
+#[test]
+fn policy_id_listing_charges_exact_work_and_repeated_batches_exhaust_remaining_gas() {
+    let mut fixture = Fixture::new();
+    let read = large_policy_listing(&mut fixture, 16);
+    let before = fixture.state();
+    let measured = fixture.dispatch(&read, 1_000_000).unwrap();
+    assert!(!measured.precompile.reverted);
+    let required = measured.precompile.gas_used;
+    assert!(required > 60_000);
+    assert_eq!(
+        IAcp::getPolicyIdsCall::abi_decode_returns(&measured.precompile.bytes)
+            .unwrap()
+            .len(),
+        16
+    );
+    assert_eq!(
+        fixture
+            .dispatch(&read, required)
+            .unwrap()
+            .precompile
+            .gas_used,
+        required
+    );
+    assert!(matches!(
+        fixture.dispatch(&read, required - 1),
+        Err(PrecompileError::OutOfGas)
+    ));
+    let nested = batch(vec![read.clone(), batch(vec![read.clone()])]);
+    let exact = READ_GAS * 2 + required * 2;
+    assert_eq!(
+        fixture
+            .dispatch(&nested, exact)
+            .unwrap()
+            .precompile
+            .gas_used,
+        exact
+    );
+    assert!(matches!(
+        fixture.dispatch(&nested, exact - 1),
+        Err(PrecompileError::OutOfGas)
+    ));
+    let input = batch(vec![read.clone(); batch::MAX_CALLS - 1]);
+    batch::validate(&input).unwrap();
+    assert!(matches!(
+        fixture.dispatch(&input, 1_000_000),
+        Err(PrecompileError::OutOfGas)
+    ));
+    assert_eq!(fixture.state(), before);
+    let mut calls = vec![create("prior-write")];
+    calls.extend(std::iter::repeat_n(read, batch::MAX_CALLS - 2));
+    assert!(matches!(
+        fixture.dispatch(&batch(calls), 1_000_000),
+        Err(PrecompileError::OutOfGas)
+    ));
+    assert_eq!(fixture.state(), before);
+}
+
+#[test]
+fn oversized_policy_id_listing_keeps_read_charges_and_rolls_back_earlier_batch_writes() {
+    let mut fixture = Fixture::new();
+    let read = large_policy_listing(&mut fixture, 18);
+    let before = fixture.state();
+    let result = fixture.dispatch(&read, 1_000_000).unwrap();
+    assert!(result.precompile.reverted);
+    assert!(result.precompile.gas_used > READ_GAS);
+    assert!(
+        String::from_utf8_lossy(&result.precompile.bytes).contains("use certified prefix pages")
+    );
+    let input = batch(vec![read.clone(); batch::MAX_CALLS - 1]);
+    batch::validate(&input).unwrap();
+    let repeated = fixture.dispatch(&input, 1_000_000).unwrap();
+    assert!(repeated.precompile.reverted);
+    assert_eq!(
+        repeated.precompile.gas_used,
+        READ_GAS + result.precompile.gas_used
+    );
+    assert!(
+        String::from_utf8_lossy(&repeated.precompile.bytes).starts_with("batch call 1 reverted:")
+    );
+    assert!(repeated.logs.is_empty());
+    assert_eq!(fixture.state(), before);
+    let result = fixture
+        .dispatch(&batch(vec![create("prior-write"), read]), 1_000_000)
+        .unwrap();
+    assert!(result.precompile.reverted);
+    assert!(result.precompile.gas_used > READ_GAS + WRITE_GAS);
+    assert!(result.logs.is_empty());
     assert_eq!(fixture.state(), before);
 }

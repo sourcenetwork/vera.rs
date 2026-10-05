@@ -530,10 +530,11 @@ async fn node_restart_preserves_state() {
         "tx submitted through restarted node should succeed"
     );
 
-    // ── 9. Consensus participation ──────────────────────────────
+    // ── 9. Finalization progress ──────────────────────────────
     //
-    // Verify the restarted node is actively participating in consensus
-    // by checking that its view advances and it finalizes new blocks.
+    // Verify the restarted node observes new finalized blocks and advancing
+    // (epoch, view) finalization rounds. Live view/leader telemetry is unavailable;
+    // these observations alone do not prove that this validator cast a vote.
     // We poll the restarted node's status directly rather than using
     // wait_for_height (which requires all nodes to converge).
 
@@ -541,12 +542,18 @@ async fn node_restart_preserves_state() {
         .node_status()
         .await
         .expect("restarted node should report status");
-    let view_before = status_before.current_view;
+    let height_before = status_before
+        .finalized_height
+        .expect("observed finalized height");
+    let round_before = status_before
+        .finalized_epoch
+        .zip(status_before.finalized_view)
+        .expect("observed finalization round");
     let finalized_before = status_before.finalized_count;
 
     let restarted_url2 = cluster.node(3).rpc_url();
     poll_until(
-        "restarted node consensus participation",
+        "restarted node finalized progress",
         Duration::from_secs(60),
         Duration::from_millis(500),
         {
@@ -557,15 +564,23 @@ async fn node_restart_preserves_state() {
                     let Ok(status) = VeraClient::new(url).node_status().await else {
                         return Some("node unreachable".to_string());
                     };
-                    if status.current_view > view_before
+                    if status
+                        .finalized_height
+                        .is_some_and(|height| height > height_before)
+                        && status
+                            .finalized_epoch
+                            .zip(status.finalized_view)
+                            .is_some_and(|round| round > round_before)
                         && status.finalized_count > finalized_before
                     {
                         None
                     } else {
                         Some(format!(
-                            "view {} -> {}, finalized {} -> {}",
-                            view_before,
-                            status.current_view,
+                            "height {} -> {:?}, finalized round {:?} -> {:?}, callbacks {} -> {}",
+                            height_before,
+                            status.finalized_height,
+                            round_before,
+                            status.finalized_epoch.zip(status.finalized_view),
                             finalized_before,
                             status.finalized_count
                         ))
@@ -579,12 +594,25 @@ async fn node_restart_preserves_state() {
     let status_after = restarted_client
         .node_status()
         .await
-        .expect("restarted node status after consensus check");
+        .expect("restarted node status after finalization check");
     assert!(
-        status_after.current_view > view_before,
-        "restarted node view should advance ({} -> {})",
-        view_before,
-        status_after.current_view
+        status_after
+            .finalized_height
+            .is_some_and(|height| height > height_before),
+        "restarted node finalized height should advance ({} -> {:?})",
+        height_before,
+        status_after.finalized_height
+    );
+    assert!(
+        status_after
+            .finalized_epoch
+            .zip(status_after.finalized_view)
+            .is_some_and(|round| round > round_before),
+        "restarted node finalized round should advance ({:?} -> {:?})",
+        round_before,
+        status_after
+            .finalized_epoch
+            .zip(status_after.finalized_view)
     );
     assert!(
         status_after.finalized_count > finalized_before,

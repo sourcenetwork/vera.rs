@@ -213,3 +213,116 @@ fn policy_id_listing_rejects_corrupt_records_after_restore() {
     module.store.put(&keys::policy_key(&id), valid);
     assert_eq!(module.query_policy_ids().unwrap(), vec![id]);
 }
+
+fn exact_byte_listing() -> AcpModule {
+    let mut module = AcpModule::new();
+    let mut record = module
+        .create_policy(
+            &Did::new("did:key:owner").unwrap(),
+            VALID,
+            PolicyMarshalingType::ShortYaml,
+        )
+        .unwrap();
+    module.store.delete(&keys::policy_key(&record.policy.id));
+    for n in 0..2 {
+        record.policy.id = format!("{n:064x}");
+        let key = keys::policy_key(&record.policy.id);
+        let mut value = serde_json::to_vec(&record).unwrap();
+        // Valid JSON whitespace makes the exact stored-byte boundary independent of schema size.
+        value.resize((1 << 19) - key.len(), b' ');
+        module.store.put(&key, value);
+    }
+    module
+}
+
+#[test]
+fn policy_id_listing_accepts_exact_byte_and_work_limits_and_rejects_one_more() {
+    let mut module = exact_byte_listing();
+    let before = module.store.serialize();
+    let measured = QueryBudget::new(u64::MAX);
+    let ids = module.query_policy_ids_with_budget(&measured).unwrap();
+    assert_eq!(ids, vec![format!("{:064x}", 0), format!("{:064x}", 1)]);
+    let prefix_cost = 100 + (keys::POLICY_PREFIX.len() as u64).div_ceil(16);
+    assert_eq!(
+        measured.consumed(),
+        prefix_cost + 2 * (100 + (1 << 19) / 16)
+    );
+    let exact = QueryBudget::new(measured.consumed());
+    assert_eq!(module.query_policy_ids_with_budget(&exact).unwrap(), ids);
+    assert!(!exact.is_exhausted());
+    let short = QueryBudget::new(measured.consumed() - 1);
+    assert!(matches!(
+        module.query_policy_ids_with_budget(&short),
+        Err(AcpError::QueryBudgetExceeded)
+    ));
+    assert!(short.is_exhausted());
+    assert_eq!(
+        short.consumed(),
+        prefix_cost + (measured.consumed() - prefix_cost) / 2
+    );
+    assert_eq!(module.store.serialize(), before);
+
+    let key = keys::policy_key(&ids[1]);
+    let mut value = module.store.get(&key).unwrap();
+    value.push(b' ');
+    module.store.put(&key, value);
+    let over = module.store.serialize();
+    let budget = QueryBudget::new(u64::MAX);
+    assert!(matches!(
+        module.query_policy_ids_with_budget(&budget),
+        Err(AcpError::InvalidAccessRequest { reason }) if reason.contains("use certified prefix pages")
+    ));
+    assert_eq!(budget.consumed(), measured.consumed() + 1);
+    assert!(!budget.is_exhausted());
+    assert_eq!(module.store.serialize(), over);
+    let first = module.query_policies_page(None).unwrap();
+    assert_eq!(first.records.len(), 1);
+    let next = module.query_policies_page(first.next.as_deref()).unwrap();
+    assert_eq!(next.records.len(), 1);
+    assert!(next.next.is_none());
+}
+
+#[test]
+fn policy_id_listing_preflights_all_bytes_before_decoding_and_preserves_corruption_errors() {
+    let mut module = exact_byte_listing();
+    let first = keys::policy_key(&format!("{:064x}", 0));
+    let second = keys::policy_key(&format!("{:064x}", 1));
+    let mut corrupt = module.store.get(&first).unwrap();
+    corrupt[0] = b'!';
+    module.store.put(&first, corrupt);
+    let mut value = module.store.get(&second).unwrap();
+    value.push(b' ');
+    module.store.put(&second, value.clone());
+    let before = module.store.serialize();
+    let over = QueryBudget::new(u64::MAX);
+    assert!(matches!(
+        module.query_policy_ids_with_budget(&over),
+        Err(AcpError::InvalidAccessRequest { .. })
+    ));
+    assert!(over.consumed() > 0);
+    assert_eq!(module.store.serialize(), before);
+
+    value.pop();
+    module.store.put(&second, value);
+    let before = module.store.serialize();
+    let charged = QueryBudget::new(u64::MAX);
+    assert!(matches!(
+        module.query_policy_ids_with_budget(&charged),
+        Err(AcpError::State(_))
+    ));
+    assert!(charged.consumed() > 0);
+    assert!(!charged.is_exhausted());
+    let exhausted = QueryBudget::new(0);
+    assert!(matches!(
+        module.query_policy_ids_with_budget(&exhausted),
+        Err(AcpError::QueryBudgetExceeded)
+    ));
+    assert!(exhausted.is_exhausted());
+    assert_eq!(exhausted.consumed(), 0);
+    assert_eq!(module.store.serialize(), before);
+    // Reusing the exhausted allowance cannot succeed even after a snapshot change.
+    assert!(matches!(
+        AcpModule::new().query_policy_ids_with_budget(&exhausted),
+        Err(AcpError::QueryBudgetExceeded)
+    ));
+}

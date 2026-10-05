@@ -17,6 +17,15 @@ first with growing registrations and then with 128 repeatedly updated objects.
 These are fixed-load baselines, not searches for maximum throughput. They are
 not part of every pull request's test loop.
 
+Before final-state reconciliation, `operation_baseline` selects the highest
+measured receipt revision and waits up to 30 seconds for that exact receipt on
+every replica. It compares the transaction hash, block hash, height and status
+before checking final ownership and permissions. Earlier receipts alone do not
+establish that later updates are visible. The `replica_state_barrier` record
+reports the selected receipt, replica count and wait duration separately from
+workload latency and throughput. Existing receipt, state and restart assertions
+remain required.
+
 ## ACP lifecycle components
 
 `component_baseline` includes policy edits and deletions with 32, 256 and 2,048
@@ -33,11 +42,19 @@ snapshot isolation, serialization restoration and absence of resurrected grants
 when a removed relation is reintroduced. These are module costs; they exclude
 consensus, durable storage and RPC/proof generation.
 
-Fixture version 2 retains the three existing component measurements and adds eight
-lifecycle measurements. Comparisons with version 1 show the new measurements
-without inventing a baseline; later version 2 comparisons report their deltas.
-Missing measurements or inconsistent fixtures fail the report. The workload does
-not establish a production mutation bound or change the fixed execution charge.
+Fixture version 3 retains the previous eleven measurements and adds
+`acp_policy_logical_edit_32` and `acp_policy_logical_edit_2048`. These hold the
+policy definition fixed and time removal of one relation with 32 or 2,048 target
+objects. Each object has an owner and one direct reader grant. Outside timing,
+the fixture checks the exact removed count, immediate access revocation,
+restoration and no resurrection after recreating the relation. Physical rows
+remain throughout these checks; `end_blocker` cleanup is excluded from the edit
+timing. The report includes the 2,048/32 cost ratio for each head pass.
+
+Comparisons still accept version 1 or 2 baselines and show new measurements
+without inventing a baseline. Matching measurements retain their comparisons;
+missing measurements or inconsistent fixtures fail the report. These component
+ratios do not measure service throughput or establish a production resource bound.
 
 ## Local pipelined load measurement
 
@@ -68,9 +85,12 @@ change.
 
 The [PR performance workflow](../.github/workflows/performance-pr.yml) measures
 code-changing same-repository PRs on one hosted Linux runner. It checks out the
-exact PR head and base-tip revisions, builds both with Rust 1.98.0 in the release
-profile, and preserves separate binaries before timing. Four passes run in
-head/base/base/head order with no compilation or chart rendering between them.
+exact PR head and base-tip revisions and builds both node binaries with Rust
+1.98.0 in the release profile. One head-built `operation_baseline` drives both
+revisions, giving them identical workload generation and correctness checks.
+Component executables remain specific to each revision. All binaries are preserved
+before four passes run in head/base/base/head order, with no compilation or chart
+rendering between them.
 Fork PRs cannot run this job because the locked dependencies require credentials.
 
 Each pass measures 600 operations at 20 offered arrivals/s on four local
@@ -79,7 +99,20 @@ verified permission reads. Receipt, permission and full-workflow p95, completed
 workflows/s, and peak member RSS appear in the check summary. Every pass must
 satisfy the existing completeness, certificate, replica and hard-restart gates.
 A failed run is never presented as improved performance. Configuration changes
-are listed explicitly and suppress full-stack percentage comparisons.
+are listed explicitly and suppress full-stack percentage comparisons. The driver
+also generates genesis/configuration and verifies native receipts and proofs.
+Before running workloads, committed ACP source supplies the explicit relationship
+namespace and its matching policy-record schema. Known `relationship/v3/` and
+`relationship/v4/` schemas are incompatible with each other's permission verifier.
+For that boundary, baseline full-stack passes are recorded as **not run** in
+`unavailable.json`; both head passes still require every correctness and recovery
+gate. Reports show head-only values, no baseline success and no full-stack delta.
+Unknown or inconsistent schemas fail. Other interface errors and failures on a
+compatible baseline still fail the job. There is no verifier relaxation or fallback
+to a different workload driver. Component passes retain their existing independent
+fixture and sampling checks. Block limits printed by the driver
+are its compiled configuration assumptions, not measurements of the base node's
+capabilities.
 
 The component executable separately measures native BLS request verification,
 ACP owner-read evaluation with read capture, and consensus-certificate verification
@@ -96,14 +129,18 @@ Otherwise, separated ranges are labelled improvement or regression **signals**, 
 statistical confidence. Performance changes are advisory on shared runners;
 missing measurements, build failures and failed correctness gates fail the job.
 The workflow summary and 30-day artifacts contain pass ranges, raw measurements,
-source revisions, binary hashes, workload configuration, host provenance and
-per-pass charts. The workflow has read-only repository permissions and does not
+separate node and workload-runner source revisions, binary hashes, workload
+configuration, host provenance and per-pass charts. Version 2 comparison records
+require the same head-sourced driver hash for every pass and reject dirty or
+misattributed sources. Historical version 1 artifacts retain their original
+per-revision runner identities when re-read. The workflow has read-only repository permissions and does not
 post comments or publish a site. Throughput at this fixed offered rate is not a
 maximum-throughput benchmark.
 
 Run the same comparison locally after building each revision into separate
-`binaries/head` and `binaries/base` directories (containing `verad`,
-`operation_baseline`, and `component_baseline` when available):
+`binaries/head` and `binaries/base` directories. Each contains its own `verad` and
+`component_baseline` when available; the head component executable is required.
+Only `binaries/head` needs `operation_baseline`:
 
 ```sh
 python tools/performance/run_pr.py --head /path/to/head --base /path/to/base \
@@ -117,7 +154,8 @@ full-stack runs.
 
 Each artifact includes:
 
-- Checkout revision, binary hashes, platform, CPU count, memory, runner image,
+- Node and runner checkout revisions, their dirty status and binary hashes,
+  platform, CPU count, memory, runner image,
   load averages, backend selection, exact arguments, and process exit status.
 - Raw versioned JSONL observations, including rejection, uncertainty, throttling,
   and incomplete workflows.

@@ -4,15 +4,37 @@
 pub mod abi;
 mod amendment_history;
 pub mod catalogue;
+mod command_auxiliary;
+mod command_budget;
 mod command_context;
+mod command_storage;
+pub use command_budget::CommandBudget;
 mod commitment_expiry;
 mod commitment_lookup;
 mod index_validation;
 mod lifecycle;
 mod management;
 mod metadata;
+mod object_archive;
+mod object_pairs;
 pub mod pages;
+mod policy_create;
+mod policy_create_budget;
+pub use policy_create_budget::PolicyCreateBudget;
+mod policy_edit;
+mod policy_edit_budget;
+pub use policy_edit_budget::PolicyEditBudget;
+mod permission_budget;
+mod policy_listing;
+pub use permission_budget::PermissionBudget;
+mod query_budget;
+pub use query_budget::QueryBudget;
 mod registration_queries;
+mod relation_cleanup;
+mod relation_edits;
+pub mod relation_generations;
+mod relation_restoration;
+pub mod relationship_index;
 mod relationship_mutations;
 mod relationship_queries;
 mod restoration;
@@ -43,7 +65,10 @@ use acp::{Policy, Relationship};
 use error::AcpError;
 use identity::Did;
 use sha2::{Digest, Sha256};
-use zanzibar::{PermissionEngine, PolicySpecification};
+#[cfg(test)]
+use zanzibar::PermissionEngine;
+use zanzibar::PolicySpecification;
+#[cfg(test)]
 use zanzibar_store::QmdbZanzibarStore;
 
 use crate::kv_store::{InMemoryKvStore, ModuleKvStore};
@@ -52,10 +77,14 @@ use types::{
     AccessDecision, AccessRequest, AcpParams, Actor, AmendmentEvent, DecisionParams,
     GenerateCommitmentResult, Object, ObjectSelector, PolicyCmd, PolicyCmdResult,
     PolicyMarshalingType, PolicyRecord, RecordMetadata, RegistrationProof, RegistrationsCommitment,
-    RelationSelector, RelationshipRecord, RelationshipSelector, SubjectSelector, SuppliedMetadata,
+    RelationGenerations, RelationPair, RelationSelector, RelationshipRecord, RelationshipSelector,
+    SubjectSelector, SuppliedMetadata,
 };
 
 type Result<T> = std::result::Result<T, AcpError>;
+
+/// Maximum encoded source bytes accepted by policy creation and replacement.
+pub const MAX_POLICY_DEFINITION_BYTES: usize = 64 << 10;
 
 /// Access Control Policy module.
 ///
@@ -71,7 +100,9 @@ type Result<T> = std::result::Result<T, AcpError>;
 /// "policy/retired/" + policy_id                         → RetiredPolicy (Borsh)
 /// "policy/cleanup/queue/" + BE(sequence)                → policy_id
 /// "policy/cleanup/counter"                             → u64 BE
-/// "relationship/v3/" + policy_id + "/" + storage_key    → RelationshipRecord (serde_json)
+/// "relationship/v4/" + policy_id + "/" + pair + storage_key → RelationshipRecord (serde_json)
+/// "relation_state/" + policy_id + "/" + index_key       → pair counts, current directories, retired names
+/// "relation_cleanup/queue/" + BE(sequence)             → RelationJob (serde_json)
 /// "access_decision/" + decision_id                     → AccessDecision (Borsh)
 /// "commitment/objs/" + BE(id)                          → RegistrationsCommitment (Borsh)
 /// "commitment/counter/id"                              → u64 BE
@@ -86,6 +117,10 @@ type Result<T> = std::result::Result<T, AcpError>;
 pub struct AcpModule {
     store: InMemoryKvStore,
     zanzibar_policies: OrdMap<String, Arc<Policy>>,
+}
+
+fn relation_state_error(error: zanzibar::error::Error) -> AcpError {
+    AcpError::State(error.to_string())
 }
 
 impl Default for AcpModule {
@@ -125,188 +160,6 @@ impl AcpModule {
 
     // ── Msg handlers ────────────────────────────────────────────────────
 
-    /// Parse, validate, and store a new access control policy.
-    #[allow(unused_variables)]
-    pub fn create_policy(
-        &mut self,
-        creator: &Did,
-        policy: &str,
-        marshal_type: PolicyMarshalingType,
-    ) -> Result<PolicyRecord> {
-        self.create_policy_with_metadata(
-            policy,
-            marshal_type,
-            RecordMetadata {
-                creation_ts: Timestamp::default(),
-                tx_hash: Vec::new(),
-                tx_signer: String::new(),
-                owner_did: creator.to_string(),
-            },
-        )
-    }
-
-    fn create_policy_with_metadata(
-        &mut self,
-        policy: &str,
-        marshal_type: PolicyMarshalingType,
-        metadata: RecordMetadata,
-    ) -> Result<PolicyRecord> {
-        self.create_policy_with_options(
-            policy,
-            marshal_type,
-            metadata,
-            None,
-            SuppliedMetadata::default(),
-        )
-    }
-
-    fn create_policy_with_options(
-        &mut self,
-        policy: &str,
-        marshal_type: PolicyMarshalingType,
-        metadata: RecordMetadata,
-        specification: Option<PolicySpecification>,
-        supplied: SuppliedMetadata,
-    ) -> Result<PolicyRecord> {
-        supplied.validate()?;
-        let counter = self.next_policy_counter()?;
-        let zanzibar_policy = Self::compile_policy(policy, &marshal_type, counter, specification)?;
-
-        let record = PolicyRecord {
-            supplied_metadata: supplied,
-            last_modified: None,
-            policy: zanzibar_policy.clone(),
-            raw_policy: policy.to_string(),
-            marshal_type,
-            metadata,
-        };
-
-        let policy_id = zanzibar_policy.id.clone();
-        if self.store.has(&keys::policy_key(&policy_id))
-            || self.retired_policy(&policy_id)?.is_some()
-        {
-            return Err(AcpError::State("policy identifier already exists".into()));
-        }
-        self.store
-            .put(keys::POLICY_COUNTER_KEY, counter.to_be_bytes().to_vec());
-        self.set_policy_record(&policy_id, &record);
-        self.zanzibar_policies
-            .insert(policy_id, Arc::new(zanzibar_policy));
-
-        Ok(record)
-    }
-
-    /// Replace a policy's definition, pruning relationships that no longer fit.
-    /// This edits the current record without an expected-parent check or a policy
-    /// revision DAG; callers must not use it to reconcile offline policy branches.
-    #[allow(unused_variables)]
-    pub fn edit_policy(
-        &mut self,
-        creator: &Did,
-        policy_id: &str,
-        policy: &str,
-        marshal_type: PolicyMarshalingType,
-    ) -> Result<(u64, PolicyRecord)> {
-        let existing =
-            self.get_policy_record(policy_id)?
-                .ok_or_else(|| AcpError::PolicyNotFound {
-                    id: policy_id.to_string(),
-                })?;
-
-        if existing.metadata.owner_did != creator.to_string() {
-            return Err(AcpError::Unauthorized {
-                reason: "only the policy creator can edit it".into(),
-            });
-        }
-
-        let mut new_zanzibar = Self::compile_policy(
-            policy,
-            &marshal_type,
-            0,
-            Some(existing.policy.specification),
-        )?;
-
-        // Validate preserved resources requirement: existing resources must still be present.
-        let existing_policy = &existing.policy;
-        for old_resource in &existing_policy.resources {
-            let still_present = new_zanzibar
-                .resources
-                .iter()
-                .any(|r| r.name == old_resource.name);
-            if !still_present {
-                return Err(AcpError::InvalidPolicy {
-                    reason: format!(
-                        "resource '{}' cannot be removed from an existing policy",
-                        old_resource.name
-                    ),
-                });
-            }
-        }
-
-        if existing_policy.actor.as_ref().map(|actor| &actor.name)
-            != new_zanzibar.actor.as_ref().map(|actor| &actor.name)
-        {
-            return Err(AcpError::InvalidPolicy {
-                reason: "actor resource cannot be renamed".into(),
-            });
-        }
-
-        new_zanzibar.id = policy_id.to_string();
-
-        // Prune orphaned relationships: relations that existed in old policy but not new.
-        let prefix = keys::relationship_policy_prefix(policy_id);
-        let mut to_delete = Vec::new();
-        for (kv_key, value) in self.store.prefix_iter(&prefix) {
-            let record: RelationshipRecord = serde_json::from_slice(value).map_err(|error| {
-                AcpError::State(format!("invalid relationship record: {error}"))
-            })?;
-            let relationship = &record.relationship;
-            if record.policy_id != policy_id
-                || keys::relationship_key(policy_id, &keys::relationship_storage_key(relationship))
-                    .as_slice()
-                    != kv_key
-            {
-                return Err(AcpError::State(
-                    "relationship record differs from its key".into(),
-                ));
-            }
-            let removed_subject = match &relationship.subject {
-                acp::Subject::EntitySet {
-                    resource, relation, ..
-                } if !relation.is_empty() => {
-                    new_zanzibar.get_relation(resource, relation).is_none()
-                }
-                _ => false,
-            };
-            if removed_subject
-                || new_zanzibar
-                    .get_relation(&relationship.resource, &relationship.relation)
-                    .is_none()
-            {
-                to_delete.push(kv_key.to_vec());
-            }
-        }
-        let removed = to_delete.len() as u64;
-        for kv_key in to_delete {
-            self.remove_relationship_key(&kv_key);
-        }
-
-        let new_record = PolicyRecord {
-            supplied_metadata: existing.supplied_metadata.clone(),
-            last_modified: existing.last_modified.clone(),
-            policy: new_zanzibar.clone(),
-            raw_policy: policy.to_string(),
-            marshal_type,
-            metadata: existing.metadata.clone(),
-        };
-
-        self.set_policy_record(policy_id, &new_record);
-        self.zanzibar_policies
-            .insert(policy_id.to_string(), Arc::new(new_zanzibar));
-
-        Ok((removed, new_record))
-    }
-
     /// Evaluate an access check and persist the decision.
     #[allow(unused_variables)]
     pub fn check_access(
@@ -317,6 +170,42 @@ impl AcpModule {
         block: &BlockExecCtx,
         tx: &TxExecCtx,
     ) -> Result<AccessDecision> {
+        self.check_access_with_budget(
+            creator,
+            policy_id,
+            access_request,
+            block,
+            tx,
+            &PermissionBudget::new(u64::MAX),
+        )
+    }
+
+    /// Record a decision after reserving request, evaluation and encoded-write work.
+    #[allow(clippy::too_many_arguments)]
+    pub fn check_access_with_budget(
+        &mut self,
+        creator: &Did,
+        policy_id: &str,
+        access_request: &AccessRequest,
+        block: &BlockExecCtx,
+        tx: &TxExecCtx,
+        budget: &PermissionBudget,
+    ) -> Result<AccessDecision> {
+        let result =
+            self.check_access_metered(creator, policy_id, access_request, block, tx, budget);
+        budget.finish(result)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn check_access_metered(
+        &mut self,
+        creator: &Did,
+        policy_id: &str,
+        access_request: &AccessRequest,
+        block: &BlockExecCtx,
+        tx: &TxExecCtx,
+        budget: &PermissionBudget,
+    ) -> Result<AccessDecision> {
         if tx.signer != creator.as_str()
             || block.timestamp.block_height == 0
             || block.timestamp.seconds == 0
@@ -325,6 +214,7 @@ impl AcpModule {
                 reason: "invalid decision execution context".into(),
             });
         }
+        budget.request(policy_id, creator.as_str(), access_request)?;
         let expected = decision::DecisionRequest {
             deployment_id: block.deployment_id,
             policy_id: policy_id.into(),
@@ -333,38 +223,7 @@ impl AcpModule {
             request: access_request.clone(),
         };
         let decision_id = expected.id()?;
-        let policy = self
-            .zanzibar_policies
-            .get(policy_id)
-            .cloned()
-            .ok_or_else(|| AcpError::PolicyNotFound {
-                id: policy_id.to_string(),
-            })?;
-
-        let actor_did = &access_request.actor.0;
-        let engine = self.permission_engine(&policy);
-
-        for op in &access_request.operations {
-            let granted = engine
-                .check_blocking(
-                    policy_id,
-                    &op.object.resource,
-                    &op.object.id,
-                    &op.permission,
-                    actor_did,
-                )
-                .map_err(|error| {
-                    AcpError::State(format!("permission evaluation failed: {error}"))
-                })?;
-            if !granted {
-                return Err(AcpError::Unauthorized {
-                    reason: format!(
-                        "actor {} denied {} on {}:{}",
-                        actor_did, op.permission, op.object.resource, op.object.id
-                    ),
-                });
-            }
-        }
+        self.evaluate_permission_request(policy_id, access_request, budget, true)?;
 
         let decision = AccessDecision {
             id: decision_id,
@@ -372,7 +231,7 @@ impl AcpModule {
             creator: creator.to_string(),
             creator_acc_sequence: tx.sequence,
             operations: access_request.operations.clone(),
-            actor: actor_did.to_string(),
+            actor: access_request.actor.0.to_string(),
             params: DecisionParams {
                 decision_expiration_delta: 100,
                 ticket_expiration_delta: 100,
@@ -382,7 +241,9 @@ impl AcpModule {
             issued_height: block.timestamp.block_height,
         };
 
-        self.set_access_decision(&decision)?;
+        let key = keys::access_decision_key(&decision.id);
+        let bytes = budget.records.encode_borsh(&key, &decision)?;
+        self.store.put(&key, bytes);
         Ok(decision)
     }
 
@@ -395,6 +256,37 @@ impl AcpModule {
         policy_id: &str,
         cmd: PolicyCmd,
     ) -> Result<PolicyCmdResult> {
+        self.direct_policy_cmd_with_budget(creator, policy_id, cmd, &CommandBudget::new(u64::MAX))
+    }
+
+    /// Execute a command with shared input and management authorization accounting.
+    pub fn direct_policy_cmd_with_budget(
+        &mut self,
+        creator: &Did,
+        policy_id: &str,
+        cmd: PolicyCmd,
+        budget: &CommandBudget,
+    ) -> Result<PolicyCmdResult> {
+        budget.input(creator.as_str().len().saturating_add(policy_id.len()))?;
+        budget.encoded_input(&cmd)?;
+        let mut candidate = self.clone();
+        let result = budget.finish(candidate.apply_policy_cmd(creator, policy_id, cmd, budget))?;
+        *self = candidate;
+        Ok(result)
+    }
+
+    fn apply_policy_cmd(
+        &mut self,
+        creator: &Did,
+        policy_id: &str,
+        cmd: PolicyCmd,
+        budget: &CommandBudget,
+    ) -> Result<PolicyCmdResult> {
+        let policy_key = keys::policy_key(policy_id);
+        budget
+            .permissions
+            .records
+            .read(&policy_key, self.store.get_ref(&policy_key))?;
         self.query_policy(policy_id)?;
         let object_id = match &cmd {
             PolicyCmd::SetRelationship(rel) | PolicyCmd::DeleteRelationship(rel) => {
@@ -413,25 +305,37 @@ impl AcpModule {
             });
         }
         match cmd {
-            PolicyCmd::SetRelationship(rel) => self.cmd_set_relationship(creator, policy_id, rel),
+            PolicyCmd::SetRelationship(rel) => {
+                self.cmd_set_relationship(creator, policy_id, rel, budget)
+            }
             PolicyCmd::DeleteRelationship(rel) => {
-                self.cmd_delete_relationship(creator, policy_id, rel)
+                self.cmd_delete_relationship(creator, policy_id, rel, budget)
             }
             PolicyCmd::TransferObject { object, new_owner } => self
-                .transfer_object(creator, policy_id, &object, &new_owner.0)
+                .transfer_object_with_budget(creator, policy_id, &object, &new_owner.0, budget)
                 .map(|record| PolicyCmdResult::TransferObject { record }),
-            PolicyCmd::RegisterObject(obj) => self.cmd_register_object(creator, policy_id, obj),
-            PolicyCmd::ArchiveObject(obj) => self.cmd_archive_object(creator, policy_id, obj),
-            PolicyCmd::UnarchiveObject(obj) => self.cmd_unarchive_object(creator, policy_id, obj),
+            PolicyCmd::RegisterObject(obj) => {
+                self.cmd_register_object(creator, policy_id, obj, budget)
+            }
+            PolicyCmd::ArchiveObject(obj) => {
+                self.cmd_archive_object(creator, policy_id, obj, budget)
+            }
+            PolicyCmd::UnarchiveObject(obj) => {
+                self.cmd_unarchive_object(creator, policy_id, obj, budget)
+            }
             PolicyCmd::CommitRegistrations { commitment } => {
                 self.cmd_commit_registrations(creator, policy_id, commitment)
             }
             PolicyCmd::RevealRegistration {
                 registrations_commitment_id,
                 proof,
-            } => {
-                self.cmd_reveal_registration(creator, policy_id, registrations_commitment_id, proof)
-            }
+            } => self.cmd_reveal_registration(
+                creator,
+                policy_id,
+                registrations_commitment_id,
+                proof,
+                budget,
+            ),
             PolicyCmd::FlagHijackAttempt { event_id } => {
                 self.cmd_flag_hijack_attempt(creator, policy_id, event_id)
             }
@@ -454,31 +358,15 @@ impl AcpModule {
             .ok_or_else(|| AcpError::PolicyNotFound { id: id.to_string() })
     }
 
-    /// List up to 128 policy IDs; larger listings require certified prefix pages.
-    pub fn query_policy_ids(&self) -> Result<Vec<String>> {
-        const MAX_IDS: usize = 128;
-        let prefix = keys::POLICY_PREFIX;
-        let mut ids = Vec::new();
-        for (key, _) in self.store.prefix_iter(prefix).take(MAX_IDS + 1) {
-            if ids.len() == MAX_IDS {
-                return Err(AcpError::InvalidAccessRequest {
-                    reason: "policy listing exceeds limit; use certified prefix pages".into(),
-                });
-            }
-            let id = &key[prefix.len()..];
-            if id.len() != 64
-                || !id
-                    .iter()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
-            {
-                return Err(AcpError::State("invalid stored policy identifier".into()));
-            }
-            let id = String::from_utf8(id.to_vec())
-                .map_err(|_| AcpError::State("invalid stored policy identifier".into()))?;
-            self.get_policy_record(&id)?;
-            ids.push(id);
-        }
-        Ok(ids)
+    /// Read and validate a policy after reserving its encoded key/value work.
+    pub fn query_policy_with_budget(&self, id: &str, budget: &QueryBudget) -> Result<PolicyRecord> {
+        let key = keys::policy_key(id);
+        let value = self.store.get_ref(&key);
+        budget.read(&key, value)?;
+        value
+            .map(|bytes| Self::decode_policy_record(id, bytes))
+            .transpose()?
+            .ok_or_else(|| AcpError::PolicyNotFound { id: id.to_string() })
     }
 
     /// Verify an access request without recording a decision.
@@ -488,33 +376,65 @@ impl AcpModule {
         policy_id: &str,
         access_request: &AccessRequest,
     ) -> Result<bool> {
-        let policy =
-            self.zanzibar_policies
-                .get(policy_id)
+        self.query_verify_access_request_with_budget(
+            policy_id,
+            access_request,
+            &PermissionBudget::new(u64::MAX),
+        )
+    }
+
+    /// Evaluate permissions with one shared allowance across every requested operation.
+    pub fn query_verify_access_request_with_budget(
+        &self,
+        policy_id: &str,
+        access_request: &AccessRequest,
+        budget: &PermissionBudget,
+    ) -> Result<bool> {
+        budget.request(policy_id, "", access_request)?;
+        let result = self.evaluate_permission_request(policy_id, access_request, budget, false);
+        budget.finish(result)
+    }
+
+    fn evaluate_permission_request(
+        &self,
+        policy_id: &str,
+        request: &AccessRequest,
+        budget: &PermissionBudget,
+        decision: bool,
+    ) -> Result<bool> {
+        let capture = read_capture::ReadCapture::with_budget(
+            self.store.clone(),
+            read_capture::PERMISSION_READ_LIMITS,
+            budget.clone(),
+        );
+        let engine =
+            zanzibar_store::evaluation_engine(capture, policy_id, Some(Arc::new(budget.clone())))
+                .map_err(|error| budget.evaluation_error(error))?
                 .ok_or_else(|| AcpError::PolicyNotFound {
-                    id: policy_id.to_string(),
+                    id: policy_id.into(),
                 })?;
-
-        let actor_did = &access_request.actor.0;
-        let engine = self.permission_engine(policy);
-
-        for op in &access_request.operations {
+        for op in &request.operations {
             let granted = engine
                 .check_blocking(
                     policy_id,
                     &op.object.resource,
                     &op.object.id,
                     &op.permission,
-                    actor_did,
+                    &request.actor.0,
                 )
-                .map_err(|error| {
-                    AcpError::State(format!("permission evaluation failed: {error}"))
-                })?;
+                .map_err(|error| budget.evaluation_error(error))?;
             if !granted {
+                if decision {
+                    return Err(AcpError::Unauthorized {
+                        reason: format!(
+                            "actor {} denied {} on {}:{}",
+                            request.actor.0, op.permission, op.object.resource, op.object.id
+                        ),
+                    });
+                }
                 return Ok(false);
             }
         }
-
         Ok(true)
     }
 
@@ -545,7 +465,7 @@ impl AcpModule {
         counter: u64,
         original_specification: Option<PolicySpecification>,
     ) -> Result<Policy> {
-        if policy.len() > 64 * 1024 {
+        if policy.len() > MAX_POLICY_DEFINITION_BYTES {
             return Err(AcpError::InvalidPolicy {
                 reason: "policy definition exceeds 64 KiB".into(),
             });
@@ -609,18 +529,6 @@ impl AcpModule {
         }
     }
 
-    /// Fetch a registration commitment by its autoincrement ID.
-    #[allow(unused_variables)]
-    pub fn query_registrations_commitment(&self, id: u64) -> Result<RegistrationsCommitment> {
-        let record = self
-            .get_commitment_by_id(id)?
-            .ok_or(AcpError::CommitmentNotFound { id })?;
-        if self.get_policy_record(&record.policy_id)?.is_none() {
-            return Err(AcpError::CommitmentNotFound { id });
-        }
-        Ok(record)
-    }
-
     /// Find registration commitments matching a commitment byte value.
     #[allow(unused_variables)]
     pub fn query_registrations_commitment_by_commitment(
@@ -678,7 +586,14 @@ impl AcpModule {
         let mut candidate = self.clone();
         candidate.prune_operations(block_ctx.timestamp.seconds)?;
         let expired = candidate.expire_commitments(&block_ctx.timestamp)?;
-        candidate.collect_retired_policies()?;
+        let mut budget = retirement_cleanup::Budget::new();
+        if block_ctx.timestamp.block_height.is_multiple_of(2) {
+            candidate.collect_retired_policies(&mut budget)?;
+            candidate.collect_retired_relations(&mut budget)?;
+        } else {
+            candidate.collect_retired_relations(&mut budget)?;
+            candidate.collect_retired_policies(&mut budget)?;
+        }
         *self = candidate;
         Ok(expired)
     }
@@ -690,15 +605,21 @@ impl AcpModule {
     fn get_policy_record(&self, id: &str) -> Result<Option<PolicyRecord>> {
         self.store
             .get_ref(&keys::policy_key(id))
-            .map(|bytes| {
-                let record: PolicyRecord = serde_json::from_slice(bytes)
-                    .map_err(|e| AcpError::State(format!("invalid policy record: {e}")))?;
-                if record.policy.id != id {
-                    return Err(AcpError::State("policy record identity mismatch".into()));
-                }
-                Ok(record)
-            })
+            .map(|bytes| Self::decode_policy_record(id, bytes))
             .transpose()
+    }
+
+    fn decode_policy_record(id: &str, bytes: &[u8]) -> Result<PolicyRecord> {
+        let record: PolicyRecord = serde_json::from_slice(bytes)
+            .map_err(|error| AcpError::State(format!("invalid policy record: {error}")))?;
+        if record.policy.id != id {
+            return Err(AcpError::State("policy record identity mismatch".into()));
+        }
+        record
+            .relations
+            .validate(&record.policy)
+            .map_err(relation_state_error)?;
+        Ok(record)
     }
 
     fn set_policy_record(&mut self, id: &str, record: &PolicyRecord) {
@@ -724,18 +645,51 @@ impl AcpModule {
 
     // ── Storage — Relationships ──────────────────────────────────────────
 
+    #[cfg(test)]
     fn get_relationship(
         &self,
         policy_id: &str,
         relationship: &Relationship,
     ) -> Result<Option<RelationshipRecord>> {
-        let storage_key = keys::relationship_storage_key(relationship);
-        self.store
-            .get_ref(&keys::relationship_key(policy_id, &storage_key))
+        self.get_relationship_with_budget(policy_id, relationship, None)
+    }
+
+    fn get_relationship_with_budget(
+        &self,
+        policy_id: &str,
+        relationship: &Relationship,
+        budget: Option<&CommandBudget>,
+    ) -> Result<Option<RelationshipRecord>> {
+        let policy_key = keys::policy_key(policy_id);
+        if let Some(budget) = budget {
+            budget
+                .permissions
+                .records
+                .read(&policy_key, self.store.get_ref(&policy_key))?;
+        }
+        let Some(policy) = self.get_policy_record(policy_id)? else {
+            return Ok(None);
+        };
+        let Ok(pair) = policy.relations.pair(relationship) else {
+            return Ok(None);
+        };
+        let key = keys::relationship_generation_key(
+            policy_id,
+            pair,
+            &keys::relationship_storage_key(relationship),
+        );
+        let bytes = self.store.get_ref(&key);
+        if let Some(budget) = budget {
+            budget.permissions.records.read(&key, bytes)?;
+        }
+        bytes
             .map(|bytes| {
                 let record: RelationshipRecord = serde_json::from_slice(bytes)
                     .map_err(|e| AcpError::State(format!("invalid relationship record: {e}")))?;
-                if record.policy_id != policy_id || record.relationship != *relationship {
+                if record.policy_id != policy_id
+                    || record.relationship != *relationship
+                    || record.generations != pair
+                {
                     return Err(AcpError::State(
                         "relationship record identity mismatch".into(),
                     ));
@@ -745,20 +699,29 @@ impl AcpModule {
             .transpose()
     }
 
-    fn set_relationship(&mut self, record: &RelationshipRecord) {
-        relationship_mutations::put(&mut self.store, record)
-            .expect("in-memory relationship write cannot fail");
+    fn relationship_pair(
+        &self,
+        policy: &str,
+        relationship: &Relationship,
+        budget: &CommandBudget,
+    ) -> Result<RelationPair> {
+        let key = keys::policy_key(policy);
+        budget
+            .permissions
+            .records
+            .read(&key, self.store.get_ref(&key))?;
+        self.query_policy(policy)?
+            .relations
+            .pair(relationship)
+            .map_err(relation_state_error)
     }
 
-    fn delete_relationship(&mut self, policy_id: &str, storage_key: &str) {
-        self.remove_relationship_key(&keys::relationship_key(policy_id, storage_key));
+    #[cfg(test)]
+    fn set_relationship(&mut self, record: &RelationshipRecord) -> Result<()> {
+        relationship_mutations::put(&mut self.store, record).map_err(relation_state_error)
     }
 
-    fn remove_relationship_key(&mut self, key: &[u8]) {
-        relationship_mutations::remove(&mut self.store, key)
-            .expect("in-memory relationship removal cannot fail");
-    }
-
+    #[cfg(test)]
     fn has_relationship(&self, policy_id: &str, storage_key: &str) -> bool {
         self.store
             .has(&keys::relationship_key(policy_id, storage_key))
@@ -787,15 +750,6 @@ impl AcpModule {
     // ── Storage — Replay cache ───────────────────────────────────────────
 
     // ── Storage — Access decisions ───────────────────────────────────────
-
-    #[allow(unused_variables)]
-    fn set_access_decision(&mut self, decision: &AccessDecision) -> Result<()> {
-        let bytes = borsh::to_vec(decision)
-            .map_err(|e| AcpError::State(format!("serialize AccessDecision: {e}")))?;
-        self.store
-            .put(&keys::access_decision_key(&decision.id), bytes);
-        Ok(())
-    }
 
     fn get_access_decision(&self, id: &str) -> Result<Option<AccessDecision>> {
         self.store
@@ -875,70 +829,10 @@ impl AcpModule {
         Ok(())
     }
 
-    fn get_commitment_by_id(&self, id: u64) -> Result<Option<RegistrationsCommitment>> {
-        self.store
-            .get_ref(&keys::commitment_key(id))
-            .map(|bytes| {
-                let record: RegistrationsCommitment = borsh::from_slice(bytes)
-                    .map_err(|error| AcpError::State(format!("invalid commitment: {error}")))?;
-                if id == 0 || record.id != id || record.commitment.len() != 32 {
-                    return Err(AcpError::State(
-                        "commitment identity or root mismatch".into(),
-                    ));
-                }
-                Ok(record)
-            })
-            .transpose()
-    }
-
     // ── Storage — Amendment events ───────────────────────────────────────
 
     fn amendment_event_objs_prefix() -> Vec<u8> {
         [keys::AMENDMENT_EVENT_PREFIX, keys::OBJS_SUBPREFIX].concat()
-    }
-
-    #[allow(unused_variables)]
-    fn create_amendment_event(&mut self, event: &mut AmendmentEvent) -> Result<()> {
-        let counter = self
-            .store
-            .get(&keys::amendment_event_counter_key())
-            .map(|bytes| {
-                bytes
-                    .try_into()
-                    .map(u64::from_be_bytes)
-                    .map_err(|_| AcpError::State("invalid record counter".into()))
-            })
-            .transpose()?
-            .unwrap_or(0);
-        let next = counter
-            .checked_add(1)
-            .ok_or_else(|| AcpError::State("record counter exhausted".into()))?;
-        if self.store.has(&keys::amendment_event_key(next)) {
-            return Err(AcpError::State(
-                "amendment identifier already exists".into(),
-            ));
-        }
-        event.id = next;
-        let bytes = borsh::to_vec(event)
-            .map_err(|e| AcpError::State(format!("serialize amendment event: {e}")))?;
-        self.store.put(
-            &keys::amendment_event_counter_key(),
-            next.to_be_bytes().to_vec(),
-        );
-        self.store.put(&keys::amendment_event_key(event.id), bytes);
-        self.store.put(
-            &keys::amendment_event_policy_index_key(&event.policy_id, event.id),
-            Vec::new(),
-        );
-        Ok(())
-    }
-
-    #[allow(unused_variables)]
-    fn update_amendment_event(&mut self, event: &AmendmentEvent) -> Result<()> {
-        let bytes = borsh::to_vec(event)
-            .map_err(|e| AcpError::State(format!("serialize amendment event: {e}")))?;
-        self.store.put(&keys::amendment_event_key(event.id), bytes);
-        Ok(())
     }
 
     // ── PolicyCmd variant handlers ───────────────────────────────────────
@@ -948,6 +842,7 @@ impl AcpModule {
         creator: &Did,
         policy_id: &str,
         rel: Relationship,
+        budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
         let policy = self
             .zanzibar_policies
@@ -970,13 +865,15 @@ impl AcpModule {
                 reason: error.to_string(),
             })?;
 
-        if !self.is_authorized_to_manage(
+        if !self.check_management_authority_with_budget(
             creator,
             policy_id,
-            &policy,
-            &rel.resource,
-            &rel.object_id,
+            &Object {
+                resource: rel.resource.clone(),
+                id: rel.object_id.clone(),
+            },
             &rel.relation,
+            budget,
         )? {
             return Err(AcpError::Unauthorized {
                 reason: format!(
@@ -986,7 +883,7 @@ impl AcpModule {
             });
         }
 
-        if let Some(record) = self.get_relationship(policy_id, &rel)? {
+        if let Some(record) = self.get_relationship_with_budget(policy_id, &rel, Some(budget))? {
             return Ok(PolicyCmdResult::SetRelationship {
                 record_existed: true,
                 record,
@@ -1001,6 +898,7 @@ impl AcpModule {
         };
 
         let record = RelationshipRecord {
+            generations: self.relationship_pair(policy_id, &rel, budget)?,
             supplied_metadata: Default::default(),
             policy_id: policy_id.to_string(),
             relationship: rel,
@@ -1008,7 +906,7 @@ impl AcpModule {
             metadata,
         };
 
-        self.set_relationship(&record);
+        self.set_relationship_with_budget(&record, budget)?;
 
         Ok(PolicyCmdResult::SetRelationship {
             record_existed: false,
@@ -1021,15 +919,8 @@ impl AcpModule {
         creator: &Did,
         policy_id: &str,
         rel: Relationship,
+        budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
-        let policy = self
-            .zanzibar_policies
-            .get(policy_id)
-            .cloned()
-            .ok_or_else(|| AcpError::PolicyNotFound {
-                id: policy_id.to_string(),
-            })?;
-
         // Ownership is established at registration and cannot be stripped via a
         // relationship delete (matches defradb).
         if rel.relation == "owner" {
@@ -1040,13 +931,15 @@ impl AcpModule {
 
         // Revocation requires the same management authority as granting, so an
         // arbitrary signer cannot revoke a grant or strip a cross-object edge.
-        if !self.is_authorized_to_manage(
+        if !self.check_management_authority_with_budget(
             creator,
             policy_id,
-            &policy,
-            &rel.resource,
-            &rel.object_id,
+            &Object {
+                resource: rel.resource.clone(),
+                id: rel.object_id.clone(),
+            },
             &rel.relation,
+            budget,
         )? {
             return Err(AcpError::Unauthorized {
                 reason: format!(
@@ -1056,18 +949,40 @@ impl AcpModule {
             });
         }
 
-        let storage_key = keys::relationship_storage_key(&rel);
-        let record_found = self.get_relationship(policy_id, &rel)?.is_some();
-        self.delete_relationship(policy_id, &storage_key);
+        let existing = self.get_relationship_with_budget(policy_id, &rel, Some(budget))?;
+        let record_found = existing.is_some();
+        if let Some(record) = existing {
+            let key = keys::relationship_generation_key(
+                policy_id,
+                record.generations,
+                &keys::relationship_storage_key(&record.relationship),
+            );
+            self.remove_relationship_key_with_budget(&key, budget)?;
+        }
 
         Ok(PolicyCmdResult::DeleteRelationship { record_found })
     }
 
     fn ensure_object_unregistered(&self, policy_id: &str, obj: &Object) -> Result<()> {
+        self.ensure_object_unregistered_with_budget(policy_id, obj, None)
+    }
+
+    fn ensure_object_unregistered_with_budget(
+        &self,
+        policy_id: &str,
+        obj: &Object,
+        budget: Option<&CommandBudget>,
+    ) -> Result<()> {
         // Archiving preserves ownership; only unarchive may reactivate it.
         let owner_prefix = keys::relation_prefix(&obj.resource, &obj.id, "owner");
         let scan_prefix = keys::relationship_storage_prefix(policy_id, &owner_prefix);
-        if self.store.prefix_iter(&scan_prefix).next().is_some() {
+        if let Some(budget) = budget {
+            budget.permissions.records.read(&scan_prefix, None)?;
+        }
+        if let Some((key, value)) = self.store.prefix_iter(&scan_prefix).next() {
+            if let Some(budget) = budget {
+                budget.permissions.records.read(key, Some(value))?;
+            }
             return Err(AcpError::ObjectAlreadyRegistered {
                 resource: obj.resource.clone(),
                 object_id: obj.id.clone(),
@@ -1107,10 +1022,11 @@ impl AcpModule {
         creator: &Did,
         policy_id: &str,
         obj: Object,
+        budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
         self.validate_registration_object(policy_id, &obj)?;
 
-        self.ensure_object_unregistered(policy_id, &obj)?;
+        self.ensure_object_unregistered_with_budget(policy_id, &obj, Some(budget))?;
 
         let owner_rel = Relationship::with_entity(obj.resource, obj.id, "owner", creator.clone());
 
@@ -1122,6 +1038,7 @@ impl AcpModule {
         };
 
         let record = RelationshipRecord {
+            generations: self.relationship_pair(policy_id, &owner_rel, budget)?,
             supplied_metadata: Default::default(),
             policy_id: policy_id.to_string(),
             relationship: owner_rel,
@@ -1129,77 +1046,9 @@ impl AcpModule {
             metadata,
         };
 
-        self.set_relationship(&record);
+        self.set_relationship_with_budget(&record, budget)?;
 
         Ok(PolicyCmdResult::RegisterObject { record })
-    }
-
-    fn cmd_archive_object(
-        &mut self,
-        creator: &Did,
-        policy_id: &str,
-        obj: Object,
-    ) -> Result<PolicyCmdResult> {
-        if !self.zanzibar_policies.contains_key(policy_id) {
-            return Err(AcpError::PolicyNotFound {
-                id: policy_id.into(),
-            });
-        }
-        let mut owner_rec = self
-            .registration_owner_record(policy_id, &obj)?
-            .ok_or_else(|| AcpError::ObjectNotRegistered {
-                resource: obj.resource.clone(),
-                object_id: obj.id.clone(),
-            })?;
-        if owner_rec.archived {
-            return Ok(PolicyCmdResult::ArchiveObject {
-                found: true,
-                relationships_removed: 0,
-            });
-        }
-        if !self.check_management_authority(creator, policy_id, &obj, "owner")? {
-            return Err(AcpError::Unauthorized {
-                reason: format!(
-                    "{} is not the owner of '{}/{}'",
-                    creator, obj.resource, obj.id
-                ),
-            });
-        }
-        let prefix = keys::relationship_storage_prefix(
-            policy_id,
-            &keys::object_prefix(&obj.resource, &obj.id),
-        );
-        let mut keys = Vec::new();
-        for (key, value) in self.store.prefix_iter(&prefix) {
-            let record: RelationshipRecord = serde_json::from_slice(value).map_err(|error| {
-                AcpError::State(format!("invalid relationship record: {error}"))
-            })?;
-            if record.policy_id != policy_id
-                || keys::relationship_key(
-                    policy_id,
-                    &keys::relationship_storage_key(&record.relationship),
-                ) != key
-            {
-                return Err(AcpError::State(
-                    "relationship record does not match its key".into(),
-                ));
-            }
-            if record.relationship.resource == obj.resource
-                && record.relationship.object_id == obj.id
-            {
-                keys.push(key.to_vec());
-            }
-        }
-        let removed = keys.len() as u64;
-        for key in keys {
-            self.remove_relationship_key(&key);
-        }
-        owner_rec.archived = true;
-        self.set_relationship(&owner_rec);
-        Ok(PolicyCmdResult::ArchiveObject {
-            found: true,
-            relationships_removed: removed,
-        })
     }
 
     fn cmd_unarchive_object(
@@ -1207,6 +1056,7 @@ impl AcpModule {
         creator: &Did,
         policy_id: &str,
         obj: Object,
+        budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
         if !self.zanzibar_policies.contains_key(policy_id) {
             return Err(AcpError::PolicyNotFound {
@@ -1214,7 +1064,7 @@ impl AcpModule {
             });
         }
         let mut rec = self
-            .registration_owner_record(policy_id, &obj)?
+            .registration_owner_record_with_budget(policy_id, &obj, Some(budget))?
             .ok_or_else(|| AcpError::ObjectNotRegistered {
                 resource: obj.resource.clone(),
                 object_id: obj.id.clone(),
@@ -1232,7 +1082,7 @@ impl AcpModule {
         let was_archived = rec.archived;
         rec.archived = false;
 
-        self.set_relationship(&rec);
+        self.set_relationship_with_budget(&rec, budget)?;
 
         Ok(PolicyCmdResult::UnarchiveObject {
             record: rec,
@@ -1292,10 +1142,11 @@ impl AcpModule {
         policy_id: &str,
         commitment_id: u64,
         proof: RegistrationProof,
+        budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
         self.validate_registration_object(policy_id, &proof.object)?;
         let commitment = self
-            .get_commitment_by_id(commitment_id)?
+            .get_commitment_by_id_with_budget(commitment_id, Some(budget))?
             .ok_or(AcpError::CommitmentNotFound { id: commitment_id })?;
 
         if commitment.expired {
@@ -1316,8 +1167,10 @@ impl AcpModule {
             });
         }
 
-        let (already_registered, existing_owner) =
-            self.query_object_owner(policy_id, &proof.object)?;
+        let existing_owner = self
+            .registration_owner_record_with_budget(policy_id, &proof.object, Some(budget))?
+            .filter(|record| !record.archived);
+        let already_registered = existing_owner.is_some();
 
         let metadata = RecordMetadata {
             creation_ts: Timestamp::default(),
@@ -1327,7 +1180,7 @@ impl AcpModule {
         };
 
         if !already_registered {
-            self.ensure_object_unregistered(policy_id, &proof.object)?;
+            self.ensure_object_unregistered_with_budget(policy_id, &proof.object, Some(budget))?;
             // New registration — creator becomes owner.
             let owner_rel = Relationship::with_entity(
                 proof.object.resource.clone(),
@@ -1336,13 +1189,14 @@ impl AcpModule {
                 creator.clone(),
             );
             let record = RelationshipRecord {
+                generations: self.relationship_pair(policy_id, &owner_rel, budget)?,
                 supplied_metadata: Default::default(),
                 policy_id: policy_id.to_string(),
                 relationship: owner_rel,
                 archived: false,
                 metadata,
             };
-            self.set_relationship(&record);
+            self.set_relationship_with_budget(&record, budget)?;
 
             return Ok(PolicyCmdResult::RevealRegistration {
                 record,
@@ -1372,6 +1226,7 @@ impl AcpModule {
             creator.clone(),
         );
         let record = RelationshipRecord {
+            generations: self.relationship_pair(policy_id, &amended_rel, budget)?,
             supplied_metadata: Default::default(),
             policy_id: policy_id.to_string(),
             relationship: amended_rel,
@@ -1390,12 +1245,16 @@ impl AcpModule {
             metadata,
         };
 
-        self.create_amendment_event(&mut event)?;
-        self.delete_relationship(
-            policy_id,
-            &keys::relationship_storage_key(&existing.relationship),
-        );
-        self.set_relationship(&record);
+        self.create_amendment_event_with_budget(&mut event, Some(budget))?;
+        self.remove_relationship_key_with_budget(
+            &keys::relationship_generation_key(
+                policy_id,
+                existing.generations,
+                &keys::relationship_storage_key(&existing.relationship),
+            ),
+            budget,
+        )?;
+        self.set_relationship_with_budget(&record, budget)?;
 
         Ok(PolicyCmdResult::RevealRegistration {
             record,
@@ -1435,7 +1294,8 @@ impl AcpModule {
 
     // ── Permission evaluation ────────────────────────────────────────────
 
-    /// Pin one bounded module snapshot for every operation in the request.
+    /// Construct the unmetered evaluator used by registration conformance fixtures.
+    #[cfg(test)]
     fn permission_engine(
         &self,
         policy: &Policy,
@@ -1849,13 +1709,22 @@ resources:
             .unwrap();
         let relationship =
             Relationship::with_entity("document", "large", "reader", creator.clone());
-        module.store.put(
-            &keys::relationship_key(
-                &policy.policy.id,
-                &keys::relationship_storage_key(&relationship),
-            ),
-            vec![b' '; read_capture::PERMISSION_READ_LIMITS.bytes + 1],
+        let generations = policy.relations.pair(&relationship).unwrap();
+        let key = keys::relationship_generation_key(
+            &policy.policy.id,
+            generations,
+            &keys::relationship_storage_key(&relationship),
         );
+        module
+            .set_relationship(&RelationshipRecord {
+                generations,
+                supplied_metadata: Default::default(),
+                policy_id: policy.policy.id.clone(),
+                relationship,
+                archived: false,
+                metadata: policy.metadata.clone(),
+            })
+            .unwrap();
         let mut request = AccessRequest {
             operations: vec![types::Operation {
                 object: Object {
@@ -1866,6 +1735,17 @@ resources:
             }],
             actor: Actor(creator.clone()),
         };
+        // No owner record can bypass the reader bucket. Establish that the
+        // indexed current-generation grant is reachable before corrupting it.
+        assert!(
+            module
+                .query_verify_access_request(&policy.policy.id, &request)
+                .unwrap()
+        );
+        module.store.put(
+            &key,
+            vec![b' '; read_capture::PERMISSION_READ_LIMITS.bytes + 1],
+        );
         let before = module.store.serialize();
         for result in [
             module

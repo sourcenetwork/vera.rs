@@ -190,9 +190,9 @@ fn leaf_preflight_rejects_malformed_heads_tails_and_parallel_lengths() {
 #[test]
 fn leaf_strings_share_the_batch_expansion_budget_across_nested_calls() {
     let input = aliased(
-        IAcp::verifyAccessRequestCall::SELECTOR,
-        3,
-        64,
+        IAcp::generateCommitmentCall::SELECTOR,
+        2,
+        128,
         &vec![b'x'; 32768],
     );
     batch::validate(&input).unwrap();
@@ -257,5 +257,95 @@ fn oversized_leaf_arrays_fail_before_standalone_or_nested_mutations() {
             ),
             Err(PrecompileError::OutOfGas)
         ));
+    }
+}
+
+fn edit_call(policy: Vec<u8>, token: Option<String>) -> Vec<u8> {
+    match token {
+        None => IAcp::editPolicyCall {
+            policyId: B256::ZERO,
+            policy: policy.into(),
+            marshalType: 1,
+        }
+        .abi_encode(),
+        Some(bearer_token) => IAcp::bearerEditPolicyCall {
+            bearerToken: bearer_token,
+            policyId: B256::ZERO,
+            policy: policy.into(),
+            marshalType: 1,
+        }
+        .abi_encode(),
+    }
+}
+
+#[test]
+fn edit_abi_preflight_enforces_existing_definition_and_token_byte_bounds() {
+    for token in [None, Some("x".repeat(16 * 1024))] {
+        let valid = edit_call(vec![b'x'; 64 * 1024], token.clone());
+        batch::validate(&valid).unwrap();
+        error(
+            &edit_call(vec![b'x'; 64 * 1024 + 1], token.clone()),
+            "policy definition exceeds 64 KiB",
+        );
+        error(
+            &batch(vec![valid, edit_call(vec![b'x'; 64 * 1024 + 1], token)]),
+            "policy definition exceeds 64 KiB",
+        );
+    }
+    error(
+        &edit_call(vec![], Some("x".repeat(16 * 1024 + 1))),
+        "decoded bytes limit exceeded",
+    );
+}
+
+#[test]
+fn edit_abi_preflight_counts_aliased_token_lossy_utf8_before_owned_decode() {
+    let mut input = edit_call(vec![255], Some(String::new()));
+    let policy_offset = input[4 + 64..4 + 96].to_vec();
+    input[4..4 + 32].copy_from_slice(&policy_offset);
+    let owned = IAcp::bearerEditPolicyCall::abi_decode(&input).unwrap();
+    assert_eq!(owned.bearerToken, "\u{fffd}");
+    let decoded = owned.policy.len() + owned.bearerToken.len();
+    let mut remaining = decoded;
+    leaf::validate(&input, &mut remaining).unwrap();
+    assert_eq!(remaining, 0);
+    assert!(leaf::validate(&input, &mut (decoded - 1)).is_err());
+    let mut expanded = edit_call(vec![255; 6000], Some(String::new()));
+    let policy_offset = expanded[4 + 64..4 + 96].to_vec();
+    expanded[4..4 + 32].copy_from_slice(&policy_offset);
+    error(&expanded, "decoded bytes limit exceeded");
+}
+
+#[test]
+fn edit_abi_preflight_rejects_bad_offsets_and_lengths_without_allocating() {
+    for token in [None, Some(String::new())] {
+        let policy_head = if token.is_some() { 64 } else { 32 };
+        let valid = edit_call(vec![b'x'], token);
+        for offset in [4 + policy_head, valid.len() - 64] {
+            let mut malformed = valid.clone();
+            malformed[offset..offset + 32].fill(255);
+            assert!(batch::validate(&malformed).is_err());
+        }
+        assert!(batch::validate(&valid[..4 + policy_head + 31]).is_err());
+    }
+}
+
+#[test]
+fn permission_leaf_bytes_are_bounded_before_alias_or_utf8_expansion() {
+    for selector in [
+        IAcp::checkAccessCall::SELECTOR,
+        IAcp::verifyAccessRequestCall::SELECTOR,
+    ] {
+        for (byte, width) in [(b'x', 1), (0xff, 3)] {
+            let count = 64;
+            let length = ((64 << 10) - ACTOR.len()) / (3 * count * width);
+            let exact = aliased(selector, 3, count, &vec![byte; length]);
+            batch::validate(&exact).unwrap();
+            assert!(owned_strings(&exact).iter().map(String::len).sum::<usize>() <= 64 << 10);
+            let oversized = aliased(selector, 3, count, &vec![byte; length + 1]);
+            assert!(oversized.len() < 64 << 10);
+            error(&oversized, "decoded bytes limit exceeded");
+            error(&batch(vec![oversized]), "decoded bytes limit exceeded");
+        }
     }
 }

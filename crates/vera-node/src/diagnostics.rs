@@ -24,15 +24,16 @@ pub(crate) async fn run(
             Ok::<_, anyhow::Error>((
                 context.encode(),
                 history.memory_usage()?,
+                history.head_height(),
                 index.stats(),
                 proofs.stats(),
             ))
         })
         .await;
         match result {
-            Ok(Ok((metrics, memory, index, proofs))) => {
+            Ok(Ok((metrics, memory, durable_height, index, proofs))) => {
                 tracing::debug!(target: "vera_diagnostics", runtime_metrics = %metrics,
-                    history_memory_bytes = ?memory, index = ?index, proofs = ?proofs, "node resource snapshot");
+                    history_memory_bytes = ?memory, durable_height, index = ?index, proofs = ?proofs, "node resource snapshot");
             }
             Ok(Err(error)) => {
                 tracing::warn!(target: "vera_diagnostics", %error, "resource snapshot failed")

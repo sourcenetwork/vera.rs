@@ -68,7 +68,7 @@ jobs:
           done
       - name: Test reporting gates
         run: python3 -m unittest discover -s head/tools/performance -p 'test_*.py'
-      - name: Build and preserve both revisions before measuring
+      - name: Build both node revisions and the head workload driver before measuring
         shell: bash
         run: |
           set -euo pipefail
@@ -77,14 +77,23 @@ jobs:
             (
               cd "$side"
               export CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target/$side"
-              examples=(--example operation_baseline)
+              packages=(-p verad)
+              examples=()
+              if [[ "$side" == head ]]; then
+                examples+=(--example operation_baseline)
+              fi
               if [[ -f crates/vera-e2e/examples/component_baseline.rs ]]; then
                 examples+=(--example component_baseline)
               fi
-              cargo +1.98.0 build --frozen --release -p verad -p vera-e2e \
+              if (( ${#examples[@]} )); then
+                packages+=(-p vera-e2e)
+              fi
+              cargo +1.98.0 build --frozen --release "${packages[@]}" \
                 --bin verad "${examples[@]}"
               cp "$CARGO_TARGET_DIR/release/verad" "$GITHUB_WORKSPACE/binaries/$side/"
-              cp "$CARGO_TARGET_DIR/release/examples/operation_baseline" "$GITHUB_WORKSPACE/binaries/$side/"
+              if [[ "$side" == head ]]; then
+                cp "$CARGO_TARGET_DIR/release/examples/operation_baseline" "$GITHUB_WORKSPACE/binaries/$side/"
+              fi
               if [[ -f crates/vera-e2e/examples/component_baseline.rs ]]; then
                 cp "$CARGO_TARGET_DIR/release/examples/component_baseline" "$GITHUB_WORKSPACE/binaries/$side/"
               fi

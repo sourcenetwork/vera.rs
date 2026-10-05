@@ -4,7 +4,10 @@ use vera_domain::{ConsensusPublicKey, LIGHT_BLOCK_RESPONSE_BYTES, LightBlock, ve
 
 use crate::{
     ModuleId, PERMISSION_LIMITS, PermissionError, PrefixProof, RECORD_PROOF_BYTES, RecordProof,
-    current::PrefixEvidence, encoded_size, policy::verify_policy, validate_policy_prefix,
+    current::PrefixEvidence,
+    encoded_size,
+    policy::{current_relationship, verify_policy},
+    validate_policy_prefix,
 };
 
 /// Policy liveness and complete relationship evidence at one native root.
@@ -18,7 +21,8 @@ pub struct PolicyPrefixProof {
 }
 
 impl PolicyPrefixProof {
-    /// Verify both proofs and expose relationships only for a live policy.
+    /// Verify both proofs and expose a complete prefix only when every row is current.
+    /// Retired generations require paged enumeration or the generic physical-prefix API.
     pub fn verify(
         &self,
         root: B256,
@@ -34,7 +38,7 @@ impl PolicyPrefixProof {
                 "policy and relationships have different roots",
             ));
         }
-        let live = verify_policy(&self.policy, root, policy, maximum_bytes)?;
+        let policy_record = verify_policy(&self.policy, root, policy, maximum_bytes)?;
         let evidence = self
             .prefix
             .verify(root, ModuleId::Acp, prefix, maximum_bytes)?;
@@ -54,7 +58,17 @@ impl PolicyPrefixProof {
                 .and_then(|n| n.checked_sub(entry.value.len()))
                 .ok_or(PermissionError::Limit)?;
         }
-        Ok(live.then_some(evidence))
+        let Some(policy_record) = policy_record else {
+            return Ok(None);
+        };
+        for entry in &evidence.entries {
+            if !current_relationship(&policy_record, &entry.key, &entry.value)? {
+                return Err(PermissionError::Invalid(
+                    "relationship generation is inactive",
+                ));
+            }
+        }
+        Ok(Some(evidence))
     }
 }
 

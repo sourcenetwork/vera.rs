@@ -85,57 +85,15 @@ impl RpcPoller {
 
             let mut snaps = snapshots.write();
             let snap = &mut snaps[node_index];
-            let prev_view = snap.current_view;
-            let prev_finalized = snap.finalized_count;
-            let prev_peers = snap.peer_count;
-            let prev_leader = snap.is_leader;
             let prev_height = snap.latest_block_height;
 
-            if let Some(ref s) = status {
-                snap.chain_id = s.chain_id;
-                snap.validator_index = s.validator_index;
-                snap.validator_count = s.validator_count;
-                snap.uptime_secs = s.uptime_secs;
-                snap.current_view = s.current_view;
-                snap.finalized_count = s.finalized_count;
-                snap.proposed_count = s.proposed_count;
-                snap.nullified_count = s.nullified_count;
-                snap.peer_count = s.peer_count;
-                snap.is_leader = s.is_leader;
-                snap.backfilling = s.backfilling;
-                snap.is_healthy = true;
+            if let Some(status) = status {
+                Self::observe_status(snap, &status, &tx);
+            } else {
+                snap.is_healthy = false;
             }
-
             if let Some(height) = block_height {
                 snap.latest_block_height = height;
-            }
-
-            // Emit events for state changes.
-            if let Some(ref s) = status {
-                if s.current_view != prev_view {
-                    let _ = tx.send(RpcEvent::ViewAdvanced {
-                        node: node_index,
-                        view: s.current_view,
-                    });
-                }
-                if s.finalized_count != prev_finalized {
-                    let _ = tx.send(RpcEvent::Finalized {
-                        node: node_index,
-                        count: s.finalized_count,
-                    });
-                }
-                if s.peer_count != prev_peers {
-                    let _ = tx.send(RpcEvent::PeerCountChanged {
-                        node: node_index,
-                        peers: s.peer_count,
-                    });
-                }
-                if s.is_leader != prev_leader {
-                    let _ = tx.send(RpcEvent::LeaderChanged {
-                        node: node_index,
-                        is_leader: s.is_leader,
-                    });
-                }
             }
 
             if let Some(height) = block_height
@@ -146,11 +104,55 @@ impl RpcPoller {
                     height,
                 });
             }
-
-            if status.is_none() {
-                snaps[node_index].is_healthy = false;
-            }
         }
+    }
+
+    fn observe_status(
+        snap: &mut NodeSnapshot,
+        status: &NodeStatusResponse,
+        tx: &broadcast::Sender<RpcEvent>,
+    ) {
+        let node = snap.node_index;
+        if status.current_view != snap.current_view {
+            let _ = tx.send(RpcEvent::ViewAdvanced {
+                node,
+                view: status.current_view,
+            });
+        }
+        if status.finalized_count != snap.finalized_count {
+            let _ = tx.send(RpcEvent::Finalized {
+                node,
+                count: status.finalized_count,
+            });
+        }
+        if status.peer_count != snap.peer_count {
+            let _ = tx.send(RpcEvent::PeerCountChanged {
+                node,
+                peers: status.peer_count,
+            });
+        }
+        if status.is_leader != snap.is_leader {
+            let _ = tx.send(RpcEvent::LeaderChanged {
+                node,
+                is_leader: status.is_leader,
+            });
+        }
+        snap.chain_id = status.chain_id;
+        snap.validator_index = status.validator_index;
+        snap.validator_count = status.validator_count;
+        snap.uptime_secs = status.uptime_secs;
+        snap.current_view = status.current_view;
+        snap.finalized_height = status.finalized_height;
+        snap.finalized_epoch = status.finalized_epoch;
+        snap.finalized_view = status.finalized_view;
+        snap.snapshot_revision = status.snapshot_revision;
+        snap.finalized_count = status.finalized_count;
+        snap.proposed_count = status.proposed_count;
+        snap.nullified_count = status.nullified_count;
+        snap.peer_count = status.peer_count;
+        snap.is_leader = status.is_leader;
+        snap.backfilling = status.backfilling;
+        snap.is_healthy = true;
     }
 
     async fn call_node_status(client: &reqwest::Client, url: &str) -> Option<NodeStatusResponse> {
@@ -199,12 +201,81 @@ struct NodeStatusResponse {
     #[serde(default)]
     validator_count: u32,
     uptime_secs: u64,
-    current_view: u64,
+    current_view: Option<u64>,
+    finalized_height: Option<u64>,
+    finalized_epoch: Option<u64>,
+    finalized_view: Option<u64>,
+    snapshot_revision: Option<u64>,
     finalized_count: u64,
     proposed_count: u64,
-    nullified_count: u64,
-    peer_count: u64,
-    is_leader: bool,
+    nullified_count: Option<u64>,
+    peer_count: Option<u64>,
+    is_leader: Option<bool>,
     #[serde(default)]
     backfilling: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_telemetry_survives_polling_and_events() {
+        let mut value = serde_json::json!({
+            "chainId": 7, "validatorIndex": 0, "validatorCount": 4, "uptimeSecs": 1,
+            "currentView": null, "finalizedCount": 1, "proposedCount": 2,
+            "nullifiedCount": null, "peerCount": null, "isLeader": null,
+            "finalizedHeight": 8, "finalizedEpoch": 2, "finalizedView": 3,
+            "snapshotRevision": 7
+        });
+        let (tx, mut events) = broadcast::channel(8);
+        let mut snapshot = NodeSnapshot {
+            current_view: Some(10),
+            peer_count: Some(3),
+            is_leader: Some(true),
+            ..NodeSnapshot::default()
+        };
+        RpcPoller::observe_status(
+            &mut snapshot,
+            &serde_json::from_value(value.clone()).unwrap(),
+            &tx,
+        );
+        assert!(snapshot.is_healthy);
+        assert_eq!(snapshot.current_view, None);
+        assert_eq!(snapshot.nullified_count, None);
+        assert_eq!(snapshot.peer_count, None);
+        assert_eq!(snapshot.is_leader, None);
+        assert_eq!(snapshot.finalized_height, Some(8));
+        assert_eq!(
+            snapshot.finalized_epoch.zip(snapshot.finalized_view),
+            Some((2, 3))
+        );
+        assert_eq!(snapshot.snapshot_revision, Some(7));
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            RpcEvent::ViewAdvanced { view: None, .. }
+        ));
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            RpcEvent::Finalized { count: 1, .. }
+        ));
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            RpcEvent::PeerCountChanged { peers: None, .. }
+        ));
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            RpcEvent::LeaderChanged {
+                is_leader: None,
+                ..
+            }
+        ));
+        value["currentView"] = serde_json::json!(0);
+        value["peerCount"] = serde_json::json!(0);
+        value["isLeader"] = serde_json::json!(false);
+        RpcPoller::observe_status(&mut snapshot, &serde_json::from_value(value).unwrap(), &tx);
+        assert_eq!(snapshot.current_view, Some(0));
+        assert_eq!(snapshot.peer_count, Some(0));
+        assert_eq!(snapshot.is_leader, Some(false));
+    }
 }

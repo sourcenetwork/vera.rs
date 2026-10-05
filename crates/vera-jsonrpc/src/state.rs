@@ -11,7 +11,7 @@ use std::{
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
-/// Shared node state that can be updated by the consensus engine.
+/// Locally observed execution progress and RPC resource limits.
 #[derive(Debug, Clone)]
 pub struct NodeState {
     inner: Arc<NodeStateInner>,
@@ -23,18 +23,22 @@ struct NodeStateInner {
     validator_index: u32,
     validator_count: u32,
     started_at: Instant,
-    current_view: AtomicU64,
+    finalized: RwLock<Option<FinalizedProgress>>,
     finalized_count: AtomicU64,
     proposed_count: AtomicU64,
-    nullified_count: AtomicU64,
-    peer_count: AtomicU64,
-    is_leader: RwLock<bool>,
     backfilling: AtomicBool,
     snapshot_revision: AtomicU64,
     proof_requests: Arc<tokio::sync::Semaphore>,
     permission_reads: Arc<tokio::sync::Semaphore>,
     light_lookups: Arc<tokio::sync::Semaphore>,
     proof_progress: tokio::sync::watch::Sender<()>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct FinalizedProgress {
+    height: u64,
+    epoch: u64,
+    view: u64,
 }
 
 fn acquire(
@@ -50,21 +54,18 @@ fn acquire(
 }
 
 impl NodeState {
-    /// Create a new node state.
+    /// Create node state with the startup configuration, not a live membership roster.
     #[must_use]
     pub fn new(chain_id: u64, validator_index: u32, validator_count: u32) -> Self {
         Self {
             inner: Arc::new(NodeStateInner {
                 chain_id,
                 validator_index,
-                validator_count: validator_count.max(1),
+                validator_count,
                 started_at: Instant::now(),
-                current_view: AtomicU64::new(0),
+                finalized: RwLock::new(None),
                 finalized_count: AtomicU64::new(0),
                 proposed_count: AtomicU64::new(0),
-                nullified_count: AtomicU64::new(0),
-                peer_count: AtomicU64::new(0),
-                is_leader: RwLock::new(false),
                 backfilling: AtomicBool::new(false),
                 snapshot_revision: AtomicU64::new(0),
                 proof_requests: Arc::new(tokio::sync::Semaphore::new(8)),
@@ -104,39 +105,31 @@ impl NodeState {
         self.inner.proof_progress.subscribe()
     }
 
-    /// Update the current view.
-    pub fn set_view(&self, view: u64) {
-        self.inner.current_view.store(view, Ordering::Relaxed);
-        let is_leader = self.leader_index_for_view(view) == self.inner.validator_index;
-        *self.inner.is_leader.write() = is_leader;
+    /// Publish one finalized execution revision after its state and index are available.
+    /// Recovery may supply the durable head. Replayed or older heights cannot replace
+    /// it; the epoch and view are updated together and views may reset between epochs.
+    pub fn record_finalized(&self, height: u64, epoch: u64, view: u64) {
+        let mut finalized = self.inner.finalized.write();
+        if finalized.is_none_or(|previous| height > previous.height) {
+            *finalized = Some(FinalizedProgress {
+                height,
+                epoch,
+                view,
+            });
+        }
     }
 
-    /// Get the current consensus view.
-    pub fn current_view(&self) -> u64 {
-        self.inner.current_view.load(Ordering::Relaxed)
-    }
-
-    /// Get this validator's index.
+    /// This node's validator index in its startup configuration.
     pub fn validator_index(&self) -> u32 {
         self.inner.validator_index
     }
 
-    /// Get the total number of validators.
+    /// Validator count in the startup configuration, not the active epoch roster.
     pub fn validator_count(&self) -> u32 {
         self.inner.validator_count
     }
 
-    /// Compute the leader index for a given view (round-robin).
-    pub fn leader_index_for_view(&self, view: u64) -> u32 {
-        (view % u64::from(self.inner.validator_count)) as u32
-    }
-
-    /// Whether this node is the leader for the current view.
-    pub fn is_current_leader(&self) -> bool {
-        *self.inner.is_leader.read()
-    }
-
-    /// Increment finalized block count.
+    /// Count a finalized callback processed in this run; this is not a height.
     pub fn inc_finalized(&self) {
         self.inner.finalized_count.fetch_add(1, Ordering::Relaxed);
     }
@@ -144,21 +137,6 @@ impl NodeState {
     /// Increment proposed block count.
     pub fn inc_proposed(&self) {
         self.inner.proposed_count.fetch_add(1, Ordering::Relaxed);
-    }
-
-    /// Increment nullified round count.
-    pub fn inc_nullified(&self) {
-        self.inner.nullified_count.fetch_add(1, Ordering::Relaxed);
-    }
-
-    /// Update peer count.
-    pub fn set_peer_count(&self, count: u64) {
-        self.inner.peer_count.store(count, Ordering::Relaxed);
-    }
-
-    /// Current peer count.
-    pub fn peer_count(&self) -> u64 {
-        self.inner.peer_count.load(Ordering::Relaxed)
     }
 
     /// Set whether this node is backfilling historical blocks.
@@ -178,7 +156,7 @@ impl NodeState {
             .store(revision, Ordering::Relaxed);
     }
 
-    /// Get the finalized block count.
+    /// Finalized callbacks processed in this run, independent of recovered height.
     pub fn finalized_count(&self) -> u64 {
         self.inner.finalized_count.load(Ordering::Relaxed)
     }
@@ -186,17 +164,21 @@ impl NodeState {
     /// Get current node status.
     pub fn status(&self) -> NodeStatus {
         let snapshot_revision = self.inner.snapshot_revision.load(Ordering::Relaxed);
+        let finalized = *self.inner.finalized.read();
         NodeStatus {
             chain_id: self.inner.chain_id,
             validator_index: self.inner.validator_index,
             validator_count: self.inner.validator_count,
             uptime_secs: self.inner.started_at.elapsed().as_secs(),
-            current_view: self.inner.current_view.load(Ordering::Relaxed),
+            current_view: None,
+            finalized_height: finalized.map(|progress| progress.height),
+            finalized_epoch: finalized.map(|progress| progress.epoch),
+            finalized_view: finalized.map(|progress| progress.view),
             finalized_count: self.inner.finalized_count.load(Ordering::Relaxed),
             proposed_count: self.inner.proposed_count.load(Ordering::Relaxed),
-            nullified_count: self.inner.nullified_count.load(Ordering::Relaxed),
-            peer_count: self.inner.peer_count.load(Ordering::Relaxed),
-            is_leader: *self.inner.is_leader.read(),
+            nullified_count: None,
+            peer_count: None,
+            is_leader: None,
             backfilling: self.inner.backfilling.load(Ordering::Relaxed),
             snapshot_revision: (snapshot_revision > 0).then_some(snapshot_revision),
         }
@@ -209,24 +191,30 @@ impl NodeState {
 pub struct NodeStatus {
     /// Chain ID.
     pub chain_id: u64,
-    /// This validator's index (0-3).
+    /// This node's validator index in its startup configuration.
     pub validator_index: u32,
-    /// Total number of validators.
+    /// Startup validator count; membership changes do not update this field.
     pub validator_count: u32,
     /// Seconds since node started.
     pub uptime_secs: u64,
-    /// Current consensus view number.
-    pub current_view: u64,
-    /// Number of finalized blocks.
+    /// Entered consensus view, or null when live consensus telemetry is unavailable.
+    pub current_view: Option<u64>,
+    /// Latest published finalized execution height, including restored durable history.
+    pub finalized_height: Option<u64>,
+    /// Epoch of `finalized_height`; reported together with its view.
+    pub finalized_epoch: Option<u64>,
+    /// View of `finalized_height`, not the live consensus view.
+    pub finalized_view: Option<u64>,
+    /// Finalized callbacks processed in this run; this is not a height.
     pub finalized_count: u64,
-    /// Number of blocks proposed by this node.
+    /// Number of blocks proposed by this node in this run.
     pub proposed_count: u64,
-    /// Number of nullified rounds.
-    pub nullified_count: u64,
-    /// Number of connected peers.
-    pub peer_count: u64,
-    /// Whether this node is the current leader.
-    pub is_leader: bool,
+    /// Number of nullified rounds, or null when unobserved.
+    pub nullified_count: Option<u64>,
+    /// Authenticated connected peer count, or null when unobserved.
+    pub peer_count: Option<u64>,
+    /// Leadership in the entered consensus view, or null when unobserved.
+    pub is_leader: Option<bool>,
     /// Whether this node is backfilling historical blocks.
     pub backfilling: bool,
     /// Revision recovered through snapshot transfer, or its persisted recovery floor on restart.
@@ -239,137 +227,94 @@ mod tests {
     use super::*;
 
     #[test]
-    fn node_status_serde_roundtrip() {
-        let status = NodeStatus {
-            chain_id: 1337,
-            validator_index: 2,
-            validator_count: 4,
-            uptime_secs: 3600,
-            current_view: 100,
-            finalized_count: 50,
-            proposed_count: 10,
-            nullified_count: 5,
-            peer_count: 3,
-            is_leader: true,
-            backfilling: false,
-            snapshot_revision: None,
-        };
-
-        let json = serde_json::to_string(&status).unwrap();
-        let parsed: NodeStatus = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(status.chain_id, parsed.chain_id);
-        assert_eq!(status.validator_index, parsed.validator_index);
-        assert_eq!(status.validator_count, parsed.validator_count);
-        assert_eq!(status.uptime_secs, parsed.uptime_secs);
-        assert_eq!(status.current_view, parsed.current_view);
-        assert_eq!(status.finalized_count, parsed.finalized_count);
-        assert_eq!(status.proposed_count, parsed.proposed_count);
-        assert_eq!(status.nullified_count, parsed.nullified_count);
-        assert_eq!(status.peer_count, parsed.peer_count);
-        assert_eq!(status.is_leader, parsed.is_leader);
-        assert_eq!(status.backfilling, parsed.backfilling);
-    }
-
-    #[test]
-    fn snapshot_revision_is_optional_and_serialized() {
-        let state = NodeState::new(1, 0, 4);
-        let before = serde_json::to_value(state.status()).unwrap();
-        assert!(before.get("snapshotRevision").is_none());
-        assert!(
-            serde_json::from_value::<NodeStatus>(before)
-                .unwrap()
-                .snapshot_revision
-                .is_none()
-        );
-        state.set_snapshot_revision(42);
-        assert_eq!(
-            serde_json::to_value(state.status()).unwrap()["snapshotRevision"],
-            42
-        );
-    }
-
-    #[test]
-    fn node_status_json_uses_camel_case() {
-        let status = NodeStatus {
-            chain_id: 1,
-            validator_index: 0,
-            validator_count: 4,
-            uptime_secs: 0,
-            current_view: 0,
-            finalized_count: 0,
-            proposed_count: 0,
-            nullified_count: 0,
-            peer_count: 0,
-            is_leader: false,
-            backfilling: false,
-            snapshot_revision: None,
-        };
-
-        let json = serde_json::to_string(&status).unwrap();
-        assert!(json.contains("chainId"));
-        assert!(json.contains("validatorIndex"));
-        assert!(json.contains("validatorCount"));
-        assert!(json.contains("uptimeSecs"));
-        assert!(json.contains("currentView"));
-        assert!(json.contains("finalizedCount"));
-        assert!(json.contains("proposedCount"));
-        assert!(json.contains("nullifiedCount"));
-        assert!(json.contains("peerCount"));
-        assert!(json.contains("isLeader"));
-        assert!(json.contains("backfilling"));
-    }
-
-    #[test]
-    fn node_state_new() {
+    fn node_status_unobserved_fields_are_null() {
         let state = NodeState::new(1337, 2, 4);
-        let status = state.status();
-        assert_eq!(status.chain_id, 1337);
-        assert_eq!(status.validator_index, 2);
-        assert!(!status.is_leader);
+        let json = serde_json::to_value(state.status()).unwrap();
+        for field in [
+            "currentView",
+            "isLeader",
+            "nullifiedCount",
+            "peerCount",
+            "finalizedHeight",
+            "finalizedEpoch",
+            "finalizedView",
+        ] {
+            assert_eq!(json.get(field), Some(&serde_json::Value::Null), "{field}");
+        }
+        assert_eq!(json["chainId"], 1337);
+        assert_eq!(json["validatorIndex"], 2);
+        assert_eq!(json["validatorCount"], 4);
+        assert_eq!(json["finalizedCount"], 0);
+        assert!(json.get("snapshotRevision").is_none());
+        let parsed: NodeStatus = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), json);
     }
 
     #[test]
-    fn node_state_set_view() {
+    fn finalized_progress_survives_replay_and_epoch_view_reset() {
         let state = NodeState::new(1, 0, 4);
-        state.set_view(4);
+        state.record_finalized(50, 2, 900);
+        state.record_finalized(49, 9, 999);
+        state.record_finalized(50, 9, 999);
         let status = state.status();
-        assert_eq!(status.current_view, 4);
-        assert!(status.is_leader);
-    }
-
-    #[test]
-    fn node_state_leader_schedule() {
-        let state = NodeState::new(1, 2, 5);
-        assert_eq!(state.leader_index_for_view(0), 0);
-        assert_eq!(state.leader_index_for_view(2), 2);
-        assert_eq!(state.leader_index_for_view(5), 0);
-        assert_eq!(state.leader_index_for_view(7), 2);
-
-        state.set_view(7);
-        assert!(state.is_current_leader());
-        state.set_view(8);
-        assert!(!state.is_current_leader());
-    }
-
-    #[test]
-    fn node_state_inc_counters() {
-        let state = NodeState::new(1, 0, 4);
-        state.inc_finalized();
+        assert_eq!(
+            (
+                status.finalized_height,
+                status.finalized_epoch,
+                status.finalized_view
+            ),
+            (Some(50), Some(2), Some(900))
+        );
+        state.record_finalized(51, 3, 1);
         state.inc_finalized();
         state.inc_proposed();
-        state.inc_nullified();
-
         let status = state.status();
-        assert_eq!(status.finalized_count, 2);
+        assert_eq!(
+            (
+                status.finalized_height,
+                status.finalized_epoch,
+                status.finalized_view
+            ),
+            (Some(51), Some(3), Some(1))
+        );
+        assert_eq!(status.finalized_count, 1);
         assert_eq!(status.proposed_count, 1);
-        assert_eq!(status.nullified_count, 1);
+        assert!(status.current_view.is_none());
+        assert!(status.is_leader.is_none());
     }
 
     #[test]
-    fn node_state_set_peer_count() {
+    fn finalized_status_is_one_coherent_revision() {
         let state = NodeState::new(1, 0, 4);
-        state.set_peer_count(5);
-        assert_eq!(state.status().peer_count, 5);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                for height in 1..=2_000 {
+                    state.record_finalized(height, height / 10, height % 10);
+                }
+            });
+            for _ in 0..2_000 {
+                let status = state.status();
+                if let Some(height) = status.finalized_height {
+                    assert_eq!(status.finalized_epoch, Some(height / 10));
+                    assert_eq!(status.finalized_view, Some(height % 10));
+                } else {
+                    assert!(status.finalized_epoch.is_none());
+                    assert!(status.finalized_view.is_none());
+                }
+            }
+        });
+        assert_eq!(state.status().finalized_height, Some(2_000));
+    }
+
+    #[test]
+    fn snapshot_revision_is_independent_of_observed_finalization() {
+        let state = NodeState::new(1, 0, 4);
+        state.set_snapshot_revision(42);
+        let json = serde_json::to_value(state.status()).unwrap();
+        assert_eq!(json["snapshotRevision"], 42);
+        assert!(json["finalizedHeight"].is_null());
+        assert_eq!(json["finalizedCount"], 0);
+        let parsed: NodeStatus = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.snapshot_revision, Some(42));
     }
 }

@@ -1,4 +1,7 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 use crate::error::{Error, Result};
 
@@ -7,14 +10,32 @@ pub const MAX_EVALUATION_DEPTH: usize = 64;
 /// Maximum expression visits and relationship candidates per check or batch.
 pub const MAX_EVALUATION_STEPS: usize = 10_000;
 
+/// Optional caller-owned accounting shared across independently bounded checks.
+/// Errors stop evaluation and must never be interpreted as a denied permission.
+pub trait EvaluationMeter: std::fmt::Debug + Send + Sync {
+    /// Reserve one evaluation step before it executes.
+    fn charge_step(&self) -> Result<()>;
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct EvaluationBudget {
+    meter: Option<Arc<dyn EvaluationMeter>>,
     steps: AtomicUsize,
     depth: AtomicUsize,
 }
 
 impl EvaluationBudget {
+    pub(crate) fn new(meter: Option<Arc<dyn EvaluationMeter>>) -> Self {
+        Self {
+            meter,
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn charge(&self) -> Result<()> {
+        if let Some(meter) = &self.meter {
+            meter.charge_step()?;
+        }
         self.steps
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |steps| {
                 (steps < MAX_EVALUATION_STEPS).then_some(steps + 1)

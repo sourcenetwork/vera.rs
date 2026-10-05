@@ -96,15 +96,33 @@ impl AcpModule {
         policy: &str,
         object: &Object,
     ) -> Result<Option<RelationshipRecord>> {
+        self.registration_owner_record_with_budget(policy, object, None)
+    }
+
+    pub(super) fn registration_owner_record_with_budget(
+        &self,
+        policy: &str,
+        object: &Object,
+        budget: Option<&CommandBudget>,
+    ) -> Result<Option<RelationshipRecord>> {
         let prefix = keys::relationship_storage_prefix(
             policy,
             &keys::relation_prefix(&object.resource, &object.id, "owner"),
         );
+        if let Some(budget) = budget {
+            budget.permissions.records.read(&prefix, None)?;
+        }
         let mut entries = self.store.prefix_iter(&prefix);
         let Some((key, value)) = entries.next() else {
             return Ok(None);
         };
-        if entries.next().is_some() {
+        if let Some(budget) = budget {
+            budget.permissions.records.read(key, Some(value))?;
+        }
+        if let Some((key, value)) = entries.next() {
+            if let Some(budget) = budget {
+                budget.permissions.records.read(key, Some(value))?;
+            }
             return Err(AcpError::State("multiple object owner records".into()));
         }
         let record: RelationshipRecord = serde_json::from_slice(value)
@@ -112,7 +130,12 @@ impl AcpModule {
         let acp::Subject::Entity(actor) = &record.relationship.subject else {
             return Err(AcpError::State("object owner must be an actor".into()));
         };
-        if record.policy_id != policy
+        if record.generations
+            != (RelationPair {
+                target: 0,
+                subject: 0,
+            })
+            || record.policy_id != policy
             || record.relationship.resource != object.resource
             || record.relationship.object_id != object.id
             || record.relationship.relation != "owner"

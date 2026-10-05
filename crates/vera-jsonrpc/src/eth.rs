@@ -444,10 +444,15 @@ impl<S: StateProvider + 'static> EthApiServer for EthApiImpl<S> {
         if let Some(ref ns) = self.node_state
             && ns.is_backfilling()
         {
+            let status = ns.status();
+            let current = status.finalized_height.unwrap_or(0);
+            // No remote tip is observed here. Report only the known local height
+            // bound, which may include a recovered snapshot awaiting publication.
+            let highest = current.max(status.snapshot_revision.unwrap_or(0));
             Ok(SyncStatus::Syncing(SyncInfo {
                 starting_block: U64::ZERO,
-                current_block: U64::from(ns.finalized_count()),
-                highest_block: U64::from(ns.current_view()),
+                current_block: U64::from(current),
+                highest_block: U64::from(highest),
             }))
         } else {
             Ok(SyncStatus::NotSyncing(false))
@@ -463,39 +468,30 @@ impl<S: StateProvider + 'static> EthApiServer for EthApiImpl<S> {
 /// Net API implementation.
 pub struct NetApiImpl {
     chain_id: u64,
-    peer_count: Arc<std::sync::atomic::AtomicU64>,
+    peer_count: parking_lot::RwLock<Option<u64>>,
 }
 
 impl std::fmt::Debug for NetApiImpl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NetApiImpl")
             .field("chain_id", &self.chain_id)
-            .field(
-                "peer_count",
-                &self.peer_count.load(std::sync::atomic::Ordering::Relaxed),
-            )
+            .field("peer_count", &*self.peer_count.read())
             .finish()
     }
 }
 
 impl NetApiImpl {
     /// Create a new Net API implementation.
-    pub fn new(chain_id: u64) -> Self {
+    pub const fn new(chain_id: u64) -> Self {
         Self {
             chain_id,
-            peer_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            peer_count: parking_lot::RwLock::new(None),
         }
     }
 
-    /// Get a handle to update the peer count.
-    pub fn peer_count_handle(&self) -> Arc<std::sync::atomic::AtomicU64> {
-        self.peer_count.clone()
-    }
-
-    /// Update the peer count.
+    /// Publish an observed authenticated peer count, including an observed zero.
     pub fn set_peer_count(&self, count: u64) {
-        self.peer_count
-            .store(count, std::sync::atomic::Ordering::Relaxed);
+        *self.peer_count.write() = Some(count);
     }
 }
 
@@ -509,7 +505,13 @@ impl NetApiServer for NetApiImpl {
     }
 
     fn peer_count(&self) -> RpcResult<U64> {
-        let count = self.peer_count.load(std::sync::atomic::Ordering::Relaxed);
+        let count = self.peer_count.read().ok_or_else(|| {
+            jsonrpsee::types::ErrorObjectOwned::owned(
+                crate::error::codes::RESOURCE_UNAVAILABLE,
+                "authenticated peer count is unavailable",
+                None::<()>,
+            )
+        })?;
         Ok(U64::from(count))
     }
 }
@@ -561,12 +563,51 @@ mod tests {
         assert_eq!(version, "1337");
     }
 
+    #[test]
+    fn net_peer_count_distinguishes_unavailable_from_observed_zero() {
+        let api = NetApiImpl::new(1337);
+        let error = NetApiServer::peer_count(&api).unwrap_err();
+        assert_eq!(error.code(), crate::error::codes::RESOURCE_UNAVAILABLE);
+        assert_eq!(error.message(), "authenticated peer count is unavailable");
+        assert!(error.data().is_none());
+        for observed in [0, 3, 0] {
+            api.set_peer_count(observed);
+            assert_eq!(NetApiServer::peer_count(&api).unwrap(), U64::from(observed));
+        }
+    }
+
     #[tokio::test]
     async fn eth_block_number() {
         let api = EthApiImpl::new(1, NoopStateProvider);
         api.set_block_height(42);
         let block_number = EthApiServer::block_number(&api).await.unwrap();
         assert_eq!(block_number, U64::from(42));
+    }
+
+    #[tokio::test]
+    async fn eth_syncing_uses_observed_heights_not_views_or_process_counters() {
+        let state = NodeState::new(1, 0, 4);
+        state.record_finalized(500, 7, 9_000);
+        state.inc_finalized();
+        state.set_snapshot_revision(550);
+        state.set_backfilling(true);
+        let api = EthApiImpl::new(1, NoopStateProvider).with_node_state(state.clone());
+        let SyncStatus::Syncing(info) = EthApiServer::syncing(&api).await.unwrap() else {
+            panic!("backfilling must report synchronization");
+        };
+        assert_eq!(info.current_block, U64::from(500));
+        assert_eq!(info.highest_block, U64::from(550));
+        state.record_finalized(600, 8, 1);
+        let SyncStatus::Syncing(info) = EthApiServer::syncing(&api).await.unwrap() else {
+            panic!("backfilling must report synchronization");
+        };
+        assert_eq!(info.current_block, U64::from(600));
+        assert_eq!(info.highest_block, U64::from(600));
+        state.set_backfilling(false);
+        assert!(matches!(
+            EthApiServer::syncing(&api).await.unwrap(),
+            SyncStatus::NotSyncing(false)
+        ));
     }
 
     #[test]

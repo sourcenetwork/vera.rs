@@ -26,6 +26,7 @@ pub struct TestClusterBuilder {
     rpc_max_connections: std::num::NonZeroU32,
     jmt_seeder: Option<JmtSeeder>,
     binary: Option<PathBuf>,
+    rust_log: Option<String>,
 }
 
 impl fmt::Debug for TestClusterBuilder {
@@ -38,6 +39,7 @@ impl fmt::Debug for TestClusterBuilder {
             .field("chain_id", &self.chain_id)
             .field("has_jmt_seeder", &self.jmt_seeder.is_some())
             .field("binary", &self.binary)
+            .field("rust_log", &self.rust_log)
             .finish()
     }
 }
@@ -53,6 +55,7 @@ impl Default for TestClusterBuilder {
             rpc_max_connections: std::num::NonZeroU32::new(100).unwrap(),
             jmt_seeder: None,
             binary: None,
+            rust_log: None,
         }
     }
 }
@@ -111,6 +114,13 @@ impl TestClusterBuilder {
     #[must_use]
     pub fn binary(mut self, path: impl Into<PathBuf>) -> Self {
         self.binary = Some(path.into());
+        self
+    }
+
+    /// Set the node processes' log filter instead of inheriting `RUST_LOG`.
+    #[must_use]
+    pub fn rust_log(mut self, filter: impl Into<String>) -> Self {
+        self.rust_log = Some(filter.into());
         self
     }
 
@@ -195,7 +205,9 @@ impl TestClusterBuilder {
             }
             None => resolve_binary()?,
         };
-        let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+        let rust_log = self
+            .rust_log
+            .unwrap_or_else(|| std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()));
         let chain_id_str = chain_id.to_string();
         let peers_str = peers_path.to_str().unwrap().to_string();
 

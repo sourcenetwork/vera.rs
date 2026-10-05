@@ -1,10 +1,7 @@
-//! Finality-progress watchdog.
+//! Finality-progress watchdog gated by observed peer connectivity.
 //!
-//! A validator that stops finalizing while connected to peers is wedged, not
-//! idle: the known cause is falling behind epoch boundaries that peers have
-//! pruned, where following ceremonies forward can no longer make progress.
-//! The watchdog fails the process fast so supervision restarts it into the
-//! boot-time rejoin, which re-engages peer state sync from a current floor.
+//! Unknown connectivity leaves the watchdog unarmed. A stall is evidence of
+//! missing progress, not a diagnosis of its cause or a guarantee that restart helps.
 
 use std::time::Duration;
 
@@ -33,30 +30,63 @@ pub(crate) fn tripped(
 /// `has_durable_history` arms the watchdog for a restart even before this
 /// process observes its first finalization.
 pub(crate) async fn run(state: NodeState, budget: Duration, has_durable_history: bool) {
-    let mut last_count = state.finalized_count();
-    let mut last_progress = tokio::time::Instant::now();
-    let mut finalized_ever = has_durable_history || last_count > 0;
+    let mut progress = Progress::new(state.finalized_count(), has_durable_history);
     loop {
         tokio::time::sleep(Duration::from_secs(30)).await;
-        let count = state.finalized_count();
-        if count != last_count {
-            last_count = count;
-            last_progress = tokio::time::Instant::now();
-            finalized_ever = true;
-        }
-        if tripped(
-            finalized_ever,
-            last_progress.elapsed(),
-            state.peer_count() > 0,
+        let peers = state.status().peer_count;
+        if progress.observe(
+            state.finalized_count(),
+            peers,
+            tokio::time::Instant::now(),
             budget,
         ) {
             tracing::error!(
-                stalled_seconds = last_progress.elapsed().as_secs(),
-                peers = state.peer_count(),
+                stalled_seconds = progress.since.elapsed().as_secs(),
+                peers,
                 "finality stalled with peers connected; exiting for supervised rejoin"
             );
             std::process::exit(EXIT_CODE);
         }
+    }
+}
+
+struct Progress {
+    count: u64,
+    finalized_ever: bool,
+    connected: bool,
+    since: tokio::time::Instant,
+}
+
+impl Progress {
+    fn new(count: u64, has_durable_history: bool) -> Self {
+        Self {
+            count,
+            finalized_ever: has_durable_history || count > 0,
+            connected: false,
+            since: tokio::time::Instant::now(),
+        }
+    }
+
+    fn observe(
+        &mut self,
+        count: u64,
+        peers: Option<u64>,
+        now: tokio::time::Instant,
+        budget: Duration,
+    ) -> bool {
+        let connected = peers.is_some_and(|count| count > 0);
+        if count != self.count || !connected || !self.connected {
+            self.since = now;
+        }
+        self.count = count;
+        self.finalized_ever |= count > 0;
+        self.connected = connected;
+        tripped(
+            self.finalized_ever,
+            now.duration_since(self.since),
+            connected,
+            budget,
+        )
     }
 }
 
@@ -89,5 +119,37 @@ mod tests {
             true,
             Duration::from_secs(600),
         ));
+    }
+
+    #[test]
+    fn unknown_or_disconnected_time_does_not_count_after_reconnection() {
+        let budget = Duration::from_secs(600);
+        for unavailable in [None, Some(0)] {
+            let mut progress = Progress::new(0, true);
+            let start = tokio::time::Instant::now();
+            assert!(!progress.observe(0, Some(3), start, budget));
+            assert!(!progress.observe(0, unavailable, start + budget, budget));
+            let reconnected = start + budget * 2;
+            assert!(!progress.observe(0, Some(3), reconnected, budget));
+            assert!(!progress.observe(
+                0,
+                Some(3),
+                reconnected + budget - Duration::from_secs(1),
+                budget
+            ));
+            assert!(progress.observe(0, Some(3), reconnected + budget, budget));
+        }
+    }
+
+    #[test]
+    fn empty_history_stays_unarmed_and_new_finalization_resets_progress() {
+        let budget = Duration::from_secs(600);
+        let start = tokio::time::Instant::now();
+        let mut progress = Progress::new(0, false);
+        assert!(!progress.observe(0, Some(3), start, budget));
+        assert!(!progress.observe(0, Some(3), start + budget * 2, budget));
+        assert!(!progress.observe(1, Some(3), start + budget * 3, budget));
+        assert!(!progress.observe(2, Some(3), start + budget * 4, budget));
+        assert!(progress.observe(2, Some(3), start + budget * 5, budget));
     }
 }

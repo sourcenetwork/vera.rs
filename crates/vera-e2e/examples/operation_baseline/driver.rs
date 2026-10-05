@@ -59,6 +59,17 @@ pub(super) struct Observation {
 }
 
 impl Observation {
+    pub(super) fn measured_anchor(&self) -> Option<super::replica_barrier::Anchor> {
+        self.receipt
+            .as_ref()
+            .map(|receipt| super::replica_barrier::Anchor {
+                transaction_hash: self.request.hash,
+                block_hash: receipt.block_hash,
+                height: receipt.block_number,
+                status: receipt.status,
+            })
+    }
+
     pub(super) fn completed(&self) -> bool {
         self.outcome == "confirmed" && self.workflow_ms.is_some()
     }

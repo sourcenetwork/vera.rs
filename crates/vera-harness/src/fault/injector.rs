@@ -5,7 +5,7 @@ use std::time::Duration;
 use rand::seq::SliceRandom;
 
 use crate::cluster::runtime::TestCluster;
-use crate::observe::ClusterState;
+use crate::observe::{ClusterState, NodeSnapshot};
 
 /// Wraps a TestCluster + ClusterState for fault injection patterns.
 #[derive(Debug)]
@@ -20,20 +20,18 @@ impl<'a> FaultInjector<'a> {
         Self { cluster, state }
     }
 
-    /// Identify the current leader node via RPC snapshot.
+    /// Identify a uniquely observed healthy leader, if actual telemetry is available.
     pub fn find_leader(&self) -> Option<usize> {
-        self.state
-            .all_nodes()
-            .iter()
-            .find(|s| s.is_leader && s.is_healthy)
-            .map(|s| s.node_index)
+        observed_leader(&self.state.all_nodes())
     }
 
     /// Kill the current leader, return its index.
     pub fn kill_leader(&mut self) -> eyre::Result<usize> {
-        let leader = self
-            .find_leader()
-            .ok_or_else(|| eyre::eyre!("no leader found"))?;
+        let leader = self.find_leader().ok_or_else(|| {
+            eyre::eyre!(
+                "no uniquely observed healthy leader; live leader telemetry may be unavailable"
+            )
+        })?;
         self.cluster.kill_node(leader);
         Ok(leader)
     }
@@ -53,7 +51,9 @@ impl<'a> FaultInjector<'a> {
         Ok(())
     }
 
-    /// Kill n random non-leader nodes.
+    /// Kill n random nodes, excluding a uniquely observed leader when available.
+    ///
+    /// When leader telemetry is unavailable, selection cannot promise to spare it.
     pub fn kill_random(&mut self, n: usize) -> eyre::Result<Vec<usize>> {
         let leader = self.find_leader();
         let mut candidates: Vec<usize> = (0..self.cluster.node_count())
@@ -62,7 +62,7 @@ impl<'a> FaultInjector<'a> {
 
         if n > candidates.len() {
             return Err(eyre::eyre!(
-                "cannot kill {} non-leader nodes (only {} available)",
+                "cannot kill {} eligible random nodes (only {} available)",
                 n,
                 candidates.len()
             ));
@@ -207,5 +207,41 @@ impl<'a> FaultInjector<'a> {
         }
 
         Ok(())
+    }
+}
+
+fn observed_leader(snapshots: &[NodeSnapshot]) -> Option<usize> {
+    let mut leaders = snapshots
+        .iter()
+        .filter(|snapshot| snapshot.is_healthy && snapshot.is_leader == Some(true));
+    let leader = leaders.next()?.node_index;
+    leaders.next().is_none().then_some(leader)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn leader_selection_requires_unique_live_evidence() {
+        let mut snapshots = vec![NodeSnapshot {
+            is_healthy: true,
+            ..NodeSnapshot::default()
+        }];
+        assert_eq!(observed_leader(&snapshots), None);
+        snapshots[0].is_leader = Some(false);
+        assert_eq!(observed_leader(&snapshots), None);
+        snapshots[0].is_leader = Some(true);
+        assert_eq!(observed_leader(&snapshots), Some(0));
+        snapshots[0].is_healthy = false;
+        assert_eq!(observed_leader(&snapshots), None);
+        snapshots[0].is_healthy = true;
+        snapshots.push(NodeSnapshot {
+            node_index: 1,
+            is_healthy: true,
+            is_leader: Some(true),
+            ..NodeSnapshot::default()
+        });
+        assert_eq!(observed_leader(&snapshots), None);
     }
 }

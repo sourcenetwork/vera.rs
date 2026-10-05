@@ -70,8 +70,11 @@ pub(crate) struct CheckCache {
 }
 
 impl CheckCache {
-    pub(crate) fn new() -> Self {
-        Self::default()
+    pub(crate) fn new(meter: Option<std::sync::Arc<dyn super::EvaluationMeter>>) -> Self {
+        Self {
+            budget: super::limits::EvaluationBudget::new(meter),
+            ..Self::default()
+        }
     }
 
     pub(crate) async fn get(&self, key: &CheckKey) -> Option<bool> {

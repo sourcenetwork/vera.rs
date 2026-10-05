@@ -46,6 +46,22 @@ fn native(nonce: u64, calldata: Vec<u8>) -> (Bytes, String) {
     )
 }
 
+fn native_gas_used(tx: &Bytes) -> u64 {
+    let executor = VeraExecutor::new(9001);
+    let outcome = executor
+        .execute(
+            &MockStateDb::new(),
+            &context(NATIVE_LIMIT),
+            std::slice::from_ref(tx),
+        )
+        .unwrap();
+    assert_eq!(outcome.executed_tx_indices, Some(vec![0]));
+    assert_eq!(outcome.receipts.len(), 1);
+    assert!(outcome.receipts[0].success());
+    assert!(outcome.gas_used > 0 && outcome.gas_used < NATIVE_LIMIT);
+    outcome.gas_used
+}
+
 fn transfer(state: &MockStateDb, nonce: u64, gas_limit: u64) -> (Bytes, Address) {
     let signer = PrivateKeySigner::from_bytes(&B256::repeat_byte(0x42)).unwrap();
     state.insert_account(
@@ -137,6 +153,7 @@ fn native_limit_is_reserved_before_nonce_or_module_changes(
     let parent = executor.snapshot().unwrap();
     let before = module_state(&parent).serialize_stores();
     let (first, actor) = native(0, policy(true));
+    let creation_gas = native_gas_used(&first);
     let (second, _) = native(1, policy(true));
     let txs = [first, second];
     let state = MockStateDb::new();
@@ -156,7 +173,7 @@ fn native_limit_is_reserved_before_nonce_or_module_changes(
         module_state(&next).acp.query_policy_ids().unwrap().len(),
         accepted as usize
     );
-    assert_eq!(outcome.gas_used, accepted * 5000);
+    assert_eq!(outcome.gas_used, accepted * creation_gas);
     verify_selected(&executor, &state, &context, &txs, &outcome, &next);
     assert!(matches!(
         executor.execute(&state, &context.with_verification(), &txs),
@@ -261,9 +278,11 @@ fn evm_limit_must_fit_before_account_changes(#[case] declared: u64, #[case] acce
 fn native_and_evm_share_actual_usage_while_reserving_full_limits() {
     let executor = VeraExecutor::new(9001);
     let state = MockStateDb::new();
-    let (evm, sender) = transfer(&state, 0, 995_000);
-    let (deferred_evm, _) = transfer(&state, 1, 974_001);
     let (native_tx, actor) = native(0, policy(true));
+    let creation_gas = native_gas_used(&native_tx);
+    let remaining = NATIVE_LIMIT - creation_gas;
+    let (evm, sender) = transfer(&state, 0, remaining);
+    let (deferred_evm, _) = transfer(&state, 1, remaining - 21_000 + 1);
     let (deferred_native, _) = native(1, policy(true));
     let txs = [evm, native_tx, deferred_native, deferred_evm];
     let context = context(NATIVE_LIMIT);
@@ -271,14 +290,14 @@ fn native_and_evm_share_actual_usage_while_reserving_full_limits() {
         .execute_with_modules(&state, &context, &txs, executor.snapshot().unwrap())
         .unwrap();
     assert_eq!(outcome.executed_tx_indices, Some(vec![1, 0]));
-    assert_eq!(outcome.gas_used, 26_000);
+    assert_eq!(outcome.gas_used, creation_gas + 21_000);
     assert_eq!(
         outcome
             .receipts
             .iter()
             .map(|r| r.cumulative_gas_used())
             .collect::<Vec<_>>(),
-        [5000, 26_000]
+        [creation_gas, creation_gas + 21_000]
     );
     assert_eq!(module_state(&next).nonces.get_nonce(&actor).unwrap(), 1);
     assert_eq!(module_state(&next).acp.query_policy_ids().unwrap().len(), 1);

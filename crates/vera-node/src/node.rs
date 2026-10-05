@@ -516,9 +516,7 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
     if config.watchdog_stall_seconds > 0 {
         let stall = Duration::from_secs(config.watchdog_stall_seconds);
         let watchdog_state = node_state.clone();
-        // Existence of the history directory means this node finalized in a
-        // prior run; the store itself opens later and must not be opened twice.
-        let has_durable_history = config.data_dir.join("history").is_dir();
+        let has_durable_history = history.head_height() > 0;
         state_resolver_handles.push(context.child("watchdog").spawn(move |_| async move {
             crate::run_watchdog(watchdog_state, stall, has_durable_history).await;
         }));
@@ -639,6 +637,11 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
                     .await
                     .map_err(|e| e.to_string())?;
                 sync_status.set_snapshot_revision(anchor.height.get());
+                sync_status.record_finalized(
+                    selected.height,
+                    selected.context.round.epoch().get(),
+                    selected.context.round.view().get(),
+                );
                 Ok(())
             }),
             provider: mempool.clone(),
@@ -740,6 +743,11 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
                 &finalization_lookup,
             )
             .await?;
+        node_state.record_finalized(
+            recovered.height,
+            recovered.context.round.epoch().get(),
+            recovered.context.round.view().get(),
+        );
     }
     let reshare_handle = reshare_actor.start(dkg_network);
     let stateful_handle = stateful_actor.start();

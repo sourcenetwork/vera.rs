@@ -4,23 +4,37 @@ mod batch;
 mod batch_results;
 #[cfg(test)]
 mod batch_tests;
+#[cfg(test)]
+mod command_budget_tests;
+mod commands;
+mod creation;
+#[cfg(test)]
+mod creation_tests;
+#[cfg(test)]
+mod edit_budget_tests;
 mod leaf;
 #[cfg(test)]
 mod leaf_tests;
 mod lifecycle;
 #[cfg(test)]
 mod lifecycle_tests;
+#[cfg(test)]
+mod permission_budget_tests;
+mod permissions;
+mod queries;
+#[cfg(test)]
+mod query_budget_tests;
 
 use alloy_primitives::{B256, Bytes};
 use alloy_sol_types::SolCall;
 use identity::Did;
 use revm::precompile::{PrecompileError, PrecompileOutput};
-use vera_modules::acp::AcpModule;
 use vera_modules::acp::abi::IAcp;
 use vera_modules::acp::types::{
     AccessRequest, AcpParams, Actor, Object, Operation, PolicyCmd, PolicyMarshalingType,
     RelationshipSelector,
 };
+use vera_modules::acp::{AcpModule, PolicyEditBudget, QueryBudget};
 use vera_modules::types::{BlockExecCtx, TxExecCtx};
 use vera_modules::vera::VeraModule;
 
@@ -33,6 +47,23 @@ use super::{
 const READ_GAS: u64 = 1000;
 /// Base gas cost for writes.
 const WRITE_GAS: u64 = 5000;
+
+// Keep work charges on ordinary reverts; snapshots restore state, never spent gas.
+fn edit_gas(budget: &PolicyEditBudget) -> Result<u64, PrecompileError> {
+    if budget.is_exhausted() {
+        return Err(PrecompileError::OutOfGas);
+    }
+    WRITE_GAS
+        .checked_add(budget.consumed())
+        .ok_or(PrecompileError::OutOfGas)
+}
+
+fn edit_error(error: impl core::fmt::Display, budget: &PolicyEditBudget) -> DispatchReturn {
+    let gas_used = edit_gas(budget)?;
+    let mut result = err_dispatch(error);
+    result.precompile.gas_used = gas_used;
+    Ok(result)
+}
 
 fn did_from_actor(actor: &str) -> Result<Did, PrecompileError> {
     Did::new(actor).map_err(|e| PrecompileError::Other(format!("actor DID: {e}").into()))
@@ -230,6 +261,15 @@ fn dispatch_validated(
     }
     let selector: [u8; 4] = input[..4].try_into().expect("checked length above");
 
+    if creation::handles(selector) {
+        return creation::dispatch(module, vera, block_ctx, tx_ctx, input, gas_limit);
+    }
+    if commands::handles(selector) {
+        return commands::dispatch(module, vera, block_ctx, tx_ctx, input, gas_limit);
+    }
+    if queries::handles(selector) {
+        return queries::dispatch(module, input, gas_limit);
+    }
     if lifecycle::handles(selector) {
         return lifecycle::dispatch(module, block_ctx, tx_ctx, input, gas_limit);
     }
@@ -296,46 +336,16 @@ fn dispatch_validated(
             Ok(ok_dispatch(gas_used, ret, logs))
         }
 
-        IAcp::bearerCreatePolicyCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::bearerCreatePolicyCall::abi_decode(input).map_err(decode_error)?;
-            let policy = std::str::from_utf8(&call.policy)
-                .map_err(|_| PrecompileError::Other("invalid UTF-8 in policy".into()))?;
-            let record = match module.bearer_create_policy(
-                vera,
-                block_ctx,
-                tx_ctx,
-                &call.bearerToken,
-                policy,
-                marshal_type_from_u8(call.marshalType),
-            ) {
-                Ok(record) => record,
-                Err(error) => return Ok(err_dispatch(error)),
-            };
-            let event = IAcp::DelegatedPolicyCreated {
-                policyId: record.policy.id.parse().map_err(|_| {
-                    PrecompileError::Other("invalid created policy identifier".into())
-                })?,
-                creator: record.metadata.owner_did.clone(),
-            };
-            Ok(ok_dispatch(
-                WRITE_GAS,
-                IAcp::bearerCreatePolicyCall::abi_encode_returns(&json_bytes(&record)),
-                vec![event_log(ACP_ADDRESS, &event)],
-            ))
-        }
-
         IAcp::bearerEditPolicyCall::SELECTOR => {
             if gas_limit < WRITE_GAS {
                 return Err(PrecompileError::OutOfGas);
             }
+            let budget = PolicyEditBudget::new(gas_limit - WRITE_GAS);
             let call = IAcp::bearerEditPolicyCall::abi_decode(input).map_err(decode_error)?;
             let policy = std::str::from_utf8(&call.policy)
                 .map_err(|_| PrecompileError::Other("invalid UTF-8 in policy".into()))?;
             let policy_id = policy_id_to_string(&call.policyId);
-            let (removed, record) = match module.bearer_edit_policy(
+            let (removed, record) = match module.bearer_edit_policy_with_budget(
                 vera,
                 block_ctx,
                 tx_ctx,
@@ -343,9 +353,10 @@ fn dispatch_validated(
                 &policy_id,
                 policy,
                 marshal_type_from_u8(call.marshalType),
+                &budget,
             ) {
                 Ok(result) => result,
-                Err(error) => return Ok(err_dispatch(error)),
+                Err(error) => return edit_error(error, &budget),
             };
             let event = IAcp::PolicyEdited {
                 policyId: alloy_primitives::keccak256(policy_id.as_bytes()),
@@ -353,7 +364,7 @@ fn dispatch_validated(
                 relationshipsRemoved: alloy_primitives::U256::from(removed),
             };
             Ok(ok_dispatch(
-                WRITE_GAS,
+                edit_gas(&budget)?,
                 IAcp::bearerEditPolicyCall::abi_encode_returns(&IAcp::bearerEditPolicyReturn {
                     relationshipsRemoved: removed,
                     record: json_bytes(&record),
@@ -362,64 +373,28 @@ fn dispatch_validated(
             ))
         }
 
-        IAcp::createPolicyCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::createPolicyCall::abi_decode(input).map_err(decode_error)?;
-            let policy_str = String::from_utf8(call.policy.to_vec())
-                .map_err(|_| PrecompileError::Other("invalid UTF-8 in policy".into()))?;
-            let creator = did_from_signer(&tx_ctx.signer)?;
-            let marshal_type = marshal_type_from_u8(call.marshalType);
-
-            let record = match module.execute_create_policy(
-                &creator,
-                &vera_modules::acp::types::PolicyCreation {
-                    policy: policy_str,
-                    marshal_type,
-                    required_specification: None,
-                    metadata: Default::default(),
-                },
-                block_ctx,
-                tx_ctx,
-            ) {
-                Ok(r) => r,
-                Err(e) => return Ok(err_dispatch(e)),
-            };
-
-            let policy_id = record.policy.id.clone();
-            let event = IAcp::PolicyCreated {
-                policyId: alloy_primitives::keccak256(policy_id.as_bytes()),
-                creator: tx_ctx.signer.clone(),
-            };
-            let ret = IAcp::createPolicyCall::abi_encode_returns(&json_bytes(&record));
-            Ok(ok_dispatch(
-                WRITE_GAS,
-                ret,
-                vec![event_log(ACP_ADDRESS, &event)],
-            ))
-        }
-
         IAcp::editPolicyCall::SELECTOR => {
             if gas_limit < WRITE_GAS {
                 return Err(PrecompileError::OutOfGas);
             }
+            let budget = PolicyEditBudget::new(gas_limit - WRITE_GAS);
             let call = IAcp::editPolicyCall::abi_decode(input).map_err(decode_error)?;
             let creator = did_from_signer(&tx_ctx.signer)?;
             let policy_id = policy_id_to_string(&call.policyId);
-            let policy_str = String::from_utf8(call.policy.to_vec())
+            let policy_str = std::str::from_utf8(&call.policy)
                 .map_err(|_| PrecompileError::Other("invalid UTF-8 in policy".into()))?;
             let marshal_type = marshal_type_from_u8(call.marshalType);
 
-            let (relationships_removed, record) = match module.edit_policy_at(
+            let (relationships_removed, record) = match module.edit_policy_at_with_budget(
                 &creator,
                 &policy_id,
-                &policy_str,
+                policy_str,
                 marshal_type,
                 &block_ctx.timestamp,
+                &budget,
             ) {
                 Ok(r) => r,
-                Err(e) => return Ok(err_dispatch(e)),
+                Err(e) => return edit_error(e, &budget),
             };
 
             let event = IAcp::PolicyEdited {
@@ -432,531 +407,16 @@ fn dispatch_validated(
                 record: json_bytes(&record),
             });
             Ok(ok_dispatch(
-                WRITE_GAS,
+                edit_gas(&budget)?,
                 ret,
                 vec![event_log(ACP_ADDRESS, &event)],
             ))
         }
 
-        IAcp::setRelationshipCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::setRelationshipCall::abi_decode(input).map_err(decode_error)?;
-            let creator = did_from_signer(&tx_ctx.signer)?;
-            let policy_id = policy_id_to_string(&call.policyId);
-            let actor_did = did_from_actor(&call.actor)?;
-            let cmd = PolicyCmd::SetRelationship(acp::Relationship::new(
-                &call.resource,
-                &call.objectId,
-                &call.relation,
-                acp::Subject::entity(actor_did),
-            ));
-
-            let result =
-                match module.execute_policy_cmd(&creator, &policy_id, cmd, block_ctx, tx_ctx) {
-                    Ok(r) => r,
-                    Err(e) => return Ok(err_dispatch(e)),
-                };
-
-            let (record_existed, record) = match result {
-                vera_modules::acp::types::PolicyCmdResult::SetRelationship {
-                    record_existed,
-                    record,
-                } => (record_existed, record),
-                _ => return Err(PrecompileError::Other("unexpected result variant".into())),
-            };
-
-            let event = IAcp::RelationshipSet {
-                policyId: alloy_primitives::keccak256(policy_id.as_bytes()),
-                resource: call.resource.clone(),
-                objectId: call.objectId.clone(),
-                relation: call.relation.clone(),
-                actor: call.actor,
-            };
-            let ret = IAcp::setRelationshipCall::abi_encode_returns(&IAcp::setRelationshipReturn {
-                recordExisted: record_existed,
-                record: json_bytes(&record),
-            });
-            Ok(ok_dispatch(
-                WRITE_GAS,
-                ret,
-                vec![event_log(ACP_ADDRESS, &event)],
-            ))
-        }
-
-        IAcp::deleteRelationshipCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::deleteRelationshipCall::abi_decode(input).map_err(decode_error)?;
-            let creator = did_from_signer(&tx_ctx.signer)?;
-            let policy_id = policy_id_to_string(&call.policyId);
-            let actor_did = did_from_actor(&call.actor)?;
-            let cmd = PolicyCmd::DeleteRelationship(acp::Relationship::new(
-                &call.resource,
-                &call.objectId,
-                &call.relation,
-                acp::Subject::entity(actor_did),
-            ));
-
-            let result =
-                match module.execute_policy_cmd(&creator, &policy_id, cmd, block_ctx, tx_ctx) {
-                    Ok(r) => r,
-                    Err(e) => return Ok(err_dispatch(e)),
-                };
-
-            let record_found = match result {
-                vera_modules::acp::types::PolicyCmdResult::DeleteRelationship { record_found } => {
-                    record_found
-                }
-                _ => return Err(PrecompileError::Other("unexpected result variant".into())),
-            };
-
-            let event = IAcp::RelationshipDeleted {
-                policyId: alloy_primitives::keccak256(policy_id.as_bytes()),
-                resource: call.resource.clone(),
-                objectId: call.objectId.clone(),
-                relation: call.relation.clone(),
-                actor: call.actor,
-            };
-            let ret = IAcp::deleteRelationshipCall::abi_encode_returns(&record_found);
-            Ok(ok_dispatch(
-                WRITE_GAS,
-                ret,
-                vec![event_log(ACP_ADDRESS, &event)],
-            ))
-        }
-
-        IAcp::setRelationshipSubjectCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::setRelationshipSubjectCall::abi_decode(input).map_err(decode_error)?;
-            let creator = did_from_signer(&tx_ctx.signer)?;
-            let policy_id = policy_id_to_string(&call.policyId);
-            let subject = decode_subject(
-                call.subjectKind,
-                &call.subjectResource,
-                &call.subjectObjectId,
-                &call.subjectRelation,
-            )?;
-            let cmd = PolicyCmd::SetRelationship(acp::Relationship::new(
-                &call.resource,
-                &call.objectId,
-                &call.relation,
-                subject,
-            ));
-
-            let result =
-                match module.execute_policy_cmd(&creator, &policy_id, cmd, block_ctx, tx_ctx) {
-                    Ok(r) => r,
-                    Err(e) => return Ok(err_dispatch(e)),
-                };
-
-            let (record_existed, record) = match result {
-                vera_modules::acp::types::PolicyCmdResult::SetRelationship {
-                    record_existed,
-                    record,
-                } => (record_existed, record),
-                _ => return Err(PrecompileError::Other("unexpected result variant".into())),
-            };
-
-            let event = IAcp::RelationshipSubjectSet {
-                policyId: alloy_primitives::keccak256(policy_id.as_bytes()),
-                resource: call.resource,
-                objectId: call.objectId,
-                relation: call.relation,
-                subjectKind: call.subjectKind,
-                subjectResource: call.subjectResource,
-                subjectObjectId: call.subjectObjectId,
-                subjectRelation: call.subjectRelation,
-            };
-            let ret = IAcp::setRelationshipSubjectCall::abi_encode_returns(
-                &IAcp::setRelationshipSubjectReturn {
-                    recordExisted: record_existed,
-                    record: json_bytes(&record),
-                },
-            );
-            Ok(ok_dispatch(
-                WRITE_GAS,
-                ret,
-                vec![event_log(ACP_ADDRESS, &event)],
-            ))
-        }
-
-        IAcp::deleteRelationshipSubjectCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call =
-                IAcp::deleteRelationshipSubjectCall::abi_decode(input).map_err(decode_error)?;
-            let creator = did_from_signer(&tx_ctx.signer)?;
-            let policy_id = policy_id_to_string(&call.policyId);
-            let subject = decode_subject(
-                call.subjectKind,
-                &call.subjectResource,
-                &call.subjectObjectId,
-                &call.subjectRelation,
-            )?;
-            let cmd = PolicyCmd::DeleteRelationship(acp::Relationship::new(
-                &call.resource,
-                &call.objectId,
-                &call.relation,
-                subject,
-            ));
-
-            let result =
-                match module.execute_policy_cmd(&creator, &policy_id, cmd, block_ctx, tx_ctx) {
-                    Ok(r) => r,
-                    Err(e) => return Ok(err_dispatch(e)),
-                };
-
-            let record_found = match result {
-                vera_modules::acp::types::PolicyCmdResult::DeleteRelationship { record_found } => {
-                    record_found
-                }
-                _ => return Err(PrecompileError::Other("unexpected result variant".into())),
-            };
-
-            let event = IAcp::RelationshipSubjectDeleted {
-                policyId: alloy_primitives::keccak256(policy_id.as_bytes()),
-                resource: call.resource,
-                objectId: call.objectId,
-                relation: call.relation,
-                subjectKind: call.subjectKind,
-                subjectResource: call.subjectResource,
-                subjectObjectId: call.subjectObjectId,
-                subjectRelation: call.subjectRelation,
-            };
-            let ret = IAcp::deleteRelationshipSubjectCall::abi_encode_returns(&record_found);
-            Ok(ok_dispatch(
-                WRITE_GAS,
-                ret,
-                vec![event_log(ACP_ADDRESS, &event)],
-            ))
-        }
-
-        IAcp::registerObjectCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::registerObjectCall::abi_decode(input).map_err(decode_error)?;
-            let creator = did_from_signer(&tx_ctx.signer)?;
-            let policy_id = policy_id_to_string(&call.policyId);
-            let resource = call.resource.clone();
-            let object_id = call.objectId.clone();
-            let cmd = PolicyCmd::RegisterObject(Object {
-                resource: call.resource,
-                id: call.objectId,
-            });
-
-            let result =
-                match module.execute_policy_cmd(&creator, &policy_id, cmd, block_ctx, tx_ctx) {
-                    Ok(r) => r,
-                    Err(e) => return Ok(err_dispatch(e)),
-                };
-
-            let record = match result {
-                vera_modules::acp::types::PolicyCmdResult::RegisterObject { record } => record,
-                _ => return Err(PrecompileError::Other("unexpected result variant".into())),
-            };
-
-            let event = IAcp::ObjectRegistered {
-                policyId: alloy_primitives::keccak256(policy_id.as_bytes()),
-                resource,
-                objectId: object_id,
-                owner: tx_ctx.signer.clone(),
-            };
-            let ret = IAcp::registerObjectCall::abi_encode_returns(&json_bytes(&record));
-            Ok(ok_dispatch(
-                WRITE_GAS,
-                ret,
-                vec![event_log(ACP_ADDRESS, &event)],
-            ))
-        }
-
-        IAcp::archiveObjectCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::archiveObjectCall::abi_decode(input).map_err(decode_error)?;
-            let creator = did_from_signer(&tx_ctx.signer)?;
-            let policy_id = policy_id_to_string(&call.policyId);
-            let resource = call.resource.clone();
-            let object_id = call.objectId.clone();
-            let cmd = PolicyCmd::ArchiveObject(Object {
-                resource: call.resource,
-                id: call.objectId,
-            });
-
-            let result =
-                match module.execute_policy_cmd(&creator, &policy_id, cmd, block_ctx, tx_ctx) {
-                    Ok(r) => r,
-                    Err(e) => return Ok(err_dispatch(e)),
-                };
-
-            let (found, relationships_removed) = match result {
-                vera_modules::acp::types::PolicyCmdResult::ArchiveObject {
-                    found,
-                    relationships_removed,
-                } => (found, relationships_removed),
-                _ => return Err(PrecompileError::Other("unexpected result variant".into())),
-            };
-
-            let event = IAcp::ObjectUnregistered {
-                policyId: alloy_primitives::keccak256(policy_id.as_bytes()),
-                resource,
-                objectId: object_id,
-            };
-            let ret = IAcp::archiveObjectCall::abi_encode_returns(&IAcp::archiveObjectReturn {
-                found,
-                relationshipsRemoved: relationships_removed,
-            });
-            Ok(ok_dispatch(
-                WRITE_GAS,
-                ret,
-                vec![event_log(ACP_ADDRESS, &event)],
-            ))
-        }
-
-        IAcp::unarchiveObjectCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::unarchiveObjectCall::abi_decode(input).map_err(decode_error)?;
-            let creator = did_from_signer(&tx_ctx.signer)?;
-            let policy_id = policy_id_to_string(&call.policyId);
-            let cmd = PolicyCmd::UnarchiveObject(Object {
-                resource: call.resource,
-                id: call.objectId,
-            });
-
-            let result =
-                match module.execute_policy_cmd(&creator, &policy_id, cmd, block_ctx, tx_ctx) {
-                    Ok(r) => r,
-                    Err(e) => return Ok(err_dispatch(e)),
-                };
-
-            let (record, relationship_modified) = match result {
-                vera_modules::acp::types::PolicyCmdResult::UnarchiveObject {
-                    record,
-                    relationship_modified,
-                } => (record, relationship_modified),
-                _ => return Err(PrecompileError::Other("unexpected result variant".into())),
-            };
-
-            let ret = IAcp::unarchiveObjectCall::abi_encode_returns(&IAcp::unarchiveObjectReturn {
-                record: json_bytes(&record),
-                relationshipModified: relationship_modified,
-            });
-            Ok(ok_dispatch(WRITE_GAS, ret, vec![]))
-        }
-
-        IAcp::commitRegistrationsCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::commitRegistrationsCall::abi_decode(input).map_err(decode_error)?;
-            let creator = did_from_signer(&tx_ctx.signer)?;
-            let policy_id = policy_id_to_string(&call.policyId);
-            let cmd = PolicyCmd::CommitRegistrations {
-                commitment: call.commitment.to_vec(),
-            };
-
-            let result =
-                match module.execute_policy_cmd(&creator, &policy_id, cmd, block_ctx, tx_ctx) {
-                    Ok(r) => r,
-                    Err(e) => return Ok(err_dispatch(e)),
-                };
-
-            let commitment_id = match result {
-                vera_modules::acp::types::PolicyCmdResult::CommitRegistrations {
-                    registrations_commitment,
-                } => registrations_commitment.id,
-                _ => return Err(PrecompileError::Other("unexpected result variant".into())),
-            };
-
-            let ret = IAcp::commitRegistrationsCall::abi_encode_returns(&commitment_id);
-            let event = IAcp::RegistrationsCommitted {
-                commitmentId: commitment_id,
-                policyId: call.policyId,
-                commitment: alloy_primitives::B256::from_slice(&call.commitment),
-            };
-            Ok(ok_dispatch(
-                WRITE_GAS,
-                ret,
-                vec![event_log(ACP_ADDRESS, &event)],
-            ))
-        }
-
-        IAcp::revealRegistrationCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::revealRegistrationCall::abi_decode(input).map_err(decode_error)?;
-            let creator = did_from_signer(&tx_ctx.signer)?;
-            let proof: vera_modules::acp::types::RegistrationProof =
-                serde_json::from_slice(&call.proof).map_err(|e| {
-                    PrecompileError::Other(format!("proof JSON decode: {e}").into())
-                })?;
-            let cmd = PolicyCmd::RevealRegistration {
-                registrations_commitment_id: call.commitmentId,
-                proof,
-            };
-
-            let policy_id = match module.query_registrations_commitment(call.commitmentId) {
-                Ok(commitment) => commitment.policy_id,
-                Err(error) => return Ok(err_dispatch(error)),
-            };
-            let result =
-                match module.execute_policy_cmd(&creator, &policy_id, cmd, block_ctx, tx_ctx) {
-                    Ok(r) => r,
-                    Err(e) => return Ok(err_dispatch(e)),
-                };
-
-            let encoded = serde_json::to_vec(&result).unwrap_or_default();
-            let ret_bytes = Bytes::from(encoded);
-            let ret = IAcp::revealRegistrationCall::abi_encode_returns(&ret_bytes);
-            Ok(ok_dispatch(WRITE_GAS, ret, vec![]))
-        }
-
-        IAcp::flagHijackAttemptCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::flagHijackAttemptCall::abi_decode(input).map_err(decode_error)?;
-            let creator = did_from_signer(&tx_ctx.signer)?;
-            let cmd = PolicyCmd::FlagHijackAttempt {
-                event_id: call.eventId,
-            };
-
-            let policy_id = match module.get_amendment_event_by_id(call.eventId) {
-                Ok(Some(event)) => event.policy_id,
-                Ok(None) => {
-                    return Ok(err_dispatch(vera_modules::acp::error::AcpError::State(
-                        format!("amendment event {} not found", call.eventId),
-                    )));
-                }
-                Err(e) => return Ok(err_dispatch(e)),
-            };
-            let result =
-                match module.execute_policy_cmd(&creator, &policy_id, cmd, block_ctx, tx_ctx) {
-                    Ok(r) => r,
-                    Err(e) => return Ok(err_dispatch(e)),
-                };
-
-            let event = match result {
-                vera_modules::acp::types::PolicyCmdResult::FlagHijackAttempt { event } => event,
-                _ => return Err(PrecompileError::Other("unexpected result variant".into())),
-            };
-
-            let ret = IAcp::flagHijackAttemptCall::abi_encode_returns(&json_bytes(&event));
-            Ok(ok_dispatch(WRITE_GAS, ret, vec![]))
-        }
-
-        IAcp::bearerCheckAccessCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::bearerCheckAccessCall::abi_decode(input).map_err(decode_error)?;
-            if call.request.len() > 64 << 10 {
-                return Err(PrecompileError::Other(
-                    "access request exceeds byte limit".into(),
-                ));
-            }
-            let request: AccessRequest =
-                serde_json::from_slice(&call.request).map_err(|error| {
-                    PrecompileError::Other(format!("access request JSON decode: {error}").into())
-                })?;
-            let decision = match module.bearer_check_access(
-                vera,
-                block_ctx,
-                tx_ctx,
-                &call.bearerToken,
-                &policy_id_to_string(&call.policyId),
-                &request,
-            ) {
-                Ok(decision) => decision,
-                Err(error) => return Ok(err_dispatch(error)),
-            };
-            Ok(ok_dispatch(
-                WRITE_GAS,
-                IAcp::bearerCheckAccessCall::abi_encode_returns(&json_bytes(&decision)),
-                vec![],
-            ))
-        }
-
-        IAcp::checkAccessCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::checkAccessCall::abi_decode(input).map_err(decode_error)?;
-            let creator = did_from_signer(&tx_ctx.signer)?;
-            let policy_id = policy_id_to_string(&call.policyId);
-            let actor_did = did_from_actor(&call.actor)?;
-            let operations = build_operations(&call.resources, &call.objectIds, &call.permissions)?;
-            let access_request = AccessRequest {
-                operations,
-                actor: Actor(actor_did),
-            };
-
-            let decision =
-                match module.check_access(&creator, &policy_id, &access_request, block_ctx, tx_ctx)
-                {
-                    Ok(d) => d,
-                    Err(e) => return Ok(err_dispatch(e)),
-                };
-
-            let ret = IAcp::checkAccessCall::abi_encode_returns(&json_bytes(&decision));
-            Ok(ok_dispatch(WRITE_GAS, ret, vec![]))
-        }
-
-        IAcp::verifyAccessRequestCall::SELECTOR => {
-            if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::verifyAccessRequestCall::abi_decode(input).map_err(decode_error)?;
-            let policy_id = policy_id_to_string(&call.policyId);
-            let actor_did = did_from_actor(&call.actor)?;
-            let operations = build_operations(&call.resources, &call.objectIds, &call.permissions)?;
-            let access_request = AccessRequest {
-                operations,
-                actor: Actor(actor_did),
-            };
-
-            let allowed = match module.query_verify_access_request(&policy_id, &access_request) {
-                Ok(v) => v,
-                Err(e) => return Ok(err_dispatch(e)),
-            };
-
-            let ret = IAcp::verifyAccessRequestCall::abi_encode_returns(&allowed);
-            Ok(ok_dispatch(READ_GAS, ret, vec![]))
-        }
-
-        IAcp::bearerPolicyCmdCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::bearerPolicyCmdCall::abi_decode(input).map_err(decode_error)?;
-            let policy_id = policy_id_to_string(&call.policyId);
-            let cmd: PolicyCmd = serde_json::from_slice(&call.cmd)
-                .map_err(|e| PrecompileError::Other(format!("cmd JSON decode: {e}").into()))?;
-
-            let result = match module.bearer_policy_cmd(
-                vera,
-                block_ctx,
-                tx_ctx,
-                &call.bearerToken,
-                &policy_id,
-                cmd,
-            ) {
-                Ok(r) => r,
-                Err(e) => return Ok(err_dispatch(e)),
-            };
-
-            let ret = IAcp::bearerPolicyCmdCall::abi_encode_returns(&json_bytes(&result));
-            Ok(ok_dispatch(WRITE_GAS, ret, vec![]))
+        IAcp::bearerCheckAccessCall::SELECTOR
+        | IAcp::checkAccessCall::SELECTOR
+        | IAcp::verifyAccessRequestCall::SELECTOR => {
+            permissions::dispatch(module, vera, block_ctx, tx_ctx, input, gas_limit)
         }
 
         IAcp::updateParamsCall::SELECTOR => {
@@ -977,55 +437,6 @@ fn dispatch_validated(
         }
 
         // ── Read methods ─────────────────────────────────────────────
-        IAcp::hasRelationshipCall::SELECTOR => {
-            if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::hasRelationshipCall::abi_decode(input).map_err(decode_error)?;
-            let policy_id = policy_id_to_string(&call.policyId);
-            let actor_did = did_from_actor(&call.actor)?;
-
-            let selector = RelationshipSelector {
-                object_selector: Some(vera_modules::acp::types::ObjectSelector::Exact(Object {
-                    resource: call.resource,
-                    id: call.objectId,
-                })),
-                relation_selector: Some(vera_modules::acp::types::RelationSelector::Exact(
-                    call.relation,
-                )),
-                subject_selector: Some(vera_modules::acp::types::SubjectSelector::Exact(
-                    acp::Subject::entity(actor_did),
-                )),
-            };
-
-            let rels = match module.query_filter_relationships(&policy_id, &selector) {
-                Ok(r) => r,
-                Err(e) => return Ok(err_dispatch(e)),
-            };
-
-            // Phase 9: verify that query_filter_relationships excludes archived
-            // records. If it doesn't, add `.iter().any(|r| !r.archived)` here.
-            let has = !rels.is_empty();
-            let ret = IAcp::hasRelationshipCall::abi_encode_returns(&has);
-            Ok(ok_dispatch(READ_GAS, ret, vec![]))
-        }
-
-        IAcp::getPolicyCall::SELECTOR => {
-            if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::getPolicyCall::abi_decode(input).map_err(decode_error)?;
-            let policy_id = policy_id_to_string(&call.policyId);
-
-            let record = match module.query_policy(&policy_id) {
-                Ok(r) => r,
-                Err(e) => return Ok(err_dispatch(e)),
-            };
-
-            let ret = IAcp::getPolicyCall::abi_encode_returns(&json_bytes(&record));
-            Ok(ok_dispatch(READ_GAS, ret, vec![]))
-        }
-
         IAcp::getObjectOwnerCall::SELECTOR => {
             if gas_limit < READ_GAS {
                 return Err(PrecompileError::OutOfGas);
@@ -1046,43 +457,6 @@ fn dispatch_validated(
                 registered,
                 record: json_bytes(&record),
             });
-            Ok(ok_dispatch(READ_GAS, ret, vec![]))
-        }
-
-        IAcp::getPolicyIdsCall::SELECTOR => {
-            if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            // Zero-parameter function — no ABI decoding needed.
-            let ids = match module.query_policy_ids() {
-                Ok(r) => r,
-                Err(e) => return Ok(err_dispatch(e)),
-            };
-
-            let ret = IAcp::getPolicyIdsCall::abi_encode_returns(&ids);
-            Ok(ok_dispatch(READ_GAS, ret, vec![]))
-        }
-
-        IAcp::filterRelationshipsCall::SELECTOR => {
-            if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::filterRelationshipsCall::abi_decode(input).map_err(decode_error)?;
-            let policy_id = policy_id_to_string(&call.policyId);
-
-            let selector = build_relationship_selector(
-                &call.resource,
-                &call.objectId,
-                &call.relation,
-                &call.actor,
-            )?;
-
-            let rels = match module.query_filter_relationships(&policy_id, &selector) {
-                Ok(r) => r,
-                Err(e) => return Ok(err_dispatch(e)),
-            };
-
-            let ret = IAcp::filterRelationshipsCall::abi_encode_returns(&json_bytes(&rels));
             Ok(ok_dispatch(READ_GAS, ret, vec![]))
         }
 
@@ -1427,7 +801,8 @@ resources:
         }
         .abi_encode();
 
-        let err = dispatch(
+        let before = module.store().serialize();
+        let result = dispatch(
             &mut module,
             &mut VeraModule::new(),
             &block_ctx,
@@ -1435,13 +810,16 @@ resources:
             &calldata,
             1_000_000,
         )
-        .unwrap_err();
-        match err {
-            PrecompileError::Other(message) => {
-                assert!(message.contains("batch call 2"), "{message}");
-            }
-            other => panic!("expected wrapped batch error, got {other:?}"),
-        }
+        .unwrap();
+        assert!(result.precompile.reverted);
+        assert!(result.precompile.gas_used > READ_GAS + 2 * WRITE_GAS);
+        let message = std::str::from_utf8(&result.precompile.bytes).unwrap();
+        assert!(
+            message.starts_with("batch call 2 reverted: actor DID:"),
+            "{message}"
+        );
+        assert!(result.logs.is_empty());
+        assert_eq!(module.store().serialize(), before);
 
         let (registered, _) = module
             .query_object_owner(
