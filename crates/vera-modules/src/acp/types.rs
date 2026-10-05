@@ -5,6 +5,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use identity::Did;
 use serde::{Deserialize, Serialize};
 
+pub use super::relation_generations::{RelationGenerations, RelationPair};
 use crate::types::{Duration, Timestamp};
 
 /// Metadata attached to any stored record.
@@ -188,6 +189,8 @@ impl SuppliedMetadata {
 /// A stored policy with metadata.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PolicyRecord {
+    /// Current relation incarnations and the next unused identifier.
+    pub relations: RelationGenerations,
     #[serde(default, skip_serializing_if = "SuppliedMetadata::is_empty")]
     pub supplied_metadata: SuppliedMetadata,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -264,6 +267,8 @@ pub struct RelationshipSelector {
 /// A relationship associated with its policy.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RelationshipRecord {
+    /// Immutable incarnations of the relationship and referenced userset.
+    pub generations: RelationPair,
     #[serde(default, skip_serializing_if = "SuppliedMetadata::is_empty")]
     pub supplied_metadata: SuppliedMetadata,
     pub policy_id: String,

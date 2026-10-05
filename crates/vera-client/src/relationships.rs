@@ -9,7 +9,7 @@ use vera_permission::{
     VerifiedPrefixPage,
 };
 
-/// Consecutive relationships at one finalized revision, before any caller-side filtering.
+/// Current generation relationships from a physical page at one finalized revision.
 #[derive(Clone, Debug)]
 pub struct RelationshipPage {
     /// Finalized revision authenticating this page.
@@ -25,6 +25,8 @@ pub struct RelationshipPage {
 impl VeraClient {
     /// Enumerate live policy relationships, including archived records, in certified pages.
     /// An absent or retired policy has no current relationships or continuation.
+    /// A live policy can return an empty page with a continuation while retired
+    /// physical records await cleanup; callers must follow the continuation.
     pub async fn read_relationship_page(
         &self,
         policy: B256,
@@ -78,8 +80,9 @@ fn current_relationships(
 fn decode(policy: &str, key: &[u8], value: &[u8]) -> Result<RelationshipRecord, ClientError> {
     let record: RelationshipRecord = serde_json::from_slice(value)?;
     if record.policy_id != policy
-        || keys::relationship_key(
+        || keys::relationship_generation_key(
             policy,
+            record.generations,
             &keys::relationship_storage_key(&record.relationship),
         ) != key
     {
@@ -103,6 +106,21 @@ mod tests {
         let (records, continuation) = current_relationships(&"a".repeat(64), None).unwrap();
         assert!(records.is_empty());
         assert!(continuation.is_none());
+    }
+
+    #[test]
+    fn empty_current_page_preserves_the_authenticated_physical_continuation() {
+        let cursor = Bytes::from_static(b"next physical row");
+        let (records, continuation) = current_relationships(
+            &"a".repeat(64),
+            Some(VerifiedPrefixPage {
+                entries: vec![],
+                continuation: Some(cursor.clone()),
+            }),
+        )
+        .unwrap();
+        assert!(records.is_empty());
+        assert_eq!(continuation, Some(cursor));
     }
 
     #[test]

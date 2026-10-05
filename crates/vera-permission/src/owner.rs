@@ -1,5 +1,8 @@
 use vera_domain::ConsensusPublicKey;
-use vera_modules::acp::{keys, types::RelationshipRecord};
+use vera_modules::acp::{
+    keys,
+    types::{RelationPair, RelationshipRecord},
+};
 use zanzibar::{Relationship, Subject};
 
 use crate::{
@@ -62,6 +65,11 @@ fn owner<'a>(
             .map_err(|_| PermissionError::Invalid("owner record encoding"))?;
         let relation = &record.relationship;
         if record.policy_id != policy
+            || record.generations
+                != (RelationPair {
+                    target: 0,
+                    subject: 0,
+                })
             || relation.resource != object.resource
             || relation.object_id != object.id
             || relation.relation != "owner"

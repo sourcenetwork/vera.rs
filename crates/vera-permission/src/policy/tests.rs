@@ -35,6 +35,7 @@ fn policy_prefix_requires_canonical_identity_and_current_namespace() {
         keys::relationship_policy_prefix(&"cd".repeat(32)),
         keys::policy_key(&policy),
         format!("relationship/{policy}/").into_bytes(),
+        format!("relationship/v3/{policy}/").into_bytes(),
         prefix[..prefix.len() - 1].to_vec(),
     ] {
         assert!(validate_policy_prefix(&policy, &invalid).is_err());
@@ -138,4 +139,106 @@ fn policy_evidence_requires_both_proofs_and_rejects_unknown_fields() {
     let mut unknown = encoded;
     unknown["policy_exists"] = serde_json::json!(true);
     assert!(serde_json::from_value::<PolicyPrefixProof>(unknown).is_err());
+}
+
+const GENERATION_POLICY: &str = "\
+name: generations
+resources:
+  - name: file
+    relations:
+      - name: reader
+  - name: group
+    relations:
+      - name: member
+";
+
+fn generation_fixture() -> (
+    vera_modules::acp::AcpModule,
+    PolicyRecord,
+    RelationshipRecord,
+) {
+    use vera_modules::acp::{AcpModule, types::PolicyMarshalingType};
+    let mut module = AcpModule::new();
+    let policy = module
+        .create_policy(
+            &"did:key:owner".parse().unwrap(),
+            GENERATION_POLICY,
+            PolicyMarshalingType::ShortYaml,
+        )
+        .unwrap();
+    let relationship = zanzibar::Relationship::new(
+        "file",
+        "report",
+        "reader",
+        zanzibar::Subject::entity_set("group", "staff", "member"),
+    );
+    let record = RelationshipRecord {
+        generations: policy.relations.pair(&relationship).unwrap(),
+        supplied_metadata: Default::default(),
+        policy_id: policy.policy.id.clone(),
+        relationship,
+        archived: false,
+        metadata: policy.metadata.clone(),
+    };
+    (module, policy, record)
+}
+
+fn relationship_bytes(record: &RelationshipRecord) -> (Vec<u8>, Vec<u8>) {
+    (
+        keys::relationship_generation_key(
+            &record.policy_id,
+            record.generations,
+            &keys::relationship_storage_key(&record.relationship),
+        ),
+        serde_json::to_vec(record).unwrap(),
+    )
+}
+
+#[test]
+fn typed_relationships_reject_retired_source_and_userset_generations_after_readdition() {
+    use vera_modules::acp::types::PolicyMarshalingType;
+    for relation in ["reader", "member"] {
+        let (mut module, policy, mut record) = generation_fixture();
+        let (key, value) = relationship_bytes(&record);
+        assert!(current_relationship(&policy, &key, &value).unwrap());
+        let removed =
+            GENERATION_POLICY.replace(&format!("    relations:\n      - name: {relation}\n"), "");
+        let (_, retired) = module
+            .edit_policy(
+                &"did:key:owner".parse().unwrap(),
+                &policy.policy.id,
+                &removed,
+                PolicyMarshalingType::ShortYaml,
+            )
+            .unwrap();
+        assert!(!current_relationship(&retired, &key, &value).unwrap());
+        let (_, restored) = module
+            .edit_policy(
+                &"did:key:owner".parse().unwrap(),
+                &policy.policy.id,
+                GENERATION_POLICY,
+                PolicyMarshalingType::ShortYaml,
+            )
+            .unwrap();
+        assert!(!current_relationship(&restored, &key, &value).unwrap());
+        record.generations = restored.relations.pair(&record.relationship).unwrap();
+        let (fresh_key, fresh_value) = relationship_bytes(&record);
+        assert_ne!(fresh_key, key);
+        assert!(current_relationship(&restored, &fresh_key, &fresh_value).unwrap());
+    }
+}
+
+#[test]
+fn typed_relationships_bind_the_generation_stamp_and_require_it_in_encoded_rows() {
+    let (_, policy, record) = generation_fixture();
+    let (key, value) = relationship_bytes(&record);
+    assert!(current_relationship(&policy, b"another-key", &value).is_err());
+    let mut changed = record.clone();
+    changed.generations.target = record.generations.subject;
+    let (changed_key, changed_value) = relationship_bytes(&changed);
+    assert!(current_relationship(&policy, &key, &changed_value).is_err());
+    assert!(current_relationship(&policy, &changed_key, &changed_value).is_err());
+    let mut missing = serde_json::to_value(record).unwrap();
+    missing.as_object_mut().unwrap().remove("generations");
+    assert!(current_relationship(&policy, &key, &serde_json::to_vec(&missing).unwrap()).is_err());
 }

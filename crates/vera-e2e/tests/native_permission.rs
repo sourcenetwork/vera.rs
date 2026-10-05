@@ -1,5 +1,8 @@
 //! Native permission evidence across a running consensus group and later denial.
 
+#[path = "native_permission/policy_edits.rs"]
+mod policy_edits;
+
 use std::time::Duration;
 
 use alloy_sol_types::SolCall;
@@ -393,6 +396,9 @@ async fn permission_lifecycle(pipelined: bool) {
         }
     };
     tokio::join!(reads, writes);
+    if pipelined {
+        policy_edits::exercise(&mut cluster, &policy, &owner, &request, &trusted).await;
+    }
     let archived = submit(
         &client,
         &owner,

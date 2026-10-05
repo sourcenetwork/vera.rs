@@ -9,8 +9,6 @@ pub(super) const MAX_BYTES: usize = 4 << 20;
 pub(super) const MAX_WRITES: usize = 640;
 pub(super) const MAX_JOBS: usize = 8;
 pub(super) const JOB_ITEMS: usize = 16;
-// Queue/marker/counter reads, writes and three empty-prefix probes for a 64-byte ID.
-const JOB_METADATA_BYTES: usize = 1024;
 
 enum CleanupResult {
     Complete,
@@ -18,14 +16,24 @@ enum CleanupResult {
     BudgetExhausted { made_progress: bool },
 }
 
-struct Budget {
-    items: usize,
-    bytes: usize,
-    writes: usize,
+pub(super) struct Budget {
+    pub(super) items: usize,
+    pub(super) bytes: usize,
+    pub(super) writes: usize,
+    jobs: usize,
 }
 
 impl Budget {
-    const fn reserve(&mut self, items: usize, bytes: usize, writes: usize) -> bool {
+    pub(super) const fn new() -> Self {
+        Self {
+            items: MAX_ITEMS,
+            bytes: MAX_BYTES,
+            writes: MAX_WRITES,
+            jobs: MAX_JOBS,
+        }
+    }
+
+    pub(super) const fn reserve(&mut self, items: usize, bytes: usize, writes: usize) -> bool {
         if self.items < items || self.bytes < bytes || self.writes < writes {
             return false;
         }
@@ -34,9 +42,31 @@ impl Budget {
         self.writes -= writes;
         true
     }
+
+    pub(super) fn start_job(&mut self, bytes: usize, writes: usize) -> Result<bool> {
+        if bytes > MAX_BYTES || writes > MAX_WRITES {
+            return Err(AcpError::State(
+                "cleanup job exceeds the per-block budget".into(),
+            ));
+        }
+        if self.jobs == 0 || !self.reserve(0, bytes, writes) {
+            return Ok(false);
+        }
+        self.jobs -= 1;
+        Ok(true)
+    }
+
+    pub(super) fn changes(&mut self, changes: &[record_store::RecordChange]) -> Result<bool> {
+        let bytes = changes.iter().try_fold(0usize, |total, (key, value)| {
+            total
+                .checked_add(record_size(key, value.as_deref().unwrap_or_default())?)
+                .ok_or_else(|| AcpError::State("cleanup write size overflow".into()))
+        })?;
+        Ok(self.reserve(1, bytes, changes.len()))
+    }
 }
 
-fn record_size(key: &[u8], value: &[u8]) -> Result<usize> {
+pub(super) fn record_size(key: &[u8], value: &[u8]) -> Result<usize> {
     if key.len() > NATIVE_MAX_KEY_BYTES || value.len() > NATIVE_MAX_VALUE_BYTES {
         return Err(AcpError::State(
             "policy cleanup record exceeds native storage bounds".into(),
@@ -54,22 +84,25 @@ fn indexed_id(prefix: &[u8], key: &[u8], value: &[u8]) -> Result<u64> {
 }
 
 impl AcpModule {
-    pub(super) fn collect_retired_policies(&mut self) -> Result<()> {
+    pub(super) fn collect_retired_policies(&mut self, budget: &mut Budget) -> Result<()> {
         self.cleanup_counter()?;
-        let mut budget = Budget {
-            items: MAX_ITEMS,
-            bytes: MAX_BYTES,
-            writes: MAX_WRITES,
-        };
-        for _ in 0..MAX_JOBS {
+        loop {
             let Some((key, value)) = self.store.prefix_iter(QUEUE_PREFIX).next() else {
                 break;
             };
-            if !budget.reserve(0, JOB_METADATA_BYTES, 4) {
+            let policy = retirement::policy_id(value)?;
+            let marker_key = retired_key(policy);
+            let marker = self
+                .store
+                .get_ref(&marker_key)
+                .ok_or_else(|| AcpError::State("policy cleanup marker missing".into()))?;
+            // Marker read and possible rewrite, queue read/requeue, counter and phase probes.
+            let bytes = 2 * record_size(&marker_key, marker)? + 2 * record_size(key, value)? + 1024;
+            if !budget.start_job(bytes, 4)? {
                 break;
             }
             let (policy, mut retired) = self.cleanup_job(key, value)?;
-            match self.cleanup_quantum(&policy, &mut retired, &mut budget)? {
+            match self.cleanup_quantum(&policy, &mut retired, budget)? {
                 CleanupResult::Complete => {
                     self.store.delete(&queue_key(retired.sequence));
                     self.store.delete(&retired_key(&policy));
@@ -79,7 +112,6 @@ impl AcpModule {
                     if made_progress {
                         self.requeue_retirement(&policy, retired)?;
                     }
-                    // An unserved job keeps the front position for the next fresh budget.
                     break;
                 }
             }
@@ -108,20 +140,15 @@ impl AcpModule {
                         None => return Ok(CleanupResult::Complete),
                     }
                 };
-                let Some(deletions) =
-                    self.cleanup_item(policy, retired.phase, &prefix, key, value, budget)?
+                let Some(changes) =
+                    self.cleanup_item(policy, retired, &prefix, key, value, budget)?
                 else {
                     return Ok(CleanupResult::BudgetExhausted {
                         made_progress: removed > 0,
                     });
                 };
-                for key in deletions {
-                    if retired.phase == Phase::Relationships {
-                        self.remove_relationship_key(&key);
-                    } else {
-                        self.store.delete(&key);
-                    }
-                }
+                record_store::RecordStore::apply_records(&mut self.store, changes)
+                    .map_err(relation_state_error)?;
                 break;
             }
         }
@@ -131,33 +158,31 @@ impl AcpModule {
     fn cleanup_item(
         &self,
         policy: &str,
-        phase: Phase,
+        retired: &RetiredPolicy,
         prefix: &[u8],
         key: &[u8],
         value: &[u8],
         budget: &mut Budget,
-    ) -> Result<Option<Vec<Vec<u8>>>> {
-        if !budget.reserve(1, record_size(key, value)?, 0) {
+    ) -> Result<Option<Vec<record_store::RecordChange>>> {
+        let phase = retired.phase;
+        if phase == Phase::Relationships {
+            return self.prepare_cleanup_relationship(key, budget);
+        }
+        if !budget.reserve(0, record_size(key, value)?, 0) {
             return Ok(None);
         }
         let deletions = match phase {
-            Phase::Relationships => {
-                let record: RelationshipRecord =
-                    serde_json::from_slice(value).map_err(|error| {
-                        AcpError::State(format!("invalid cleanup relationship: {error}"))
-                    })?;
-                if record.policy_id != policy
-                    || keys::relationship_key(
-                        policy,
-                        &keys::relationship_storage_key(&record.relationship),
-                    ) != key
-                {
-                    return Err(AcpError::State(
-                        "cleanup relationship identity mismatch".into(),
-                    ));
-                }
-                vec![key.to_vec()]
-            }
+            Phase::Relationships => unreachable!(),
+            Phase::RelationshipsMetadata => match self.cleanup_relationship_metadata(
+                policy,
+                &retired.relations,
+                key,
+                value,
+                budget,
+            )? {
+                Some(deletions) => deletions,
+                None => return Ok(None),
+            },
             Phase::Commitments => {
                 let id = indexed_id(prefix, key, value)?;
                 let record_key = keys::commitment_key(id);
@@ -199,15 +224,42 @@ impl AcpModule {
                 vec![key.to_vec(), record_key]
             }
         };
-        let write_bytes = deletions.iter().try_fold(0usize, |bytes, key| {
-            bytes
-                .checked_add(record_size(key, &[])?)
-                .ok_or_else(|| AcpError::State("policy cleanup byte overflow".into()))
-        })?;
-        if !budget.reserve(0, write_bytes, deletions.len()) {
+        let changes: Vec<_> = deletions.into_iter().map(|key| (key, None)).collect();
+        if !budget.changes(&changes)? {
             return Ok(None);
         }
-        Ok(Some(deletions))
+        Ok(Some(changes))
+    }
+
+    pub(super) fn prepare_cleanup_relationship(
+        &self,
+        key: &[u8],
+        budget: &mut Budget,
+    ) -> Result<Option<Vec<record_store::RecordChange>>> {
+        let bytes = self
+            .store
+            .get_ref(key)
+            .ok_or_else(|| AcpError::State("cleanup relationship missing".into()))?;
+        record_size(key, bytes)?;
+        let capture = read_capture::ReadCapture::new(
+            self.store.clone(),
+            read_capture::ReadLimits {
+                reads: 16,
+                records: 16,
+                bytes: budget.bytes,
+            },
+        );
+        let prepared = relationship_mutations::prepare_removals(&capture, &[key.to_vec()]);
+        let Some(remaining) = capture.remaining_limits() else {
+            budget.bytes = 0;
+            return Ok(None);
+        };
+        budget.bytes = remaining.bytes;
+        let changes = prepared.map_err(relation_state_error)?;
+        if !budget.changes(&changes)? {
+            return Ok(None);
+        }
+        Ok(Some(changes))
     }
 
     pub(super) fn commitment_cleanup_keys(

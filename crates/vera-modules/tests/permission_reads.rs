@@ -1,24 +1,24 @@
 //! Permission read coverage, failure propagation and capture limits.
 
-use std::collections::BTreeMap;
+use futures::executor::block_on;
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, RwLock},
+};
 
 use identity::Did;
 use vera_modules::{
     acp::{
         AcpModule, keys,
         read_capture::{ReadCapture, ReadLimits, RecordRead},
-        record_store::RecordStore,
-        types::{
-            AccessRequest, Actor, Object, Operation, PolicyMarshalingType, PolicyRecord,
-            RecordMetadata, RelationshipRecord,
-        },
-        zanzibar_store::evaluate_access_request,
+        record_store::{RecordChange, RecordStore},
+        types::{AccessRequest, Actor, Object, Operation, PolicyRecord, RelationshipRecord},
+        zanzibar_store::{QmdbZanzibarStore, evaluate_access_request},
     },
     kv_store::{InMemoryKvStore, ModuleKvStore},
-    types::Timestamp,
 };
 use zanzibar::{
-    Policy, Relation, RelationExpression, Relationship, Resource, Subject,
+    Policy, Relation, RelationExpression, Relationship, Resource, Subject, ZanzibarStore,
     error::{Error, Result},
 };
 
@@ -30,13 +30,32 @@ const LIMITS: ReadLimits = ReadLimits {
     bytes: 1 << 20,
 };
 
-fn metadata() -> RecordMetadata {
-    RecordMetadata {
-        creation_ts: Timestamp::default(),
-        tx_hash: vec![],
-        tx_signer: String::new(),
-        owner_did: String::new(),
+#[derive(Clone, Default)]
+struct WritableFixture(Arc<RwLock<InMemoryKvStore>>);
+
+impl RecordStore for WritableFixture {
+    fn read_record(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
+        self.0.read().unwrap().read_record(key)
     }
+    fn scan_records(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        self.0.read().unwrap().scan_records(prefix)
+    }
+    fn write_record(&mut self, key: &[u8], value: Vec<u8>) -> Result<()> {
+        self.0.write().unwrap().write_record(key, value)
+    }
+    fn apply_records(&mut self, changes: Vec<RecordChange>) -> Result<()> {
+        self.0.write().unwrap().apply_records(changes)
+    }
+}
+
+fn relationship_key(store: &InMemoryKvStore, relationship: &Relationship) -> Vec<u8> {
+    let policy: PolicyRecord =
+        serde_json::from_slice(&store.get(&keys::policy_key(POLICY)).unwrap()).unwrap();
+    keys::relationship_generation_key(
+        POLICY,
+        policy.relations.pair(relationship).unwrap(),
+        &keys::relationship_storage_key(relationship),
+    )
 }
 
 fn fixture(subject: Subject, archived: bool) -> InMemoryKvStore {
@@ -46,9 +65,14 @@ fn fixture(subject: Subject, archived: bool) -> InMemoryKvStore {
         RelationExpression::computed_userset("blocked")
     };
     let policy = Policy::new(POLICY, "exclusion")
-        .with_resource(Resource::new("group").with_relation(Relation::direct("blocked")))
+        .with_resource(
+            Resource::new("group")
+                .with_relation(Relation::direct("owner"))
+                .with_relation(Relation::direct("blocked")),
+        )
         .with_resource(
             Resource::new("document")
+                .with_relation(Relation::direct("owner"))
                 .with_relation(Relation::direct("reader"))
                 .with_relation(Relation::direct("blocked"))
                 .with_relation(Relation::computed(
@@ -59,19 +83,9 @@ fn fixture(subject: Subject, archived: bool) -> InMemoryKvStore {
                     ),
                 )),
         );
-    let mut store = InMemoryKvStore::default();
-    store.put(
-        &keys::policy_key(POLICY),
-        serde_json::to_vec(&PolicyRecord {
-            supplied_metadata: Default::default(),
-            last_modified: None,
-            policy,
-            raw_policy: String::new(),
-            marshal_type: PolicyMarshalingType::ShortYaml,
-            metadata: metadata(),
-        })
-        .unwrap(),
-    );
+    let shared = WritableFixture::default();
+    let adapter = QmdbZanzibarStore::new(shared.clone());
+    block_on(adapter.store_policy(&policy)).unwrap();
     let alice = Did::new(ALICE).unwrap();
     for (relationship, archived) in [
         (
@@ -87,20 +101,19 @@ fn fixture(subject: Subject, archived: bool) -> InMemoryKvStore {
             false,
         ),
     ] {
-        let key = keys::relationship_key(POLICY, &keys::relationship_storage_key(&relationship));
-        store.put(
-            &key,
-            serde_json::to_vec(&RelationshipRecord {
-                supplied_metadata: Default::default(),
-                policy_id: POLICY.into(),
-                relationship,
-                archived,
-                metadata: metadata(),
-            })
-            .unwrap(),
-        );
+        block_on(adapter.store_relationship(POLICY, &relationship)).unwrap();
+        if archived {
+            // This fixture models an archived tuple directly. Its generation stamps and
+            // physical counts stay unchanged because the index includes archived rows.
+            let mut store = shared.0.write().unwrap();
+            let key = relationship_key(&store, &relationship);
+            let mut record: RelationshipRecord =
+                serde_json::from_slice(&store.get(&key).unwrap()).unwrap();
+            record.archived = true;
+            store.put(&key, serde_json::to_vec(&record).unwrap());
+        }
     }
-    store
+    shared.0.read().unwrap().clone()
 }
 
 fn request() -> AccessRequest {
@@ -208,7 +221,7 @@ fn replay_requires_every_read_used_by_exclusions() {
 
 #[test]
 fn capture_keeps_a_snapshot_and_rejects_mutation() {
-    let mut store = fixture(Subject::typed_wildcard("document"), false);
+    let store = fixture(Subject::typed_wildcard("document"), false);
     let mut capture = ReadCapture::new(store.clone(), LIMITS);
     let blocked = Relationship::new(
         "document",
@@ -216,14 +229,21 @@ fn capture_keeps_a_snapshot_and_rejects_mutation() {
         "blocked",
         Subject::typed_wildcard("document"),
     );
-    let key = keys::relationship_key(POLICY, &keys::relationship_storage_key(&blocked));
-    store.delete(&key);
-    assert!(evaluate_access_request(store, POLICY, &request()).unwrap());
+    let key = relationship_key(&store, &blocked);
+    let policy: PolicyRecord =
+        serde_json::from_slice(&store.get(&keys::policy_key(POLICY)).unwrap()).unwrap();
+    let pair = policy.relations.pair(&blocked).unwrap();
+    let shared = WritableFixture(Arc::new(RwLock::new(store)));
+    let adapter = QmdbZanzibarStore::new(shared.clone());
+    block_on(adapter.delete_relationship(POLICY, &blocked)).unwrap();
+    assert!(evaluate_access_request(shared.0.read().unwrap().clone(), POLICY, &request()).unwrap());
     assert!(capture.remove_record(&key).is_err());
     assert!(capture.write_record(&key, vec![]).is_err());
+    assert!(capture.apply_records(vec![(key.clone(), None)]).is_err());
     assert!(!evaluate_access_request(capture.clone(), POLICY, &request()).unwrap());
-    let prefix = keys::relationship_storage_prefix(
+    let prefix = keys::relationship_generation_prefix(
         POLICY,
+        pair,
         &keys::relation_prefix("document", "report", "blocked"),
     );
     assert!(

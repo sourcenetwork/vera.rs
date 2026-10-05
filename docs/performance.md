@@ -33,11 +33,19 @@ snapshot isolation, serialization restoration and absence of resurrected grants
 when a removed relation is reintroduced. These are module costs; they exclude
 consensus, durable storage and RPC/proof generation.
 
-Fixture version 2 retains the three existing component measurements and adds eight
-lifecycle measurements. Comparisons with version 1 show the new measurements
-without inventing a baseline; later version 2 comparisons report their deltas.
-Missing measurements or inconsistent fixtures fail the report. The workload does
-not establish a production mutation bound or change the fixed execution charge.
+Fixture version 3 retains the previous eleven measurements and adds
+`acp_policy_logical_edit_32` and `acp_policy_logical_edit_2048`. These hold the
+policy definition fixed and time removal of one relation with 32 or 2,048 target
+objects. Each object has an owner and one direct reader grant. Outside timing,
+the fixture checks the exact removed count, immediate access revocation,
+restoration and no resurrection after recreating the relation. Physical rows
+remain throughout these checks; `end_blocker` cleanup is excluded from the edit
+timing. The report includes the 2,048/32 cost ratio for each head pass.
+
+Comparisons still accept version 1 or 2 baselines and show new measurements
+without inventing a baseline. Matching measurements retain their comparisons;
+missing measurements or inconsistent fixtures fail the report. These component
+ratios do not measure service throughput or establish a production resource bound.
 
 ## Local pipelined load measurement
 
