@@ -59,10 +59,6 @@ async fn main() {
         .ok()
         .and_then(std::num::NonZeroU64::new)
         .expect("positive epoch length within u64");
-    assert!(
-        vera_domain::max_epoch_participants(epoch_length) >= 4,
-        "epoch is too short for four participants"
-    );
     let retention_height = u64::try_from(parse(7, 0)).expect("retention revision within u64");
     let update_objects = parse(8, 0);
     assert!(update_objects <= count && update_objects <= outstanding);
@@ -74,6 +70,12 @@ async fn main() {
     let pipelined = parse(10, 0);
     assert!(pipelined <= 1);
     let simplex = (pipelined == 1).then(vera_domain::SimplexParameters::default);
+    let term_length =
+        std::num::NonZeroU64::new(simplex.map_or(1, |parameters| parameters.term_length)).unwrap();
+    assert!(
+        vera_domain::max_epoch_participants(epoch_length, term_length) >= 4,
+        "epoch is too short for four participants with the configured leader term"
+    );
     let mut genesis = GenesisBuilder::devnet().blocks_per_epoch(epoch_length.get());
     if let Some(parameters) = simplex {
         genesis = genesis.simplex(parameters);

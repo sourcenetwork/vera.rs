@@ -50,7 +50,9 @@ async fn native_go_workflow(pipelined: bool) {
         .public();
     let genesis = GenesisBuilder::devnet().operators(administration_support::operators());
     let genesis = if pipelined {
-        genesis.simplex(vera_domain::SimplexParameters::default())
+        genesis
+            .blocks_per_epoch(192)
+            .simplex(vera_domain::SimplexParameters::default())
     } else {
         genesis
     };

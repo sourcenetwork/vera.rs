@@ -131,8 +131,13 @@ impl VeraExecutor {
 
     /// Select future consensus rosters at the configured epoch boundaries.
     #[must_use]
-    pub const fn with_membership_epochs(mut self, length: std::num::NonZeroU64) -> Self {
+    pub const fn with_membership_epochs(
+        mut self,
+        length: std::num::NonZeroU64,
+        term_length: std::num::NonZeroU64,
+    ) -> Self {
         self.config.membership_epoch_length = Some(length);
+        self.config.membership_term_length = term_length;
         self
     }
 

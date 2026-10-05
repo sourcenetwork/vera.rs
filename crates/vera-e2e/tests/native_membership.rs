@@ -16,7 +16,7 @@ use serde_json::json;
 use vera_client::{
     BlsSigner, VALIDATOR_REGISTRY_ADDRESS, VeraClient, administration::AdministrativeCommand,
 };
-use vera_domain::{ConsensusPublicKey, EpochMaterial, LightBlock, NativeTx};
+use vera_domain::{ConsensusPublicKey, EpochMaterial, LightBlock, NativeTx, SimplexParameters};
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, NodeConfigBuilder, TestCluster};
 use vera_modules::validator_registry::abi::IValidatorRegistry;
 
@@ -62,8 +62,9 @@ async fn membership(
     trusted: &ConsensusPublicKey,
     minimum: u64,
     members: usize,
+    epoch_deadline: Duration,
 ) -> LightBlock {
-    tokio::time::timeout(deadline(), async {
+    tokio::time::timeout(epoch_deadline, async {
         loop {
             if let Ok(height) = client.block_number().await
                 && height >= minimum
@@ -86,22 +87,41 @@ async fn membership(
 
 #[tokio::test]
 async fn native_member_joins_without_bootstrap_share_and_sustains_quorum() {
-    admit_member(false, false).await;
+    admit_member(false, false, false).await;
 }
 
 #[tokio::test]
 async fn interrupted_member_recovers_after_admission_without_a_share() {
-    admit_member(true, false).await;
+    admit_member(true, false, false).await;
 }
 
 #[cfg(feature = "fault-injection")]
 #[tokio::test]
 async fn native_member_recovers_after_share_persistence_crash() {
-    admit_member(false, true).await;
+    admit_member(false, true, false).await;
 }
 
-async fn admit_member(interrupt: bool, crash_share: bool) {
-    let deployment = if interrupt { 9080 } else { 9079 };
+#[tokio::test]
+async fn pipelined_member_joins_without_bootstrap_share_and_sustains_quorum() {
+    admit_member(false, false, true).await;
+}
+
+async fn admit_member(interrupt: bool, crash_share: bool, pipelined: bool) {
+    let deployment = if pipelined {
+        9083
+    } else if interrupt {
+        9080
+    } else {
+        9079
+    };
+    let blocks_per_epoch: u64 = if pipelined { 192 } else { 20 };
+    let epoch_deadline = deadline() * if pipelined { 4 } else { 1 };
+    let mut genesis = GenesisBuilder::devnet()
+        .operators(administration::operators())
+        .blocks_per_epoch(blocks_per_epoch);
+    if pipelined {
+        genesis = genesis.simplex(SimplexParameters::default());
+    }
     let keys = KeySet::builder().seed(deployment).build().unwrap();
     let trusted = *keys.epoch_info().output.public().public();
     let mut cluster = TestCluster::builder()
@@ -109,11 +129,7 @@ async fn admit_member(interrupt: bool, crash_share: bool) {
         .nodes(4)
         .seed(deployment)
         .chain_id(deployment)
-        .genesis(
-            GenesisBuilder::devnet()
-                .operators(administration::operators())
-                .blocks_per_epoch(20),
-        )
+        .genesis(genesis)
         .preset(ConsensusPreset::Normal)
         .build()
         .await
@@ -284,7 +300,7 @@ async fn admit_member(interrupt: bool, crash_share: bool) {
     )
     .await;
     if interrupt {
-        membership(&origin, &trusted, admitted + 1, 5).await;
+        membership(&origin, &trusted, admitted + 1, 5, epoch_deadline).await;
         assert!(!directory.join("secrets.json").exists());
     }
     if crash_share {
@@ -309,7 +325,7 @@ async fn admit_member(interrupt: bool, crash_share: bool) {
             .stderr(Stdio::from(log));
         incoming = command.spawn().unwrap();
     }
-    let active = membership(&joining, &trusted, admitted + 1, 5).await;
+    let active = membership(&joining, &trusted, admitted + 1, 5, epoch_deadline).await;
     let material = EpochMaterial::decode_bounded(
         &hex::decode(active.epoch_material.trim_start_matches("0x")).unwrap(),
     )
@@ -326,9 +342,13 @@ async fn admit_member(interrupt: bool, crash_share: bool) {
     assert!(secrets["shares"].get("0").is_none());
     assert!(!secrets["shares"].as_object().unwrap().is_empty());
 
-    let current = membership(&origin, &trusted, active.height, 5).await;
-    epoch_share::wait_for_epoch_share(&directory.join("secrets.json"), current.epoch, deadline())
-        .await;
+    let current = membership(&origin, &trusted, active.height, 5, epoch_deadline).await;
+    epoch_share::wait_for_epoch_share(
+        &directory.join("secrets.json"),
+        current.epoch,
+        epoch_deadline,
+    )
+    .await;
     cluster.kill_node(3);
     let changed = submit(
         &joining,
@@ -353,7 +373,7 @@ async fn admit_member(interrupt: bool, crash_share: bool) {
         .stdout(Stdio::from(log.try_clone().unwrap()))
         .stderr(Stdio::from(log));
     incoming = command.spawn().unwrap();
-    let resumed = membership(&joining, &trusted, changed + 1, 5).await;
+    let resumed = membership(&joining, &trusted, changed + 1, 5, epoch_deadline).await;
     assert!(resumed.height > changed);
 
     let removed_key = &keys.participants()[3];
@@ -369,7 +389,7 @@ async fn admit_member(interrupt: bool, crash_share: bool) {
         .abi_encode(),
     )
     .await;
-    let reduced = membership(&joining, &trusted, deactivated + 1, 4).await;
+    let reduced = membership(&joining, &trusted, deactivated + 1, 4, epoch_deadline).await;
     let material = EpochMaterial::decode_bounded(
         &hex::decode(reduced.epoch_material.trim_start_matches("0x")).unwrap(),
     )
@@ -383,9 +403,13 @@ async fn admit_member(interrupt: bool, crash_share: bool) {
         IValidatorRegistry::removeValidatorCall { evmAddr: removed }.abi_encode(),
     )
     .await;
-    let current = membership(&origin, &trusted, reduced.height, 4).await;
-    epoch_share::wait_for_epoch_share(&directory.join("secrets.json"), current.epoch, deadline())
-        .await;
+    let current = membership(&origin, &trusted, reduced.height, 4, epoch_deadline).await;
+    epoch_share::wait_for_epoch_share(
+        &directory.join("secrets.json"),
+        current.epoch,
+        epoch_deadline,
+    )
+    .await;
     cluster.kill_node(2);
     let final_write = submit(
         &joining,

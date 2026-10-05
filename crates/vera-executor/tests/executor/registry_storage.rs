@@ -625,7 +625,7 @@ fn epoch_rosters_capture_the_boundary_branch_and_survive_later_changes() {
     use std::num::NonZeroU64;
     let (registration, actor) = native_member_call(0, native_registration());
     let (state, executor) = authorized_actor(actor);
-    let executor = executor.with_membership_epochs(NonZeroU64::new(10).unwrap());
+    let executor = executor.with_membership_epochs(NonZeroU64::new(10).unwrap(), NonZeroU64::MIN);
     let parent = executor.snapshot().unwrap();
     let mut context = BlockContext::new(
         Header {
@@ -702,13 +702,18 @@ fn epoch_rosters_capture_the_boundary_branch_and_survive_later_changes() {
 }
 
 #[rstest]
-#[case(true, 4)]
-#[case(false, 4)]
-#[case(true, 20)]
-#[case(false, 20)]
+#[case(true, 4, 1, true)]
+#[case(false, 4, 1, true)]
+#[case(true, 20, 1, false)]
+#[case(false, 20, 1, false)]
+#[case(true, 20, 16, true)]
+#[case(false, 20, 16, true)]
+#[case(true, 192, 16, false)]
 fn membership_epoch_capacity_rejects_addition_and_both_reactivation_paths(
     #[case] native: bool,
     #[case] epoch_length: u64,
+    #[case] term_length: u64,
+    #[case] limited: bool,
 ) {
     let (state, executor) = if native {
         authorized_actor(native_member_call(0, native_registration()).1)
@@ -742,7 +747,6 @@ fn membership_epoch_capacity_rejects_addition_and_both_reactivation_paths(
         }
         .abi_encode()
     };
-    let limited = epoch_length == 4;
     let commands = [
         (native_registration(), true),
         (backup.abi_encode(), true),
@@ -771,9 +775,10 @@ fn membership_epoch_capacity_rejects_addition_and_both_reactivation_paths(
         let executor = if sequence < 3 {
             executor.clone()
         } else {
-            executor
-                .clone()
-                .with_membership_epochs(std::num::NonZeroU64::new(epoch_length).unwrap())
+            executor.clone().with_membership_epochs(
+                std::num::NonZeroU64::new(epoch_length).unwrap(),
+                std::num::NonZeroU64::new(term_length).unwrap(),
+            )
         };
         let before = state.accounts.read().unwrap()[&VALIDATOR_REGISTRY_ADDRESS]
             .storage

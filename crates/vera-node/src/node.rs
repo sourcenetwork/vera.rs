@@ -106,6 +106,12 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
     if let Some(parameters) = genesis.simplex {
         parameters.validate().map_err(anyhow::Error::msg)?;
     }
+    let term_length = std::num::NonZeroU64::new(
+        genesis
+            .simplex
+            .map_or(1, |parameters| parameters.term_length),
+    )
+    .expect("validated leader term length");
     let blocks_per_epoch = std::num::NonZeroU64::new(genesis.blocks_per_epoch)
         .ok_or_else(|| anyhow::anyhow!("genesis blocks_per_epoch must be non-zero"))?;
     let prune_config = config
@@ -132,6 +138,19 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
     let epoch_info = genesis
         .decode_epoch_info()?
         .ok_or_else(|| anyhow::anyhow!("genesis.json is missing epoch_info"))?;
+    let players = epoch_info.output.players().clone();
+    let capacity = vera_domain::max_epoch_participants(blocks_per_epoch, term_length);
+    for (set, count) in [
+        ("voting participants", players.len()),
+        ("DKG players", epoch_info.players.len()),
+        ("next DKG players", epoch_info.next_players.len()),
+        ("registry validators", genesis.validators.len()),
+    ] {
+        anyhow::ensure!(
+            count <= capacity as usize,
+            "genesis has {count} {set}, but epoch length {blocks_per_epoch} and leader term {term_length} support at most {capacity}",
+        );
+    }
     let listen: std::net::SocketAddr = config.network.listen_addr.parse()?;
     let dial: std::net::SocketAddr = config
         .network
@@ -214,11 +233,6 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
     // Epoch-0 certificate scheme.
     let provider = DynamicProvider::default();
     let mut store = FileSecretStore::load(&secrets_path)?;
-    let players = epoch_info.output.players().clone();
-    anyhow::ensure!(
-        players.len() <= vera_domain::max_epoch_participants(blocks_per_epoch) as usize,
-        "genesis participants exceed the configured epoch capacity"
-    );
     let sharing = epoch_info.output.public().clone();
     match store.get_share(Epoch::zero()).await {
         Some(share) => provider.register(
@@ -236,7 +250,7 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
         .unwrap_or(NZUsize!(1))
         .min(NZUsize!(4));
     let executor = VeraExecutor::new(chain_id)
-        .with_membership_epochs(blocks_per_epoch)
+        .with_membership_epochs(blocks_per_epoch, term_length)
         .with_native_verification_strategy(Rayon::new(verification_threads)?);
     let executor_spec = executor.spec_id();
     #[cfg(feature = "fault-injection")]

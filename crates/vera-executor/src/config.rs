@@ -57,6 +57,8 @@ impl Default for BaseFeeParams {
 pub struct ExecutionConfig {
     /// Epoch length for execution-derived membership selection on native nodes.
     pub membership_epoch_length: Option<std::num::NonZeroU64>,
+    /// Consecutive views per leader; one selects rotating leaders.
+    pub membership_term_length: std::num::NonZeroU64,
     /// Genesis record identifier used to bind administrative approvals.
     pub genesis_id: [u8; 32],
     /// Chain ID for transaction validation.
@@ -75,6 +77,7 @@ impl ExecutionConfig {
         Self {
             chain_id,
             membership_epoch_length: None,
+            membership_term_length: std::num::NonZeroU64::MIN,
             genesis_id: [0; 32],
             spec_id: SpecId::CANCUN,
             gas_limit_bounds: GasLimitBounds::DEFAULT,
@@ -84,10 +87,10 @@ impl ExecutionConfig {
 
     /// Maximum active committee allowed by the deployment epoch length.
     pub fn max_active_members(&self) -> u32 {
-        self.membership_epoch_length.map_or(
-            vera_domain::MAX_DKG_PARTICIPANTS.get(),
-            vera_domain::max_epoch_participants,
-        )
+        self.membership_epoch_length
+            .map_or(vera_domain::MAX_DKG_PARTICIPANTS.get(), |length| {
+                vera_domain::max_epoch_participants(length, self.membership_term_length)
+            })
     }
 
     /// Set the hardfork specification.
