@@ -240,7 +240,7 @@ async fn light_client_proof_verification() {
     let proof_1 = response.record;
     assert!(proof_1.value.is_some());
     let reader_prefix = format!(
-        "relationship/{policy_id_str}/{}",
+        "relationship/v3/{policy_id_str}/{}",
         vera_modules::acp::keys::relation_prefix("document", "doc1", "reader")
     );
     let request = permission::request();

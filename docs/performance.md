@@ -394,6 +394,15 @@ speedup. Epoch length, history backend, arrival rate and verification gates rema
 independently configurable. Pipelining does not establish a transaction capacity
 or latency guarantee.
 
+PR comparisons and the main-branch performance jobs explicitly enable pipelining,
+with 192 revisions per epoch and 256 retained consensus revisions. This gives the
+four participants room to complete DKG with stable leader terms and retains a
+complete epoch for recovery. Both sides of a PR comparison use the same settings;
+their emitted configuration must match before a performance delta is reported.
+`run_pr.py --consensus classic` retains the rotating-leader comparison with
+20-revision epochs and 32 retained revisions. Changing these settings requires a
+new baseline; historical classic measurements are not directly comparable.
+
 ## Storage tracing
 
 For diagnostic runs, set `VERA_TRACE_SPANS=1` and select Commonware storage spans

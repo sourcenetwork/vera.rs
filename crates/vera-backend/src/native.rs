@@ -36,6 +36,8 @@ mod record;
 pub use record::record_proof_at;
 mod prefix;
 pub use prefix::{prefix_page_at, prefix_proof_at};
+mod policy;
+pub use policy::{policy_prefix_page_at, policy_prefix_proof_at};
 
 mod permission;
 pub use permission::{permission_proof, permission_proof_at};

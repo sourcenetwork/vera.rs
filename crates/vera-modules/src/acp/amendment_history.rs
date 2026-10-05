@@ -15,6 +15,16 @@ fn decode(bytes: &[u8], id: u64) -> Result<AmendmentEvent> {
 impl AcpModule {
     /// Read an amendment by its global identifier, validating the stored identity.
     pub fn get_amendment_event_by_id(&self, id: u64) -> Result<Option<AmendmentEvent>> {
+        let Some(record) = self.retained_amendment_by_id(id)? else {
+            return Ok(None);
+        };
+        if self.get_policy_record(&record.policy_id)?.is_none() {
+            return Ok(None);
+        }
+        Ok(Some(record))
+    }
+
+    pub(super) fn retained_amendment_by_id(&self, id: u64) -> Result<Option<AmendmentEvent>> {
         self.store
             .get_ref(&keys::amendment_event_key(id))
             .map(|bytes| decode(bytes, id))
@@ -129,7 +139,16 @@ mod tests {
     #[test]
     fn hijack_reports_bind_policy_and_preserve_event_metadata() {
         let mut module = AcpModule::new();
-        let event = insert(&mut module, "selected", false);
+        let policy = module
+            .create_policy(
+                &Did::new("did:key:owner").unwrap(),
+                "name: amendments\nresources:\n  - name: file\n",
+                PolicyMarshalingType::ShortYaml,
+            )
+            .unwrap()
+            .policy
+            .id;
+        let event = insert(&mut module, &policy, false);
         for restored in [false, true] {
             if restored {
                 module = AcpModule::from_store(
@@ -139,9 +158,9 @@ mod tests {
             let before = module.store.serialize();
             for (actor, policy, id) in [
                 (&event.new_owner.0, "other", event.id),
-                (&event.previous_owner.0, "selected", event.id),
-                (&event.new_owner.0, "selected", 0),
-                (&event.new_owner.0, "selected", u64::MAX),
+                (&event.previous_owner.0, policy.as_str(), event.id),
+                (&event.new_owner.0, policy.as_str(), 0),
+                (&event.new_owner.0, policy.as_str(), u64::MAX),
             ] {
                 assert!(
                     module
@@ -157,7 +176,7 @@ mod tests {
             let PolicyCmdResult::FlagHijackAttempt { event: actual } = module
                 .direct_policy_cmd(
                     &event.new_owner.0,
-                    "selected",
+                    policy.as_str(),
                     PolicyCmd::FlagHijackAttempt { event_id: event.id },
                 )
                 .unwrap()

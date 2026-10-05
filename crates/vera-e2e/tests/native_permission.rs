@@ -82,7 +82,16 @@ fn evaluate(
 
 #[tokio::test]
 async fn native_permission_reads_follow_finalized_grants_and_denials() {
-    let deployment = 9047;
+    permission_lifecycle(false).await;
+}
+
+#[tokio::test]
+async fn pipelined_permission_reads_follow_finalized_grants_and_deletion() {
+    permission_lifecycle(true).await;
+}
+
+async fn permission_lifecycle(pipelined: bool) {
+    let deployment = if pipelined { 9057 } else { 9047 };
     let trusted = *KeySet::builder()
         .seed(deployment)
         .build()
@@ -91,12 +100,17 @@ async fn native_permission_reads_follow_finalized_grants_and_denials() {
         .output
         .public()
         .public();
+    let genesis = if pipelined {
+        GenesisBuilder::devnet().simplex(vera_domain::SimplexParameters::default())
+    } else {
+        GenesisBuilder::devnet()
+    };
     let mut cluster = TestCluster::builder()
         .binary(vera_e2e::resolve_binary().unwrap())
         .nodes(4)
         .seed(deployment)
         .chain_id(deployment)
-        .genesis(GenesisBuilder::devnet())
+        .genesis(genesis)
         .preset(ConsensusPreset::Fast)
         .build()
         .await
@@ -153,8 +167,8 @@ async fn native_permission_reads_follow_finalized_grants_and_denials() {
     };
     let owner_prefix = vera_client::object_owner_prefix(&policy, &object).unwrap();
     let ownership = client
-        .read_current_prefix(
-            ModuleId::Acp,
+        .read_current_policy_prefix(
+            &policy,
             &owner_prefix,
             granted,
             &trusted,
@@ -345,8 +359,8 @@ async fn native_permission_reads_follow_finalized_grants_and_denials() {
                 .unwrap();
             assert_eq!(record.record.value, policy_record.record.value);
             let owners = client
-                .read_current_prefix(
-                    ModuleId::Acp,
+                .read_current_policy_prefix(
+                    &policy,
                     &owner_prefix,
                     record.revision.height,
                     &trusted,
@@ -396,8 +410,8 @@ async fn native_permission_reads_follow_finalized_grants_and_denials() {
     for index in 0..cluster.node_count() {
         let replica = VeraClient::new(cluster.node(index).rpc_url());
         let current = replica
-            .read_current_prefix(
-                ModuleId::Acp,
+            .read_current_policy_prefix(
+                &policy,
                 &owner_prefix,
                 archived,
                 &trusted,
@@ -428,8 +442,8 @@ async fn native_permission_reads_follow_finalized_grants_and_denials() {
                 .is_err()
         );
         let missing = replica
-            .read_current_prefix(
-                ModuleId::Acp,
+            .read_current_policy_prefix(
+                &policy,
                 &vera_client::object_owner_prefix(&policy, &other).unwrap(),
                 archived,
                 &trusted,
@@ -444,6 +458,50 @@ async fn native_permission_reads_follow_finalized_grants_and_denials() {
                 .is_none()
         );
     }
+    let deleted = submit(
+        &client,
+        &owner,
+        IAcp::deletePolicyCall {
+            policyId: policy.parse().unwrap(),
+        },
+    )
+    .await;
+    let live_object = Object {
+        resource: "document".into(),
+        id: "concurrent-0".into(),
+    };
+    let live_prefix = vera_client::object_owner_prefix(&policy, &live_object).unwrap();
+    for index in 0..cluster.node_count() {
+        let replica = VeraClient::new(cluster.node(index).rpc_url());
+        let deleted_owner = replica
+            .read_current_policy_prefix(
+                &policy,
+                &live_prefix,
+                deleted,
+                &trusted,
+                RECORD_PROOF_BYTES,
+            )
+            .await
+            .unwrap();
+        assert!(deleted_owner.proof.policy.value.is_none());
+        assert!(
+            deleted_owner
+                .verify_object_owner(&policy, &live_object, deleted, &trusted)
+                .unwrap()
+                .is_none()
+        );
+        let page = replica
+            .read_relationship_page(policy.parse().unwrap(), None, 8, deleted, &trusted)
+            .await
+            .unwrap();
+        assert!(page.records.is_empty());
+        assert!(page.continuation.is_none());
+    }
+    assert!(
+        ownership
+            .verify_object_owner(&policy, &object, deleted, &trusted)
+            .is_err()
+    );
     cluster.restart_node(0).unwrap();
     cluster
         .wait_ready(vera_e2e::readiness_deadline())
@@ -451,18 +509,19 @@ async fn native_permission_reads_follow_finalized_grants_and_denials() {
         .unwrap();
     let restarted = VeraClient::new(cluster.node(0).rpc_url());
     let current = restarted
-        .read_current_prefix(
-            ModuleId::Acp,
+        .read_current_policy_prefix(
+            &policy,
             &owner_prefix,
-            archived,
+            deleted,
             &trusted,
             RECORD_PROOF_BYTES,
         )
         .await
         .unwrap();
+    assert!(current.proof.policy.value.is_none());
     assert!(
         current
-            .verify_object_owner(&policy, &object, archived, &trusted)
+            .verify_object_owner(&policy, &object, deleted, &trusted)
             .unwrap()
             .is_none()
     );

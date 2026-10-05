@@ -5,7 +5,8 @@ use alloy_primitives::{B256, Bytes};
 use vera_domain::ConsensusPublicKey;
 use vera_modules::acp::{keys, types::RelationshipRecord};
 use vera_permission::{
-    ModuleId, PAGE_PROOF_BYTES, PAGE_RESPONSE_BYTES, PrefixPageRequest, PrefixPageResponse,
+    ModuleId, PAGE_PROOF_BYTES, PAGE_RESPONSE_BYTES, PolicyPrefixPageResponse, PrefixPageRequest,
+    VerifiedPrefixPage,
 };
 
 /// Consecutive relationships at one finalized revision, before any caller-side filtering.
@@ -22,7 +23,8 @@ pub struct RelationshipPage {
 }
 
 impl VeraClient {
-    /// Enumerate policy relationships, including archived records, in certified bounded pages.
+    /// Enumerate live policy relationships, including archived records, in certified pages.
+    /// An absent or retired policy has no current relationships or continuation.
     pub async fn read_relationship_page(
         &self,
         policy: B256,
@@ -40,26 +42,37 @@ impl VeraClient {
             limit,
         };
         request.validate()?;
-        let response: PrefixPageResponse = self
+        let response: PolicyPrefixPageResponse = self
             .rpc_call_bounded(
-                "vera_getCurrentPrefixPageProof",
-                serde_json::json!([request, minimum]),
+                "vera_getCurrentPolicyPrefixPageProof",
+                serde_json::json!([policy, request, minimum]),
                 PAGE_RESPONSE_BYTES,
             )
             .await?;
-        let page = response.verify(&request, minimum, trusted, PAGE_PROOF_BYTES)?;
-        let records = page
-            .entries
-            .iter()
-            .map(|entry| decode(&policy, &entry.key, &entry.value))
-            .collect::<Result<_, _>>()?;
+        let page = response.verify(&policy, &request, minimum, trusted, PAGE_PROOF_BYTES)?;
+        let (records, continuation) = current_relationships(&policy, page)?;
         Ok(RelationshipPage {
             revision: response.revision.height,
             timestamp: response.revision.timestamp,
             records,
-            continuation: page.continuation,
+            continuation,
         })
     }
+}
+
+fn current_relationships(
+    policy: &str,
+    page: Option<VerifiedPrefixPage>,
+) -> Result<(Vec<RelationshipRecord>, Option<Bytes>), ClientError> {
+    let Some(page) = page else {
+        return Ok((Vec::new(), None));
+    };
+    let records = page
+        .entries
+        .iter()
+        .map(|entry| decode(policy, &entry.key, &entry.value))
+        .collect::<Result<_, _>>()?;
+    Ok((records, page.continuation))
 }
 
 fn decode(policy: &str, key: &[u8], value: &[u8]) -> Result<RelationshipRecord, ClientError> {
@@ -84,6 +97,13 @@ mod tests {
         AcpModule,
         types::{Object, PolicyCmd, PolicyMarshalingType},
     };
+
+    #[test]
+    fn absent_policy_has_no_relationships_or_continuation() {
+        let (records, continuation) = current_relationships(&"a".repeat(64), None).unwrap();
+        assert!(records.is_empty());
+        assert!(continuation.is_none());
+    }
 
     #[test]
     fn relationship_record_binds_policy_and_key_and_requires_complete_json() {

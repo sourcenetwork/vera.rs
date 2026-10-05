@@ -657,3 +657,6 @@ mod registry_storage;
 
 #[path = "executor/block_gas.rs"]
 mod block_gas;
+
+#[path = "executor/record_limits.rs"]
+mod record_limits;

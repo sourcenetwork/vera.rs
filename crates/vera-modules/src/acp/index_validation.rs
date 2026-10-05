@@ -17,7 +17,8 @@ impl AcpModule {
                 .get_commitment_by_id(id)?
                 .ok_or_else(|| AcpError::State("commitment index record missing".into()))?;
             if keys::commitment_key(id) != key
-                || !self.zanzibar_policies.contains_key(&record.policy_id)
+                || !self
+                    .retained_policy_allows(&record.policy_id, retirement::Phase::Commitments)?
                 || self
                     .store
                     .get_ref(&keys::commitment_by_commitment_index_key(
@@ -46,7 +47,8 @@ impl AcpModule {
                 .ok_or_else(|| AcpError::State("commitment policy index record missing".into()))?;
             if !value.is_empty()
                 || keys::commitment_policy_index_key(&record.policy_id, id) != key
-                || !self.zanzibar_policies.contains_key(&record.policy_id)
+                || !self
+                    .retained_policy_allows(&record.policy_id, retirement::Phase::Commitments)?
             {
                 return Err(AcpError::State("commitment policy index mismatch".into()));
             }
@@ -85,11 +87,11 @@ impl AcpModule {
         for (key, value) in self.store.prefix_iter(&policies) {
             let id = index_id(key)?;
             let event = self
-                .get_amendment_event_by_id(id)?
+                .retained_amendment_by_id(id)?
                 .ok_or_else(|| AcpError::State("amendment index record missing".into()))?;
             if !value.is_empty()
                 || keys::amendment_event_policy_index_key(&event.policy_id, id) != key
-                || !self.zanzibar_policies.contains_key(&event.policy_id)
+                || !self.retained_policy_allows(&event.policy_id, retirement::Phase::Amendments)?
             {
                 return Err(AcpError::State("amendment policy index mismatch".into()));
             }

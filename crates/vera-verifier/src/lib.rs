@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use vera_domain::{ConsensusPublicKey, RECEIPT_RESPONSE_BYTES, ReceiptResponse};
 use vera_permission::{
     AccessRequest, DecisionOperation, ModuleId, Object, PERMISSION_LIMITS, PermissionResponse,
-    PrefixResponse, RECORD_PROOF_BYTES, RecordResponse,
+    PolicyPrefixResponse, RECORD_PROOF_BYTES, RecordResponse,
 };
 
 /// Maximum encoded verification request, including independently configured trust.
@@ -17,6 +17,13 @@ pub const MAX_REQUEST_BYTES: usize =
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
+    PolicyPrefixPage {
+        trusted_key: String,
+        policy_id: String,
+        request: vera_permission::PrefixPageRequest,
+        minimum_height: u64,
+        proof: Box<vera_permission::PolicyPrefixPageResponse>,
+    },
     PrefixPage {
         trusted_key: String,
         request: vera_permission::PrefixPageRequest,
@@ -64,7 +71,7 @@ enum Request {
         policy_id: String,
         object: Object,
         minimum_height: u64,
-        proof: Box<PrefixResponse>,
+        proof: Box<PolicyPrefixResponse>,
     },
 }
 
@@ -84,6 +91,40 @@ fn verify(input: &[u8]) -> Result<Value, String> {
     }
     let request: Request = serde_json::from_slice(input).map_err(|error| error.to_string())?;
     match request {
+        Request::PolicyPrefixPage {
+            trusted_key: key,
+            policy_id,
+            request,
+            minimum_height,
+            proof,
+        } => {
+            let page = proof
+                .verify(
+                    &policy_id,
+                    &request,
+                    minimum_height,
+                    &trusted_key(&key)?,
+                    vera_permission::PAGE_PROOF_BYTES,
+                )
+                .map_err(|error| error.to_string())?;
+            let policy_exists = page.is_some();
+            let (entries, continuation) = page.map_or_else(
+                || (Vec::new(), None),
+                |page| (page.entries, page.continuation),
+            );
+            let entries: Vec<_> = entries
+                .into_iter()
+                .map(|entry| {
+                    json!({
+                        "key": Bytes::from(entry.key), "value": Bytes::from(entry.value)
+                    })
+                })
+                .collect();
+            Ok(
+                json!({"height": proof.revision.height, "timestamp": proof.revision.timestamp,
+                "policy_exists": policy_exists, "entries": entries, "continuation": continuation}),
+            )
+        }
         Request::PrefixPage {
             trusted_key: key,
             request,
@@ -288,48 +329,4 @@ pub unsafe extern "C" fn vera_buffer_free(buffer: VeraBuffer) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn policy_validation_selects_json_or_yaml_without_fallback() {
-        for (definition, format, expected) in [
-            (
-                r#"{"name":"sample","resources":[{"name":"file"}]}"#,
-                "JSON",
-                true,
-            ),
-            ("name: sample\nresources:\n  - name: file\n", "yaml", true),
-            ("name: sample\nresources:\n  - name: file\n", "json", false),
-            (r#"{"name":"sample","extra":true}"#, "json", false),
-            ("{}", "unknown", false),
-        ] {
-            let input = serde_json::to_vec(
-                &json!({"kind":"validate_policy", "definition":definition, "format":format}),
-            )
-            .unwrap();
-            let output = unsafe { vera_verify(input.as_ptr(), input.len()) };
-            let bytes = unsafe { std::slice::from_raw_parts(output.data, output.len) };
-            let response: Value = serde_json::from_slice(bytes).unwrap();
-            unsafe { vera_buffer_free(output) };
-            assert_eq!(response["result"]["valid"], expected, "{response}");
-        }
-    }
-
-    #[test]
-    fn invalid_foreign_inputs_return_owned_errors() {
-        for (input, len) in [
-            (std::ptr::null(), 0),
-            (b"x".as_ptr(), MAX_REQUEST_BYTES + 1),
-            (b"x".as_ptr(), 1),
-        ] {
-            // Valid readable memory is supplied whenever the length passes the boundary checks.
-            let output = unsafe { vera_verify(input, len) };
-            let bytes = unsafe { std::slice::from_raw_parts(output.data, output.len) };
-            let json: Value = serde_json::from_slice(bytes).unwrap();
-            assert!(json["error"].is_string());
-            assert!(json.get("result").is_none());
-            unsafe { vera_buffer_free(output) };
-        }
-    }
-}
+mod tests;

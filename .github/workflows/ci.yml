@@ -178,7 +178,8 @@ jobs:
     env:
       VERA_E2E_DEADLINE_SCALE: "4"
       VERAD_BINARY: ${{ github.workspace }}/target/debug/verad
-      TMPDIR: $RUNNER_TEMP/vera-e2e-${{ github.run_id }}-${{ github.run_attempt }}-extended
+      VERA_E2E_KEEP: "1"
+      RUST_LOG: info
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -205,13 +206,19 @@ jobs:
 
       - name: Prepare test workspace
         run: |
-          mkdir -p "$TMPDIR"
+          extended_test_dir="$RUNNER_TEMP/vera-e2e-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-extended"
+          mkdir -p "$extended_test_dir"
+          {
+            echo "TMPDIR=$extended_test_dir"
+            echo "VERA_E2E_DIR=$extended_test_dir/clusters"
+          } >> "$GITHUB_ENV"
           python3 .github/scripts/stop-test-nodes.py "$VERAD_BINARY"
 
       - name: Build verad
         run: cargo build --frozen -p verad
 
       - name: Run e2e tests
+        shell: bash
         run: >-
           cargo test --frozen -p vera-e2e
           --test core_chain
@@ -221,8 +228,18 @@ jobs:
           --test validator_bootstrap
           --test validator_epoch_transition
           --test cross_object_acp
-          -- --nocapture
+          -- --nocapture 2>&1 | tee "$TMPDIR/test-output.log"
         timeout-minutes: 15
+
+      - name: Upload failed extended test logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: extended-e2e-logs-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/vera-e2e-${{ github.run_id }}-${{ github.run_attempt }}-extended/test-output.log
+            ${{ runner.temp }}/vera-e2e-${{ github.run_id }}-${{ github.run_attempt }}-extended/clusters/**/logs/*.log
+          if-no-files-found: ignore
 
       - name: Cleanup
         if: always()
@@ -230,7 +247,7 @@ jobs:
           git checkout -- .
           git clean -fd
           python3 .github/scripts/stop-test-nodes.py "$VERAD_BINARY"
-          rm -rf "$TMPDIR"
+          rm -rf "$RUNNER_TEMP/vera-e2e-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-extended"
 
   artifacts:
     name: Release Artifacts
