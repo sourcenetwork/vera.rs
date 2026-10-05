@@ -99,9 +99,19 @@ This is a feature port, not a claim of identical transport or parser behavior:
   live RPC calls can observe different revisions. Unpaged queries reject oversized
   results rather than silently truncate. For larger catalogues, enumerate the
   relationship pages and combine them with the policy's declared resources.
-- Policy deletion and definition edits scan their dependent records; large-policy
-  mutation costs still require workload qualification. This port does not establish
-  new throughput numbers or a production load guarantee.
+- Policy deletion scans only that policy's relationships and its commitment and
+  amendment indexes; definition edits scan only its relationships. The lifecycle
+  component workload measures these costs. Target-policy size remains unbounded
+  under the fixed execution charge; these measurements do not establish a
+  production mutation limit or load guarantee.
+
+The commitment policy index is persisted in authenticated state, including for
+expired commitments. It changes execution roots when commitments are written.
+All validators must use the same indexing rules. Fresh deployments create the
+index with each commitment. Native restoration rejects retained commitments
+without it.
+There is no index backfill or fallback scan. Commitment record encodings and
+client proof formats are unchanged.
 
 ACP v1 edits use finalized execution order. They do not implement offline policy
 branch merging, causal policy pins, or the separate ACP v2 design.

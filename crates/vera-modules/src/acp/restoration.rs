@@ -168,6 +168,7 @@ mod tests {
         let amendment = keys::amendment_event_policy_index_key(&event.policy_id, event.id);
         for key in [
             keys::commitment_key(commitment.id),
+            keys::commitment_policy_index_key(&commitment.policy_id, commitment.id),
             root,
             expiry.clone(),
             keys::amendment_event_key(event.id),
@@ -188,6 +189,15 @@ mod tests {
             }
         }
         for key in [
+            keys::commitment_policy_index_key("wrong", commitment.id),
+            keys::commitment_policy_index_key(&commitment.policy_id, 99),
+            keys::commitment_policy_index_key(&commitment.policy_id, 0),
+            {
+                let mut key =
+                    keys::commitment_policy_index_key(&commitment.policy_id, commitment.id);
+                key.push(0);
+                key
+            },
             keys::commitment_by_commitment_index_key(&[8; 32], commitment.id),
             keys::commitment_by_commitment_index_key(&commitment.commitment, 99),
             keys::amendment_event_policy_index_key("wrong", event.id),
