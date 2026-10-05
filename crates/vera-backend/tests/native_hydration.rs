@@ -285,3 +285,6 @@ resources:
         assert_eq!(root(&set).await, corrupt_root);
     });
 }
+
+#[path = "native_hydration/object_archive.rs"]
+mod object_archive;
