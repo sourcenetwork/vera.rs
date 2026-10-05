@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    keys,
+    keys, object_pairs,
     record_store::{RecordChange, RecordStore},
     relationship_index::{self, invalid},
     types::{PolicyRecord, RelationPair, RelationshipRecord},
@@ -33,6 +33,14 @@ pub(super) fn put<S: RecordStore>(store: &mut S, record: &RelationshipRecord) ->
         &[(record.generations, true, u64::from(existing.is_none()))],
         Some(&policy.relations),
     )?;
+    if let Some(change) = object_pairs::prepare_change(
+        store,
+        object_pairs::key(record),
+        true,
+        u64::from(existing.is_none()),
+    )? {
+        changes.push(change);
+    }
     changes.push((key, Some(encoded)));
     store.apply_records(changes)
 }
@@ -54,6 +62,7 @@ pub(super) fn prepare_removals<S: RecordStore>(
     let mut seen = BTreeSet::new();
     let mut policies = BTreeMap::new();
     let mut counts: BTreeMap<String, BTreeMap<RelationPair, u64>> = BTreeMap::new();
+    let mut object_counts = BTreeMap::<Vec<u8>, u64>::new();
     let mut changes = Vec::new();
     for key in keys {
         if !seen.insert(key) {
@@ -91,6 +100,10 @@ pub(super) fn prepare_removals<S: RecordStore>(
         *count = count
             .checked_add(1)
             .ok_or_else(|| invalid("relationship removal count overflow"))?;
+        let count = object_counts.entry(object_pairs::key(&record)).or_default();
+        *count = count
+            .checked_add(1)
+            .ok_or_else(|| invalid("object relationship removal count overflow"))?;
         changes.push((key.clone(), None));
     }
     for (policy, pairs) in counts {
@@ -104,6 +117,11 @@ pub(super) fn prepare_removals<S: RecordStore>(
             &deltas,
             policies[&policy].as_ref().map(|record| &record.relations),
         )?);
+    }
+    for (key, count) in object_counts {
+        if let Some(change) = object_pairs::prepare_change(store, key, false, count)? {
+            changes.push(change);
+        }
     }
     Ok(changes)
 }

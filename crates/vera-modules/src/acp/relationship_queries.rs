@@ -402,13 +402,23 @@ mod tests {
         module
             .direct_policy_cmd(&owner, &policy, PolicyCmd::RegisterObject(object.clone()))
             .unwrap();
-        let before = module.store.serialize();
+        assert!(matches!(
+            module
+                .direct_policy_cmd(&owner, &policy, PolicyCmd::ArchiveObject(object.clone()))
+                .unwrap(),
+            PolicyCmdResult::ArchiveObject {
+                found: true,
+                relationships_removed: 1
+            }
+        ));
         assert!(
             module
-                .direct_policy_cmd(&owner, &policy, PolicyCmd::ArchiveObject(object))
-                .is_err()
+                .registration_owner_record(&policy, &object)
+                .unwrap()
+                .unwrap()
+                .archived
         );
-        assert_eq!(module.store.serialize(), before);
+        module.validate_restored_state().unwrap();
     }
 
     #[test]

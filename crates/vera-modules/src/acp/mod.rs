@@ -11,6 +11,8 @@ mod index_validation;
 mod lifecycle;
 mod management;
 mod metadata;
+mod object_archive;
+mod object_pairs;
 pub mod pages;
 mod policy_edit;
 mod policy_edit_budget;
@@ -1089,62 +1091,6 @@ impl AcpModule {
         self.set_relationship(&record)?;
 
         Ok(PolicyCmdResult::RegisterObject { record })
-    }
-
-    fn cmd_archive_object(
-        &mut self,
-        creator: &Did,
-        policy_id: &str,
-        obj: Object,
-    ) -> Result<PolicyCmdResult> {
-        if !self.zanzibar_policies.contains_key(policy_id) {
-            return Err(AcpError::PolicyNotFound {
-                id: policy_id.into(),
-            });
-        }
-        let mut owner_rec = self
-            .registration_owner_record(policy_id, &obj)?
-            .ok_or_else(|| AcpError::ObjectNotRegistered {
-                resource: obj.resource.clone(),
-                object_id: obj.id.clone(),
-            })?;
-        if owner_rec.archived {
-            return Ok(PolicyCmdResult::ArchiveObject {
-                found: true,
-                relationships_removed: 0,
-            });
-        }
-        if !self.check_management_authority(creator, policy_id, &obj, "owner")? {
-            return Err(AcpError::Unauthorized {
-                reason: format!(
-                    "{} is not the owner of '{}/{}'",
-                    creator, obj.resource, obj.id
-                ),
-            });
-        }
-        let policy = self.query_policy(policy_id)?;
-        let selector = RelationshipSelector {
-            object_selector: Some(ObjectSelector::Exact(obj)),
-            relation_selector: None,
-            subject_selector: None,
-        };
-        let mut keys = Vec::new();
-        for prefix in self.relationship_query_prefixes(&policy, &selector)? {
-            for (key, value) in self.store.prefix_iter(&prefix) {
-                Self::decode_current_relationship(&policy, key, value)?;
-                keys.push(key.to_vec());
-            }
-        }
-        let removed = keys.len() as u64;
-        for key in keys {
-            self.remove_relationship_key(&key)?;
-        }
-        owner_rec.archived = true;
-        self.set_relationship(&owner_rec)?;
-        Ok(PolicyCmdResult::ArchiveObject {
-            found: true,
-            relationships_removed: removed,
-        })
     }
 
     fn cmd_unarchive_object(

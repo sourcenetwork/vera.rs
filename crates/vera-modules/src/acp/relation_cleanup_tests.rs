@@ -34,14 +34,18 @@ fn put_row(module: &mut AcpModule, policy: &str, index: usize) -> Vec<u8> {
     let relationship = Relationship::new(
         "file",
         format!("item-{index}"),
-        if index % 2 == 0 { "reader" } else { "viewer" },
+        if index.is_multiple_of(2) {
+            "reader"
+        } else {
+            "viewer"
+        },
         Subject::entity_set("group", "staff", "member"),
     );
     let record = RelationshipRecord {
         generations: definition.relations.pair(&relationship).unwrap(),
         relationship,
         policy_id: policy.into(),
-        archived: index % 3 == 0,
+        archived: index.is_multiple_of(3),
         supplied_metadata: Default::default(),
         metadata: definition.metadata,
     };
