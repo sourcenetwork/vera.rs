@@ -112,7 +112,12 @@ impl AcpModule {
         let acp::Subject::Entity(actor) = &record.relationship.subject else {
             return Err(AcpError::State("object owner must be an actor".into()));
         };
-        if record.policy_id != policy
+        if record.generations
+            != (RelationPair {
+                target: 0,
+                subject: 0,
+            })
+            || record.policy_id != policy
             || record.relationship.resource != object.resource
             || record.relationship.object_id != object.id
             || record.relationship.relation != "owner"

@@ -10,6 +10,7 @@ pub(super) const COUNTER_KEY: &[u8] = b"policy/cleanup/counter";
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, BorshDeserialize, BorshSerialize)]
 pub(super) enum Phase {
     Relationships,
+    RelationshipsMetadata,
     Commitments,
     Amendments,
 }
@@ -18,6 +19,7 @@ pub(super) enum Phase {
 pub(super) struct RetiredPolicy {
     pub(super) sequence: u64,
     pub(super) phase: Phase,
+    pub(super) relations: RelationGenerations,
 }
 
 pub(super) fn retired_key(policy: &str) -> Vec<u8> {
@@ -28,7 +30,7 @@ pub(super) fn queue_key(sequence: u64) -> Vec<u8> {
     [QUEUE_PREFIX, &sequence.to_be_bytes()].concat()
 }
 
-fn policy_id(bytes: &[u8]) -> Result<&str> {
+pub(super) fn policy_id(bytes: &[u8]) -> Result<&str> {
     if bytes.len() != 64
         || !bytes
             .iter()
@@ -52,6 +54,7 @@ impl Phase {
     pub(super) fn prefix(self, policy: &str) -> Vec<u8> {
         match self {
             Self::Relationships => keys::relationship_policy_prefix(policy),
+            Self::RelationshipsMetadata => relationship_index::policy_prefix(policy),
             Self::Commitments => keys::commitment_policy_index_prefix(policy),
             Self::Amendments => keys::amendment_event_policy_index_prefix(policy),
         }
@@ -59,7 +62,8 @@ impl Phase {
 
     pub(super) const fn next(self) -> Option<Self> {
         match self {
-            Self::Relationships => Some(Self::Commitments),
+            Self::Relationships => Some(Self::RelationshipsMetadata),
+            Self::RelationshipsMetadata => Some(Self::Commitments),
             Self::Commitments => Some(Self::Amendments),
             Self::Amendments => None,
         }
@@ -80,6 +84,12 @@ impl AcpModule {
                 policy_id(policy.as_bytes())?;
                 let retired: RetiredPolicy = borsh::from_slice(bytes)
                     .map_err(|error| AcpError::State(format!("invalid retired policy: {error}")))?;
+                let canonical = borsh::to_vec(&retired)
+                    .map_err(|error| AcpError::State(format!("encode retired policy: {error}")))?;
+                if canonical != bytes {
+                    return Err(AcpError::State("noncanonical retired policy".into()));
+                }
+                relation_cleanup::validate_catalog(&retired.relations)?;
                 if retired.sequence == 0 {
                     return Err(AcpError::State("zero policy cleanup sequence".into()));
                 }
@@ -122,6 +132,10 @@ impl AcpModule {
         let retired = RetiredPolicy {
             sequence: self.next_cleanup_sequence()?,
             phase: Phase::Relationships,
+            relations: self
+                .get_policy_record(policy)?
+                .ok_or_else(|| AcpError::State("retiring policy is missing".into()))?
+                .relations,
         };
         self.store_retirement(policy, &retired)
     }
@@ -189,7 +203,11 @@ impl AcpModule {
                     "retired policy queue or counter mismatch".into(),
                 ));
             }
-            for phase in [Phase::Relationships, Phase::Commitments] {
+            for phase in [
+                Phase::Relationships,
+                Phase::RelationshipsMetadata,
+                Phase::Commitments,
+            ] {
                 if phase < retired.phase
                     && self
                         .store

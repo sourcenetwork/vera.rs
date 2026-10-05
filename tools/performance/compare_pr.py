@@ -15,7 +15,12 @@ LIFECYCLE_COMPONENTS = tuple(
     for size in ('32', '256', '2048', '32_unrelated_2048')
     for operation in ('edit', 'delete')
 )
-COMPONENT_FIXTURES = {1: COMPONENTS, 2: COMPONENTS + LIFECYCLE_COMPONENTS}
+LOGICAL_EDIT_COMPONENTS = ('acp_policy_logical_edit_32', 'acp_policy_logical_edit_2048')
+COMPONENT_FIXTURES = {
+    1: COMPONENTS,
+    2: COMPONENTS + LIFECYCLE_COMPONENTS,
+    3: COMPONENTS + LIFECYCLE_COMPONENTS + LOGICAL_EDIT_COMPONENTS,
+}
 
 
 def change(base, head, lower=True, threshold=5):
@@ -62,6 +67,7 @@ def components(path):
 def compare(directory):
     identity = json.loads((directory / 'comparison.json').read_text())
     rows, errors, differences = [], [], []
+    logical_edit_scaling = {}
 
     def row(name, values, lower=True, comparable=True):
         base = [values[t] for t in ('base1', 'base2')]
@@ -120,9 +126,14 @@ def compare(directory):
             else:
                 rows.append({'metric': f'{name}: ns/op', 'base': [], 'head': [current[t][name] for t in ('head1', 'head2')],
                              'change_percent': None, 'verdict': 'new benchmark; no baseline'})
+        if all(name in current['head1'] for name in LOGICAL_EDIT_COMPONENTS):
+            small, large = LOGICAL_EDIT_COMPONENTS
+            logical_edit_scaling = {tag: current[tag][large] / current[tag][small]
+                                    for tag in ('head1', 'head2')}
     except (OSError, ValueError, KeyError, TypeError) as error:
         errors.append(f'components: {error}')
-    result = {'identity': identity, 'metrics': rows, 'errors': errors, 'configuration_differences': differences}
+    result = {'identity': identity, 'metrics': rows, 'errors': errors, 'configuration_differences': differences,
+              'logical_edit_2048_to_32_ratio': logical_edit_scaling}
     (directory / 'comparison-report.json').write_text(json.dumps(result, indent=2, allow_nan=False) + '\n')
     lines = ['# Vera PR performance', '', f"Base `{identity['base']['source']}` → head `{identity['head']['source']}`", '',
              'Release builds, same runner, head/base/base/head passes. 5% advisory threshold. Overlapping ranges or more than 5% within-revision spread are inconclusive; remaining signals are not statistical confidence.', '',
@@ -133,6 +144,9 @@ def compare(directory):
         delta = '—' if item['change_percent'] is None else f"{item['change_percent']:+.2f}%"
         lines.append(f"| {item['metric']} | {span(item['base'])} | {span(item['head'])} | {delta} | {item['verdict']} |")
     lines += ['', 'Full-stack throughput is offered-load limited. Certificate verification is a local component cost, not consensus finality. ACP capture excludes authenticated storage proof construction. Policy lifecycle timings exclude fixture construction, fork setup, result disposal and restoration checks; they exclude consensus and durable storage. No maximum-capacity or WAN claim.', '']
+    if logical_edit_scaling:
+        ratios = ', '.join(f'{tag} {value:.2f}×' for tag, value in logical_edit_scaling.items())
+        lines += [f'Logical edit cost ratio (2,048 / 32 objects): {ratios}. These within-pass module ratios exclude physical cleanup and are not service throughput.', '']
     if differences:
         lines += ['Configuration changes (no full-stack deltas):', '', '```json', json.dumps(differences, indent=2), '```', '']
     if errors:

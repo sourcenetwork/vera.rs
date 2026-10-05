@@ -36,22 +36,7 @@ impl AcpModule {
                 ));
             }
         }
-        for (key, bytes) in self.store.prefix_iter(keys::RELATIONSHIP_PREFIX) {
-            let record: RelationshipRecord = serde_json::from_slice(bytes)
-                .map_err(|e| AcpError::State(format!("invalid relationship record: {e}")))?;
-            if keys::relationship_key(
-                &record.policy_id,
-                &keys::relationship_storage_key(&record.relationship),
-            ) != key
-                || !self
-                    .retained_policy_allows(&record.policy_id, retirement::Phase::Relationships)?
-            {
-                return Err(AcpError::State(
-                    "relationship key or policy mismatch; legacy keys require explicit migration"
-                        .into(),
-                ));
-            }
-        }
+        self.validate_relation_state()?;
         for (key, _) in self.store.prefix_iter(keys::ACCESS_DECISION_PREFIX) {
             let id = std::str::from_utf8(&key[keys::ACCESS_DECISION_PREFIX.len()..])
                 .map_err(|_| AcpError::State("invalid access decision key".into()))?;

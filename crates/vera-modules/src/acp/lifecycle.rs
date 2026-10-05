@@ -57,11 +57,15 @@ impl AcpModule {
                 reason: "actor cannot transfer this object".into(),
             });
         }
-        let old_key = keys::relationship_storage_key(&record.relationship);
+        let old_key = keys::relationship_generation_key(
+            policy_id,
+            record.generations,
+            &keys::relationship_storage_key(&record.relationship),
+        );
         record.relationship.subject = acp::Subject::Entity(new_owner.clone());
         record.metadata.owner_did = new_owner.to_string();
-        self.delete_relationship(policy_id, &old_key);
-        self.set_relationship(&record);
+        self.remove_relationship_key(&old_key)?;
+        self.set_relationship(&record)?;
         Ok(record)
     }
 

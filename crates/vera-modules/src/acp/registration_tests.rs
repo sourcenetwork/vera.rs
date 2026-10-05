@@ -608,7 +608,12 @@ fn corrupt_policy_and_relationship_records_cannot_authorize_or_be_overwritten() 
     }
     module.store.put(&policy_key, policy_bytes);
     let owner = Relationship::with_entity("file", "report", "owner", second.clone());
-    let owner_key = keys::relationship_key(&policy, &keys::relationship_storage_key(&owner));
+    let relations = module.query_policy(&policy).unwrap().relations;
+    let owner_key = keys::relationship_generation_key(
+        &policy,
+        relations.pair(&owner).unwrap(),
+        &keys::relationship_storage_key(&owner),
+    );
     let owner_bytes = module.store.get(&owner_key).unwrap();
     module.store.put(&owner_key, b"{".to_vec());
     let before = module.store.serialize();
@@ -618,7 +623,11 @@ fn corrupt_policy_and_relationship_records_cannot_authorize_or_be_overwritten() 
     ));
     assert_eq!(module.store.serialize(), before);
     module.store.put(&owner_key, owner_bytes.clone());
-    let grant_key = keys::relationship_key(&policy, &keys::relationship_storage_key(&grant));
+    let grant_key = keys::relationship_generation_key(
+        &policy,
+        relations.pair(&grant).unwrap(),
+        &keys::relationship_storage_key(&grant),
+    );
     for invalid in [b"{".to_vec(), owner_bytes] {
         module.store.put(&grant_key, invalid);
         let before = module.store.serialize();

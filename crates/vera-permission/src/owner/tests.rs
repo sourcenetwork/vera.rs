@@ -9,6 +9,10 @@ fn object() -> Object {
 }
 fn record() -> RelationshipRecord {
     RelationshipRecord {
+        generations: RelationPair {
+            target: 0,
+            subject: 0,
+        },
         supplied_metadata: Default::default(),
         policy_id: "policy".into(),
         relationship: Relationship::with_entity(
@@ -81,14 +85,16 @@ fn live_owner_is_distinct_from_archived_or_absent_registration() {
 
 #[test]
 fn owner_records_and_queries_cannot_change_the_selected_object() {
-    for field in 0..5 {
+    for field in 0..7 {
         let mut record = record();
         match field {
             0 => record.policy_id = "other".into(),
             1 => record.relationship.resource = "other".into(),
             2 => record.relationship.object_id = "other".into(),
             3 => record.relationship.relation = "reader".into(),
-            _ => record.relationship.subject = Subject::Wildcard,
+            4 => record.relationship.subject = Subject::Wildcard,
+            5 => record.generations.target = 1,
+            _ => record.generations.subject = 1,
         }
         assert!(read(&[record]).is_err());
     }

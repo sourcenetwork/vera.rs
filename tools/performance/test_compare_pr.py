@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from compare_pr import COMPONENTS, LIFECYCLE_COMPONENTS, TAGS, change, compare, components
+from compare_pr import COMPONENTS, LIFECYCLE_COMPONENTS, LOGICAL_EDIT_COMPONENTS, TAGS, change, compare, components
 
 
 class CompareTests(unittest.TestCase):
@@ -138,6 +138,58 @@ class CompareTests(unittest.TestCase):
             self.assertTrue(compare(self.root))
         result = json.loads((self.root / 'comparison-report.json').read_text())
         self.assertEqual(result['errors'], ['components: head removed a component measurement'])
+
+    def write_logical_edit(self, tag, small=100, large=200):
+        self.write_lifecycle(tag)
+        path = self.root / tag / 'components.jsonl'
+        rows = [json.loads(line) for line in path.read_text().splitlines()]
+        rows[0]['fixture_version'] = 3
+        rows += [dict(name=name, unit='ns/op', samples=[value] * 9, iterations=[3] * 9)
+                 for name, value in zip(LOGICAL_EDIT_COMPONENTS, (small, large))]
+        path.write_text('\n'.join(json.dumps(row) for row in rows))
+
+    def test_logical_edit_v3_accepts_both_old_baselines_and_reports_head_ratios(self):
+        for old_version in (1, 2):
+            with self.subTest(old_version=old_version):
+                for tag in ('base1', 'base2'):
+                    if old_version == 2:
+                        self.write_lifecycle(tag)
+                self.write_logical_edit('head1', 100, 200)
+                self.write_logical_edit('head2', 200, 600)
+                with patch('compare_pr.load_run', side_effect=self.run_fixture):
+                    self.assertFalse(compare(self.root))
+                result = json.loads((self.root / 'comparison-report.json').read_text())
+                self.assertEqual(result['logical_edit_2048_to_32_ratio'], {'head1': 2, 'head2': 3})
+                metrics = {row['metric']: row for row in result['metrics']}
+                for name in LOGICAL_EDIT_COMPONENTS:
+                    self.assertEqual(metrics[f'{name}: ns/op']['verdict'], 'new benchmark; no baseline')
+                    self.assertIsNone(metrics[f'{name}: ns/op']['change_percent'])
+                self.assertEqual(metrics['native_bls_verify: ns/op']['change_percent'], 0)
+
+    def test_logical_edit_v3_requires_both_sizes_and_matching_head_passes(self):
+        self.write_logical_edit('head1')
+        path = self.root / 'head1' / 'components.jsonl'
+        lines = path.read_text().splitlines()
+        path.write_text('\n'.join(lines[:-1]))
+        with self.assertRaisesRegex(ValueError, 'missing component'):
+            components(path)
+        self.write_logical_edit('head1')
+        self.write_lifecycle('head2')
+        with patch('compare_pr.load_run', side_effect=self.run_fixture):
+            self.assertTrue(compare(self.root))
+        result = json.loads((self.root / 'comparison-report.json').read_text())
+        self.assertEqual(result['errors'], ['components: component fixture changed between head passes'])
+        self.assertEqual(result['logical_edit_2048_to_32_ratio'], {})
+
+    def test_logical_edit_v3_same_fixture_keeps_timing_comparisons(self):
+        for tag in TAGS:
+            self.write_logical_edit(tag, large=240 if tag.startswith('head') else 200)
+        with patch('compare_pr.load_run', side_effect=self.run_fixture):
+            self.assertFalse(compare(self.root))
+        result = json.loads((self.root / 'comparison-report.json').read_text())
+        metrics = {row['metric']: row for row in result['metrics']}
+        self.assertEqual(metrics[f'{LOGICAL_EDIT_COMPONENTS[1]}: ns/op']['verdict'], 'regression signal')
+        self.assertAlmostEqual(metrics[f'{LOGICAL_EDIT_COMPONENTS[1]}: ns/op']['change_percent'], 20)
 
     def test_missing_component_fails(self):
         path = self.root / 'head1' / 'components.jsonl'

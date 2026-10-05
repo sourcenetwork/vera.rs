@@ -293,12 +293,22 @@ impl Fixture {
         assert_eq!(removed, (2 * count + 1) as u64);
         assert_eq!(record.policy.id, self.policy);
         assert_eq!(record.last_modified, Some(revision(6)));
-        assert_eq!(edited.store().prefix_iter(&prefix).count(), count + 1);
+        // Logical edits retire generations; physical rows remain until bounded cleanup.
+        assert_eq!(edited.store().prefix_iter(&prefix).count(), 3 * count + 2);
+        let mut current_owners = 0;
         for (key, bytes) in edited.store().prefix_iter(&prefix) {
-            let relationship: RelationshipRecord = serde_json::from_slice(bytes).unwrap();
-            assert_eq!(relationship.relationship.relation, "owner");
             assert_eq!(self.module.store().get_ref(key), Some(bytes));
+            let relationship: RelationshipRecord = serde_json::from_slice(bytes).unwrap();
+            if record
+                .relations
+                .pair(&relationship.relationship)
+                .is_ok_and(|pair| pair == relationship.generations)
+            {
+                assert_eq!(relationship.relationship.relation, "owner");
+                current_owners += 1;
+            }
         }
+        assert_eq!(current_owners, count + 1);
         for (commitment, event) in &self.registrations {
             assert_eq!(
                 edited
@@ -336,7 +346,7 @@ impl Fixture {
                 .query_verify_access_request(&self.policy, &request)
                 .unwrap()
         );
-        assert_eq!(edited.store().prefix_iter(&prefix).count(), count + 1);
+        assert_eq!(edited.store().prefix_iter(&prefix).count(), 3 * count + 2);
 
         let mut deleted = self.module.clone();
         assert!(self.delete(&mut deleted));

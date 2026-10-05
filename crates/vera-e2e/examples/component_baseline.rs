@@ -4,6 +4,8 @@
 mod certificate;
 #[path = "component_baseline/lifecycle.rs"]
 mod lifecycle;
+#[path = "component_baseline/logical_edit.rs"]
+mod logical_edit;
 
 use serde_json::json;
 use std::{
@@ -80,7 +82,7 @@ fn main() {
     }
     println!(
         "{}",
-        json!({"format_version": 1, "fixture_version": 2,
+        json!({"format_version": 1, "fixture_version": 3,
         "kind": "configuration", "samples": 9, "sample_ms": 100, "warmup_ms": 200})
     );
     let signer = BlsSigner::new(42_u64.into(), 9001).unwrap();
@@ -137,4 +139,5 @@ fn main() {
         black_box(vera_domain::verify_light_block(black_box(&light), black_box(&trusted)).unwrap());
     });
     lifecycle::run();
+    logical_edit::run();
 }

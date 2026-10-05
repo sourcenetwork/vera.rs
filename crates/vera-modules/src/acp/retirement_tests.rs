@@ -638,7 +638,7 @@ fn restore_rejects_legacy_relationship_namespaces_even_beside_current_records() 
     let mut module = AcpModule::new();
     let id = policy(&mut module);
     register(&mut module, &id, "report");
-    assert_eq!(keys::RELATIONSHIP_PREFIX, b"relationship/v3/");
+    assert_eq!(keys::RELATIONSHIP_PREFIX, b"relationship/v4/");
     let (key, value) = module
         .store
         .prefix_iter(&keys::relationship_policy_prefix(&id))
@@ -646,7 +646,11 @@ fn restore_rejects_legacy_relationship_namespaces_even_beside_current_records() 
         .map(|(key, value)| (key.to_vec(), value.to_vec()))
         .unwrap();
     let suffix = key.strip_prefix(keys::RELATIONSHIP_PREFIX).unwrap();
-    for legacy in [b"relationship/".as_slice(), b"relationship/v2/".as_slice()] {
+    for legacy in [
+        b"relationship/".as_slice(),
+        b"relationship/v2/".as_slice(),
+        b"relationship/v3/".as_slice(),
+    ] {
         let mut candidate = module.clone();
         candidate
             .store
@@ -655,5 +659,59 @@ fn restore_rejects_legacy_relationship_namespaces_even_beside_current_records() 
         let before = restored.store.serialize();
         assert!(restored.validate_restored_state().is_err());
         assert_eq!(restored.store.serialize(), before);
+    }
+}
+
+#[test]
+fn retired_snapshot_rejects_duplicate_or_unsorted_generation_names() {
+    let mut module = AcpModule::new();
+    let id = policy(&mut module);
+    register(&mut module, &id, "report");
+    module.delete_policy(&actor("creator"), &id).unwrap();
+    module.validate_restored_state().unwrap();
+    let retired = module.retired_policy(&id).unwrap().unwrap();
+    let entries: Vec<_> = retired
+        .relations
+        .active
+        .iter()
+        .map(|(resource, relations)| {
+            (
+                resource.clone(),
+                relations
+                    .iter()
+                    .map(|(name, generation)| (name.clone(), *generation))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    for case in 0..3 {
+        let mut entries = entries.clone();
+        match case {
+            0 => entries.push(entries[0].clone()),
+            1 => entries.reverse(),
+            2 => {
+                let relations = &mut entries
+                    .iter_mut()
+                    .find(|(name, _)| name == "file")
+                    .unwrap()
+                    .1;
+                relations.push(relations[0].clone());
+            }
+            _ => unreachable!(),
+        }
+        // Borsh maps and sequences of key/value pairs share the same wire layout.
+        let bytes = borsh::to_vec(&(
+            retired.sequence,
+            retired.phase,
+            retired.relations.next,
+            entries,
+        ))
+        .unwrap();
+        let mut candidate = module.clone();
+        candidate.store.put(&retired_key(&id), bytes);
+        let before = candidate.store.serialize();
+        assert!(candidate.validate_restored_state().is_err(), "case {case}");
+        assert!(candidate.end_blocker(&block(2)).is_err(), "case {case}");
+        assert_eq!(candidate.store.serialize(), before);
     }
 }

@@ -36,7 +36,10 @@ use commonware_storage::{
 use commonware_utils::{NZU16, NZU64, NZUsize};
 use proof::Store;
 use std::{collections::BTreeMap, hint::black_box, time::Instant};
-use vera_modules::acp::{AcpModule, keys, types::PolicyMarshalingType};
+use vera_modules::acp::{
+    AcpModule, keys,
+    types::{PolicyMarshalingType, PolicyRecord},
+};
 use zanzibar::{Relationship, Subject};
 
 type LogCodec = ((RangeCfg<usize>, ()), RangeCfg<usize>);
@@ -81,19 +84,28 @@ where
     tokio::Runner::new(tokio::Config::new().with_storage_directory(dir.path())).start(f)
 }
 
-fn prefix(object: usize, layout: &str, policy: &str) -> Vec<u8> {
+fn prefix(object: usize, layout: &str, policy: &PolicyRecord) -> Vec<u8> {
     let text = format!("relationship/policy/rel/document/{object:08}/blocked/");
     match layout {
         "grouped" => Sha256::hash(&[text.as_bytes()]).to_vec(),
-        "native" => keys::relationship_storage_prefix(
-            policy,
+        "native" => keys::relationship_generation_prefix(
+            &policy.policy.id,
+            policy
+                .relations
+                .pair(&Relationship::new(
+                    "document",
+                    "",
+                    "blocked",
+                    Subject::entity_set("group", "", "member"),
+                ))
+                .unwrap(),
             &keys::relation_prefix("document", &format!("{object:08}"), "blocked"),
         ),
         _ => text.into_bytes(),
     }
 }
 
-fn key(object: usize, subject: usize, layout: &str, policy: &str) -> Vec<u8> {
+fn key(object: usize, subject: usize, layout: &str, policy: &PolicyRecord) -> Vec<u8> {
     if layout == "native" {
         let relation = Relationship::new(
             "document",
@@ -101,7 +113,11 @@ fn key(object: usize, subject: usize, layout: &str, policy: &str) -> Vec<u8> {
             "blocked",
             Subject::entity_set("group", format!("{subject:08}"), "member"),
         );
-        return keys::relationship_key(policy, &keys::relationship_storage_key(&relation));
+        return keys::relationship_generation_key(
+            &policy.policy.id,
+            policy.relations.pair(&relation).unwrap(),
+            &keys::relationship_storage_key(&relation),
+        );
     }
     let mut key = prefix(object, layout, policy);
     key.extend_from_slice(format!("{subject:08}").as_bytes());
@@ -122,7 +138,7 @@ fn main() {
     let owner = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
         .parse()
         .unwrap();
-    let policy = AcpModule::new().create_policy(&owner, "name: documents\nresources:\n  - name: document\n    relations:\n      - name: blocked\n", PolicyMarshalingType::ShortYaml).unwrap().policy.id;
+    let policy = AcpModule::new().create_policy(&owner, "name: documents\nresources:\n  - name: document\n    relations:\n      - name: blocked\n  - name: group\n    relations:\n      - name: member\n", PolicyMarshalingType::ShortYaml).unwrap();
     assert!((1..=100_000).contains(&objects) && (1..=10_000).contains(&samples));
     run(|context| async move {
         let cfg = config(&context);
