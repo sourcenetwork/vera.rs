@@ -56,13 +56,17 @@ impl Budget {
         Ok(true)
     }
 
-    pub(super) fn changes(&mut self, changes: &[record_store::RecordChange]) -> Result<bool> {
+    pub(super) fn changes(
+        &mut self,
+        items: usize,
+        changes: &[record_store::RecordChange],
+    ) -> Result<bool> {
         let bytes = changes.iter().try_fold(0usize, |total, (key, value)| {
             total
                 .checked_add(record_size(key, value.as_deref().unwrap_or_default())?)
                 .ok_or_else(|| AcpError::State("cleanup write size overflow".into()))
         })?;
-        Ok(self.reserve(1, bytes, changes.len()))
+        Ok(self.reserve(items, bytes, changes.len()))
     }
 }
 
@@ -128,7 +132,8 @@ impl AcpModule {
         retired: &mut RetiredPolicy,
         budget: &mut Budget,
     ) -> Result<CleanupResult> {
-        for removed in 0..JOB_ITEMS {
+        let mut removed = 0;
+        while removed < JOB_ITEMS {
             loop {
                 let prefix = retired.phase.prefix(policy);
                 let Some((key, value)) = self.store.prefix_iter(&prefix).next() else {
@@ -140,15 +145,26 @@ impl AcpModule {
                         None => return Ok(CleanupResult::Complete),
                     }
                 };
-                let Some(changes) =
+                let batch = if retired.phase == Phase::Relationships {
+                    self.prepare_cleanup_relationships(
+                        policy,
+                        None,
+                        key,
+                        JOB_ITEMS - removed,
+                        budget,
+                    )?
+                } else {
                     self.cleanup_item(policy, retired, &prefix, key, value, budget)?
-                else {
+                        .map(|changes| (1, changes))
+                };
+                let Some((items, changes)) = batch else {
                     return Ok(CleanupResult::BudgetExhausted {
                         made_progress: removed > 0,
                     });
                 };
                 record_store::RecordStore::apply_records(&mut self.store, changes)
                     .map_err(relation_state_error)?;
+                removed += items;
                 break;
             }
         }
@@ -165,9 +181,6 @@ impl AcpModule {
         budget: &mut Budget,
     ) -> Result<Option<Vec<record_store::RecordChange>>> {
         let phase = retired.phase;
-        if phase == Phase::Relationships {
-            return self.prepare_cleanup_relationship(key, budget);
-        }
         if !budget.reserve(0, record_size(key, value)?, 0) {
             return Ok(None);
         }
@@ -225,41 +238,94 @@ impl AcpModule {
             }
         };
         let changes: Vec<_> = deletions.into_iter().map(|key| (key, None)).collect();
-        if !budget.changes(&changes)? {
+        if !budget.changes(1, &changes)? {
             return Ok(None);
         }
         Ok(Some(changes))
     }
 
-    pub(super) fn prepare_cleanup_relationship(
+    /// Prepare a byte-fitting prefix of one physical pair without crossing a job quantum.
+    /// `generation` is absent only for a logically deleted policy; otherwise the caller
+    /// has validated that this generation is retired in the current policy catalogue.
+    pub(super) fn prepare_cleanup_relationships(
         &self,
-        key: &[u8],
+        policy: &str,
+        generation: Option<u64>,
+        first_key: &[u8],
+        limit: usize,
         budget: &mut Budget,
-    ) -> Result<Option<Vec<record_store::RecordChange>>> {
-        let bytes = self
-            .store
-            .get_ref(key)
-            .ok_or_else(|| AcpError::State("cleanup relationship missing".into()))?;
-        record_size(key, bytes)?;
+    ) -> Result<Option<(usize, Vec<record_store::RecordChange>)>> {
+        let pair = cleanup_pair(policy, first_key)?;
+        if generation.is_some_and(|id| pair.target != id && pair.subject != id) {
+            return Err(AcpError::State(
+                "cleanup relationship is not retired".into(),
+            ));
+        }
+        let policy_key = keys::policy_key(policy);
+        let policy_bytes = self.store.get_ref(&policy_key);
+        if policy_bytes.is_some() != generation.is_some() {
+            return Err(AcpError::State("cleanup policy state mismatch".into()));
+        }
+        let counters = [
+            relationship_index::outgoing_key(policy, pair),
+            relationship_index::incoming_key(policy, pair),
+        ];
+        let mut read_bytes = record_size(&policy_key, policy_bytes.unwrap_or_default())?;
+        let mut write_bytes = 0;
+        for key in &counters {
+            let value = self.store.get_ref(key).unwrap_or_default();
+            if value.len() != 8 {
+                return Err(AcpError::State(
+                    "cleanup pair counter missing or invalid".into(),
+                ));
+            }
+            read_bytes += record_size(key, value)?;
+            // A surviving pair writes eight bytes; an exhausted pair writes only its key.
+            write_bytes += key.len() + 8;
+        }
+        let Some(mut available) = budget.bytes.checked_sub(read_bytes + write_bytes) else {
+            return Ok(None);
+        };
+        let limit = limit
+            .min(JOB_ITEMS)
+            .min(budget.items)
+            .min(budget.writes.saturating_sub(2));
+        let prefix = keys::relationship_generation_prefix(policy, pair, "");
+        let mut selected = Vec::new();
+        for (key, value) in self.store.prefix_iter(&prefix).take(limit) {
+            let cost = record_size(key, value)? + key.len();
+            let Some(remaining) = available.checked_sub(cost) else {
+                break;
+            };
+            selected.push(key.to_vec());
+            available = remaining;
+        }
+        if selected.is_empty() {
+            return Ok(None);
+        }
+        if selected[0] != first_key {
+            return Err(AcpError::State("cleanup skipped a relationship".into()));
+        }
         let capture = read_capture::ReadCapture::new(
             self.store.clone(),
             read_capture::ReadLimits {
-                reads: 16,
-                records: 16,
+                reads: selected.len() + 3,
+                records: selected.len() + 3,
                 bytes: budget.bytes,
             },
         );
-        let prepared = relationship_mutations::prepare_removals(&capture, &[key.to_vec()]);
-        let Some(remaining) = capture.remaining_limits() else {
-            budget.bytes = 0;
-            return Ok(None);
-        };
-        budget.bytes = remaining.bytes;
-        let changes = prepared.map_err(relation_state_error)?;
-        if !budget.changes(&changes)? {
-            return Ok(None);
+        let changes = relationship_mutations::prepare_removals(&capture, &selected)
+            .map_err(relation_state_error)?;
+        budget.bytes = capture
+            .remaining_limits()
+            .ok_or_else(|| AcpError::State("cleanup batch exceeded its read allowance".into()))?
+            .bytes;
+        if !budget.changes(selected.len(), &changes)? {
+            return Err(AcpError::State(
+                "cleanup batch exceeded its write allowance".into(),
+            ));
         }
-        Ok(Some(changes))
+        Ok(Some((selected.len(), changes)))
     }
 
     pub(super) fn commitment_cleanup_keys(
@@ -283,3 +349,19 @@ impl AcpModule {
         Ok(keys)
     }
 }
+
+fn cleanup_pair(policy: &str, key: &[u8]) -> Result<RelationPair> {
+    let prefix = keys::relationship_policy_prefix(policy);
+    let suffix = key
+        .strip_prefix(prefix.as_slice())
+        .filter(|suffix| suffix.len() >= 34 && suffix[16] == b'/' && suffix[33] == b'/')
+        .ok_or_else(|| AcpError::State("invalid cleanup relationship key".into()))?;
+    Ok(RelationPair {
+        target: relation_cleanup::generation_suffix(&[], &suffix[..16])?,
+        subject: relation_cleanup::generation_suffix(&[], &suffix[17..33])?,
+    })
+}
+
+#[cfg(test)]
+#[path = "retirement_cleanup_tests.rs"]
+mod tests;
