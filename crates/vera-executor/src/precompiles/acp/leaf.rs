@@ -28,6 +28,7 @@ pub(super) fn required_gas(input: &[u8]) -> Option<u64> {
         Some(WRITE_GAS)
     } else if input.starts_with(&IAcp::verifyAccessRequestCall::SELECTOR)
         || input.starts_with(&IAcp::generateCommitmentCall::SELECTOR)
+        || input.starts_with(&IAcp::validatePolicyCall::SELECTOR)
     {
         Some(READ_GAS)
     } else {

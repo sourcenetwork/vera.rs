@@ -486,7 +486,7 @@ fn run(
                 event_id: call.eventId,
             };
 
-            let policy_id = match module.get_amendment_event_by_id(call.eventId) {
+            let policy_id = match module.get_amendment_event_by_id_with_budget(call.eventId, budget) {
                 Ok(Some(event)) => event.policy_id,
                 Ok(None) => {
                     return Ok(err_dispatch(vera_modules::acp::error::AcpError::State(

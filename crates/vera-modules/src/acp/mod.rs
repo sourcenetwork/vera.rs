@@ -11,6 +11,7 @@ mod command_storage;
 pub use command_budget::CommandBudget;
 mod commitment_expiry;
 mod commitment_lookup;
+mod commitment_storage;
 mod index_validation;
 mod lifecycle;
 mod management;
@@ -324,7 +325,7 @@ impl AcpModule {
                 self.cmd_unarchive_object(creator, policy_id, obj, budget)
             }
             PolicyCmd::CommitRegistrations { commitment } => {
-                self.cmd_commit_registrations(creator, policy_id, commitment)
+                self.cmd_commit_registrations(creator, policy_id, commitment, budget)
             }
             PolicyCmd::RevealRegistration {
                 registrations_commitment_id,
@@ -337,7 +338,7 @@ impl AcpModule {
                 budget,
             ),
             PolicyCmd::FlagHijackAttempt { event_id } => {
-                self.cmd_flag_hijack_attempt(creator, policy_id, event_id)
+                self.cmd_flag_hijack_attempt(creator, policy_id, event_id, budget)
             }
         }
     }
@@ -771,64 +772,6 @@ impl AcpModule {
         [keys::COMMITMENT_PREFIX, keys::OBJS_SUBPREFIX].concat()
     }
 
-    #[allow(unused_variables)]
-    fn create_commitment(&mut self, commitment: &mut RegistrationsCommitment) -> Result<()> {
-        let counter = self
-            .store
-            .get(&keys::commitment_counter_key())
-            .map(|bytes| {
-                bytes
-                    .try_into()
-                    .map(u64::from_be_bytes)
-                    .map_err(|_| AcpError::State("invalid record counter".into()))
-            })
-            .transpose()?
-            .unwrap_or(0);
-        let next = counter
-            .checked_add(1)
-            .ok_or_else(|| AcpError::State("record counter exhausted".into()))?;
-        if self.store.has(&keys::commitment_key(next)) {
-            return Err(AcpError::State(
-                "commitment identifier already exists".into(),
-            ));
-        }
-        commitment.id = next;
-        self.update_commitment(commitment)?;
-        self.store
-            .put(&keys::commitment_counter_key(), next.to_be_bytes().to_vec());
-        Ok(())
-    }
-
-    fn update_commitment(&mut self, commitment: &RegistrationsCommitment) -> Result<()> {
-        let bytes = borsh::to_vec(commitment)
-            .map_err(|e| AcpError::State(format!("serialize commitment: {e}")))?;
-        if let Some(previous) = self.get_commitment_by_id(commitment.id)? {
-            self.store.delete(&Self::commitment_expiry_key(&previous));
-            self.store.delete(&keys::commitment_by_commitment_index_key(
-                &previous.commitment,
-                previous.id,
-            ));
-            self.store.delete(&keys::commitment_policy_index_key(
-                &previous.policy_id,
-                previous.id,
-            ));
-        }
-        if !commitment.expired {
-            self.store
-                .put(&Self::commitment_expiry_key(commitment), Vec::new());
-        }
-        self.store.put(
-            &keys::commitment_by_commitment_index_key(&commitment.commitment, commitment.id),
-            Vec::new(),
-        );
-        self.store.put(
-            &keys::commitment_policy_index_key(&commitment.policy_id, commitment.id),
-            Vec::new(),
-        );
-        self.store.put(&keys::commitment_key(commitment.id), bytes);
-        Ok(())
-    }
-
     // ── Storage — Amendment events ───────────────────────────────────────
 
     fn amendment_event_objs_prefix() -> Vec<u8> {
@@ -1095,6 +1038,7 @@ impl AcpModule {
         creator: &Did,
         policy_id: &str,
         commitment: Vec<u8>,
+        budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
         if !self.zanzibar_policies.contains_key(policy_id) {
             return Err(AcpError::PolicyNotFound {
@@ -1111,6 +1055,10 @@ impl AcpModule {
             });
         }
 
+        budget
+            .permissions
+            .records
+            .read(keys::PARAMS_KEY, self.store.get_ref(keys::PARAMS_KEY))?;
         let params = self.get_params()?;
 
         let metadata = RecordMetadata {
@@ -1129,7 +1077,7 @@ impl AcpModule {
             metadata,
         };
 
-        self.create_commitment(&mut reg_commitment)?;
+        self.create_commitment_with_budget(&mut reg_commitment, Some(budget))?;
 
         Ok(PolicyCmdResult::CommitRegistrations {
             registrations_commitment: reg_commitment,
@@ -1267,9 +1215,10 @@ impl AcpModule {
         creator: &Did,
         policy_id: &str,
         event_id: u64,
+        budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
         let mut event = self
-            .get_amendment_event_by_id(event_id)?
+            .get_amendment_event_by_id_with_budget(event_id, budget)?
             .ok_or(AcpError::State(format!(
                 "amendment event {event_id} not found"
             )))?;
@@ -1287,7 +1236,7 @@ impl AcpModule {
         }
 
         event.hijack_flag = true;
-        self.update_amendment_event(&event)?;
+        self.update_amendment_event_with_budget(&event, Some(budget))?;
 
         Ok(PolicyCmdResult::FlagHijackAttempt { event })
     }

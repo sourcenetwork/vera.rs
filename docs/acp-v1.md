@@ -234,8 +234,19 @@ second copy. Direct/bearer definition and bearer token limits are checked before
 owned ABI decoding. Options JSON retains the transaction/batch byte bound and is
 charged in full, including whitespace and escape spelling; its decoded fields
 then undergo normal semantic validation. Parser expansion limits are unchanged.
-Creation accounting does not meter every compiler instruction or the remaining
-relationship/registration mutation paths.
+Creation accounting does not meter every compiler instruction. Command storage
+uses the separate shared command allowance described below.
+
+## Policy validation work
+
+`validatePolicy` charges its 1,000-unit read base plus eight units per 16 bytes of
+leaf calldata and definition processing. Both reservations precede owned ABI
+decoding and policy compilation. Invalid policy definitions, including those above
+the existing 64 KiB definition limit, retain the validation result format; malformed
+ABI or UTF-8 remains an error. Completed work is charged for unsuccessful
+validation too, and insufficient allowance produces out-of-gas, including inside
+nested batches. Existing parser expansion and schema limits remain independent;
+byte accounting does not meter each compiler instruction.
 
 ## Permission evaluation work
 
@@ -316,9 +327,23 @@ preserves the spent allowance. The public `RecordStore` preparation hooks retain
 unmetered defaults for generic stores and maintenance; the command-only adapter
 uses them explicitly and rejects direct unprepared writes.
 
-Commitment creation/index maintenance, hijack-flag record writes and the full
-archive scan/removals still need separate accounting. Archive's fixed owner
-rewrite is charged; its bulk removal remains synchronous, reports the exact
+Commitment creation also reserves parameter, allocation-counter and identifier
+collision reads, then the counter, Borsh record and expiry/root/policy index writes
+before publication. Contextual restamping charges the previous-record read and
+all index removals/replacements before applying any of them. Each prepared index
+operation pays once; the prepaid record encoding is not charged again when the
+plan is applied. End-block expiry uses the same persistence logic with its own
+existing bounded maintenance schedule, outside transaction command allowances.
+
+Hijack flagging charges amendment and policy-liveness reads before decoding, then
+reserves the Borsh rewrite. Direct ABI lookup, generic commands and bearer commands
+use the same caller-owned allowance. Existing flags still pay for their reads and
+rewrite; unauthorized or corrupt records retain spent read work without publishing
+changes. `get_amendment_event_by_id_with_budget` exposes the paid point lookup;
+the convenience lookup retains an unlimited allowance.
+
+The full archive scan/removals still need separate accounting. Archive's fixed
+owner rewrite is charged; its bulk removal remains synchronous, reports the exact
 removed count and preserves the archived owner. No fanout cap or logical-archive
 substitution is introduced. Proof formats and ownership rules are unchanged.
 

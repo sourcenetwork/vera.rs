@@ -24,6 +24,9 @@ mod permissions;
 mod queries;
 #[cfg(test)]
 mod query_budget_tests;
+mod validation;
+#[cfg(test)]
+mod validation_tests;
 
 use alloy_primitives::{B256, Bytes};
 use alloy_sol_types::SolCall;
@@ -460,27 +463,7 @@ fn dispatch_validated(
             Ok(ok_dispatch(READ_GAS, ret, vec![]))
         }
 
-        IAcp::validatePolicyCall::SELECTOR => {
-            if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
-            }
-            let call = IAcp::validatePolicyCall::abi_decode(input).map_err(decode_error)?;
-            let policy_str = String::from_utf8(call.policy.to_vec())
-                .map_err(|_| PrecompileError::Other("invalid UTF-8 in policy".into()))?;
-            let marshal_type = marshal_type_from_u8(call.marshalType);
-
-            let (valid, reason, _policy) =
-                match module.query_validate_policy(&policy_str, marshal_type) {
-                    Ok(r) => r,
-                    Err(e) => return Ok(err_dispatch(e)),
-                };
-
-            let ret = IAcp::validatePolicyCall::abi_encode_returns(&IAcp::validatePolicyReturn {
-                valid,
-                reason,
-            });
-            Ok(ok_dispatch(READ_GAS, ret, vec![]))
-        }
+        IAcp::validatePolicyCall::SELECTOR => validation::dispatch(module, input, gas_limit),
 
         IAcp::getAccessDecisionCall::SELECTOR => {
             if gas_limit < READ_GAS {
