@@ -70,11 +70,7 @@ impl AcpModule {
             | PolicyCmdResult::RegisterObject { record }
             | PolicyCmdResult::RevealRegistration { record, .. } => {
                 record.supplied_metadata = request.metadata;
-                self.set_relationship(
-                    policy_id,
-                    &keys::relationship_storage_key(&record.relationship),
-                    record,
-                );
+                self.set_relationship(record);
             }
             _ => {}
         }

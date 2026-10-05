@@ -116,7 +116,11 @@ impl AcpModule {
                     });
                 };
                 for key in deletions {
-                    self.store.delete(&key);
+                    if retired.phase == Phase::Relationships {
+                        self.remove_relationship_key(&key);
+                    } else {
+                        self.store.delete(&key);
+                    }
                 }
                 break;
             }

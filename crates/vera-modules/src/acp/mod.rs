@@ -13,6 +13,7 @@ mod management;
 mod metadata;
 pub mod pages;
 mod registration_queries;
+mod relationship_mutations;
 mod relationship_queries;
 mod restoration;
 mod retirement;
@@ -287,7 +288,7 @@ impl AcpModule {
         }
         let removed = to_delete.len() as u64;
         for kv_key in to_delete {
-            self.store.delete(&kv_key);
+            self.remove_relationship_key(&kv_key);
         }
 
         let new_record = PolicyRecord {
@@ -744,20 +745,18 @@ impl AcpModule {
             .transpose()
     }
 
-    fn set_relationship(
-        &mut self,
-        policy_id: &str,
-        storage_key: &str,
-        record: &RelationshipRecord,
-    ) {
-        let bytes = serde_json::to_vec(record).expect("serialize RelationshipRecord");
-        self.store
-            .put(&keys::relationship_key(policy_id, storage_key), bytes);
+    fn set_relationship(&mut self, record: &RelationshipRecord) {
+        relationship_mutations::put(&mut self.store, record)
+            .expect("in-memory relationship write cannot fail");
     }
 
     fn delete_relationship(&mut self, policy_id: &str, storage_key: &str) {
-        self.store
-            .delete(&keys::relationship_key(policy_id, storage_key));
+        self.remove_relationship_key(&keys::relationship_key(policy_id, storage_key));
+    }
+
+    fn remove_relationship_key(&mut self, key: &[u8]) {
+        relationship_mutations::remove(&mut self.store, key)
+            .expect("in-memory relationship removal cannot fail");
     }
 
     fn has_relationship(&self, policy_id: &str, storage_key: &str) -> bool {
@@ -987,7 +986,6 @@ impl AcpModule {
             });
         }
 
-        let storage_key = keys::relationship_storage_key(&rel);
         if let Some(record) = self.get_relationship(policy_id, &rel)? {
             return Ok(PolicyCmdResult::SetRelationship {
                 record_existed: true,
@@ -1010,7 +1008,7 @@ impl AcpModule {
             metadata,
         };
 
-        self.set_relationship(policy_id, &storage_key, &record);
+        self.set_relationship(&record);
 
         Ok(PolicyCmdResult::SetRelationship {
             record_existed: false,
@@ -1115,7 +1113,6 @@ impl AcpModule {
         self.ensure_object_unregistered(policy_id, &obj)?;
 
         let owner_rel = Relationship::with_entity(obj.resource, obj.id, "owner", creator.clone());
-        let storage_key = keys::relationship_storage_key(&owner_rel);
 
         let metadata = RecordMetadata {
             creation_ts: Timestamp::default(),
@@ -1132,7 +1129,7 @@ impl AcpModule {
             metadata,
         };
 
-        self.set_relationship(policy_id, &storage_key, &record);
+        self.set_relationship(&record);
 
         Ok(PolicyCmdResult::RegisterObject { record })
     }
@@ -1195,14 +1192,10 @@ impl AcpModule {
         }
         let removed = keys.len() as u64;
         for key in keys {
-            self.store.delete(&key);
+            self.remove_relationship_key(&key);
         }
         owner_rec.archived = true;
-        self.set_relationship(
-            policy_id,
-            &keys::relationship_storage_key(&owner_rec.relationship),
-            &owner_rec,
-        );
+        self.set_relationship(&owner_rec);
         Ok(PolicyCmdResult::ArchiveObject {
             found: true,
             relationships_removed: removed,
@@ -1239,14 +1232,7 @@ impl AcpModule {
         let was_archived = rec.archived;
         rec.archived = false;
 
-        let bytes = serde_json::to_vec(&rec).expect("serialize RelationshipRecord");
-        self.store.put(
-            &keys::relationship_storage_prefix(
-                policy_id,
-                &keys::relationship_storage_key(&rec.relationship),
-            ),
-            bytes,
-        );
+        self.set_relationship(&rec);
 
         Ok(PolicyCmdResult::UnarchiveObject {
             record: rec,
@@ -1349,7 +1335,6 @@ impl AcpModule {
                 "owner",
                 creator.clone(),
             );
-            let storage_key = keys::relationship_storage_key(&owner_rel);
             let record = RelationshipRecord {
                 supplied_metadata: Default::default(),
                 policy_id: policy_id.to_string(),
@@ -1357,7 +1342,7 @@ impl AcpModule {
                 archived: false,
                 metadata,
             };
-            self.set_relationship(policy_id, &storage_key, &record);
+            self.set_relationship(&record);
 
             return Ok(PolicyCmdResult::RevealRegistration {
                 record,
@@ -1410,11 +1395,7 @@ impl AcpModule {
             policy_id,
             &keys::relationship_storage_key(&existing.relationship),
         );
-        self.set_relationship(
-            policy_id,
-            &keys::relationship_storage_key(&record.relationship),
-            &record,
-        );
+        self.set_relationship(&record);
 
         Ok(PolicyCmdResult::RevealRegistration {
             record,
