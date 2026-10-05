@@ -178,7 +178,10 @@ jobs:
     env:
       VERA_E2E_DEADLINE_SCALE: "4"
       VERAD_BINARY: ${{ github.workspace }}/target/debug/verad
-      TMPDIR: $RUNNER_TEMP/vera-e2e-${{ github.run_id }}-${{ github.run_attempt }}-extended
+      TMPDIR: ${{ runner.temp }}/vera-e2e-${{ github.run_id }}-${{ github.run_attempt }}-extended
+      VERA_E2E_DIR: ${{ runner.temp }}/vera-e2e-${{ github.run_id }}-${{ github.run_attempt }}-extended/clusters
+      VERA_E2E_KEEP: "1"
+      RUST_LOG: info
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -212,6 +215,7 @@ jobs:
         run: cargo build --frozen -p verad
 
       - name: Run e2e tests
+        shell: bash
         run: >-
           cargo test --frozen -p vera-e2e
           --test core_chain
@@ -221,8 +225,18 @@ jobs:
           --test validator_bootstrap
           --test validator_epoch_transition
           --test cross_object_acp
-          -- --nocapture
+          -- --nocapture 2>&1 | tee "$TMPDIR/test-output.log"
         timeout-minutes: 15
+
+      - name: Upload failed extended test logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: extended-e2e-logs-${{ github.run_attempt }}
+          path: |
+            ${{ env.TMPDIR }}/test-output.log
+            ${{ env.VERA_E2E_DIR }}/**/logs/*.log
+          if-no-files-found: ignore
 
       - name: Cleanup
         if: always()

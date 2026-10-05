@@ -28,6 +28,8 @@ use vera_modules::acp::abi::IAcp;
 use vera_modules::validator_registry::abi::IValidatorRegistry;
 use vera_modules::validator_registry::types::ValidatorInfo;
 
+const BLOCKS_PER_EPOCH: u64 = 20;
+
 const HARDHAT_KEY_0: &str = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 const REGISTRY_POLICY_YAML: &str = "\
@@ -40,6 +42,14 @@ resources:
       - name: manage
         expr: admin
 ";
+
+// The receipt's epoch records its roster at the boundary for ceremony e + 3.
+// That ceremony can first supply the voting material for epoch e + 4.
+const fn first_reshared_epoch(receipt_height: u64) -> u64 {
+    (receipt_height / BLOCKS_PER_EPOCH)
+        .checked_add(4)
+        .expect("membership activation epoch")
+}
 
 fn parse_policy_id(hex_str: &str) -> FixedBytes<32> {
     let mut bytes = [0u8; 32];
@@ -151,6 +161,7 @@ async fn validator_epoch_transition() {
         .expect("bootstrap keys");
     let trusted_key = *bootstrap.epoch_info().output.public().public();
     let genesis = GenesisBuilder::devnet()
+        .blocks_per_epoch(BLOCKS_PER_EPOCH)
         .operators(administration::operators())
         .funded_accounts(3, "1000000000000000000000000");
 
@@ -237,46 +248,72 @@ async fn validator_epoch_transition() {
 
     // ── D: Verify the registry-backed set completes resharing ─────
 
-    state
-        .wait_for_height(42, Duration::from_secs(60))
-        .await
-        .expect("cluster should advance to epoch 2 after the registry update");
-
-    let logs = tokio::fs::read_to_string(state.node_logs(0).log_path())
-        .await
-        .expect("should read node logs");
-
-    let entered_epochs = logs.matches("entered epoch").count();
-    assert!(
-        entered_epochs >= 3,
-        "expected the engine to enter epochs 0, 1, and 2, got {entered_epochs} entries"
+    let first_epoch = first_reshared_epoch(receipt.block_number);
+    let first_height = first_epoch * BLOCKS_PER_EPOCH;
+    let mut expected_players: Vec<_> = bootstrap
+        .epoch_info()
+        .output
+        .players()
+        .iter()
+        .cloned()
+        .chain([new_public_key])
+        .collect();
+    expected_players.sort();
+    assert_eq!(expected_players.len(), 5);
+    eprintln!(
+        "validator added at height {}; first eligible voting epoch {first_epoch}, height {first_height}",
+        receipt.block_number
     );
+    state
+        .wait_for_height(first_height, vera_e2e::readiness_deadline() * 2)
+        .await
+        .expect("cluster should reach the registry roster's first eligible voting epoch");
 
-    tokio::time::timeout(Duration::from_secs(30), async {
+    let mut last_status = String::from("no eligible light block observed");
+    let result = tokio::time::timeout(vera_e2e::readiness_deadline(), async {
         loop {
-            let latest = client.block_number().await.expect("latest height");
-            for height in (42..=latest).rev() {
-                if let Ok(light) = client
+            let height = client.block_number().await.expect("latest height");
+            if height >= first_height {
+                let light = match client
                     .rpc_call_typed::<LightBlock>("vera_getLightBlock", serde_json::json!([height]))
                     .await
                 {
-                    assert!(light.epoch >= 2);
-                    verify_light_block(&light, &trusted_key)
-                        .expect("reshared group must retain the bootstrap identity");
-                    let material = EpochMaterial::decode_bounded(
-                        &hex::decode(light.epoch_material.trim_start_matches("0x")).unwrap(),
-                    )
-                    .unwrap();
-                    assert_ne!(material.sharing, *bootstrap.epoch_info().output.public(),
-                        "resharing must update the polynomial while preserving the consensus identity");
+                    Ok(light) => light,
+                    Err(error) => {
+                        last_status = format!("latest={height}, light block unavailable: {error}");
+                        tokio::time::sleep(RECEIPT_POLL_INTERVAL).await;
+                        continue;
+                    }
+                };
+                assert_eq!(light.height, height, "light block must match the requested revision");
+                assert!(light.epoch >= first_epoch);
+                verify_light_block(&light, &trusted_key)
+                    .expect("every epoch must retain the bootstrap consensus identity");
+                let material = EpochMaterial::decode_bounded(
+                    &hex::decode(light.epoch_material.trim_start_matches("0x")).unwrap(),
+                )
+                .unwrap();
+                let changed = material.sharing != *bootstrap.epoch_info().output.public();
+                let roster_matches = material.participants.iter().eq(expected_players.iter());
+                last_status = format!(
+                    "verified height={}, epoch={}, members={}, polynomial_changed={changed}, expected_roster={roster_matches}",
+                    light.height, light.epoch, material.participants.len()
+                );
+                eprintln!("{last_status}");
+                if roster_matches {
+                    assert!(changed, "resharing must update the polynomial while preserving the consensus identity");
                     return;
                 }
+                // A failed ceremony legitimately carries the previous output forward.
+                // Only certified material for the complete updated roster completes this wait.
             }
             tokio::time::sleep(RECEIPT_POLL_INTERVAL).await;
         }
-    })
-    .await
-    .expect("reshared epoch should serve a verifiable light block");
+    }).await;
+    assert!(
+        result.is_ok(),
+        "updated validator roster never produced certified resharing material: {last_status}"
+    );
 
     // ── E: Deactivate a validator → triggers another epoch ────────
 

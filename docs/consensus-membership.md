@@ -42,6 +42,16 @@ the end of epoch `e + 1`, which gives every replica the same finalized cutoff.
 Changes after the cutoff enter a later selection. Genesis supplies the initial
 lookahead through epoch 2. A selected roster does not guarantee admission:
 the corresponding resharing ceremony must also succeed.
+The roster selected for ceremony `e + 3` can first supply voting material in
+`e + 4`. A valid certificate from an earlier epoch, or one carrying forward a
+previous ceremony's output, does not prove that a registry change took effect.
+
+The `validator_epoch_transition` fixture derives this earliest epoch from the
+membership receipt and waits for certified material containing the complete new
+roster and a changed polynomial. Its bounded wait still fails if resharing never
+succeeds. Failed extended CI runs retain the test's observed heights, epochs, and
+roster status together with node stdout/stderr logs; generated keys and state
+files are excluded from the artifact.
 
 These records participate in the native state commitment, proposal verification,
 recovery and state synchronization. The provider reads them under the committed
