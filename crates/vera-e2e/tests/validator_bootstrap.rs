@@ -436,8 +436,30 @@ async fn validator_bootstrap() {
 
     // ── F: Cross-node consistency ─────────────────────────────────
 
-    // Query validator state from a different node
+    // The origin receipt does not imply node 1 has applied the removal yet.
     let client2 = VeraClient::new(cluster.node(1).rpc_url());
+    let node1_receipt = client2
+        .wait_for_receipt(
+            receipt.transaction_hash,
+            RECEIPT_POLL_INTERVAL,
+            RECEIPT_POLL_ATTEMPTS,
+        )
+        .await
+        .expect("removal receipt should appear on node 1");
+    assert_eq!(
+        node1_receipt.transaction_hash, receipt.transaction_hash,
+        "node 1 should confirm the same removal transaction"
+    );
+    assert_eq!(node1_receipt.status, 1, "removal should succeed on node 1");
+    assert_eq!(
+        node1_receipt.block_hash, receipt.block_hash,
+        "removal block should match across nodes"
+    );
+    assert_eq!(
+        node1_receipt.block_number, receipt.block_number,
+        "removal height should match across nodes"
+    );
+
     let calldata = IValidatorRegistry::getValidatorsCall {}.abi_encode();
     let result = eth_call_raw(&client2, VALIDATOR_REGISTRY_ADDRESS, calldata).await;
     let decoded = IValidatorRegistry::getValidatorsCall::abi_decode_returns(&result)
@@ -448,6 +470,10 @@ async fn validator_bootstrap() {
         node1_validators.len(),
         all_validators.len(),
         "validator count should match across nodes"
+    );
+    assert_eq!(
+        node1_validators, all_validators,
+        "validator records should match across nodes"
     );
 }
 
