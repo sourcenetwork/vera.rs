@@ -40,9 +40,11 @@ use crate::precompiles::{
 /// Gas budget for native BLS transactions dispatched to modules.
 const NATIVE_TX_GAS_LIMIT: u64 = 1_000_000;
 
+mod gas_budget;
 mod native_authentication;
 mod recovery;
 
+use gas_budget::BlockGasBudget;
 use native_authentication::AuthenticatedNativeTx;
 
 /// Per-module JMT-backed state trees: [acp, bulletin, vera, nonces].
@@ -346,21 +348,15 @@ impl VeraExecutor {
         };
 
         match dispatch_result {
-            Ok(Ok(result)) => {
-                let logs = if result.precompile.reverted {
-                    vec![]
-                } else {
-                    result.logs
-                };
-                Ok(ExecutionReceipt::new(
-                    tx_hash,
-                    !result.precompile.reverted,
-                    result.precompile.gas_used,
-                    0, // cumulative gas set by caller
-                    logs,
-                    None,
-                ))
-            }
+            Ok(Ok(result)) if !result.precompile.reverted => Ok(ExecutionReceipt::new(
+                tx_hash,
+                true,
+                result.precompile.gas_used,
+                0, // cumulative gas set by caller
+                result.logs,
+                None,
+            )),
+            Ok(Ok(_)) => Ok(failed_receipt()),
             Ok(Err(PrecompileError::Fatal(message))) => Err(ExecutionError::TxExecution(message)),
             Ok(Err(_)) => Ok(failed_receipt()),
             Err(_) => {
@@ -412,7 +408,7 @@ impl VeraExecutor {
         };
 
         let mut outcome = ExecutionOutcome::new();
-        let mut cumulative_gas = 0u64;
+        let mut gas_budget = BlockGasBudget::new(context.header.gas_limit);
         let building = !context.is_verification;
         let mut executed_indices: Vec<usize> = Vec::new();
 
@@ -452,6 +448,9 @@ impl VeraExecutor {
         let authentication_elapsed = native_started.map(|started| started.elapsed());
         let native_count = authenticated.len();
         for (i, authenticated) in authenticated {
+            if !gas_budget.admit(NATIVE_TX_GAS_LIMIT, building)? {
+                continue;
+            }
             let receipt = match authenticated.and_then(|authenticated| {
                 self.execute_authenticated_native_tx(
                     authenticated,
@@ -473,6 +472,7 @@ impl VeraExecutor {
                 Err(e) => return Err(e),
             };
 
+            gas_budget.charge(NATIVE_TX_GAS_LIMIT, receipt.gas_used)?;
             let journaled = ctx.journal_mut().finalize();
             outcome.changes.merge(extract_changes(&journaled));
             // Native module storage is retained even when its account has no balance or code.
@@ -494,11 +494,8 @@ impl VeraExecutor {
             }
 
             executed_indices.push(i);
-            let gas_used = receipt.gas_used;
-            cumulative_gas = cumulative_gas.saturating_add(gas_used);
-
             let mut receipt = receipt;
-            receipt.receipt.cumulative_gas_used = cumulative_gas;
+            receipt.receipt.cumulative_gas_used = gas_budget.used();
             outcome.receipts.push(receipt);
         }
 
@@ -537,6 +534,11 @@ impl VeraExecutor {
                 Err(e) => return Err(e),
             };
 
+            let tx_gas_limit = tx_env.gas_limit;
+            if !gas_budget.admit(tx_gas_limit, building)? {
+                continue;
+            }
+
             evm.precompiles.set_tx_hash(tx_hash);
             evm.precompiles.set_signer_did(signer_did);
 
@@ -569,10 +571,14 @@ impl VeraExecutor {
             executed_indices.push(i);
 
             let gas_used = result_and_state.result.gas_used();
-            cumulative_gas = cumulative_gas.saturating_add(gas_used);
+            gas_budget.charge(tx_gas_limit, gas_used)?;
 
-            let receipt =
-                build_receipt(&result_and_state.result, tx_hash, gas_used, cumulative_gas);
+            let receipt = build_receipt(
+                &result_and_state.result,
+                tx_hash,
+                gas_used,
+                gas_budget.used(),
+            );
             outcome.receipts.push(receipt);
 
             let changes = extract_changes(&result_and_state.state);
@@ -608,7 +614,7 @@ impl VeraExecutor {
             outcome.executed_tx_indices = Some(executed_indices);
         }
 
-        outcome.gas_used = cumulative_gas;
+        outcome.gas_used = gas_budget.used();
         outcome.module_state_root = if context.receipt_only {
             B256::ZERO
         } else if let Some(ref trees) = self.module_trees {

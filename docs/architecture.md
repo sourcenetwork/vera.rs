@@ -128,6 +128,12 @@ signers provide concurrent submission lanes; their durable journals prevent
 sequence reuse after restart. Fee provisioning is unnecessary for this native
 path. Reads and local policy validation do not allocate a submission lane.
 
+Proposal construction and verification enforce a shared execution budget. A
+request must fit its full allowance before dispatch; successful execution
+charges its actual reported cost, and failed native dispatch consumes its full
+allowance. See [execution limits](execution-limits.md) for sequence, rollback
+and resource-accounting semantics.
+
 ## ACP reads
 
 ```mermaid

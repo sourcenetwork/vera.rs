@@ -654,3 +654,6 @@ mod sequence;
 
 #[path = "executor/registry_storage.rs"]
 mod registry_storage;
+
+#[path = "executor/block_gas.rs"]
+mod block_gas;
