@@ -51,6 +51,28 @@ impl ModuleJournal {
             })
     }
 
+    pub(super) fn writes_fit_native_bounds(&self) -> bool {
+        self.frames
+            .last()
+            .and_then(Option::as_ref)
+            .is_some_and(|before| {
+                self.modules
+                    .0
+                    .store()
+                    .changes_fit_native_bounds(before.0.store())
+                    && self
+                        .modules
+                        .1
+                        .store()
+                        .changes_fit_native_bounds(before.1.store())
+                    && self
+                        .modules
+                        .2
+                        .store()
+                        .changes_fit_native_bounds(before.2.store())
+            })
+    }
+
     fn end(&mut self, success: bool) {
         let before = self.frames.pop().expect("matching execution checkpoint");
         if let Some(before) = before {

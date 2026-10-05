@@ -6,6 +6,11 @@ use bytes::Bytes;
 use futures::{TryStream, TryStreamExt as _};
 use imbl::{OrdMap, ordmap::DiffItem};
 
+/// Maximum record key accepted by native storage and its proof codecs.
+pub const NATIVE_MAX_KEY_BYTES: usize = 64 << 10;
+/// Maximum record value accepted by native storage and its proof codecs.
+pub const NATIVE_MAX_VALUE_BYTES: usize = 1 << 20;
+
 /// Key-value store abstraction for module state.
 ///
 /// Each module holds a single `impl ModuleKvStore` instead of raw `HashMap`s.
@@ -146,6 +151,21 @@ impl InMemoryKvStore {
     /// Clear the dirty set.
     pub fn reset_dirty(&mut self) {
         self.dirty.clear();
+    }
+
+    /// Whether all final record changes fit native key and value limits.
+    ///
+    /// Borrows changed entries without copying their keys or values. Comparing map
+    /// snapshots includes changes across nested clones that reset dirty tracking.
+    /// Unchanged records and removed values are not writes and are not checked.
+    pub fn changes_fit_native_bounds(&self, base: &Self) -> bool {
+        base.data.diff(&self.data).all(|change| match change {
+            DiffItem::Add(key, value)
+            | DiffItem::Update {
+                new: (key, value), ..
+            } => key.len() <= NATIVE_MAX_KEY_BYTES && value.len() <= NATIVE_MAX_VALUE_BYTES,
+            DiffItem::Remove(key, _) => key.len() <= NATIVE_MAX_KEY_BYTES,
+        })
     }
 
     /// Compute the diff between `self` and `base`, returning all changed/added/deleted keys.
@@ -466,3 +486,7 @@ mod tests {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "kv_store/limits_tests.rs"]
+mod limits_tests;

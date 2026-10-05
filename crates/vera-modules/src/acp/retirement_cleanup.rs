@@ -1,6 +1,7 @@
 //! Deterministic cleanup quanta for logically deleted policies.
 
 use super::*;
+use crate::kv_store::{NATIVE_MAX_KEY_BYTES, NATIVE_MAX_VALUE_BYTES};
 use retirement::{Phase, QUEUE_PREFIX, RetiredPolicy, queue_key, retired_key};
 
 pub(super) const MAX_ITEMS: usize = 128;
@@ -8,9 +9,6 @@ pub(super) const MAX_BYTES: usize = 4 << 20;
 pub(super) const MAX_WRITES: usize = 640;
 pub(super) const MAX_JOBS: usize = 8;
 pub(super) const JOB_ITEMS: usize = 16;
-// The native QMDB codecs and application already enforce these record bounds.
-const MAX_KEY_BYTES: usize = 64 << 10;
-const MAX_RECORD_BYTES: usize = 1 << 20;
 // Queue/marker/counter reads, writes and three empty-prefix probes for a 64-byte ID.
 const JOB_METADATA_BYTES: usize = 1024;
 
@@ -39,7 +37,7 @@ impl Budget {
 }
 
 fn record_size(key: &[u8], value: &[u8]) -> Result<usize> {
-    if key.len() > MAX_KEY_BYTES || value.len() > MAX_RECORD_BYTES {
+    if key.len() > NATIVE_MAX_KEY_BYTES || value.len() > NATIVE_MAX_VALUE_BYTES {
         return Err(AcpError::State(
             "policy cleanup record exceeds native storage bounds".into(),
         ));

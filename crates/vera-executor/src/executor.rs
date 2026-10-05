@@ -295,7 +295,7 @@ impl VeraExecutor {
 
         let before = (acp.clone(), bulletin.clone(), vera.clone());
         let checkpoint = journal.journal_mut().checkpoint();
-        let dispatch_result = catch_unwind(AssertUnwindSafe(|| {
+        let mut dispatch_result = catch_unwind(AssertUnwindSafe(|| {
             if native_tx.target == VALIDATOR_REGISTRY_ADDRESS {
                 journal
                     .journal_mut()
@@ -328,6 +328,16 @@ impl VeraExecutor {
             )
             .expect("target validated above")
         }));
+
+        if matches!(&dispatch_result, Ok(Ok(result)) if !result.precompile.reverted)
+            && !(acp.store().changes_fit_native_bounds(before.0.store())
+                && bulletin.store().changes_fit_native_bounds(before.1.store())
+                && vera.store().changes_fit_native_bounds(before.2.store()))
+        {
+            dispatch_result = Ok(Err(PrecompileError::Other(
+                "module record exceeds native storage bounds".into(),
+            )));
+        }
 
         if !matches!(&dispatch_result, Ok(Ok(result)) if !result.precompile.reverted) {
             (*acp, *bulletin, *vera) = before;
