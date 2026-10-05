@@ -4,7 +4,9 @@ use vera_domain::{ConsensusPublicKey, LIGHT_BLOCK_RESPONSE_BYTES, LightBlock, ve
 
 use crate::{
     ModuleId, PAGE_PROOF_BYTES, PermissionError, PrefixPageProof, PrefixPageRequest, RecordProof,
-    VerifiedPrefixPage, encoded_size, policy::verify_policy, validate_policy_prefix,
+    VerifiedPrefixPage, encoded_size,
+    policy::{current_relationship, verify_policy},
+    validate_policy_prefix,
 };
 
 /// Policy liveness and a relationship page at one native root.
@@ -18,7 +20,8 @@ pub struct PolicyPrefixPageProof {
 }
 
 impl PolicyPrefixPageProof {
-    /// Verify complete page coverage and expose records only for a live policy.
+    /// Verify physical page coverage and expose only current generation records.
+    /// The physical continuation is preserved even when every row is retired.
     pub fn verify(
         &self,
         root: B256,
@@ -40,9 +43,19 @@ impl PolicyPrefixPageProof {
                 "policy and relationships have different roots",
             ));
         }
-        let live = verify_policy(&self.policy, root, policy, maximum_bytes)?;
-        let page = self.page.verify(root, request, maximum_bytes)?;
-        Ok(live.then_some(page))
+        let policy_record = verify_policy(&self.policy, root, policy, maximum_bytes)?;
+        let mut page = self.page.verify(root, request, maximum_bytes)?;
+        let Some(policy_record) = policy_record else {
+            return Ok(None);
+        };
+        let mut entries = Vec::with_capacity(page.entries.len());
+        for entry in page.entries {
+            if current_relationship(&policy_record, &entry.key, &entry.value)? {
+                entries.push(entry);
+            }
+        }
+        page.entries = entries;
+        Ok(Some(page))
     }
 }
 

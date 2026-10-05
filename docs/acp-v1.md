@@ -149,7 +149,7 @@ Physical records can remain after logical deletion. Certified ownership and
 relationship clients must verify the policy's presence at the same revision as
 those records, using the [policy proof APIs](permission-proofs.md#native-prefix-and-owner-reads).
 Generic record and prefix evidence authenticates physical storage only.
-Relationships use the fresh-state `relationship/v3/` namespace; restore rejects
+Relationships use the fresh-state `relationship/v4/` namespace; restore rejects
 older namespaces rather than migrating them. Validators and consumers must use
 matching [key and proof formats](native-relationship-keys.md). Receipt and finality
 formats are unchanged.
@@ -202,3 +202,6 @@ pagination and native-dispatch tests cover metadata, ownership, revocation,
 corruption, bounds, gas rejection and batch rollback. The canonical four-member
 integration test exercises the new native client calls and verifies their finality
 receipts. CI runs the fixture replay without requiring Go.
+
+See [policy edits and relation generations](acp-policy-edits.md) for bounded
+definition editing, exact removal counts, current-query selection and cleanup.

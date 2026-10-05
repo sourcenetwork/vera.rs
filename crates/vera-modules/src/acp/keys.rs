@@ -9,7 +9,7 @@ pub const POLICY_PREFIX: &[u8] = b"policy/objs/";
 /// Policy autoincrement counter key.
 pub const POLICY_COUNTER_KEY: &[u8] = b"policy/counter/id";
 /// Current native relationship namespace; older namespaces are not migrated.
-pub const RELATIONSHIP_PREFIX: &[u8] = b"relationship/v3/";
+pub const RELATIONSHIP_PREFIX: &[u8] = b"relationship/v4/";
 /// Access decision prefix (string-keyed objects).
 pub const ACCESS_DECISION_PREFIX: &[u8] = b"access_decision/";
 /// Registration commitment prefix (auto-increment objects).
@@ -69,12 +69,43 @@ pub fn relation_prefix(resource: &str, object_id: &str, relation: &str) -> Strin
     )
 }
 
-/// Relationship key: `"relationship/v3/" + policy_id + "/" + storage_key`.
+/// Canonical key for a permanent object-owner record.
 pub fn relationship_key(policy_id: &str, storage_key: &str) -> Vec<u8> {
-    let mut key = Vec::from(RELATIONSHIP_PREFIX);
-    key.extend_from_slice(policy_id.as_bytes());
-    key.push(b'/');
-    key.extend_from_slice(storage_key.as_bytes());
+    relationship_generation_key(
+        policy_id,
+        super::types::RelationPair {
+            target: 0,
+            subject: 0,
+        },
+        storage_key,
+    )
+}
+
+/// Key in an immutable target/userset relation-generation bucket.
+pub fn relationship_generation_key(
+    policy_id: &str,
+    pair: super::types::RelationPair,
+    storage_key: &str,
+) -> Vec<u8> {
+    relationship_generation_prefix(policy_id, pair, storage_key)
+}
+
+/// Prefix in one target/userset generation bucket.
+pub fn relationship_generation_prefix(
+    policy_id: &str,
+    pair: super::types::RelationPair,
+    storage_prefix: &str,
+) -> Vec<u8> {
+    let mut key = relationship_target_prefix(policy_id, pair.target);
+    key.extend_from_slice(format!("{:016x}/", pair.subject).as_bytes());
+    key.extend_from_slice(storage_prefix.as_bytes());
+    key
+}
+
+/// All physical records whose target is one immutable relation generation.
+pub fn relationship_target_prefix(policy_id: &str, generation: u64) -> Vec<u8> {
+    let mut key = relationship_policy_prefix(policy_id);
+    key.extend_from_slice(format!("{generation:016x}/").as_bytes());
     key
 }
 
@@ -86,11 +117,16 @@ pub fn relationship_policy_prefix(policy_id: &str) -> Vec<u8> {
     key
 }
 
-/// Prefix for scanning relationships matching a storage key prefix within a policy.
+/// Prefix for permanent owner records within a policy.
 pub fn relationship_storage_prefix(policy_id: &str, storage_prefix: &str) -> Vec<u8> {
-    let mut key = relationship_policy_prefix(policy_id);
-    key.extend_from_slice(storage_prefix.as_bytes());
-    key
+    relationship_generation_prefix(
+        policy_id,
+        super::types::RelationPair {
+            target: 0,
+            subject: 0,
+        },
+        storage_prefix,
+    )
 }
 
 /// Access decision key: `prefix + decision_id`.

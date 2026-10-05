@@ -198,3 +198,156 @@ fn policy_evidence_revokes_retained_relationships_at_the_deletion_root() {
         },
     );
 }
+
+#[test]
+fn policy_pages_filter_retired_generations_without_losing_the_physical_cursor() {
+    const SCHEMA: &str = "\
+name: generations
+resources:
+  - name: document
+    relations:
+      - name: reader
+  - name: group
+    relations:
+      - name: member
+";
+    let directory = tempfile::tempdir().unwrap();
+    tokio::Runner::new(tokio::Config::new().with_storage_directory(directory.path())).start(
+        |context| async move {
+            let set = init(&context).await;
+            let actor = "did:key:owner".parse().unwrap();
+            let mut state = ModuleState::default();
+            let policy = state
+                .acp
+                .create_policy(&actor, SCHEMA, PolicyMarshalingType::ShortYaml)
+                .unwrap();
+            let id = &policy.policy.id;
+            state
+                .acp
+                .direct_policy_cmd(
+                    &actor,
+                    id,
+                    PolicyCmd::RegisterObject(Object {
+                        resource: "document".into(),
+                        id: "report".into(),
+                    }),
+                )
+                .unwrap();
+            let direct = Relationship::with_entity("document", "report", "reader", actor.clone());
+            let userset = Relationship::new(
+                "document",
+                "report",
+                "reader",
+                Subject::entity_set("group", "staff", "member"),
+            );
+            for relationship in [&direct, &userset] {
+                state
+                    .acp
+                    .direct_policy_cmd(&actor, id, PolicyCmd::SetRelationship(relationship.clone()))
+                    .unwrap();
+            }
+            let prefix = keys::relationship_policy_prefix(id);
+            let old_key = keys::relationship_generation_key(
+                id,
+                policy.relations.pair(&direct).unwrap(),
+                &keys::relationship_storage_key(&direct),
+            );
+            let mut request = PrefixPageRequest {
+                module: ModuleId::Acp,
+                prefix: prefix.clone().into(),
+                start: old_key.into(),
+                limit: 1,
+            };
+            let original_root = apply(&set, state.diff_from(&ModuleState::default())).await;
+            let original_policy = {
+                let (a, b, h, n) =
+                    futures::join!(set.0.read(), set.1.read(), set.2.read(), set.3.read());
+                policy_prefix_page_at([&a, &b, &h, &n], original_root, id, &request)
+                    .await
+                    .unwrap()
+                    .policy
+            };
+            let before = state.clone();
+            let removed_schema = SCHEMA.replace("    relations:\n      - name: reader\n", "");
+            assert_eq!(
+                state
+                    .acp
+                    .edit_policy(&actor, id, &removed_schema, PolicyMarshalingType::ShortYaml)
+                    .unwrap()
+                    .0,
+                2
+            );
+            let (_, recreated) = state
+                .acp
+                .edit_policy(&actor, id, SCHEMA, PolicyMarshalingType::ShortYaml)
+                .unwrap();
+            state
+                .acp
+                .direct_policy_cmd(&actor, id, PolicyCmd::SetRelationship(direct.clone()))
+                .unwrap();
+            let fresh_pair = recreated.relations.pair(&direct).unwrap();
+            assert_ne!(fresh_pair, policy.relations.pair(&direct).unwrap());
+            let root = apply(&set, state.diff_from(&before)).await;
+            let (a, b, h, n) =
+                futures::join!(set.0.read(), set.1.read(), set.2.read(), set.3.read());
+            let dbs: [&crate::native::NativeDb; 4] = [&a, &b, &h, &n];
+            let raw = prefix_proof_at(dbs, root, ModuleId::Acp, &prefix)
+                .await
+                .unwrap();
+            assert_eq!(
+                raw.verify(root, ModuleId::Acp, &prefix, RECORD_PROOF_BYTES)
+                    .unwrap()
+                    .entries
+                    .len(),
+                4
+            );
+            assert!(
+                policy_prefix_proof_at(dbs, root, id, &prefix)
+                    .await
+                    .is_err()
+            );
+            let first = policy_prefix_page_at(dbs, root, id, &request)
+                .await
+                .unwrap();
+            let physical = first.page.verify(root, &request, PAGE_PROOF_BYTES).unwrap();
+            assert_eq!(physical.entries.len(), 1);
+            let current = first
+                .verify(root, id, &request, PAGE_PROOF_BYTES)
+                .unwrap()
+                .unwrap();
+            assert!(current.entries.is_empty());
+            assert!(current.continuation.is_some());
+            assert_eq!(current.continuation, physical.continuation);
+            let complete = vera_permission::PolicyPrefixProof {
+                policy: first.policy.clone(),
+                prefix: raw,
+            };
+            assert!(
+                complete
+                    .verify(root, id, &prefix, RECORD_PROOF_BYTES)
+                    .is_err()
+            );
+            let mut mixed = first.clone();
+            mixed.policy = original_policy;
+            assert!(mixed.verify(root, id, &request, PAGE_PROOF_BYTES).is_err());
+            let mut continuation = current.continuation;
+            let mut records = Vec::new();
+            while let Some(start) = continuation {
+                request.start = start;
+                let page = policy_prefix_page_at(dbs, root, id, &request)
+                    .await
+                    .unwrap()
+                    .verify(root, id, &request, PAGE_PROOF_BYTES)
+                    .unwrap()
+                    .unwrap();
+                records.extend(page.entries);
+                continuation = page.continuation;
+            }
+            assert_eq!(records.len(), 1);
+            let record: vera_modules::acp::types::RelationshipRecord =
+                serde_json::from_slice(&records[0].value).unwrap();
+            assert_eq!(record.relationship, direct);
+            assert_eq!(record.generations, fresh_pair);
+        },
+    );
+}

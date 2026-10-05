@@ -110,6 +110,9 @@ fn decode(key: &[u8], value: &[u8]) -> Result<PolicyRecord, ClientError> {
             "policy record differs from selection",
         ));
     }
+    record.relations.validate(&record.policy).map_err(|_| {
+        ClientError::InvalidResponse("policy relation generations differ from definition")
+    })?;
     Ok(record)
 }
 
@@ -136,6 +139,12 @@ mod tests {
         let mut trailing = bytes;
         trailing.push(b'!');
         assert!(decode(&key, &trailing).is_err());
+        let mut missing = serde_json::to_value(&record).unwrap();
+        missing.as_object_mut().unwrap().remove("relations");
+        assert!(decode(&key, &serde_json::to_vec(&missing).unwrap()).is_err());
+        let mut invalid = record.clone();
+        invalid.relations.next = 0;
+        assert!(decode(&key, &serde_json::to_vec(&invalid).unwrap()).is_err());
         record.policy.id = "A".repeat(64);
         assert!(
             decode(

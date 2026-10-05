@@ -13,6 +13,11 @@ mod management;
 mod metadata;
 pub mod pages;
 mod registration_queries;
+mod relation_cleanup;
+mod relation_edits;
+pub mod relation_generations;
+mod relation_restoration;
+pub mod relationship_index;
 mod relationship_mutations;
 mod relationship_queries;
 mod restoration;
@@ -52,7 +57,8 @@ use types::{
     AccessDecision, AccessRequest, AcpParams, Actor, AmendmentEvent, DecisionParams,
     GenerateCommitmentResult, Object, ObjectSelector, PolicyCmd, PolicyCmdResult,
     PolicyMarshalingType, PolicyRecord, RecordMetadata, RegistrationProof, RegistrationsCommitment,
-    RelationSelector, RelationshipRecord, RelationshipSelector, SubjectSelector, SuppliedMetadata,
+    RelationGenerations, RelationPair, RelationSelector, RelationshipRecord, RelationshipSelector,
+    SubjectSelector, SuppliedMetadata,
 };
 
 type Result<T> = std::result::Result<T, AcpError>;
@@ -71,7 +77,9 @@ type Result<T> = std::result::Result<T, AcpError>;
 /// "policy/retired/" + policy_id                         → RetiredPolicy (Borsh)
 /// "policy/cleanup/queue/" + BE(sequence)                → policy_id
 /// "policy/cleanup/counter"                             → u64 BE
-/// "relationship/v3/" + policy_id + "/" + storage_key    → RelationshipRecord (serde_json)
+/// "relationship/v4/" + policy_id + "/" + pair + storage_key → RelationshipRecord (serde_json)
+/// "relation_state/" + policy_id + "/" + index_key       → pair counts, current directories, retired names
+/// "relation_cleanup/queue/" + BE(sequence)             → RelationJob (serde_json)
 /// "access_decision/" + decision_id                     → AccessDecision (Borsh)
 /// "commitment/objs/" + BE(id)                          → RegistrationsCommitment (Borsh)
 /// "commitment/counter/id"                              → u64 BE
@@ -86,6 +94,10 @@ type Result<T> = std::result::Result<T, AcpError>;
 pub struct AcpModule {
     store: InMemoryKvStore,
     zanzibar_policies: OrdMap<String, Arc<Policy>>,
+}
+
+fn relation_state_error(error: zanzibar::error::Error) -> AcpError {
+    AcpError::State(error.to_string())
 }
 
 impl Default for AcpModule {
@@ -173,6 +185,7 @@ impl AcpModule {
         let zanzibar_policy = Self::compile_policy(policy, &marshal_type, counter, specification)?;
 
         let record = PolicyRecord {
+            relations: RelationGenerations::new(&zanzibar_policy).map_err(relation_state_error)?,
             supplied_metadata: supplied,
             last_modified: None,
             policy: zanzibar_policy.clone(),
@@ -226,79 +239,45 @@ impl AcpModule {
             Some(existing.policy.specification),
         )?;
 
-        // Validate preserved resources requirement: existing resources must still be present.
-        let existing_policy = &existing.policy;
-        for old_resource in &existing_policy.resources {
-            let still_present = new_zanzibar
-                .resources
-                .iter()
-                .any(|r| r.name == old_resource.name);
-            if !still_present {
+        for resource in &existing.policy.resources {
+            if new_zanzibar.get_resource(&resource.name).is_none() {
                 return Err(AcpError::InvalidPolicy {
                     reason: format!(
                         "resource '{}' cannot be removed from an existing policy",
-                        old_resource.name
+                        resource.name
                     ),
                 });
             }
         }
-
-        if existing_policy.actor.as_ref().map(|actor| &actor.name)
+        if existing.policy.actor.as_ref().map(|actor| &actor.name)
             != new_zanzibar.actor.as_ref().map(|actor| &actor.name)
         {
             return Err(AcpError::InvalidPolicy {
                 reason: "actor resource cannot be renamed".into(),
             });
         }
-
         new_zanzibar.id = policy_id.to_string();
-
-        // Prune orphaned relationships: relations that existed in old policy but not new.
-        let prefix = keys::relationship_policy_prefix(policy_id);
-        let mut to_delete = Vec::new();
-        for (kv_key, value) in self.store.prefix_iter(&prefix) {
-            let record: RelationshipRecord = serde_json::from_slice(value).map_err(|error| {
-                AcpError::State(format!("invalid relationship record: {error}"))
-            })?;
-            let relationship = &record.relationship;
-            if record.policy_id != policy_id
-                || keys::relationship_key(policy_id, &keys::relationship_storage_key(relationship))
-                    .as_slice()
-                    != kv_key
-            {
-                return Err(AcpError::State(
-                    "relationship record differs from its key".into(),
-                ));
-            }
-            let removed_subject = match &relationship.subject {
-                acp::Subject::EntitySet {
-                    resource, relation, ..
-                } if !relation.is_empty() => {
-                    new_zanzibar.get_relation(resource, relation).is_none()
-                }
-                _ => false,
-            };
-            if removed_subject
-                || new_zanzibar
-                    .get_relation(&relationship.resource, &relationship.relation)
-                    .is_none()
-            {
-                to_delete.push(kv_key.to_vec());
-            }
-        }
-        let removed = to_delete.len() as u64;
-        for kv_key in to_delete {
-            self.remove_relationship_key(&kv_key);
-        }
-
+        let (relations, retired) = existing
+            .relations
+            .updated(&existing.policy, &new_zanzibar)
+            .map_err(relation_state_error)?;
+        let (removed, changes) =
+            self.prepare_relation_edit(policy_id, &existing.relations, &relations, &retired)?;
         let new_record = PolicyRecord {
+            relations,
             supplied_metadata: existing.supplied_metadata.clone(),
             last_modified: existing.last_modified.clone(),
             policy: new_zanzibar.clone(),
             raw_policy: policy.to_string(),
             marshal_type,
-            metadata: existing.metadata.clone(),
+            metadata: existing.metadata,
         };
+        for (key, value) in changes {
+            match value {
+                Some(value) => self.store.put(&key, value),
+                None => self.store.delete(&key),
+            }
+        }
 
         self.set_policy_record(policy_id, &new_record);
         self.zanzibar_policies
@@ -390,6 +369,18 @@ impl AcpModule {
     /// to retain authenticated submission metadata and registration priority.
     #[allow(unused_variables)]
     pub fn direct_policy_cmd(
+        &mut self,
+        creator: &Did,
+        policy_id: &str,
+        cmd: PolicyCmd,
+    ) -> Result<PolicyCmdResult> {
+        let mut candidate = self.clone();
+        let result = candidate.apply_policy_cmd(creator, policy_id, cmd)?;
+        *self = candidate;
+        Ok(result)
+    }
+
+    fn apply_policy_cmd(
         &mut self,
         creator: &Did,
         policy_id: &str,
@@ -678,7 +669,14 @@ impl AcpModule {
         let mut candidate = self.clone();
         candidate.prune_operations(block_ctx.timestamp.seconds)?;
         let expired = candidate.expire_commitments(&block_ctx.timestamp)?;
-        candidate.collect_retired_policies()?;
+        let mut budget = retirement_cleanup::Budget::new();
+        if block_ctx.timestamp.block_height.is_multiple_of(2) {
+            candidate.collect_retired_policies(&mut budget)?;
+            candidate.collect_retired_relations(&mut budget)?;
+        } else {
+            candidate.collect_retired_relations(&mut budget)?;
+            candidate.collect_retired_policies(&mut budget)?;
+        }
         *self = candidate;
         Ok(expired)
     }
@@ -696,6 +694,10 @@ impl AcpModule {
                 if record.policy.id != id {
                     return Err(AcpError::State("policy record identity mismatch".into()));
                 }
+                record
+                    .relations
+                    .validate(&record.policy)
+                    .map_err(relation_state_error)?;
                 Ok(record)
             })
             .transpose()
@@ -729,13 +731,26 @@ impl AcpModule {
         policy_id: &str,
         relationship: &Relationship,
     ) -> Result<Option<RelationshipRecord>> {
-        let storage_key = keys::relationship_storage_key(relationship);
+        let Some(policy) = self.get_policy_record(policy_id)? else {
+            return Ok(None);
+        };
+        let Ok(pair) = policy.relations.pair(relationship) else {
+            return Ok(None);
+        };
+        let key = keys::relationship_generation_key(
+            policy_id,
+            pair,
+            &keys::relationship_storage_key(relationship),
+        );
         self.store
-            .get_ref(&keys::relationship_key(policy_id, &storage_key))
+            .get_ref(&key)
             .map(|bytes| {
                 let record: RelationshipRecord = serde_json::from_slice(bytes)
                     .map_err(|e| AcpError::State(format!("invalid relationship record: {e}")))?;
-                if record.policy_id != policy_id || record.relationship != *relationship {
+                if record.policy_id != policy_id
+                    || record.relationship != *relationship
+                    || record.generations != pair
+                {
                     return Err(AcpError::State(
                         "relationship record identity mismatch".into(),
                     ));
@@ -745,20 +760,22 @@ impl AcpModule {
             .transpose()
     }
 
-    fn set_relationship(&mut self, record: &RelationshipRecord) {
-        relationship_mutations::put(&mut self.store, record)
-            .expect("in-memory relationship write cannot fail");
+    fn relationship_pair(&self, policy: &str, relationship: &Relationship) -> Result<RelationPair> {
+        self.query_policy(policy)?
+            .relations
+            .pair(relationship)
+            .map_err(relation_state_error)
     }
 
-    fn delete_relationship(&mut self, policy_id: &str, storage_key: &str) {
-        self.remove_relationship_key(&keys::relationship_key(policy_id, storage_key));
+    fn set_relationship(&mut self, record: &RelationshipRecord) -> Result<()> {
+        relationship_mutations::put(&mut self.store, record).map_err(relation_state_error)
     }
 
-    fn remove_relationship_key(&mut self, key: &[u8]) {
-        relationship_mutations::remove(&mut self.store, key)
-            .expect("in-memory relationship removal cannot fail");
+    fn remove_relationship_key(&mut self, key: &[u8]) -> Result<()> {
+        relationship_mutations::remove(&mut self.store, key).map_err(relation_state_error)
     }
 
+    #[cfg(test)]
     fn has_relationship(&self, policy_id: &str, storage_key: &str) -> bool {
         self.store
             .has(&keys::relationship_key(policy_id, storage_key))
@@ -1001,6 +1018,7 @@ impl AcpModule {
         };
 
         let record = RelationshipRecord {
+            generations: self.relationship_pair(policy_id, &rel)?,
             supplied_metadata: Default::default(),
             policy_id: policy_id.to_string(),
             relationship: rel,
@@ -1008,7 +1026,7 @@ impl AcpModule {
             metadata,
         };
 
-        self.set_relationship(&record);
+        self.set_relationship(&record)?;
 
         Ok(PolicyCmdResult::SetRelationship {
             record_existed: false,
@@ -1056,9 +1074,16 @@ impl AcpModule {
             });
         }
 
-        let storage_key = keys::relationship_storage_key(&rel);
-        let record_found = self.get_relationship(policy_id, &rel)?.is_some();
-        self.delete_relationship(policy_id, &storage_key);
+        let existing = self.get_relationship(policy_id, &rel)?;
+        let record_found = existing.is_some();
+        if let Some(record) = existing {
+            let key = keys::relationship_generation_key(
+                policy_id,
+                record.generations,
+                &keys::relationship_storage_key(&record.relationship),
+            );
+            self.remove_relationship_key(&key)?;
+        }
 
         Ok(PolicyCmdResult::DeleteRelationship { record_found })
     }
@@ -1122,6 +1147,7 @@ impl AcpModule {
         };
 
         let record = RelationshipRecord {
+            generations: self.relationship_pair(policy_id, &owner_rel)?,
             supplied_metadata: Default::default(),
             policy_id: policy_id.to_string(),
             relationship: owner_rel,
@@ -1129,7 +1155,7 @@ impl AcpModule {
             metadata,
         };
 
-        self.set_relationship(&record);
+        self.set_relationship(&record)?;
 
         Ok(PolicyCmdResult::RegisterObject { record })
     }
@@ -1165,37 +1191,25 @@ impl AcpModule {
                 ),
             });
         }
-        let prefix = keys::relationship_storage_prefix(
-            policy_id,
-            &keys::object_prefix(&obj.resource, &obj.id),
-        );
+        let policy = self.query_policy(policy_id)?;
+        let selector = RelationshipSelector {
+            object_selector: Some(ObjectSelector::Exact(obj)),
+            relation_selector: None,
+            subject_selector: None,
+        };
         let mut keys = Vec::new();
-        for (key, value) in self.store.prefix_iter(&prefix) {
-            let record: RelationshipRecord = serde_json::from_slice(value).map_err(|error| {
-                AcpError::State(format!("invalid relationship record: {error}"))
-            })?;
-            if record.policy_id != policy_id
-                || keys::relationship_key(
-                    policy_id,
-                    &keys::relationship_storage_key(&record.relationship),
-                ) != key
-            {
-                return Err(AcpError::State(
-                    "relationship record does not match its key".into(),
-                ));
-            }
-            if record.relationship.resource == obj.resource
-                && record.relationship.object_id == obj.id
-            {
+        for prefix in self.relationship_query_prefixes(&policy, &selector)? {
+            for (key, value) in self.store.prefix_iter(&prefix) {
+                Self::decode_current_relationship(&policy, key, value)?;
                 keys.push(key.to_vec());
             }
         }
         let removed = keys.len() as u64;
         for key in keys {
-            self.remove_relationship_key(&key);
+            self.remove_relationship_key(&key)?;
         }
         owner_rec.archived = true;
-        self.set_relationship(&owner_rec);
+        self.set_relationship(&owner_rec)?;
         Ok(PolicyCmdResult::ArchiveObject {
             found: true,
             relationships_removed: removed,
@@ -1232,7 +1246,7 @@ impl AcpModule {
         let was_archived = rec.archived;
         rec.archived = false;
 
-        self.set_relationship(&rec);
+        self.set_relationship(&rec)?;
 
         Ok(PolicyCmdResult::UnarchiveObject {
             record: rec,
@@ -1336,13 +1350,14 @@ impl AcpModule {
                 creator.clone(),
             );
             let record = RelationshipRecord {
+                generations: self.relationship_pair(policy_id, &owner_rel)?,
                 supplied_metadata: Default::default(),
                 policy_id: policy_id.to_string(),
                 relationship: owner_rel,
                 archived: false,
                 metadata,
             };
-            self.set_relationship(&record);
+            self.set_relationship(&record)?;
 
             return Ok(PolicyCmdResult::RevealRegistration {
                 record,
@@ -1372,6 +1387,7 @@ impl AcpModule {
             creator.clone(),
         );
         let record = RelationshipRecord {
+            generations: self.relationship_pair(policy_id, &amended_rel)?,
             supplied_metadata: Default::default(),
             policy_id: policy_id.to_string(),
             relationship: amended_rel,
@@ -1391,11 +1407,12 @@ impl AcpModule {
         };
 
         self.create_amendment_event(&mut event)?;
-        self.delete_relationship(
+        self.remove_relationship_key(&keys::relationship_generation_key(
             policy_id,
+            existing.generations,
             &keys::relationship_storage_key(&existing.relationship),
-        );
-        self.set_relationship(&record);
+        ))?;
+        self.set_relationship(&record)?;
 
         Ok(PolicyCmdResult::RevealRegistration {
             record,
