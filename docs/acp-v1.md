@@ -298,12 +298,29 @@ still precedes outcome recovery. Ordinary dispatch denials retain base and spent
 units, including in nested batches. Failed native transactions continue to charge
 the full native transaction allowance, as before.
 
-This covers command input and management authorization, not every physical
-command read or mutation. Relationship/index rewrites, registration and commitment
-storage work, and archive's object-row scan still need separate accounting.
-Archive still removes grants synchronously, reports the exact removed count and
-preserves the archived owner; no fanout cap or logical-archive substitution is
-introduced. Proof formats and ownership rules are unchanged.
+Relationship point storage for set/delete, register, transfer, unarchive and reveal
+uses the same allowance, including contextual and supplied-metadata rewrites.
+Policy, existing relationship, mirrored pair-count, subject-directory and object
+pair-count reads reserve work before copying or decoding. Prepared replacements
+and deletions cost 200 units plus two per 16 encoded key/value bytes; JSON encoding
+reserves bytes before extending its buffer. Primary records, both count mirrors,
+changed directories and object counters each pay once per prepared write. Applying
+a complete prepared plan does not charge those writes again. Idempotent grants
+still pay for their reads and return the original record; metadata-only rewrites
+validate counters without charging nonexistent counter writes.
+
+Reveal also charges its commitment and policy-liveness reads, amendment counter
+and collision reads, and the amendment record/index writes. Exhaustion during a
+late metadata or amendment rewrite restores every earlier command change and
+preserves the spent allowance. The public `RecordStore` preparation hooks retain
+unmetered defaults for generic stores and maintenance; the command-only adapter
+uses them explicitly and rejects direct unprepared writes.
+
+Commitment creation/index maintenance, hijack-flag record writes and the full
+archive scan/removals still need separate accounting. Archive's fixed owner
+rewrite is charged; its bulk removal remains synchronous, reports the exact
+removed count and preserves the archived owner. No fanout cap or logical-archive
+substitution is introduced. Proof formats and ownership rules are unchanged.
 
 ## Batch dispatch limits
 

@@ -192,21 +192,22 @@ pub(super) fn prepare_counts<S: RecordStore>(
             }
         }
         if previous != next {
-            let value = (next > 0).then(|| next.to_be_bytes().to_vec());
-            changes.push((outgoing_key(policy, *pair), value.clone()));
-            changes.push((incoming_key(policy, *pair), value));
+            let encoded = next.to_be_bytes();
+            let value = (next > 0).then_some(encoded.as_slice());
+            changes.push(store.prepare_write(&outgoing_key(policy, *pair), value)?);
+            changes.push(store.prepare_write(&incoming_key(policy, *pair), value)?);
         }
     }
     for (target, (subjects, changed)) in directories {
         if !changed {
             continue;
         }
-        let value = if subjects.is_empty() {
-            None
+        let key = active_key(policy, target);
+        changes.push(if subjects.is_empty() {
+            store.prepare_write(&key, None)?
         } else {
-            Some(serde_json::to_vec(&subjects)?)
-        };
-        changes.push((active_key(policy, target), value));
+            store.prepare_json(&key, &subjects)?
+        });
     }
     Ok(changes)
 }

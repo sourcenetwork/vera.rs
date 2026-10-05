@@ -50,7 +50,7 @@ impl AcpModule {
             .apply_records(changes)
             .map_err(relation_state_error)?;
         owner.archived = true;
-        self.set_relationship(&owner)?;
+        self.set_relationship_with_budget(&owner, budget)?;
         Ok(PolicyCmdResult::ArchiveObject {
             found: true,
             relationships_removed: removed,

@@ -133,7 +133,13 @@ pub(super) fn prepare_change<S: RecordStore>(
         previous.checked_sub(amount)
     }
     .ok_or_else(|| invalid("object relationship count overflow or underflow"))?;
-    Ok((next != previous).then(|| (key, (next > 0).then(|| next.to_be_bytes().to_vec()))))
+    if next == previous {
+        return Ok(None);
+    }
+    let encoded = next.to_be_bytes();
+    store
+        .prepare_write(&key, (next > 0).then_some(encoded.as_slice()))
+        .map(Some)
 }
 
 #[cfg(test)]

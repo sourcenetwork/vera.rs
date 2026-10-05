@@ -80,7 +80,7 @@ impl AcpModule {
         } = &command
         {
             let commitment = self
-                .get_commitment_by_id(*registrations_commitment_id)?
+                .get_commitment_by_id_with_budget(*registrations_commitment_id, Some(budget))?
                 .ok_or(AcpError::CommitmentNotFound {
                     id: *registrations_commitment_id,
                 })?;
@@ -114,7 +114,7 @@ impl AcpModule {
                 record,
             } => {
                 record.metadata = metadata;
-                self.set_relationship(record)?;
+                self.set_relationship_with_budget(record, budget)?;
             }
             PolicyCmdResult::CommitRegistrations {
                 registrations_commitment,
@@ -124,10 +124,10 @@ impl AcpModule {
             }
             PolicyCmdResult::RevealRegistration { record, event } => {
                 record.metadata = metadata;
-                self.set_relationship(record)?;
+                self.set_relationship_with_budget(record, budget)?;
                 if let Some(event) = event {
                     event.metadata = event_metadata;
-                    self.update_amendment_event(event)?;
+                    self.update_amendment_event_with_budget(event, Some(budget))?;
                 }
             }
             _ => {}

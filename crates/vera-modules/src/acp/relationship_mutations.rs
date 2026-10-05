@@ -26,7 +26,7 @@ pub(super) fn put<S: RecordStore>(store: &mut S, record: &RelationshipRecord) ->
             return Err(invalid("relationship key collision"));
         }
     }
-    let encoded = serde_json::to_vec(record)?;
+    let primary = store.prepare_json(&key, record)?;
     let mut changes = relationship_index::prepare_counts(
         store,
         &record.policy_id,
@@ -41,12 +41,12 @@ pub(super) fn put<S: RecordStore>(store: &mut S, record: &RelationshipRecord) ->
     )? {
         changes.push(change);
     }
-    changes.push((key, Some(encoded)));
+    changes.push(primary);
     store.apply_records(changes)
 }
 
 pub(super) fn remove<S: RecordStore>(store: &mut S, key: &[u8]) -> Result<()> {
-    let changes = prepare_removals(store, &[key.to_vec()])?;
+    let changes = prepare_removal_keys(store, std::iter::once(key))?;
     if changes.is_empty() {
         return Ok(());
     }
@@ -58,6 +58,13 @@ pub(super) fn remove<S: RecordStore>(store: &mut S, key: &[u8]) -> Result<()> {
 pub(super) fn prepare_removals<S: RecordStore>(
     store: &S,
     keys: &[Vec<u8>],
+) -> Result<Vec<RecordChange>> {
+    prepare_removal_keys(store, keys.iter().map(Vec::as_slice))
+}
+
+fn prepare_removal_keys<'a, S: RecordStore>(
+    store: &S,
+    keys: impl IntoIterator<Item = &'a [u8]>,
 ) -> Result<Vec<RecordChange>> {
     let mut seen = BTreeSet::new();
     let mut policies = BTreeMap::new();
@@ -104,7 +111,7 @@ pub(super) fn prepare_removals<S: RecordStore>(
         *count = count
             .checked_add(1)
             .ok_or_else(|| invalid("object relationship removal count overflow"))?;
-        changes.push((key.clone(), None));
+        changes.push(store.prepare_write(key, None)?);
     }
     for (policy, pairs) in counts {
         let deltas: Vec<_> = pairs

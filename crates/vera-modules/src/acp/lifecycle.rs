@@ -133,8 +133,8 @@ impl AcpModule {
         );
         record.relationship.subject = acp::Subject::Entity(new_owner.clone());
         record.metadata.owner_did = new_owner.to_string();
-        self.remove_relationship_key(&old_key)?;
-        self.set_relationship(&record)?;
+        self.remove_relationship_key_with_budget(&old_key, budget)?;
+        self.set_relationship_with_budget(&record, budget)?;
         Ok(record)
     }
 

@@ -460,7 +460,9 @@ fn run(
                 proof,
             };
 
-            let policy_id = match module.query_registrations_commitment(call.commitmentId) {
+            let policy_id = match module
+                .query_registrations_commitment_with_budget(call.commitmentId, budget)
+            {
                 Ok(commitment) => commitment.policy_id,
                 Err(error) => return Ok(err_dispatch(error)),
             };

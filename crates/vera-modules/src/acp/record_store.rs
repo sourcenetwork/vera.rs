@@ -29,6 +29,22 @@ pub trait RecordStore: Send + Sync {
         Err(Error::Serialization("record store is read-only".into()))
     }
 
+    /// Prepare a copied replacement or deletion before applying a mutation plan.
+    /// Metered stores reserve the complete write before copying its key/value.
+    fn prepare_write(&self, key: &[u8], value: Option<&[u8]>) -> Result<RecordChange> {
+        Ok((key.to_vec(), value.map(<[u8]>::to_vec)))
+    }
+
+    /// Prepare JSON without exposing an unreserved intermediate encoded buffer.
+    /// The returned write is already reserved by metered implementations; applying
+    /// it must not reserve the same encoding or write a second time.
+    fn prepare_json<T: serde::Serialize>(&self, key: &[u8], value: &T) -> Result<RecordChange>
+    where
+        Self: Sized,
+    {
+        Ok((key.to_vec(), Some(serde_json::to_vec(value)?)))
+    }
+
     /// Apply prepared replacements and removals atomically.
     ///
     /// Returning an error must leave every record unchanged. Writable custom stores
