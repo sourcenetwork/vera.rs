@@ -6,6 +6,10 @@
 
 mod backtrace;
 pub use backtrace::Backtracing;
+#[cfg(unix)]
+mod listener;
+#[cfg(unix)]
+pub use listener::inherited_tcp_listener;
 mod private_file;
 pub use private_file::write_private;
 

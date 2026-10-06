@@ -19,6 +19,8 @@ pub struct ManagedProcess {
     program: PathBuf,
     args: Vec<String>,
     envs: HashMap<String, String>,
+    #[cfg(unix)]
+    listener: Option<crate::ReservedTcpListener>,
 }
 
 impl ManagedProcess {
@@ -32,6 +34,35 @@ impl ManagedProcess {
         args: &[&str],
         envs: &[(&str, &str)],
         log_dir: &Path,
+    ) -> Result<Self> {
+        Self::spawn_inner(name, program, args, envs, log_dir, None)
+    }
+
+    /// Spawn with one explicitly inherited TCP listener, retaining it across restarts.
+    ///
+    /// Pass `listener.raw_fd()` through the child's explicit descriptor argument.
+    /// Other reservations remain close-on-exec. Dropping this process releases the
+    /// parent reservation after the child is stopped.
+    #[cfg(unix)]
+    pub fn spawn_with_listener(
+        name: &str,
+        program: &Path,
+        args: &[&str],
+        envs: &[(&str, &str)],
+        log_dir: &Path,
+        listener: crate::ReservedTcpListener,
+    ) -> Result<Self> {
+        Self::spawn_inner(name, program, args, envs, log_dir, Some(listener))
+    }
+
+    fn spawn_inner(
+        name: &str,
+        program: &Path,
+        args: &[&str],
+        envs: &[(&str, &str)],
+        log_dir: &Path,
+        #[cfg(unix)] listener: Option<crate::ReservedTcpListener>,
+        #[cfg(not(unix))] _listener: Option<()>,
     ) -> Result<Self> {
         fs::create_dir_all(log_dir)
             .wrap_err_with(|| format!("failed to create log dir {}", log_dir.display()))?;
@@ -48,6 +79,10 @@ impl ManagedProcess {
         }
         cmd.stdout(Stdio::from(stdout_file));
         cmd.stderr(Stdio::from(stderr_file));
+        #[cfg(unix)]
+        if let Some(listener) = &listener {
+            listener.configure_child(&mut cmd);
+        }
 
         let child = cmd
             .spawn()
@@ -65,6 +100,8 @@ impl ManagedProcess {
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
+            #[cfg(unix)]
+            listener,
         })
     }
 
@@ -77,6 +114,8 @@ impl ManagedProcess {
             program: PathBuf::new(),
             args: Vec::new(),
             envs: HashMap::new(),
+            #[cfg(unix)]
+            listener: None,
         }
     }
 
@@ -105,6 +144,10 @@ impl ManagedProcess {
         }
         cmd.stdout(Stdio::from(stdout_file));
         cmd.stderr(Stdio::from(stderr_file));
+        #[cfg(unix)]
+        if let Some(listener) = &self.listener {
+            listener.configure_child(&mut cmd);
+        }
 
         let child = cmd
             .spawn()
@@ -182,3 +225,7 @@ impl Drop for ManagedProcess {
         let _ = child.wait();
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "listener_tests.rs"]
+mod listener_tests;

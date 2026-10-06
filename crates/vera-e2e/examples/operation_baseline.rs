@@ -34,8 +34,8 @@ const CHAIN_ID: u64 = 9001;
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     assert!(
-        args.len() <= 11,
-        "usage: operation_baseline [count] [arrivals/sec] [max outstanding] [permission reads 0/1] [fast|normal|stress] [RPC connections] [epoch revisions] [retention minimum revision] [fixed update objects, 0 for registrations] [retained consensus revisions, 0 disables pruning] [pipelined consensus 0/1]"
+        args.len() <= 12,
+        "usage: operation_baseline [count] [arrivals/sec] [max outstanding] [permission reads 0/1] [fast|normal|stress] [RPC connections] [epoch revisions] [retention minimum revision] [fixed update objects, 0 for registrations] [retained consensus revisions, 0 disables pruning] [pipelined consensus 0/1] [inherit RPC listener 0/1, Unix default 1]"
     );
     let parse = |index: usize, default: usize| {
         args.get(index).map_or(default, |value| {
@@ -71,6 +71,15 @@ async fn main() {
     let retained_consensus = parse(9, 0);
     let pipelined = parse(10, 0);
     assert!(pipelined <= 1);
+    let inherit_rpc_listener = parse(11, usize::from(cfg!(unix)));
+    assert!(
+        inherit_rpc_listener <= 1,
+        "inherit RPC listener must be 0 or 1"
+    );
+    assert!(
+        cfg!(unix) || inherit_rpc_listener == 0,
+        "listener inheritance requires Unix"
+    );
     let simplex = (pipelined == 1).then(vera_domain::SimplexParameters::default);
     let term_length =
         std::num::NonZeroU64::new(simplex.map_or(1, |parameters| parameters.term_length)).unwrap();
@@ -104,7 +113,7 @@ async fn main() {
     );
     assert!((1..=1024).contains(&outstanding));
 
-    let mut cluster = TestCluster::builder()
+    let cluster = TestCluster::builder()
         .nodes(4)
         .genesis(genesis)
         .seed(42)
@@ -118,10 +127,10 @@ async fn main() {
                     .open(dir.join("config.toml")).unwrap();
                 writeln!(config, "\n[pruning]\nmaintenance_interval = 64\nretained_consensus_revisions = {retained_consensus}\nretained_state_revisions = 0").unwrap();
             }
-        })
-        .build()
-        .await
-        .expect("start cluster");
+        });
+    #[cfg(unix)]
+    let cluster = cluster.inherit_rpc_listener(inherit_rpc_listener == 1);
+    let mut cluster = cluster.build().await.expect("start cluster");
     cluster
         .wait_ready(Duration::from_secs(30))
         .await
@@ -240,6 +249,7 @@ async fn main() {
             "arrival_model": if update_objects == 0 { "scheduled_drop_when_full" } else { "scheduled_wait_for_previous_per_object" },
             "format_version": 2, "permission_reads_per_write": permission_reads,
             "runner_debug_assertions": cfg!(debug_assertions),
+            "inherit_rpc_listener": inherit_rpc_listener == 1,
             "revisions_per_epoch": epoch_length.get(),
             "simplex": simplex,
             "proposal_batch_wait_ms": simplex.map(|_| (timing.leader_timeout / 4).min(Duration::from_millis(100)).as_millis()),
