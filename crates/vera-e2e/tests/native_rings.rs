@@ -14,7 +14,7 @@ use vera_client::{
     rings::*,
 };
 use vera_domain::{ConsensusPublicKey, NativeTx};
-use vera_e2e::cluster::{ConsensusPreset, KeySet, TestCluster};
+use vera_e2e::cluster::{ConsensusParams, KeySet, TestCluster};
 use vera_modules::acp::{
     abi::IAcp,
     types::{Object, PolicyCmd},
@@ -34,10 +34,16 @@ async fn execute(
     call: Bytes,
     success: bool,
 ) -> NativeReceipt {
+    let call_bytes = call.len();
+    let receipt_deadline = if call_bytes > 8 << 20 {
+        vera_e2e::readiness_deadline().max(Duration::from_secs(120))
+    } else {
+        Duration::from_secs(30)
+    };
     let wire = worker.sign_native_tx(target, call).unwrap();
     let id = writer.send_native_tx(&wire).await.unwrap();
     assert_eq!(id, NativeTx::decode_wire(&wire).unwrap().tx_id().0);
-    tokio::time::timeout(Duration::from_secs(30), async {
+    tokio::time::timeout(receipt_deadline, async {
         loop {
             let (local, remote) = tokio::try_join!(
                 writer.read_receipt(id, trusted),
@@ -52,7 +58,11 @@ async fn execute(
         }
     })
     .await
-    .unwrap()
+    .unwrap_or_else(|_| {
+        panic!(
+            "native receipt timed out after {receipt_deadline:?}: tx_id={id}, call_bytes={call_bytes}"
+        )
+    })
 }
 
 #[tokio::test]
@@ -72,7 +82,13 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
         .nodes(4)
         .seed(deployment)
         .chain_id(deployment)
-        .preset(ConsensusPreset::Normal)
+        // This fixture executes a report larger than 8 MiB; debug CI validation takes
+        // several seconds per node and must fit inside one consensus round.
+        .consensus_params(ConsensusParams {
+            leader_timeout: Duration::from_secs(10),
+            notarization_timeout: Duration::from_secs(20),
+            nullify_retry: Duration::from_secs(2),
+        })
         .build()
         .await
         .unwrap();

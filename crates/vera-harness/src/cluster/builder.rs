@@ -10,7 +10,7 @@ use test_infra::{BinaryResolver, ManagedProcess, TestRunDir};
 use super::{
     genesis::{GenesisBuilder, ValidatorConfig},
     keys::KeySet,
-    node_config::{ConsensusPreset, NodeConfigBuilder},
+    node_config::{ConsensusParams, ConsensusPreset, NodeConfigBuilder},
     runtime::{TestCluster, TestNode},
 };
 
@@ -22,6 +22,7 @@ pub struct TestClusterBuilder {
     seed: Option<u64>,
     genesis: Option<GenesisBuilder>,
     preset: ConsensusPreset,
+    consensus_override: Option<ConsensusParams>,
     chain_id: u64,
     rpc_max_connections: std::num::NonZeroU32,
     jmt_seeder: Option<JmtSeeder>,
@@ -36,6 +37,7 @@ impl fmt::Debug for TestClusterBuilder {
             .field("seed", &self.seed)
             .field("genesis", &self.genesis)
             .field("preset", &self.preset)
+            .field("consensus_override", &self.consensus_override)
             .field("chain_id", &self.chain_id)
             .field("has_jmt_seeder", &self.jmt_seeder.is_some())
             .field("binary", &self.binary)
@@ -51,6 +53,7 @@ impl Default for TestClusterBuilder {
             seed: None,
             genesis: None,
             preset: ConsensusPreset::Fast,
+            consensus_override: None,
             chain_id: 9001,
             rpc_max_connections: std::num::NonZeroU32::new(100).unwrap(),
             jmt_seeder: None,
@@ -93,6 +96,13 @@ impl TestClusterBuilder {
     #[must_use]
     pub const fn preset(mut self, p: ConsensusPreset) -> Self {
         self.preset = p;
+        self
+    }
+
+    /// Override consensus timing for this test cluster.
+    #[must_use]
+    pub const fn consensus_params(mut self, params: ConsensusParams) -> Self {
+        self.consensus_override = Some(params);
         self
     }
 
@@ -141,7 +151,9 @@ impl TestClusterBuilder {
             .preset(self.preset)
             .rpc_max_connections(self.rpc_max_connections);
 
-        let consensus = node_config.consensus();
+        let consensus = self
+            .consensus_override
+            .unwrap_or_else(|| node_config.consensus());
 
         let mut key_builder = KeySet::builder().nodes(n);
         if let Some(seed) = self.seed {
