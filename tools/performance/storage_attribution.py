@@ -59,20 +59,45 @@ def closed_span(line):
         operation, index = 'start_sync', int(match.group(1)) if match else None
     if not match:
         return None
+    return operation, index, *span_duration(line)
+
+
+def span_duration(line):
     times = TIMES.findall(line)
     if len(times) != 2 or {kind for kind, _, _ in times} != {'busy', 'idle'}:
         raise ValueError('recognized span has invalid duration fields')
     milliseconds = {kind: float(value) * UNITS[unit] for kind, value, unit in times}
     if not all(math.isfinite(value) for value in milliseconds.values()):
         raise ValueError('recognized span has nonfinite duration')
-    return operation, index, milliseconds['busy'], milliseconds['idle']
+    return milliseconds['busy'], milliseconds['idle']
+
+
+def closed_blob_span(line):
+    marker = ': commonware_runtime::storage::metered: close '
+    if marker not in line:
+        return None
+    prefix = line.split(marker, 1)[0]
+    match = re.search(r'runtime\.storage\.blob\.(write_at|start_sync|sync)(?:\{[^{}]*\})?$', prefix)
+    if not match:
+        return None
+    return match.group(1), *span_duration(line)
+
+
+def durations(values):
+    return {'elapsed': distribution([busy + idle for busy, idle in values]),
+            'busy': distribution([busy for busy, _ in values]),
+            'idle': distribution([idle for _, idle in values])}
 
 
 def span_summary(lines):
-    groups = defaultdict(list)
+    groups, blobs = defaultdict(list), defaultdict(list)
     height, pending = None, []
     complete, discarded, outside = 0, 0, 0
     for line in lines:
+        blob = closed_blob_span(line)
+        if blob:
+            operation, busy, idle = blob
+            blobs[operation].append((busy, idle))
         applied = APPLIED.search(line)
         if applied:
             discarded += int(height is not None)
@@ -96,11 +121,11 @@ def span_summary(lines):
     rows = []
     for (operation, index), values in sorted(groups.items()):
         rows.append({'operation': operation, 'partition': PARTITIONS[index], 'index': index,
-                     'elapsed': distribution([busy + idle for busy, idle in values]),
-                     'busy': distribution([busy for busy, _ in values]),
-                     'idle': distribution([idle for _, idle in values])})
+                     **durations(values)})
     return {'completed_finalization_windows': complete, 'discarded_windows': discarded,
-            'spans_outside_windows': outside, 'groups': rows}
+            'spans_outside_windows': outside, 'groups': rows,
+            'blob_groups': [{'operation': operation, **durations(values)}
+                            for operation, values in sorted(blobs.items())]}
 
 
 def syscall_location(annotation, run_root):
@@ -202,10 +227,11 @@ def summarize_run(run_root):
         raise ValueError('no completed durability syscalls were captured')
     hashes['syscalls'] = digest(calls)
     return {
-        'format_version': 1,
+        'format_version': 2,
         'scope': 'Normal is an uninstrumented comparator only. Traced timings include scheduling, tracing and ptrace overhead; neither run establishes capacity or a baseline improvement.',
         'span_scope': 'Only complete apply-to-synchronization-start windows at a matching revision; bootstrap and incomplete windows excluded. Lock users within a window may be concurrent. Finalize and start_sync overlap; do not add them or subtract their percentiles.',
-        'duration_scope': 'Read/write spans end at acquisition. Finalize starts after acquisition. Start_sync combines predecessor waits and preparation. Syscalls cover the whole run, including startup and restart, and are not attributed to a revision or partition.',
+        'duration_scope': 'Read/write spans end at acquisition. Finalize starts after acquisition. Start_sync includes preparation and internal pending-sync checks; the actor completes the previous finalization barrier before starting another. Syscalls cover the whole run, including startup and restart, and are not attributed to a revision or partition.',
+        'blob_scope': 'Blob groups cover the whole run, including bootstrap and restart, without partition or revision attribution. Write_at includes the awaited write and scheduling. Start_sync measures initiation. Sync measures synchronous sync calls or observation of a returned completion handle, potentially including time before first polling. These overlapping populations do not isolate prior-sync waits or physical I/O; do not add their durations or subtract their percentiles.',
         'nodes': nodes, 'syscalls': syscalls, 'private_input_sha256': hashes,
     }
 

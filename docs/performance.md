@@ -512,6 +512,11 @@ gh workflow run performance.yml --repo sourcenetwork/vera.rs --ref main \
 
 The artifact retains each run's executable/source manifest and workload JSONL,
 plus `storage-attribution/summary.json` with numeric span and syscall summaries.
+The trace also enables `commonware_runtime::storage::metered=info`; per-node
+`blob_groups` summarize existing blob write, sync-start and sync-completion spans
+using fixed operation labels, without exporting their partition names or fields.
+The target records every blob write, resize and sync span, including bootstrap
+and restart; these private logs can be large and add observer overhead.
 Raw node stdout, syscall traces, configuration and fixture keys remain under
 `RUNNER_TEMP` and are not uploaded. The offline parser accepts only paths
 inside its supplied private run root and emits fixed labels, numbers and input hashes.
@@ -524,7 +529,14 @@ This excludes bootstrap's reused partition indices. Concurrent readers can still
 share those windows. Lock spans measure acquisition, not guard holding; finalize
 and start-sync spans overlap. Syscalls cover the whole run, including startup and
 restart, and do not identify a consensus revision or a QMDB partition. Neither
-span idle time nor syscall elapsed time isolates physical disk latency. Tracing
-and ptrace perturb scheduling; neither the uninstrumented comparator nor the
-traced run establishes capacity, and their difference does not qualify a
-production optimization.
+span idle time nor syscall elapsed time isolates physical disk latency.
+
+Blob summaries cover the whole run, separately from the partition windows. Writes
+include awaited work and scheduling; sync-start measures initiation. Sync spans
+cover synchronous calls or observation of returned completion handles, potentially
+including time before first polling. Their overlapping populations cannot be
+added or have percentiles subtracted to attribute phases. They do not directly
+measure internal pending-sync waits; the actor completes the previous finalization
+barrier before starting another. Tracing and ptrace perturb scheduling; neither
+the uninstrumented comparator nor the traced run establishes capacity, and their
+difference does not qualify a production optimization.

@@ -114,7 +114,7 @@ jobs:
             filter=warn
             if [[ "$mode" == traced ]]; then
               export VERA_TRACE_SPANS=1
-              filter=warn,vera_publication_diagnostics=debug,commonware_glue::stateful::db=info,commonware_storage::qmdb=info,commonware_utils::sync=info
+              filter=warn,vera_publication_diagnostics=debug,commonware_glue::stateful::db=info,commonware_storage::qmdb=info,commonware_utils::sync=info,commonware_runtime::storage::metered=info
               trace=(--sync-trace "$private/$mode/syscalls.log")
             fi
             python3 tools/performance/record.py "${trace[@]}" \

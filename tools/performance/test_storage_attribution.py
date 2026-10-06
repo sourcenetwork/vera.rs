@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from storage_attribution import closed_span, span_summary, syscall_summary, summarize_run
+from storage_attribution import closed_blob_span, closed_span, span_summary, syscall_summary, summarize_run
 
 
 APPLY = '2026-10-06T00:00:00Z DEBUG vera_publication_diagnostics: finalized state apply height=12\n'
@@ -15,6 +15,14 @@ ANY = ('stateful.db.finalize{index=3}:qmdb.current.db.start_sync:'
        'qmdb.any.db.start_sync{db_size=3}: commonware_storage::qmdb::any::db: close '
        'time.busy=100ns time.idle=12µs\n')
 WRITE = 'utils.rwlock.write{lock="stateful.db.3"}: commonware_utils::sync: close time.busy=3us time.idle=1s\n'
+
+BLOB_WRITE = ('runtime.storage.blob.write_at{partition=/private/secret bytes=32 options=DONT_CACHE}: '
+              'commonware_runtime::storage::metered: close time.busy=5µs time.idle=3ms\n')
+BLOB_START = ('runtime.storage.blob.start_sync{partition=private-payload}: '
+              'commonware_runtime::storage::metered: close time.busy=2us time.idle=100ns\n')
+BLOB_COMPLETE = ('runtime.storage.blob.start_sync{partition=private-payload}:'
+                 'runtime.storage.blob.sync{partition=private-payload}: '
+                 'commonware_runtime::storage::metered: close time.busy=1ms time.idle=2s\n')
 
 
 class StorageAttributionTests(unittest.TestCase):
@@ -51,6 +59,34 @@ class StorageAttributionTests(unittest.TestCase):
             closed_span(WRITE.replace('1s', '1fortnight'))
         with self.assertRaises(ValueError):
             closed_span(WRITE.replace('time.idle=1s', 'time.busy=1s'))
+
+    def test_blob_spans_cover_bootstrap_and_late_completion_outside_revision_windows(self):
+        result = span_summary([BLOB_WRITE, APPLY, FINALIZE, BLOB_START, START, BLOB_COMPLETE])
+        self.assertEqual(result['completed_finalization_windows'], 1)
+        groups = {row['operation']: row for row in result['blob_groups']}
+        self.assertEqual(set(groups), {'write_at', 'start_sync', 'sync'})
+        for row in groups.values():
+            self.assertEqual(row['elapsed']['count'], 1)
+            self.assertEqual(set(row), {'operation', 'elapsed', 'busy', 'idle'})
+        self.assertAlmostEqual(groups['write_at']['elapsed']['p50_ms'], 3.005)
+        self.assertAlmostEqual(groups['start_sync']['elapsed']['p50_ms'], .0021)
+        self.assertEqual(groups['sync']['elapsed']['p50_ms'], 2001)
+        self.assertEqual([row['operation'] for row in result['groups']], ['finalize'])
+        self.assertNotIn('private', json.dumps(result))
+
+    def test_blob_close_matches_only_emitting_operation_and_target(self):
+        self.assertEqual(closed_blob_span(BLOB_COMPLETE)[0], 'sync')
+        fieldless = ('runtime.storage.blob.sync: commonware_runtime::storage::metered: '
+                     'close time.busy=1µs time.idle=2ms\n')
+        self.assertEqual(closed_blob_span(fieldless), ('sync', .001, 2))
+        for line in (BLOB_COMPLETE.replace('::metered:', '::tokio:'),
+                     BLOB_COMPLETE.replace('runtime.storage.blob.sync{', 'some.child{'),
+                     BLOB_WRITE.replace('.write_at{', '.resize{')):
+            self.assertIsNone(closed_blob_span(line))
+        for line in (BLOB_WRITE.replace('3ms', 'NaNms'),
+                     BLOB_COMPLETE.replace('time.idle=2s', 'time.busy=2s')):
+            with self.assertRaises(ValueError):
+                closed_blob_span(line)
 
     def test_interleaved_resumed_syscalls_use_total_seconds_and_preserve_failures(self):
         lines = [f'31 1791244800.1 fdatasync(17<{self.descriptor}> <unfinished ...>\n',
@@ -123,7 +159,7 @@ class StorageAttributionTests(unittest.TestCase):
             path = self.root / 'clusters' / 'run' / f'node{node}' / 'logs' / 'stdout.log'
             path.parent.mkdir(parents=True)
             path.write_text('untrusted text and /private/secret/config\n' + FINALIZE
-                            + APPLY + FINALIZE + ANY + WRITE + START)
+                            + APPLY + FINALIZE + ANY + WRITE + START + BLOB_COMPLETE)
         (self.root / 'syscalls.log').write_text(self.call(31, 'fsync', '0.001'))
 
     def test_summary_has_numeric_observations_and_hashes_but_no_arbitrary_log_text(self):
@@ -132,6 +168,7 @@ class StorageAttributionTests(unittest.TestCase):
         encoded = json.dumps(result)
         self.assertEqual(len(result['nodes']), 4)
         self.assertEqual(len(result['private_input_sha256']), 5)
+        self.assertEqual(result['nodes'][0]['blob_groups'][0]['operation'], 'sync')
         for private in ('private-payload', '/private/secret', 'untrusted', str(self.root)):
             self.assertNotIn(private, encoded)
 
