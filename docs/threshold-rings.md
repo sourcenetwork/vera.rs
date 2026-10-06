@@ -89,10 +89,13 @@ settings omitted from the protobuf projection invalidate previous signatures.
 
 Submit the aggregate signature with `encode_ring_reshare` through the durable
 worker. The service verifies either `bls12_381_g1_pk_g2_sig_aug_v1` or
-`decaf377_frost` against the existing ring key, then rechecks target controllers'
+`jubjub_frost` against the existing ring key, then rechecks target controllers'
 current permission. It atomically replaces the committee/threshold, clears the
 pending target and advances the sequence. The ring identifier and public key
 remain unchanged. Replays, changed targets and outdated sequences are rejected.
+
+Jubjub rings require fresh key generation. Decaf keys and signatures are not
+Jubjub-compatible; there is no legacy scheme alias, decoder or key conversion.
 
 This verifies threshold authorization for finalization; it does not verify the
 underlying resharing transcript or guarantee participants retained their shares.
@@ -152,8 +155,8 @@ BLS reshare finalization and fault reports require
 `bls12_381_g1_pk_g2_sig_aug_v1`, matching Orbis's augmented BLS signer. Verification
 uses the compressed ring public key as the message prefix and the AUG domain.
 Basic NUL scheme identifiers and signatures are rejected; there is no fallback
-verifier. Decaf377 FROST keeps its existing format.
+verifier. Jubjub FROST uses `jubjub_frost` and Orbis's Jubjub challenge transcript.
 
-Vera and Orbis must use matching builds. Ring IDs and public keys retain their
+Vera and Orbis must use matching builds. BLS ring IDs and public keys retain their
 encoding. Native threshold services target a fresh deployment; no legacy
 threshold-signature compatibility or history migration is provided.
