@@ -446,7 +446,9 @@ is no automatic percentage-regression gate on these shared hosts.
 
 A live view and a benchmark report answer different questions. The native RPC
 already exposes member status and finalized-header subscriptions. Those can show
-actual revision progress and connectivity. A client must verify finality evidence
+observed revision progress. Authenticated peer connectivity is not currently
+exposed: `peerCount` remains null, and reaching an RPC endpoint does not establish
+that the member can reach a voting quorum. A client must verify finality evidence
 against operator-provisioned trust before presenting authenticated results.
 
 Browser-observed latency also needs an explicit clock-skew policy. Receipt
