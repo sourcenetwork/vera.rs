@@ -16,37 +16,32 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
-# ── Self-hosted Mac Studio runners ──────────────────────────────────
-#
-# Two runners (studio-1, studio-2): M3 Ultra, 32-core, 512GB RAM.
-# Shared with defradb.rs and backbone — don't assume exclusive access.
-# Persistent machines: kill lingering processes, reset working tree
-# after every run.
-#
-# No [profile.test] override, no .cargo/config.toml — clippy and test
-# share the same dev profile so the warm cache serves both without
-# profile thrashing.
-
 jobs:
   lint:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Lint
-    runs-on: [self-hosted, macOS, ARM64, studio]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: "2"
+      PROTOC: /usr/bin/protoc
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          clean: false
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@62ae3a85dbdd2bedbb5819da8ce45635129289a1 # 1.98.0
         with:
           components: clippy, rustfmt
 
-      - name: Clear stale checkout credentials
-        run: git config --local --unset-all http.https://github.com/.extraheader 2>/dev/null || true
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
 
-      - name: Remove stale files from other branches
-        run: git clean -fdx -e /target
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: hosted-linux-checks
 
       - name: Fetch locked dependencies
         env:
@@ -68,22 +63,28 @@ jobs:
   build:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Build & Test
-    runs-on: [self-hosted, macOS, ARM64, studio]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: "2"
+      PROTOC: /usr/bin/protoc
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          clean: false
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@62ae3a85dbdd2bedbb5819da8ce45635129289a1 # 1.98.0
         with:
           components: clippy, rustfmt
 
-      - name: Clear stale checkout credentials
-        run: git config --local --unset-all http.https://github.com/.extraheader 2>/dev/null || true
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
 
-      - name: Remove stale files from other branches
-        run: git clean -fdx -e /target
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: hosted-linux-checks
 
       - name: Fetch locked dependencies
         env:
@@ -99,45 +100,34 @@ jobs:
       - name: Build verad
         run: cargo build --frozen -p verad
 
-      - name: Cache verad binary for backbone CI
-        run: |
-          HASH=$(git rev-parse HEAD)
-          CACHE_DIR="$HOME/.sourcenetwork/bin/vera.rs/$HASH"
-          mkdir -p "$CACHE_DIR"
-          cp target/debug/verad "$CACHE_DIR/verad" || cp target/release/verad "$CACHE_DIR/verad" || true
-          [ -f "$CACHE_DIR/verad" ] && ln -sf "$CACHE_DIR/verad" "$HOME/.sourcenetwork/bin/verad"
-
-      - name: Cleanup
-        if: always()
-        run: |
-          git checkout -- .
-          git clean -fd
-
   e2e-canonical:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: "E2E (canonical)"
-    runs-on: [self-hosted, macOS, ARM64, studio]
+    runs-on: ubuntu-24.04
     needs: [build]
-    timeout-minutes: 20
+    timeout-minutes: 60
     env:
+      CARGO_BUILD_JOBS: "2"
+      PROTOC: /usr/bin/protoc
       VERA_E2E_DEADLINE_SCALE: "4"
       VERAD_BINARY: ${{ github.workspace }}/target/debug/verad
-      TMPDIR: $RUNNER_TEMP/vera-e2e-${{ github.run_id }}-${{ github.run_attempt }}-canonical
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          clean: false
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@62ae3a85dbdd2bedbb5819da8ce45635129289a1 # 1.98.0
         with:
           components: clippy, rustfmt
 
-      - name: Clear stale checkout credentials
-        run: git config --local --unset-all http.https://github.com/.extraheader 2>/dev/null || true
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
 
-      - name: Remove stale files from other branches
-        run: git clean -fdx -e /target
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: hosted-linux-checks
 
       - name: Fetch locked dependencies
         env:
@@ -149,11 +139,16 @@ jobs:
 
       - name: Prepare test workspace
         run: |
-          mkdir -p "$TMPDIR"
+          canonical_test_dir="$RUNNER_TEMP/vera-e2e-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-canonical"
+          mkdir -p "$canonical_test_dir"
+          echo "TMPDIR=$canonical_test_dir" >> "$GITHUB_ENV"
           python3 .github/scripts/stop-test-nodes.py "$VERAD_BINARY"
 
       - name: Build verad
         run: cargo build --frozen -p verad
+
+      - name: Compile e2e tests
+        run: cargo test --frozen -p vera-e2e --test vera_e2e_canonical --no-run
 
       - name: Run e2e tests
         run: cargo test --frozen -p vera-e2e --test vera_e2e_canonical -- --nocapture
@@ -162,20 +157,18 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          git checkout -- .
-          git clean -fd
           python3 .github/scripts/stop-test-nodes.py "$VERAD_BINARY"
-          rm -rf "$TMPDIR"
+          rm -rf "$RUNNER_TEMP/vera-e2e-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-canonical"
 
   e2e-extended:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: "E2E (extended)"
-    runs-on: [self-hosted, macOS, ARM64, studio]
-    # Serialized with the canonical suite: both start multi-node clusters on
-    # a shared self-hosted studio runner.
+    runs-on: ubuntu-24.04
     needs: [e2e-canonical]
-    timeout-minutes: 20
+    timeout-minutes: 60
     env:
+      CARGO_BUILD_JOBS: "2"
+      PROTOC: /usr/bin/protoc
       VERA_E2E_DEADLINE_SCALE: "4"
       VERAD_BINARY: ${{ github.workspace }}/target/debug/verad
       VERA_E2E_KEEP: "1"
@@ -183,18 +176,20 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          clean: false
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@62ae3a85dbdd2bedbb5819da8ce45635129289a1 # 1.98.0
         with:
           components: clippy, rustfmt
 
-      - name: Clear stale checkout credentials
-        run: git config --local --unset-all http.https://github.com/.extraheader 2>/dev/null || true
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
 
-      - name: Remove stale files from other branches
-        run: git clean -fdx -e /target
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: hosted-linux-checks
 
       - name: Fetch locked dependencies
         env:
@@ -216,6 +211,18 @@ jobs:
 
       - name: Build verad
         run: cargo build --frozen -p verad
+
+      - name: Compile e2e tests
+        run: >-
+          cargo test --frozen -p vera-e2e
+          --test core_chain
+          --test contract_deploy
+          --test light_client
+          --test gossip_headers
+          --test validator_bootstrap
+          --test validator_epoch_transition
+          --test cross_object_acp
+          --no-run
 
       - name: Run e2e tests
         shell: bash
@@ -244,8 +251,6 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          git checkout -- .
-          git clean -fd
           python3 .github/scripts/stop-test-nodes.py "$VERAD_BINARY"
           rm -rf "$RUNNER_TEMP/vera-e2e-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-extended"
 

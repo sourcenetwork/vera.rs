@@ -39,10 +39,14 @@ def main():
                         help='Checkout used to build the workload runner; defaults to the node checkout.')
     parser.add_argument('--history', required=True, choices=['rocksdb', 'regolith'])
     parser.add_argument('--rust-log', default='warn,vera_storage=info')
+    parser.add_argument('--timeout-seconds', type=int, default=900,
+                        help='Runner process deadline in seconds, from 1 to 86400 (default: 900).')
     parser.add_argument('--sync-trace', type=Path,
                         help='Private output for Linux fsync/fdatasync tracing of the runner and its children only.')
     parser.add_argument('workload_args', nargs='+')
     args = parser.parse_args()
+    if not 1 <= args.timeout_seconds <= 86400:
+        parser.error('--timeout-seconds must be between 1 and 86400')
     node, runner = args.node.resolve(strict=True), args.runner.resolve(strict=True)
     runner_source = args.runner_source.resolve(strict=True)
     command = [str(runner), *args.workload_args]
@@ -66,6 +70,7 @@ def main():
         'node_sha256': digest(node), 'runner_sha256': digest(runner),
         'history': args.history, 'arguments': args.workload_args,
         'rust_log': args.rust_log,
+        'timeout_seconds': args.timeout_seconds,
         'trace_span_close': os.environ.get('VERA_TRACE_SPANS') == '1',
         'platform': platform.platform(), 'architecture': platform.machine(),
         'logical_cpus': os.cpu_count(), 'cpu_model': cpu_model(), 'load_before': os.getloadavg(),
@@ -87,7 +92,7 @@ def main():
         process = subprocess.Popen(command, env=environment,
                                    stdout=output, stderr=error, start_new_session=True)
         try:
-            exit_code = process.wait(timeout=900)
+            exit_code = process.wait(timeout=args.timeout_seconds)
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGTERM)
             try:

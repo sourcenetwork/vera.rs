@@ -1,12 +1,18 @@
 """Recorder failures retain evidence and cannot overwrite an existing run."""
+import contextlib
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock, call, patch
+
+import record
 
 
 class RecorderTests(unittest.TestCase):
@@ -110,6 +116,74 @@ class RecorderTests(unittest.TestCase):
             repeated = subprocess.run(command, cwd=checkout, capture_output=True, text=True)
             self.assertNotEqual(repeated.returncode, 0)
             self.assertEqual(json.loads((output / 'manifest.json').read_text()), metadata)
+
+
+    def record_with_mocked_process(self, timeout, waits):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runner = root / 'runner'
+            runner.write_bytes(b'binary fixture')
+            output = root / 'result'
+            command = ['record.py', '--node', str(runner), '--runner', str(runner),
+                       '--history', 'rocksdb', '--output', str(output)]
+            if timeout is not None:
+                command += ['--timeout-seconds', str(timeout)]
+            command += ['fixture-argument']
+            process = Mock(pid=12345)
+            process.wait.side_effect = waits
+            with patch.object(sys, 'argv', command), \
+                    patch('record.subprocess.check_output', side_effect=['revision', b'', 'revision', b'']), \
+                    patch('record.cpu_model', return_value='fixture'), \
+                    patch('record.platform.platform', return_value='fixture'), \
+                    patch('record.subprocess.Popen', return_value=process) as spawn, \
+                    patch('record.os.killpg') as killpg:
+                with self.assertRaises(SystemExit) as result:
+                    record.main()
+            manifest = json.loads((output / 'manifest.json').read_text())
+            self.assertEqual(manifest['exit_code'], result.exception.code)
+            self.assertTrue(spawn.call_args.kwargs['start_new_session'])
+            self.assertEqual(spawn.call_args.args[0], [str(runner.resolve()), 'fixture-argument'])
+            return manifest, process.wait.call_args_list, killpg.call_args_list
+
+    def test_default_and_configured_timeout_reach_child_wait(self):
+        for configured, expected in ((None, 900), (1, 1), (1800, 1800), (86400, 86400)):
+            with self.subTest(timeout=configured):
+                manifest, waits, signals = self.record_with_mocked_process(configured, [0, 0])
+                self.assertEqual(manifest['timeout_seconds'], expected)
+                self.assertEqual(manifest['exit_code'], 0)
+                self.assertEqual(waits, [call(timeout=expected), call()])
+                self.assertEqual(signals, [call(12345, signal.SIGKILL)])
+
+    def test_timeout_records_failure_and_cleans_up_process_group(self):
+        for grace in (0, subprocess.TimeoutExpired('fixture', 10)):
+            with self.subTest(grace_timed_out=isinstance(grace, subprocess.TimeoutExpired)):
+                manifest, waits, signals = self.record_with_mocked_process(
+                    1800, [subprocess.TimeoutExpired('fixture', 1800), grace, 0])
+                self.assertEqual(manifest['timeout_seconds'], 1800)
+                self.assertEqual(manifest['exit_code'], 124)
+                self.assertEqual(waits, [call(timeout=1800), call(timeout=10), call()])
+                self.assertEqual(signals, [call(12345, signal.SIGTERM), call(12345, signal.SIGKILL)])
+
+    def test_invalid_timeout_creates_no_artifacts_or_processes(self):
+        for value in ('0', '-1', '86401', '1.5', 'nan', 'inf', '9999999999999999999999999999'):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                output, trace = root / 'result', root / 'sync.log'
+                command = ['record.py', '--node', str(root / 'missing-node'),
+                           '--runner', str(root / 'missing-runner'), '--history', 'rocksdb',
+                           '--output', str(output), '--sync-trace', str(trace),
+                           '--timeout-seconds', value, 'fixture-argument']
+                with patch.object(sys, 'argv', command), \
+                        patch('record.subprocess.check_output') as git, \
+                        patch('record.subprocess.Popen') as spawn, \
+                        contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as result:
+                        record.main()
+                self.assertEqual(result.exception.code, 2)
+                git.assert_not_called()
+                spawn.assert_not_called()
+                self.assertFalse(output.exists())
+                self.assertFalse(trace.exists())
 
 
 if __name__ == '__main__':

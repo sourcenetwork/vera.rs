@@ -316,7 +316,7 @@ cargo +1.98.0 build --frozen --release -p vera-e2e --example operation_baseline
 python3 tools/performance/record.py \
   --node target/release/verad \
   --runner target/release/examples/operation_baseline \
-  --history rocksdb --output /tmp/vera-performance-run \
+  --history rocksdb --output /tmp/vera-performance-run --timeout-seconds 900 \
   3000 50 128 1 normal 100 20 0 128 32
 python3 -m venv /tmp/vera-performance-python
 /tmp/vera-performance-python/bin/pip install -r tools/performance/requirements.txt
@@ -329,9 +329,12 @@ The recorder hashes binaries but cannot infer their source revision or features;
 its source field describes the checkout. The workflow binds that checkout to its
 own build steps. Do not label an older prebuilt executable with a new checkout.
 
-Each local run has a 15-minute process deadline; timeout terminates its process
-group and remains a failed measurement. Compilation, report rendering, and
-post-run correctness checks do not contribute to the driver's measured workload
+The recorder defaults to a 900-second process deadline. For longer workloads,
+set `--timeout-seconds 1800`, for example, to allow 30 minutes; the integer limit
+is 1–86400 seconds and is recorded in the manifest. This does not change the
+workload’s own deadlines. Timeout terminates the process group and records exit
+status 124. Compilation, report rendering, and post-run correctness checks do
+not contribute to the driver's measured workload
 interval. See [workload semantics and arguments](native-workload.md).
 
 For diagnosis, pass `--rust-log warn,vera_storage=info,vera_diagnostics=debug`.
