@@ -7813,6 +7813,7 @@ dependencies = [
  "anyhow",
  "borsh",
  "bytes",
+ "commonware-actor",
  "commonware-broadcast",
  "commonware-codec",
  "commonware-consensus",

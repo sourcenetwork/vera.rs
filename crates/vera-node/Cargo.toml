@@ -59,3 +59,6 @@ tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+commonware-actor = { git = "https://github.com/iverc/commonware", rev = "d0cef38586581911ddbeb3060ea6b0d7e33d2a98" }
