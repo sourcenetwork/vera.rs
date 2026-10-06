@@ -443,7 +443,7 @@ jobs:
 
       - name: Run suite
         env:
-          RUST_LOG: ${{ matrix.suite == 'lifecycle' && 'warn,vera_storage=info,vera_node=debug,vera_diagnostics=debug' || 'warn,vera_storage=info' }}
+          RUST_LOG: ${{ matrix.suite == 'lifecycle' && 'warn,vera_storage=info,vera_node=debug,vera_node::tx_gossip=trace,vera_diagnostics=debug' || 'warn,vera_storage=info' }}
           VERA_E2E_DIR: ${{ runner.temp }}/e2e-logs
           VERA_E2E_KEEP: "1"
         run: >-
