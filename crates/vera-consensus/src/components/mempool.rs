@@ -1,8 +1,9 @@
 //! In-memory mempool implementation.
 
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     sync::Arc,
+    time::{Duration, SystemTime},
 };
 
 use commonware_codec::EncodeSize as _;
@@ -20,12 +21,15 @@ pub struct InMemoryMempool {
 
 const MAX_PENDING_BYTES: usize = 64 << 20;
 const MAX_PENDING_TXS: usize = 4096;
+const LOCAL_RETRY_DELAY: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Default)]
 struct Pending {
     txs: BTreeMap<TxId, Tx>,
     order: VecDeque<TxId>,
     bytes: usize,
+    local: BTreeSet<TxId>,
+    local_order: VecDeque<(TxId, SystemTime)>,
 }
 
 impl Pending {
@@ -44,6 +48,63 @@ impl Pending {
 }
 
 impl InMemoryMempool {
+    /// Whether the exact wire transaction remains pending.
+    pub fn contains(&self, id: &TxId) -> bool {
+        self.inner.read().txs.contains_key(id)
+    }
+
+    /// Track a locally admitted transaction for retries while it remains pending.
+    /// Peer admission does not call this method.
+    pub fn mark_local(&self, id: &TxId, now: SystemTime) -> bool {
+        let mut inner = self.inner.write();
+        if !inner.txs.contains_key(id) || !inner.local.insert(*id) {
+            return false;
+        }
+        let due =
+            (now + LOCAL_RETRY_DELAY).max(inner.local_order.back().map_or(now, |(_, due)| *due));
+        inner.local_order.push_back((*id, due));
+        true
+    }
+
+    /// Whether a local retry is due, without inspecting unrelated requests.
+    pub fn has_due_local(&self, now: SystemTime) -> bool {
+        self.inner
+            .read()
+            .local_order
+            .front()
+            .is_some_and(|(_, due)| *due <= now)
+    }
+
+    /// Select due local transactions once each, within both work limits.
+    /// A byte-limited head remains first for the next tick's fresh allowance.
+    pub fn local_reannouncement(
+        &self,
+        now: SystemTime,
+        max_txs: usize,
+        max_bytes: usize,
+    ) -> Vec<Tx> {
+        let mut inner = self.inner.write();
+        let mut selected = Vec::new();
+        let mut remaining = max_bytes;
+        for _ in 0..max_txs.min(inner.local_order.len()) {
+            let (id, due) = *inner.local_order.front().expect("local retry head");
+            if due > now {
+                break;
+            }
+            let tx = inner.txs.get(&id).expect("pending local transaction");
+            if tx.bytes.len() > remaining {
+                break;
+            }
+            remaining -= tx.bytes.len();
+            selected.push(tx.clone());
+            inner.local_order.pop_front();
+            let due = (now + LOCAL_RETRY_DELAY)
+                .max(inner.local_order.back().map_or(now, |(_, due)| *due));
+            inner.local_order.push_back((id, due));
+        }
+        selected
+    }
+
     /// Check capacity while the caller holds the admission validator lock.
     pub fn can_insert(&self, tx: &Tx) -> bool {
         self.inner.read().accepts(&tx.id(), tx)
@@ -146,10 +207,18 @@ impl Mempool for InMemoryMempool {
         for id in tx_ids {
             if let Some(tx) = inner.txs.remove(id) {
                 inner.bytes -= tx.bytes.len();
+                inner.local.remove(id);
             }
         }
-        let Pending { txs, order, .. } = &mut *inner;
+        let Pending {
+            txs,
+            order,
+            local,
+            local_order,
+            ..
+        } = &mut *inner;
         order.retain(|id| txs.contains_key(id));
+        local_order.retain(|(id, _)| local.contains(id));
     }
 
     fn len(&self) -> usize {
@@ -315,3 +384,7 @@ mod batching_tests {
         assert!(batch.is_empty());
     }
 }
+
+#[cfg(test)]
+#[path = "mempool_reannouncement_tests.rs"]
+mod reannouncement_tests;
