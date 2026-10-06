@@ -1114,8 +1114,13 @@ async fn canonical_module_test() {
     // ── F: Cross-Node Consistency + Health ────────────────────────
 
     // F1. All nodes agree on state
+    let consistency_height = max_block + 1;
+    let consistency_deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     state
-        .wait_for_height(max_block + 1, Duration::from_secs(15))
+        .wait_for_height(
+            consistency_height,
+            consistency_deadline.saturating_duration_since(tokio::time::Instant::now()),
+        )
         .await
         .expect("all nodes should advance past last tx block");
 
@@ -1237,10 +1242,41 @@ async fn canonical_module_test() {
         assert_eq!(node_bls_nonce, 6, "node{node_idx} native nonce should be 6");
     }
 
-    // F2. Cluster health
-    state
-        .assert_heights_converged(2)
-        .expect("block heights should converge within 2 blocks");
+    // F2. Cluster health, within the same deadline as the fixed-height barrier.
+    loop {
+        let snapshots = state.all_nodes();
+        let minimum = snapshots
+            .iter()
+            .map(|node| node.effective_height())
+            .min()
+            .unwrap_or(0);
+        let maximum = snapshots
+            .iter()
+            .map(|node| node.effective_height())
+            .max()
+            .unwrap_or(0);
+        let observed: Vec<_> = snapshots
+            .iter()
+            .map(|node| (node.node_index, node.is_healthy, node.effective_height()))
+            .collect();
+        assert!(
+            tokio::time::Instant::now() < consistency_deadline,
+            "cluster health deadline expired: min={minimum}, max={maximum}, tolerance=2, \
+             expected nodes={}, observed (node, healthy, height)={observed:?}",
+            cluster.node_count(),
+        );
+        if snapshots.len() == cluster.node_count()
+            && snapshots.iter().all(|node| node.is_healthy)
+            && minimum >= consistency_height
+            && maximum - minimum <= 2
+        {
+            break;
+        }
+        tokio::time::sleep_until(
+            consistency_deadline.min(tokio::time::Instant::now() + Duration::from_millis(100)),
+        )
+        .await;
+    }
     state
         .assert_no_errors()
         .expect("no unexpected errors in cluster logs");
