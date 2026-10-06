@@ -128,7 +128,7 @@ pub(crate) async fn recheck(
     let pending = mempool.build(usize::MAX, &std::collections::BTreeSet::new());
     let mut evict = Vec::new();
     for tx in &pending {
-        if let Err(e) = guard.recheck_tx_stateless(&tx.bytes).await {
+        if let Err(e) = guard.recheck_pending_tx(&tx.bytes).await {
             trace!(tx_id = ?tx.id(), error = %e, "evicting stale tx");
             evict.push(tx.id());
         }
