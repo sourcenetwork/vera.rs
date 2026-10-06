@@ -71,8 +71,9 @@ verify revision certificates and permission evidence independently.
 
 ## Commonware integration
 
-The pinned fork follows upstream `b07d043a815096c57c1da62cde20c9e065b8919c`,
-which includes [Commonware #5044](https://github.com/commonwarexyz/monorepo/pull/5044).
+The pinned [runtime fork](https://github.com/iverc/commonware-upstream) follows
+upstream `39d04ee1057ee03046973391d26e7101e4a3ef41`, which includes
+[Commonware #5044](https://github.com/commonwarexyz/monorepo/pull/5044).
 Upstream preserves verified operations across target updates and keeps pinned
 nodes when the retention floor is unchanged. When the floor advances, it cancels
 requests at the new boundary so a new boundary request is scheduled immediately.
@@ -90,6 +91,11 @@ the local DKG actor catches up. It still requires independently derived matching
 epoch information before accepting a boundary. Follower responses remain pending,
 and unavailable or mismatched artifacts are rejected. A temporarily early request
 must not leave certification suspended after the DKG state becomes available.
+
+Upstream [#5135](https://github.com/commonwarexyz/monorepo/pull/5135) moves batch
+verification to the signer's public-key type. Vera's reshare configuration uses
+that API instead of selecting a separate Ed25519 batch-verifier type. DKG signing
+domains and encoded epoch and share material are unchanged.
 
 Recovery supplies the authenticated target when each database opens. Every
 partition must recover that target before the application verifies the combined

@@ -2,7 +2,6 @@
 //! and run until one of them stops.
 
 use std::{
-    marker::PhantomData,
     sync::{Arc, OnceLock},
     time::Duration,
 };
@@ -493,7 +492,6 @@ pub async fn run_node_with_rpc_listener(
             muxer_size: 128,
             max_participants: MAX_PARTICIPANTS,
             blocks_per_epoch,
-            batch_verifier: PhantomData::<commonware_cryptography::ed25519::Batch>,
         },
     );
 
