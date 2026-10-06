@@ -92,6 +92,18 @@ affects memory use. See [storage](history-storage.md).
 
 ## Write, confirmation, and retry
 
+A member reannounces locally submitted transactions while they remain in its
+bounded pending pool. Peer-received transactions do not enter this retry queue.
+Every 250 milliseconds, at most 16 due requests and 12 MiB + 4 KiB of signed request
+bytes are selected in round-robin order. Local tracking starts before awaiting the
+initial send. The first retry is due after two seconds; later retry selections are
+at least two seconds apart. The largest valid request fits a fresh allowance.
+A full 4,096-request queue needs up to 256 ticks (64 seconds) for one sweep after
+its initial two-second delay when the count limit dominates. Byte limits and
+runtime scheduling can delay a sweep further. Pruning removes retry tracking;
+already queued network sends can still complete. This is best-effort delivery,
+not durable admission or a confirmation deadline, and admission checks are unchanged.
+
 ```mermaid
 sequenceDiagram
     participant Caller
