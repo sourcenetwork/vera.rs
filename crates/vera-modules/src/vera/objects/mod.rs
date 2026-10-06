@@ -62,6 +62,11 @@ impl VeraModule {
                     {
                         return Err(invalid("ring is not active in this deployment"));
                     }
+                    if let ThresholdObject::Document(document) = object
+                        && document.pet_tag.is_some() != ring.config.requires_pet
+                    {
+                        return Err(invalid("PET attachment presence does not match ring mode"));
+                    }
                     let id = object.id()?;
                     let kind = object.kind();
                     let key = object_key(kind, &id)?;

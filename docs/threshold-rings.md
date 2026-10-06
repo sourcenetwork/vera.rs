@@ -6,17 +6,22 @@ A ring starts with an ACP-authorized creation request. The actor must have
 All committee and reporting-backup node keys must already be registered.
 
 `RingConfig::id` binds the initial deployment state, creator and complete creation
-configuration, including a caller-generated nonce. Node and relay sets must be
+configuration, including a caller-generated nonce and required `requires_pet` mode. Node and relay sets must be
 sorted and unique. Reporting settings are explicit; `ReportingConfig::default`
 uses one demerit per report, a daily reset and a kick threshold of three. Ring
 configuration retains these settings for the reporting service.
 
+`RingPublicKeys` contains the main key and an optional PET key. PET rings require
+both; ordinary rings forbid the PET key. The mode and finalized pair are immutable.
+See [native PET state](native-pet.md) for document bindings, fresh-state signing
+formats and qualification limits.
+
 | Current state | Authorized action | Result |
 |---|---|---|
 | Absent | Actor with ACP creation permission | Pending ring and registered ACP object |
-| Pending | First confirmation from a participant | Record that participant's public-key declaration |
-| Pending | All participants confirm the same key | Active ring |
-| Pending | Different participant confirms a conflicting key | Terminal conflict record |
+| Pending | First confirmation from a participant | Record that participant's complete key pair |
+| Pending | All participants confirm the same key pair | Active ring |
+| Pending | Different participant confirms either conflicting key | Terminal conflict record |
 | Pending | Creator or participant cancels | Terminal cancellation record |
 | Active, cancelled or conflicting | Fresh-DKG confirmation/cancellation | Rejected |
 

@@ -30,7 +30,7 @@ impl RingRecord {
     /// Build Orbis reshare sign bytes from a validated current record and its pending target.
     pub fn reshare_signing_bytes(&self, deployment_id: u64) -> Result<Vec<u8>> {
         self.validate(&self.id)?;
-        let RingState::Active { public_key } = &self.state else {
+        let RingState::Active { keys } = &self.state else {
             return Err(invalid("ring is not active"));
         };
         let settings = self.current_settings();
@@ -38,7 +38,7 @@ impl RingRecord {
             .pending_reshare
             .ok_or_else(|| invalid("reshare is not pending"))?;
         let mut state = SignState {
-            public_key: public_key.clone(),
+            public_key: keys.public_key.clone(),
             peers: settings.peer_node_keys,
             threshold: settings.threshold,
             next_peers: target.peer_node_keys.clone(),
@@ -57,7 +57,7 @@ impl RingRecord {
             domain: "orbis-ring-reshare-finalize".into(),
             deployment: ring_deployment_label(self.deployment_root, deployment_id),
             ring_id: self.id.clone(),
-            public_key: public_key.clone(),
+            public_key: keys.public_key.clone(),
             current_state,
             finalized_state: Sha256::digest(state.encode_to_vec()).to_vec(),
             sequence: self.sequence,
@@ -88,7 +88,7 @@ impl VeraModule {
             return Err(invalid("ring deployment or sequence changed"));
         }
         let message = record.reshare_signing_bytes(context.deployment_id)?;
-        let RingState::Active { public_key } = &record.state else {
+        let RingState::Active { keys } = &record.state else {
             return Err(invalid("ring is not active"));
         };
         let signature = hex::decode(&request.signature).map_err(invalid)?;
@@ -97,7 +97,7 @@ impl VeraModule {
         }
         vera_crypto::threshold::verify(
             request.scheme,
-            &hex::decode(public_key).map_err(invalid)?,
+            &hex::decode(&keys.public_key).map_err(invalid)?,
             &message,
             &signature,
         )

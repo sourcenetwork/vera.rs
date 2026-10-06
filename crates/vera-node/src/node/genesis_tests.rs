@@ -70,6 +70,7 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
                 .await
                 .unwrap();
             assert!(block.native_targets.is_some());
+            assert_eq!(block.prevrandao, fingerprint(genesis).unwrap());
             assert!(!directory.join("native-genesis.intent").exists());
             let modules = NativeStateSet::init(
                 context.child("check_modules"),
@@ -326,4 +327,33 @@ fn pipeline_parameters_bind_the_genesis_identity_and_restart() {
         });
     }
     assert_ne!(identities[0], identities[1]);
+}
+
+#[test]
+fn pre_pet_genesis_and_interrupted_initialization_are_rejected_unchanged() {
+    let genesis = configured_genesis();
+    let mut bytes = b"vera/native-genesis/v2\0".to_vec();
+    bytes.extend_from_slice(&serde_json::to_vec(&genesis).unwrap());
+    let old_fingerprint = keccak256(bytes);
+    assert_ne!(old_fingerprint, fingerprint(&genesis).unwrap());
+    for marker in ["native-genesis.bin", "native-genesis.intent"] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path();
+        persist(&path.join(marker), old_fingerprint.as_slice()).unwrap();
+        let runtime = tokio::Config::new().with_storage_directory(path.join("commonware"));
+        let genesis = &genesis;
+        tokio::Runner::new(runtime).start(|context| async move {
+            let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+            let error = load_or_create(&context, path, genesis, &cache)
+                .await
+                .unwrap_err();
+            assert!(
+                error.to_string().contains("different") || error.to_string().contains("differs")
+            );
+        });
+        assert_eq!(
+            fs::read(path.join(marker)).unwrap(),
+            old_fingerprint.as_slice()
+        );
+    }
 }

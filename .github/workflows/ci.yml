@@ -353,6 +353,25 @@ jobs:
           cargo build --frozen -p verad --features regolith-history,fault-injection
           cargo build --frozen --release -p verad
 
+      - name: Native ring lifecycle with release daemon
+        env:
+          VERAD_BINARY: ${{ github.workspace }}/target/release/verad
+          VERA_E2E_DEADLINE_SCALE: "8"
+          VERA_E2E_DIR: ${{ runner.temp }}/native-rings-release
+          VERA_E2E_KEEP: "1"
+          RUST_LOG: warn,vera_storage=info,vera_node=debug,vera_node::tx_gossip=trace,vera_diagnostics=debug
+        run: >-
+          cargo test --release --frozen -p vera-e2e --test native_rings
+          -- --test-threads=1 --nocapture
+
+      - name: Upload failed native ring logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-native-rings-release-logs
+          path: ${{ runner.temp }}/native-rings-release
+          if-no-files-found: ignore
+
   linux-recovery:
     name: Linux recovery (${{ matrix.suite }})
     runs-on: ubuntu-latest

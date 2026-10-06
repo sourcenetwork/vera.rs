@@ -85,12 +85,12 @@ impl RingRecord {
     /// Hash the same report snapshot consumed by existing Orbis signers.
     pub fn report_state_hash(&self) -> Result<String> {
         self.validate(&self.id)?;
-        let RingState::Active { public_key } = &self.state else {
+        let RingState::Active { keys } = &self.state else {
             return Err(invalid("ring is not active"));
         };
         let s = self.current_settings();
         let mut out = Vec::new();
-        write_string(&mut out, public_key);
+        write_string(&mut out, &keys.public_key);
         write_string_vec(&mut out, &s.peer_node_keys);
         write_u32(&mut out, s.threshold);
         write_optional_string_vec(
@@ -166,11 +166,11 @@ impl VeraModule {
         let record = self
             .threshold_ring(&report.ring_id)?
             .ok_or_else(|| invalid("ring not found"))?;
-        let RingState::Active { public_key } = &record.state else {
+        let RingState::Active { keys } = &record.state else {
             return Err(invalid("ring is not active"));
         };
         if record.deployment_root != context.genesis_id
-            || report.ring_pk != *public_key
+            || report.ring_pk != keys.public_key
             || report.ring_state_sha256 != record.report_state_hash()?
         {
             return Err(invalid("report ring state is stale"));
@@ -192,6 +192,17 @@ impl VeraModule {
         };
         let (accused, _) = committee(metadata.accused)?;
         let (signers, threshold) = committee(metadata.signing)?;
+        if metadata.origin == "pet" && !record.config.requires_pet {
+            return Err(invalid("PET evidence requires a PET ring"));
+        }
+        if let Some(node_id) = metadata.pet_node_id
+            && accused.binary_search(&report.accused_node_key).ok()
+                != usize::try_from(node_id)
+                    .ok()
+                    .and_then(|id| id.checked_sub(1))
+        {
+            return Err(invalid("PET evidence member index does not match accused"));
+        }
         if accused.binary_search(&report.accused_node_key).is_err()
             || signers.binary_search(&report.reporter_node_key).is_err()
             || threshold < 2
@@ -226,7 +237,7 @@ impl VeraModule {
         }
         vera_crypto::threshold::verify(
             scheme,
-            &hex::decode(public_key).map_err(invalid)?,
+            &hex::decode(&keys.public_key).map_err(invalid)?,
             &report.canonical_bytes(),
             &signature,
         )
@@ -285,3 +296,6 @@ impl VeraModule {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod pet_tests;

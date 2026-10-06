@@ -1,4 +1,8 @@
 mod jubjub;
+#[path = "../objects/registration_tests.rs"]
+mod object_registration;
+mod pet;
+mod pet_reports;
 
 use super::*;
 use crate::{
@@ -163,6 +167,7 @@ fn fixture_nodes(policy: &str, nodes: &[u8]) -> (VeraModule, AcpModule, RingConf
             threshold: 2,
             pss_interval: 86400,
             current_version: 0,
+            requires_pet: false,
             nonce: [9; 32],
             trusted_auth_relay_dids: None,
             reporting: ReportingConfig::default(),
@@ -190,11 +195,17 @@ fn participant(
         signature: hex::encode(signature.to_bytes()),
     }
 }
+fn ring_keys(key: &str) -> RingPublicKeys {
+    RingPublicKeys {
+        public_key: key.into(),
+        pet_public_key: None,
+    }
+}
 fn confirm(ring: &str, n: u8, key: &str) -> SignedRingParticipantRequest {
     participant(
         ring,
         &secret(n),
-        RingParticipantCommand::Confirm(key.into()),
+        RingParticipantCommand::Confirm(ring_keys(key)),
     )
 }
 fn apply(
@@ -248,7 +259,7 @@ fn ring_creation_is_atomic_and_confirmations_require_unanimity() {
     assert_eq!(
         active.state,
         RingState::Active {
-            public_key: "aabb".into()
+            keys: ring_keys("aabb")
         }
     );
     assert!(
@@ -296,7 +307,7 @@ fn cancellation_conflict_revocation_and_bad_signatures_cannot_reuse_a_ring() {
             .is_err()
     );
     let mut altered = confirm(&record.id, 2, "aabb");
-    altered.request.command = RingParticipantCommand::Confirm("ccdd".into());
+    altered.request.command = RingParticipantCommand::Confirm(ring_keys("ccdd"));
     assert!(
         vera.apply_ring_participant_request(&context(), &altered)
             .is_err()
@@ -1020,6 +1031,8 @@ fn threshold_objects_require_active_ring_and_scoped_actor_and_rollback_on_failed
         ring_id: ring.id.clone(),
         document: r#"{"enc_cmt":[1],"encrypted_data":[2],"nonce":[3]}"#.into(),
         proof: r#"{"challenge":[4],"response":[5]}"#.into(),
+        pet_tag: None,
+        pet_tag_proof: None,
         policy_id: config.policy_id.clone(),
         resource: "document".into(),
         permission: "read".into(),

@@ -75,3 +75,6 @@ impl VeraClient {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;

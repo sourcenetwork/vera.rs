@@ -14,7 +14,7 @@ use vera_client::{
     rings::*,
 };
 use vera_domain::{ConsensusPublicKey, NativeTx};
-use vera_e2e::cluster::{ConsensusPreset, KeySet, TestCluster};
+use vera_e2e::cluster::{ConsensusParams, KeySet, TestCluster};
 use vera_modules::acp::{
     abi::IAcp,
     types::{Object, PolicyCmd},
@@ -34,10 +34,16 @@ async fn execute(
     call: Bytes,
     success: bool,
 ) -> NativeReceipt {
+    let call_bytes = call.len();
+    let receipt_deadline = if call_bytes > 8 << 20 {
+        vera_e2e::readiness_deadline().max(Duration::from_secs(120))
+    } else {
+        Duration::from_secs(30)
+    };
     let wire = worker.sign_native_tx(target, call).unwrap();
     let id = writer.send_native_tx(&wire).await.unwrap();
     assert_eq!(id, NativeTx::decode_wire(&wire).unwrap().tx_id().0);
-    tokio::time::timeout(Duration::from_secs(30), async {
+    tokio::time::timeout(receipt_deadline, async {
         loop {
             let (local, remote) = tokio::try_join!(
                 writer.read_receipt(id, trusted),
@@ -52,7 +58,11 @@ async fn execute(
         }
     })
     .await
-    .unwrap()
+    .unwrap_or_else(|_| {
+        panic!(
+            "native receipt timed out after {receipt_deadline:?}: tx_id={id}, call_bytes={call_bytes}"
+        )
+    })
 }
 
 #[tokio::test]
@@ -72,7 +82,13 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
         .nodes(4)
         .seed(deployment)
         .chain_id(deployment)
-        .preset(ConsensusPreset::Normal)
+        // The report larger than 8 MiB must fit inside one consensus round
+        // even when validators share a busy runner.
+        .consensus_params(ConsensusParams {
+            leader_timeout: Duration::from_secs(10),
+            notarization_timeout: Duration::from_secs(20),
+            nullify_retry: Duration::from_secs(2),
+        })
         .build()
         .await
         .unwrap();
@@ -202,6 +218,7 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
         threshold: 2,
         pss_interval: 86400,
         current_version: 0,
+        requires_pet: false,
         nonce: [1; 32],
         trusted_auth_relay_dids: None,
         reporting: ReportingConfig {
@@ -265,7 +282,10 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
     let first = participant(
         &ring,
         &nodes[0],
-        RingParticipantCommand::Confirm(ring_public.clone()),
+        RingParticipantCommand::Confirm(RingPublicKeys {
+            public_key: ring_public.clone(),
+            pet_public_key: None,
+        }),
     );
     execute(
         &writer,
@@ -280,7 +300,10 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
     let duplicate = participant(
         &ring,
         &nodes[0],
-        RingParticipantCommand::Confirm("ccdd".into()),
+        RingParticipantCommand::Confirm(RingPublicKeys {
+            public_key: "ccdd".into(),
+            pet_public_key: None,
+        }),
     );
     execute(
         &writer,
@@ -295,7 +318,10 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
     let second = participant(
         &ring,
         &nodes[1],
-        RingParticipantCommand::Confirm(ring_public.clone()),
+        RingParticipantCommand::Confirm(RingPublicKeys {
+            public_key: ring_public.clone(),
+            pet_public_key: None,
+        }),
     );
     execute(
         &writer,
@@ -316,7 +342,10 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
         encode_ring_participant_request(&participant(
             &ring,
             &nodes[2],
-            RingParticipantCommand::Confirm(ring_public.clone()),
+            RingParticipantCommand::Confirm(RingPublicKeys {
+                public_key: ring_public.clone(),
+                pet_public_key: None,
+            }),
         ))
         .unwrap(),
         true,
@@ -332,6 +361,8 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
         ring_id: ring.clone(),
         document: r#"{"enc_cmt":[1],"encrypted_data":[2],"nonce":[3]}"#.into(),
         proof: r#"{"challenge":[4],"response":[5]}"#.into(),
+        pet_tag: None,
+        pet_tag_proof: None,
         policy_id: config.policy_id.clone(),
         resource: "document".into(),
         permission: "read".into(),
@@ -521,7 +552,10 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
     assert_eq!(
         recovered.state,
         RingState::Active {
-            public_key: ring_public.clone()
+            keys: RingPublicKeys {
+                public_key: ring_public.clone(),
+                pet_public_key: None
+            }
         }
     );
     assert_eq!(recovered.config, config);
@@ -672,7 +706,10 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
         encode_ring_participant_request(&participant(
             &ring,
             &nodes[1],
-            RingParticipantCommand::Confirm(ring_public.clone()),
+            RingParticipantCommand::Confirm(RingPublicKeys {
+                public_key: ring_public.clone(),
+                pet_public_key: None,
+            }),
         ))
         .unwrap(),
         false,

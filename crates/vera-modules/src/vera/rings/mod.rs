@@ -31,7 +31,7 @@ pub fn ring_key(id: &str) -> Result<Vec<u8>> {
     if id.len() != 64 || hex::decode(id).is_err() || id.bytes().any(|b| b.is_ascii_uppercase()) {
         return Err(invalid("invalid ring identifier"));
     }
-    Ok(format!("orbis/ring/v1/{id}").into_bytes())
+    Ok(format!("orbis/ring/v2/{id}").into_bytes())
 }
 
 impl VeraModule {
@@ -121,7 +121,7 @@ impl VeraModule {
                     creator: actor.to_string(),
                     config: config.clone(),
                     state: RingState::Pending {
-                        public_key: None,
+                        keys: None,
                         confirmations: Vec::new(),
                     },
                     revision: context.timestamp.clone(),
@@ -213,7 +213,7 @@ impl VeraModule {
         )
         .map_err(invalid)?;
         let RingState::Pending {
-            public_key,
+            keys,
             confirmations,
         } = &mut record.state
         else {
@@ -229,7 +229,7 @@ impl VeraModule {
                 };
             }
             RingParticipantCommand::Confirm(key) => {
-                types::public_key_value(key)?;
+                key.validate(record.config.requires_pet)?;
                 let node = self
                     .threshold_node(&request.node_key)?
                     .ok_or_else(|| invalid("node not registered"))?;
@@ -240,19 +240,17 @@ impl VeraModule {
                     .binary_search(&request.node_key)
                     .err()
                     .ok_or_else(|| invalid("node already confirmed"))?;
-                if let Some(first) = public_key.as_ref().filter(|first| *first != key) {
+                if let Some(first) = keys.as_ref().filter(|first| *first != key) {
                     record.state = RingState::Conflict {
-                        first_key: first.clone(),
-                        conflicting_key: key.clone(),
+                        first_keys: first.clone(),
+                        conflicting_keys: key.clone(),
                         by: request.node_key.clone(),
                     };
                 } else {
-                    *public_key = Some(key.clone());
+                    *keys = Some(key.clone());
                     confirmations.insert(position, request.node_key.clone());
                     if confirmations.len() == record.config.peer_node_keys.len() {
-                        record.state = RingState::Active {
-                            public_key: key.clone(),
-                        };
+                        record.state = RingState::Active { keys: key.clone() };
                     }
                 }
             }

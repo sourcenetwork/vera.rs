@@ -15,7 +15,7 @@ use vera_genesis::VeraGenesis;
 use vera_modules::ModuleState;
 
 pub(super) fn fingerprint(genesis: &VeraGenesis) -> anyhow::Result<alloy_primitives::B256> {
-    let mut bytes = b"vera/native-genesis/v2\0".to_vec();
+    let mut bytes = b"vera/native-genesis/v3\0".to_vec();
     bytes.extend_from_slice(&serde_json::to_vec(genesis)?);
     Ok(keccak256(bytes))
 }
@@ -108,10 +108,8 @@ pub(super) async fn load_or_create(
     );
     let native_targets = native.committed_targets().await;
     let mut block = vera_app::genesis_block(root, targets, module_root);
-    if genesis.simplex.is_some() {
-        // Bind consensus parameters into the network's authenticated genesis identity.
-        block.prevrandao = fingerprint;
-    }
+    // Bind the native schema and consensus parameters into the deployment identity.
+    block.prevrandao = fingerprint;
     block.receipt_commitment = Some(vera_executor::receipt_commitment(0, &[]));
     block.native_targets = Some(
         [
