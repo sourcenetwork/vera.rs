@@ -19,6 +19,7 @@ fn fixture(rows: usize, metadata_bytes: usize) -> (AcpModule, String) {
         metadata.validate().unwrap();
         module
             .set_relationship(&RelationshipRecord {
+                incarnation: 0,
                 policy_id: policy.policy.id.clone(),
                 generations: RelationPair {
                     target: 0,
@@ -223,8 +224,21 @@ fn empty_directories_and_prefixes_are_charged_before_suffix_materialization() {
         if relation == "owner" {
             assert!(long_budget.consumed() > short_budget.consumed() + 1900);
         } else {
-            assert_eq!(long_budget.consumed(), short_budget.consumed());
+            let point_cost =
+                |id: &str| 100 + (object_state::key(&policy, "file", id).len() as u64).div_ceil(16);
+            assert_eq!(
+                long_budget.consumed() - short_budget.consumed(),
+                point_cost(&long) - point_cost("missing")
+            );
         }
+        let exact = QueryBudget::new(long_budget.consumed());
+        assert!(
+            module
+                .query_filter_relationships_with_budget(&policy, &selection, &exact)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(exact.consumed(), long_budget.consumed());
         let short = QueryBudget::new(long_budget.consumed() - 1);
         assert!(matches!(
             module.query_filter_relationships_with_budget(&policy, &selection, &short),

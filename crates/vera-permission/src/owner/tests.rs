@@ -9,6 +9,7 @@ fn object() -> Object {
 }
 fn record() -> RelationshipRecord {
     RelationshipRecord {
+        incarnation: 0,
         generations: RelationPair {
             target: 0,
             subject: 0,
@@ -42,7 +43,7 @@ fn read(records: &[RelationshipRecord]) -> Result<Option<Actor>, PermissionError
             (
                 keys::relationship_key(
                     &record.policy_id,
-                    &keys::relationship_storage_key(&record.relationship),
+                    &keys::relationship_storage_key(&record.relationship, record.incarnation),
                 ),
                 serde_json::to_vec(record).unwrap(),
             )
@@ -142,4 +143,11 @@ fn owner_records_and_queries_cannot_change_the_selected_object() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn owner_records_cannot_select_a_nonzero_incarnation() {
+    let mut record = record();
+    record.incarnation = 1;
+    assert!(read(&[record]).is_err());
 }

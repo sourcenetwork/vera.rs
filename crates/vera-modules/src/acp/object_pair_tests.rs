@@ -16,6 +16,7 @@ fn fixture() -> (InMemoryKvStore, String, RelationshipRecord) {
         .unwrap();
     let relationship = Relationship::with_entity("file", "report/child", "reader", owner);
     let record = RelationshipRecord {
+        incarnation: 0,
         generations: policy.relations.pair(&relationship).unwrap(),
         policy_id: policy.policy.id.clone(),
         relationship,
@@ -30,7 +31,7 @@ fn primary(record: &RelationshipRecord) -> Vec<u8> {
     keys::relationship_generation_key(
         &record.policy_id,
         record.generations,
-        &keys::relationship_storage_key(&record.relationship),
+        &keys::relationship_storage_key(&record.relationship, record.incarnation),
     )
 }
 
@@ -48,7 +49,7 @@ fn object_keys_preserve_boundaries_pairs_and_maximum_primary_keys() {
         target: u64::MAX,
         subject: 10,
     };
-    let object = prefix(&policy, "file", "report/雪");
+    let object = incarnation_prefix(&policy, "file", "report/雪", 0);
     assert_eq!(
         parse_pair(&object, &key(&record)).unwrap(),
         record.generations
@@ -79,7 +80,7 @@ fn object_keys_preserve_boundaries_pairs_and_maximum_primary_keys() {
 #[test]
 fn object_key_parsers_reject_noncanonical_boundaries_and_suffixes() {
     let (_, policy, record) = fixture();
-    let object = prefix(&policy, "file", "report/child");
+    let object = incarnation_prefix(&policy, "file", "report/child", 0);
     for suffix in [
         "0000000000000001/000000000000000A",
         "0000000000000001/0000000000000000/",
@@ -94,14 +95,20 @@ fn object_key_parsers_reject_noncanonical_boundaries_and_suffixes() {
     let base = keys::relationship_generation_prefix(&policy, record.generations, "");
     let digest = "a".repeat(64);
     for suffix in [
-        format!("v1/66696c65/61/726561646572/{digest}"),
-        format!("v2/66696C65/61/726561646572/{digest}"),
-        format!("v2/66696c65/6/726561646572/{digest}"),
-        format!("v2/66696c65/ff/726561646572/{digest}"),
-        format!("v2/66696c65/61/726561646572/{digest}/extra"),
-        format!("v2/66696c65/61/{digest}"),
-        format!("v2/66696c65/61/726561646572/{}", "A".repeat(64)),
-        format!("v2/66696c65/61/726561646572/{}", "a".repeat(63)),
+        format!("v1/66696c65/61/0000000000000000/726561646572/{digest}"),
+        format!("v3/66696C65/61/0000000000000000/726561646572/{digest}"),
+        format!("v3/66696c65/6/0000000000000000/726561646572/{digest}"),
+        format!("v3/66696c65/ff/0000000000000000/726561646572/{digest}"),
+        format!("v3/66696c65/61/0000000000000000/726561646572/{digest}/extra"),
+        format!("v3/66696c65/61/{digest}"),
+        format!(
+            "v3/66696c65/61/0000000000000000/726561646572/{}",
+            "A".repeat(64)
+        ),
+        format!(
+            "v3/66696c65/61/0000000000000000/726561646572/{}",
+            "a".repeat(63)
+        ),
     ] {
         let mut malformed = base.clone();
         malformed.extend_from_slice(suffix.as_bytes());

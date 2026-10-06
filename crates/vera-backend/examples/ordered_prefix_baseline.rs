@@ -99,7 +99,7 @@ fn prefix(object: usize, layout: &str, policy: &PolicyRecord) -> Vec<u8> {
                     Subject::entity_set("group", "", "member"),
                 ))
                 .unwrap(),
-            &keys::relation_prefix("document", &format!("{object:08}"), "blocked"),
+            &keys::relation_prefix("document", &format!("{object:08}"), "blocked", 0),
         ),
         _ => text.into_bytes(),
     }
@@ -116,7 +116,7 @@ fn key(object: usize, subject: usize, layout: &str, policy: &PolicyRecord) -> Ve
         return keys::relationship_generation_key(
             &policy.policy.id,
             policy.relations.pair(&relation).unwrap(),
-            &keys::relationship_storage_key(&relation),
+            &keys::relationship_storage_key(&relation, 0),
         );
     }
     let mut key = prefix(object, layout, policy);

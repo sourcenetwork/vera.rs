@@ -107,7 +107,7 @@ impl AcpModule {
     ) -> Result<Option<RelationshipRecord>> {
         let prefix = keys::relationship_storage_prefix(
             policy,
-            &keys::relation_prefix(&object.resource, &object.id, "owner"),
+            &keys::relation_prefix(&object.resource, &object.id, "owner", 0),
         );
         if let Some(budget) = budget {
             budget.permissions.records.read(&prefix, None)?;
@@ -135,6 +135,7 @@ impl AcpModule {
                 target: 0,
                 subject: 0,
             })
+            || record.incarnation != 0
             || record.policy_id != policy
             || record.relationship.resource != object.resource
             || record.relationship.object_id != object.id
@@ -142,7 +143,7 @@ impl AcpModule {
             || record.metadata.owner_did != actor.as_str()
             || keys::relationship_storage_prefix(
                 policy,
-                &keys::relationship_storage_key(&record.relationship),
+                &keys::relationship_storage_key(&record.relationship, record.incarnation),
             ) != key
         {
             return Err(AcpError::State(
@@ -292,7 +293,7 @@ mod tests {
         };
         let key = keys::relationship_storage_prefix(
             &policy,
-            &keys::relationship_storage_key(&record.relationship),
+            &keys::relationship_storage_key(&record.relationship, record.incarnation),
         );
         let original = module.store.serialize();
         for case in 0..4 {
@@ -320,7 +321,10 @@ mod tests {
                         Did::new("did:key:other").unwrap(),
                     );
                     module.store.put(
-                        &keys::relationship_key(&policy, &keys::relationship_storage_key(&other)),
+                        &keys::relationship_key(
+                            &policy,
+                            &keys::relationship_storage_key(&other, 0),
+                        ),
                         serde_json::to_vec(&record).unwrap(),
                     );
                 }

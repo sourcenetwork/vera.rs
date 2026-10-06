@@ -267,6 +267,8 @@ pub struct RelationshipSelector {
 /// A relationship associated with its policy.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RelationshipRecord {
+    /// Target object's physical incarnation; owner records always use zero.
+    pub incarnation: u64,
     /// Immutable incarnations of the relationship and referenced userset.
     pub generations: RelationPair,
     #[serde(default, skip_serializing_if = "SuppliedMetadata::is_empty")]
@@ -320,5 +322,38 @@ impl Default for AcpParams {
             policy_command_max_expiration_delta: 12 * 60 * 60,
             registrations_commitment_validity: Duration::Seconds(10 * 60),
         }
+    }
+}
+
+#[cfg(test)]
+mod incarnation_tests {
+    use super::*;
+
+    #[test]
+    fn relationship_incarnation_is_required_and_round_trips() {
+        let record = RelationshipRecord {
+            incarnation: u64::MAX,
+            generations: RelationPair {
+                target: 1,
+                subject: 0,
+            },
+            supplied_metadata: Default::default(),
+            policy_id: "policy-1".into(),
+            relationship: Relationship::new("file", "report", "reader", Subject::Wildcard),
+            archived: false,
+            metadata: RecordMetadata {
+                creation_ts: Timestamp::default(),
+                tx_hash: Vec::new(),
+                tx_signer: "actor".into(),
+                owner_did: "actor".into(),
+            },
+        };
+        let mut value = serde_json::to_value(&record).unwrap();
+        let decoded: RelationshipRecord = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(decoded.incarnation, u64::MAX);
+        value.as_object_mut().unwrap().remove("incarnation");
+        assert!(serde_json::from_value::<RelationshipRecord>(value.clone()).is_err());
+        value["incarnation"] = serde_json::Value::Null;
+        assert!(serde_json::from_value::<RelationshipRecord>(value).is_err());
     }
 }

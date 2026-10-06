@@ -118,7 +118,7 @@ fn recreating_target_or_userset_relation_never_resurrects_retained_grants() {
         let retained_key = keys::relationship_generation_key(
             &policy,
             previous.generations,
-            &keys::relationship_storage_key(&previous.relationship),
+            &keys::relationship_storage_key(&previous.relationship, previous.incarnation),
         );
         let (removed, _) = module
             .edit_policy(

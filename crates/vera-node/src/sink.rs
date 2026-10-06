@@ -147,9 +147,20 @@ impl FinalizedSink for NodeSink {
     }
 
     async fn finalized(&self, block: &Block, receipts: Vec<ExecutionReceipt>) {
-        let started =
-            tracing::enabled!(target: "vera_publication_diagnostics", tracing::Level::DEBUG)
-                .then(std::time::Instant::now);
+        let started = (tracing::enabled!(target: "vera_diagnostics", tracing::Level::DEBUG)
+            || tracing::enabled!(target: "vera_publication_diagnostics", tracing::Level::DEBUG))
+        .then(std::time::Instant::now);
+        tracing::debug!(target: "vera_diagnostics", height = block.height, "finalized sink started");
+        tracing::debug!(target: "vera_publication_diagnostics", height = block.height, "finalized sink started");
+        let completed = || {
+            if let Some(started) = started {
+                let total_us = started.elapsed().as_micros();
+                tracing::debug!(target: "vera_diagnostics", height = block.height, total_us,
+                    "finalized sink completed");
+                tracing::debug!(target: "vera_publication_diagnostics", height = block.height, total_us,
+                    "finalized sink completed");
+            }
+        };
         // Marshal serves lookups independently of the stateful callback.
         let artifacts = (self.finalization_lookup)(block.height).await;
         let lookup_elapsed = started.map(|started| started.elapsed());
@@ -178,10 +189,14 @@ impl FinalizedSink for NodeSink {
         if let Some(((started, lookup), persisted)) =
             started.zip(lookup_elapsed).zip(persisted_elapsed)
         {
+            let index_us = (started.elapsed() - persisted).as_micros();
             tracing::debug!(target: "vera_publication_diagnostics", height = block.height,
                 transactions = block.txs.len(), lookup_us = lookup.as_micros(),
-                history_us = (persisted - lookup).as_micros(),
-                index_us = (started.elapsed() - persisted).as_micros(),
+                history_us = (persisted - lookup).as_micros(), index_us,
+                "finalized revision publication");
+            tracing::debug!(target: "vera_diagnostics", height = block.height,
+                transactions = block.txs.len(), lookup_us = lookup.as_micros(),
+                history_us = (persisted - lookup).as_micros(), index_us,
                 "finalized revision publication");
         }
         let (rpc_block, rpc_logs) = subscription_data(block, self.gas_limit, &receipts, gas_used);
@@ -213,6 +228,7 @@ impl FinalizedSink for NodeSink {
         self.node_state.notify_proof_progress();
 
         let Some(set) = self.state.get() else {
+            completed();
             return;
         };
         let nonces = self
@@ -228,5 +244,6 @@ impl FinalizedSink for NodeSink {
             nonces,
         )
         .await;
+        completed();
     }
 }

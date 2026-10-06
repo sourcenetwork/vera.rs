@@ -76,6 +76,7 @@ vera-harness = { path = "crates/vera-harness" }
 test-infra = { path = "crates/test-infra" }
 
 # Commonware (calver 2026.2.0)
+commonware-actor = { git = "https://github.com/iverc/commonware", rev = "d0cef38586581911ddbeb3060ea6b0d7e33d2a98" }
 commonware-p2p = "2026.9.0"
 commonware-utils = "2026.9.0"
 commonware-codec = "2026.9.0"

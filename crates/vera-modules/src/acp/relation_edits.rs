@@ -96,20 +96,30 @@ impl AcpModule {
             for subject in &subjects {
                 budget.pair()?;
                 if retired.contains(&target) || retired.contains(subject) {
-                    let count = relationship_index::read_pair_count(
-                        &records,
-                        policy,
-                        RelationPair {
-                            target,
-                            subject: *subject,
-                        },
-                    )
-                    .map_err(relation_state_error)?;
-                    if count == 0 {
+                    let pair = RelationPair {
+                        target,
+                        subject: *subject,
+                    };
+                    let physical = relationship_index::read_pair_count(&records, policy, pair)
+                        .map_err(relation_state_error)?;
+                    if physical == 0 {
                         return Err(AcpError::State(
                             "live relation directory has no physical records".into(),
                         ));
                     }
+                    let count = relationship_index::read_logical_record(&records, policy, pair)
+                        .map_err(relation_state_error)?
+                        .ok_or_else(|| {
+                            AcpError::State("current pair logical count missing".into())
+                        })?;
+                    if count > physical {
+                        return Err(AcpError::State(
+                            "logical relationship count differs from current rows".into(),
+                        ));
+                    }
+                    let key = relationship_index::logical_key(policy, pair);
+                    budget.write(&key, None)?;
+                    changes.push((key, None));
                     removed = removed.checked_add(count).ok_or_else(|| {
                         AcpError::State("removed relationship count overflow".into())
                     })?;

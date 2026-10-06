@@ -27,6 +27,7 @@ vera-modules.workspace = true
 vera-qmdb.workspace = true
 vera-traits.workspace = true
 
+commonware-actor.workspace = true
 commonware-broadcast.workspace = true
 commonware-codec.workspace = true
 commonware-consensus.workspace = true

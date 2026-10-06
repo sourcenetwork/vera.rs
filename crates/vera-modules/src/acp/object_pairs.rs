@@ -8,7 +8,7 @@ use super::{
 };
 use zanzibar::error::Result;
 
-fn policy_prefix(policy: &str) -> Vec<u8> {
+pub(super) fn policy_prefix(policy: &str) -> Vec<u8> {
     let mut prefix = relationship_index::policy_prefix(policy);
     prefix.extend_from_slice(b"object/");
     prefix
@@ -21,12 +21,35 @@ pub(super) fn prefix(policy: &str, resource: &str, object: &str) -> Vec<u8> {
 }
 
 pub(super) fn key(record: &RelationshipRecord) -> Vec<u8> {
-    let mut key = prefix(
+    pair_key(
         &record.policy_id,
         &record.relationship.resource,
         &record.relationship.object_id,
-    );
-    append_pair(&mut key, record.generations);
+        record.incarnation,
+        record.generations,
+    )
+}
+
+pub(super) fn incarnation_prefix(
+    policy: &str,
+    resource: &str,
+    object: &str,
+    incarnation: u64,
+) -> Vec<u8> {
+    let mut prefix = prefix(policy, resource, object);
+    prefix.extend_from_slice(format!("{incarnation:016x}/").as_bytes());
+    prefix
+}
+
+pub(super) fn pair_key(
+    policy: &str,
+    resource: &str,
+    object: &str,
+    incarnation: u64,
+    pair: RelationPair,
+) -> Vec<u8> {
+    let mut key = incarnation_prefix(policy, resource, object, incarnation);
+    append_pair(&mut key, pair);
     key
 }
 
@@ -70,7 +93,7 @@ pub(super) fn key_from_relationship(
     let primary = keys::relationship_generation_prefix(policy, pair, "");
     let suffix = key
         .strip_prefix(primary.as_slice())
-        .and_then(|suffix| suffix.strip_prefix(b"v2/"))
+        .and_then(|suffix| suffix.strip_prefix(b"v3/"))
         .ok_or_else(|| invalid("relationship key has another policy or generation"))?;
     let mut fields = suffix.split(|byte| *byte == b'/');
     let resource = fields
@@ -79,6 +102,13 @@ pub(super) fn key_from_relationship(
     let object = fields
         .next()
         .ok_or_else(|| invalid("missing relationship object"))?;
+    let incarnation = fields
+        .next()
+        .ok_or_else(|| invalid("missing relationship incarnation"))?;
+    if incarnation.len() != 16 {
+        return Err(invalid("invalid relationship incarnation"));
+    }
+    generation(incarnation)?;
     let relation = fields
         .next()
         .ok_or_else(|| invalid("missing relationship relation"))?;
@@ -97,13 +127,42 @@ pub(super) fn key_from_relationship(
             .map_err(|_| invalid("relationship key field is not UTF-8"))?;
     }
     let mut output = policy_prefix(policy);
-    output.extend_from_slice(b"v2/");
+    output.extend_from_slice(b"v3/");
     output.extend_from_slice(resource);
     output.push(b'/');
     output.extend_from_slice(object);
     output.push(b'/');
+    output.extend_from_slice(incarnation);
+    output.push(b'/');
     append_pair(&mut output, pair);
     Ok(output)
+}
+
+/// State key for a non-owner row, derived before owned primary decoding.
+pub(super) fn state_key_from_relationship(
+    policy: &str,
+    pair: RelationPair,
+    key: &[u8],
+) -> Result<Option<Vec<u8>>> {
+    if pair.target == 0 {
+        return Ok(None);
+    }
+    let counter = key_from_relationship(policy, pair, key)?;
+    let prefix = policy_prefix(policy);
+    let mut fields = counter
+        .strip_prefix(prefix.as_slice())
+        .unwrap()
+        .split(|b| *b == b'/');
+    if fields.next() != Some(b"v3".as_slice()) {
+        return Err(invalid("invalid object key version"));
+    }
+    let decode = |bytes: &[u8]| -> Result<String> {
+        String::from_utf8(hex::decode(bytes).map_err(|_| invalid("invalid object key"))?)
+            .map_err(|_| invalid("invalid object key UTF-8"))
+    };
+    let resource = decode(fields.next().unwrap())?;
+    let object = decode(fields.next().unwrap())?;
+    Ok(Some(super::object_state::key(policy, &resource, &object)))
 }
 
 fn lower_hex(bytes: &[u8]) -> bool {
