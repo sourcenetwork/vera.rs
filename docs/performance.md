@@ -543,6 +543,17 @@ zero; short peaks may be missed. A short fixed-state run cannot establish a
 memory plateau, and growing state has a different working set. Plots contain
 measured data only and show failed-run status explicitly.
 
+Linux benchmark samples also retain `VmRSS`, `RssAnon`, `RssFile` and `RssShmem`
+in KiB under `sample.rss_breakdown`, from one bounded `/proc/<pid>/status` read
+per member per tick. Values come from the same status read; the existing `ps`
+rows are sampled separately and remain unchanged for older reports. Unavailable
+components are `null` with a fixed availability label, including on non-Linux
+hosts. Each read is limited to 16 KiB and two seconds, concurrent with the
+existing sampler. These measurements distinguish anonymous, file-backed and
+shared resident pages; they do not attribute allocations or establish a leak.
+Older recordings have no component measurements. Node diagnostics and their
+opt-in 30-second cadence are unchanged.
+
 Hosted runner hardware and contention vary. Compare matching workload settings,
 backends, toolchains, and host classes; repeat runs before drawing conclusions.
 Load averages are context, not proof of exclusive CPU or storage access. There
