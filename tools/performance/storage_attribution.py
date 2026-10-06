@@ -18,6 +18,60 @@ STRACE_LINE = re.compile(r'^\s*(?:\[pid\s+)?(\d+)\]?\s+\d+(?:\.\d+)?\s+(.*)$')
 CALL = re.compile(r'^(fsync|fdatasync)\(\d+(?:<([^>]+)>)?\)\s+=\s+(-?\d+|\?)(?=\s).* <(\d+(?:\.\d+)?)>$')
 RESUMED = re.compile(r'^<\.\.\. (fsync|fdatasync) resumed>(.*)$')
 
+# These fixed labels mirror the existing events, not span-close lifetimes.
+PUBLICATION_EVENTS = {
+    'finalized state apply': ('apply', ('database_apply_us', 'publication_us')),
+    'finalized state synchronization started': ('synchronization_started', ('sync_start_us',)),
+    'finalized state durability completed': ('durability_completed', ('wait_us', 'since_finalize_us')),
+    'finalized revision publication': ('revision_published', ('lookup_us', 'history_us', 'index_us')),
+    'finalized sink completed': ('sink_completed', ('total_us',)),
+}
+
+
+def publication_event(line):
+    """Read one target only: vera_diagnostics emits duplicate events when enabled."""
+    marker = 'vera_publication_diagnostics: '
+    if marker not in line:
+        return None
+    body = line.split(marker, 1)[1].strip()
+    for message, (event, names) in PUBLICATION_EVENTS.items():
+        if body != message and not body.startswith(message + ' '):
+            continue
+        fields = body[len(message):]
+
+        def field(name):
+            matches = re.findall(r'(?:^|\s)' + name + r'=(\S*)', fields)
+            if len(matches) != 1:
+                raise ValueError('publication event has missing or duplicate fields')
+            return matches[0]
+
+        height = field('height')
+        optional = event in ('synchronization_started', 'durability_completed')
+        unknown_height = optional and height == 'None'
+        if optional and not unknown_height:
+            if not height.startswith('Some(') or not height.endswith(')'):
+                raise ValueError('publication event has invalid height')
+            height = height[5:-1]
+        if not unknown_height and (not re.fullmatch(r'[0-9]{1,20}', height)
+                                   or int(height) > (1 << 64) - 1):
+            raise ValueError('publication event has invalid height')
+        outcome = 'observed'
+        if event == 'durability_completed':
+            durable = field('durable')
+            if durable not in ('true', 'false'):
+                raise ValueError('publication event has invalid durability outcome')
+            outcome = 'durable' if durable == 'true' else 'not_durable'
+        values = {}
+        for name in names:
+            value = field(name)
+            # Rust emits elapsed microseconds as u128; reject units, floats,
+            # nonfinite values and oversized tokens without echoing private logs.
+            if not re.fullmatch(r'[0-9]{1,39}', value) or int(value) > (1 << 128) - 1:
+                raise ValueError('publication event has invalid duration')
+            values[name] = int(value) / 1000
+        return event, outcome, unknown_height, values
+    return None
+
 
 def inside(path, root):
     """Resolve symlinks and reject both lexical and resolved escapes."""
@@ -91,9 +145,22 @@ def durations(values):
 
 def span_summary(lines):
     groups, blobs = defaultdict(list), defaultdict(list)
+    publication_groups = defaultdict(list)
+    event_counts = {event: 0 for event, _ in PUBLICATION_EVENTS.values()}
+    durability_outcomes = {'durable': 0, 'not_durable': 0}
+    unknown_height_events = 0
     height, pending = None, []
     complete, discarded, outside, incomplete_finalize = 0, 0, 0, 0
     for line in lines:
+        publication = publication_event(line)
+        if publication:
+            event, outcome, unknown_height, values = publication
+            event_counts[event] += 1
+            unknown_height_events += int(unknown_height)
+            if event == 'durability_completed':
+                durability_outcomes[outcome] += 1
+            for field, value in values.items():
+                publication_groups[event, field, outcome].append(value)
         blob = closed_blob_span(line)
         if blob:
             operation, busy, idle = blob
@@ -132,6 +199,12 @@ def span_summary(lines):
             'incomplete_persistent_finalize_windows': incomplete_finalize,
             'persistent_finalize_window_coverage_complete': complete > 0 and incomplete_finalize == 0,
             'groups': rows,
+            'publication_event_counts': event_counts,
+            'publication_unknown_height_events': unknown_height_events,
+            'durability_outcomes': durability_outcomes,
+            'publication_groups': [
+                {'event': event, 'field': field, 'outcome': outcome, **distribution(values)}
+                for (event, field, outcome), values in sorted(publication_groups.items())],
             'blob_groups': [{'operation': operation, **durations(values)}
                             for operation, values in sorted(blobs.items())]}
 
@@ -213,7 +286,7 @@ def digest(path):
     return value.hexdigest()
 
 
-def summarize_run(run_root):
+def summarize_run(run_root, publication_only=False):
     root = run_root.resolve(strict=True)
     logs = sorted((root / 'clusters').glob('*/node[0-3]/logs/stdout.log'))
     nodes, hashes = [], {}
@@ -223,34 +296,54 @@ def summarize_run(run_root):
             raise ValueError('expected exactly one cluster in the run root')
         path = inside(path, root)
         with path.open() as source:
-            summary = span_summary(source)
+            lines = (line for line in source if 'vera_publication_diagnostics: ' in line) if publication_only else source
+            summary = span_summary(lines)
+        if publication_only:
+            if not all(summary['publication_event_counts'].values()):
+                raise ValueError('expected all publication lifecycle events on every node')
+            for field in ('groups', 'blob_groups', 'spans_outside_windows',
+                          'persistent_finalize_window_samples', 'incomplete_persistent_finalize_windows',
+                          'persistent_finalize_window_coverage_complete'):
+                summary[field] = None
         nodes.append({'node': node, **summary})
         hashes[f'node{node}_stdout'] = digest(path)
     if len(nodes) != 4 or any(not node['completed_finalization_windows'] for node in nodes):
         raise ValueError('expected completed finalization windows on all four nodes')
-    calls = inside(root / 'syscalls.log', root)
-    with calls.open() as source:
-        syscalls = syscall_summary(source, root)
-    if not syscalls['groups']:
-        raise ValueError('no completed durability syscalls were captured')
-    hashes['syscalls'] = digest(calls)
-    return {
+    syscalls = None
+    if not publication_only:
+        calls = inside(root / 'syscalls.log', root)
+        with calls.open() as source:
+            syscalls = syscall_summary(source, root)
+        if not syscalls['groups']:
+            raise ValueError('no completed durability syscalls were captured')
+        hashes['syscalls'] = digest(calls)
+    result = {
         'format_version': 2,
         'scope': 'Normal is an uninstrumented comparator only. Traced timings include scheduling, tracing and ptrace overhead; neither run establishes capacity or a baseline improvement.',
         'span_scope': 'Close events are grouped only inside complete apply-to-synchronization-start windows at a matching revision; bootstrap and incomplete windows excluded. Concurrent users and retained child spans prevent exact revision attribution. Coverage reports windows missing any of seven persistent-partition finalize closes; missing samples are not zero-duration work. Finalize and start_sync overlap; do not add them or subtract their percentiles.',
         'duration_scope': 'Read/write spans end at acquisition. Finalize starts after acquisition, but enabled completion spans retain finalize/start_sync ancestors beyond function return and potentially beyond the originating window. Their close lifetimes do not measure guard holding or initiation alone. The actor completes the previous finalization barrier before starting another. Syscalls cover the whole run, including startup and restart, without revision or partition attribution.',
         'blob_scope': 'Blob groups cover the whole run, including bootstrap and restart, without partition or revision attribution. Write_at includes the awaited write and scheduling. Start_sync close lifetime includes retention by its sync child and does not isolate initiation. Sync measures synchronous sync calls or observation of a returned completion handle, potentially including time before first polling. These overlapping populations do not isolate prior-sync waits or physical I/O; do not add their durations or subtract their percentiles.',
+        'publication_scope': 'Only vera_publication_diagnostics events are counted. Scalar timings cover the whole run, including restart, independently of span windows. Preparation ends when finalize returns its barrier; wait starts at barrier polling; since-finalize includes intervening work before polling. Sink history includes blocking-pool scheduling and persistence. Durability false means not durable, not successful storage completion. Missing event groups are unavailable, not zero work. Fields overlap and are not additive or physical disk latency.',
         'nodes': nodes, 'syscalls': syscalls, 'private_input_sha256': hashes,
     }
+    if publication_only:
+        result['summary_scope'] = 'publication_only'
+        result['scope'] = 'Publication event summary only. This scope does not establish collection settings or overhead; consult the recording manifest. It establishes neither capacity nor a baseline improvement.'
+        result['span_scope'] = 'Unavailable in this summary scope; span events are excluded, not measured as zero. Their absence does not establish that tracing was disabled.'
+        result['duration_scope'] = 'Syscall evidence is unavailable in this summary scope. Publication scalar durations include scheduling and overlapping work, not isolated physical I/O.'
+        result['blob_scope'] = 'Unavailable in this summary scope; blob span events are excluded.'
+    return result
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run-root', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--publication-only', action='store_true',
+                        help='Summarize lifecycle events on all four nodes; syscall and span evidence stays unavailable.')
     args = parser.parse_args()
     try:
-        summary = summarize_run(args.run_root)
+        summary = summarize_run(args.run_root, publication_only=args.publication_only)
         with args.output.open('x') as output:
             json.dump(summary, output, indent=2, allow_nan=False)
             output.write('\n')

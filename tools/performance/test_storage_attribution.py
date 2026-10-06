@@ -3,13 +3,15 @@ import io
 import json
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
 import unittest
 
 from storage_attribution import closed_blob_span, closed_span, span_summary, syscall_summary, summarize_run
 
 
-APPLY = '2026-10-06T00:00:00Z DEBUG vera_publication_diagnostics: finalized state apply height=12\n'
-START = '2026-10-06T00:00:01Z DEBUG vera_publication_diagnostics: finalized state synchronization started height=Some(12)\n'
+APPLY = '2026-10-06T00:00:00Z DEBUG vera_publication_diagnostics: finalized state apply height=12 database_apply_us=12000 publication_us=10\n'
+START = '2026-10-06T00:00:01Z DEBUG vera_publication_diagnostics: finalized state synchronization started height=Some(12) sync_start_us=100000\n'
 FINALIZE = 'stateful.db.finalize{index=3}: commonware_glue::stateful::db: close time.busy=2ms time.idle=10ms\n'
 ANY = ('stateful.db.finalize{index=3}:qmdb.current.db.start_sync:'
        'qmdb.any.db.start_sync{db_size=3}: commonware_storage::qmdb::any::db: close '
@@ -105,6 +107,62 @@ class StorageAttributionTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 closed_blob_span(line)
 
+    def test_publication_scalars_are_separate_from_spans_and_duplicate_target(self):
+        durable = ('DEBUG vera_publication_diagnostics: finalized state durability completed '
+                   'height=Some(12) durable=true wait_us=2000 since_finalize_us=150000\n')
+        published = ('DEBUG vera_publication_diagnostics: finalized revision publication '
+                     'height=12 transactions=2 lookup_us=3000 history_us=17000 index_us=500\n')
+        completed = ('DEBUG vera_publication_diagnostics: finalized sink completed '
+                     'height=12 total_us=23000\n')
+        lines = [APPLY, FINALIZE, START, published, durable, completed]
+        result = span_summary(lines + [line.replace('vera_publication_diagnostics:', 'vera_diagnostics:')
+                                       for line in lines if 'vera_publication_diagnostics:' in line])
+        self.assertEqual(result['completed_finalization_windows'], 1)
+        self.assertFalse(result['persistent_finalize_window_coverage_complete'])
+        self.assertTrue(all(count == 1 for count in result['publication_event_counts'].values()))
+        fields = {row['field']: row for row in result['publication_groups']}
+        expected = {'database_apply_us': 12, 'publication_us': .01, 'sync_start_us': 100,
+                    'wait_us': 2, 'since_finalize_us': 150, 'lookup_us': 3, 'history_us': 17,
+                    'index_us': .5, 'total_us': 23}
+        self.assertEqual(set(fields), set(expected))
+        for name, value in expected.items():
+            self.assertEqual(fields[name]['count'], 1)
+            self.assertEqual(fields[name]['p50_ms'], value)
+        self.assertEqual(result['durability_outcomes'], {'durable': 1, 'not_durable': 0})
+
+    def test_failed_durability_and_missing_events_are_not_successes_or_zero_latency(self):
+        prefix = 'DEBUG vera_publication_diagnostics: finalized state durability completed '
+        result = span_summary([
+            prefix + 'height=Some(12) durable=true wait_us=1000 since_finalize_us=4000\n',
+            prefix + 'height=None durable=false wait_us=9000 since_finalize_us=12000\n',
+        ])
+        self.assertEqual(result['durability_outcomes'], {'durable': 1, 'not_durable': 1})
+        self.assertEqual(result['publication_unknown_height_events'], 1)
+        self.assertEqual(result['publication_event_counts']['synchronization_started'], 0)
+        groups = {(row['field'], row['outcome']): row for row in result['publication_groups']}
+        self.assertEqual(groups['wait_us', 'durable']['p50_ms'], 1)
+        self.assertEqual(groups['wait_us', 'not_durable']['p50_ms'], 9)
+        self.assertNotIn(('sync_start_us', 'observed'), groups)
+        empty = span_summary([])
+        self.assertEqual(empty['publication_groups'], [])
+        self.assertFalse(empty['persistent_finalize_window_coverage_complete'])
+
+    def test_malformed_publication_fields_fail_without_echoing_private_values(self):
+        bad = [START.replace(' sync_start_us=100000', ''),
+               START.replace('sync_start_us=100000', 'sync_start_us=1 sync_start_us=2'),
+               START.replace('Some(12)', 'Some(18446744073709551616)'),
+               START.replace('Some(12)', '12'),
+               START.replace('sync_start_us=100000', 'sync_start_us= sync_start_us=2'),
+               APPLY.replace('height=12', 'height=None')]
+        for value in ('NaN', 'inf', '-1', '1.5', '1ms', '1e3', str(1 << 128), '/private/secret'):
+            bad.append(START.replace('100000', value))
+        bad.append('DEBUG vera_publication_diagnostics: finalized state durability completed '
+                   'height=Some(12) durable=unknown wait_us=0 since_finalize_us=1\n')
+        for line in bad:
+            with self.subTest(line=line), self.assertRaises(ValueError) as raised:
+                span_summary([line])
+            self.assertNotIn('/private/secret', str(raised.exception))
+
     def test_interleaved_resumed_syscalls_use_total_seconds_and_preserve_failures(self):
         lines = [f'31 1791244800.1 fdatasync(17<{self.descriptor}> <unfinished ...>\n',
                  self.call(32, 'fsync', '0.000020'),
@@ -170,6 +228,64 @@ class StorageAttributionTests(unittest.TestCase):
                 line = f'31 1791244800.1 fsync(17<{path}>){suffix}\n'
                 with self.subTest(path=path, suffix=suffix), self.assertRaises(ValueError):
                     syscall_summary([line], self.root)
+
+    def publication_run(self):
+        events = [APPLY, START,
+                  'DEBUG vera_publication_diagnostics: finalized state durability completed '
+                  'height=Some(12) durable=true wait_us=2000 since_finalize_us=150000\n',
+                  'DEBUG vera_publication_diagnostics: finalized revision publication '
+                  'height=12 lookup_us=3000 history_us=17000 index_us=500\n',
+                  'DEBUG vera_publication_diagnostics: finalized sink completed height=12 total_us=23000\n']
+        for node in range(4):
+            path = self.root / 'clusters' / 'run' / f'node{node}' / 'logs' / 'stdout.log'
+            path.parent.mkdir(parents=True)
+            path.write_text('untrusted /private/secret\n' + ''.join(events))
+        return events
+
+    def test_publication_only_cli_accepts_events_without_claiming_span_or_syscall_evidence(self):
+        self.publication_run()
+        output = self.root / 'summary.json'
+        command = [sys.executable, str(Path(__file__).with_name('storage_attribution.py')),
+                   '--publication-only', '--run-root', str(self.root), '--output', str(output)]
+        completed = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = json.loads(output.read_text())
+        self.assertEqual(result['summary_scope'], 'publication_only')
+        self.assertIsNone(result['syscalls'])
+        self.assertEqual(set(result['private_input_sha256']), {f'node{node}_stdout' for node in range(4)})
+        for node in result['nodes']:
+            self.assertTrue(all(count == 1 for count in node['publication_event_counts'].values()))
+            self.assertEqual(node['durability_outcomes'], {'durable': 1, 'not_durable': 0})
+            self.assertEqual(node['completed_finalization_windows'], 1)
+            for field in ('groups', 'blob_groups', 'spans_outside_windows',
+                          'persistent_finalize_window_samples', 'incomplete_persistent_finalize_windows',
+                          'persistent_finalize_window_coverage_complete'):
+                self.assertIsNone(node[field])
+            timing = next(row for row in node['publication_groups'] if row['field'] == 'wait_us')
+            self.assertEqual(timing['p50_ms'], 2)
+        for private in ('untrusted', '/private/secret', str(self.root)):
+            self.assertNotIn(private, output.read_text())
+
+    def test_publication_only_requires_each_lifecycle_event_on_each_node(self):
+        events = self.publication_run()
+        path = self.root / 'clusters/run/node3/logs/stdout.log'
+        for excluded in range(len(events)):
+            path.write_text(''.join(event for index, event in enumerate(events) if index != excluded))
+            with self.subTest(excluded=excluded), self.assertRaises(ValueError):
+                summarize_run(self.root, publication_only=True)
+        path.unlink()
+        with self.assertRaises(ValueError):
+            summarize_run(self.root, publication_only=True)
+
+    def test_default_mode_still_rejects_missing_syscalls_with_complete_publication_events(self):
+        self.publication_run()
+        output = self.root / 'summary.json'
+        completed = subprocess.run(
+            [sys.executable, str(Path(__file__).with_name('storage_attribution.py')),
+             '--run-root', str(self.root), '--output', str(output)], capture_output=True, text=True)
+        self.assertEqual(completed.returncode, 1)
+        self.assertFalse(output.exists())
+        self.assertNotIn(str(self.root), completed.stderr)
 
     def create_run(self):
         for node in range(4):

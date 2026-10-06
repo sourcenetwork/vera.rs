@@ -7,6 +7,11 @@ on:
         description: Run the bounded RocksDB storage diagnostic instead of performance baselines
         type: boolean
         default: false
+      storage_attribution_mode:
+        description: Diagnostic evidence to collect when storage_attribution is enabled
+        type: choice
+        options: [full, publication]
+        default: full
   workflow_run:
     workflows: [CI]
     types: [completed]
@@ -33,6 +38,7 @@ jobs:
       HISTORY_BACKEND: ${{ matrix.history }}
       VERA_E2E_KEEP: '0'
       STORAGE_ATTRIBUTION: ${{ github.event_name == 'workflow_dispatch' && inputs.storage_attribution }}
+      STORAGE_ATTRIBUTION_MODE: ${{ inputs.storage_attribution_mode || 'full' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -43,7 +49,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler python3-venv
-          if [[ "$STORAGE_ATTRIBUTION" == true ]]; then sudo apt-get install -y strace; fi
+          if [[ "$STORAGE_ATTRIBUTION" == true && "$STORAGE_ATTRIBUTION_MODE" == full ]]; then
+            sudo apt-get install -y strace
+          fi
           python3 -m venv "$RUNNER_TEMP/performance-python"
           "$RUNNER_TEMP/performance-python/bin/pip" install -r tools/performance/requirements.txt
 
@@ -106,7 +114,13 @@ jobs:
           set -euo pipefail
           private="$RUNNER_TEMP/vera-storage-attribution"
           result=0
-          for mode in normal traced; do
+          diagnostic=traced
+          summary_options=()
+          if [[ "$STORAGE_ATTRIBUTION_MODE" == publication ]]; then
+            diagnostic=publication
+            summary_options=(--publication-only)
+          fi
+          for mode in normal "$diagnostic"; do
             mkdir -p "$private/$mode"
             export VERA_E2E_DIR="$private/$mode/clusters" VERA_E2E_KEEP=1
             export VERA_TRACE_SPANS=0
@@ -116,6 +130,8 @@ jobs:
               export VERA_TRACE_SPANS=1
               filter=warn,vera_publication_diagnostics=debug,commonware_glue::stateful::db=info,commonware_storage::qmdb=info,commonware_utils::sync=info,commonware_runtime::storage::metered=info
               trace=(--sync-trace "$private/$mode/syscalls.log")
+            elif [[ "$mode" == publication ]]; then
+              filter=warn,vera_publication_diagnostics=debug
             fi
             python3 tools/performance/record.py "${trace[@]}" \
               --node target/release/verad --runner target/release/examples/mixed_policy_workload \
@@ -130,10 +146,10 @@ jobs:
               fi
             done
           done
-          python3 tools/performance/storage_attribution.py \
-            --run-root "$private/traced" \
+          python3 tools/performance/storage_attribution.py "${summary_options[@]}" \
+            --run-root "$private/$diagnostic" \
             --output performance-results/storage-attribution/summary.json || result=1
-          echo 'Storage attribution is diagnostic only. Both runs retain all mixed-policy correctness and restart assertions. Numeric trace summaries and workload provenance are in the artifact; raw traces remain private on the runner.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Storage attribution is diagnostic only. Both runs retain all mixed-policy correctness and restart assertions. The selected diagnostic scope, scalar summaries and workload provenance are in the artifact; raw logs remain private on the runner.' >> "$GITHUB_STEP_SUMMARY"
           exit "$result"
 
       - name: Render interactive measurements
