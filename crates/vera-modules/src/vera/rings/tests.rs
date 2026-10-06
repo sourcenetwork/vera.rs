@@ -1,3 +1,5 @@
+mod jubjub;
+
 use super::*;
 use crate::{
     acp::types::PolicyMarshalingType,
@@ -718,7 +720,7 @@ fn reshare_finalization_preserves_key_and_rejects_replay_and_changed_authority()
             1 => bad.deployment_id += 1,
             2 => bad.expected_sequence += 1,
             3 => bad.signature = "00".repeat(96),
-            _ => bad.scheme = ThresholdScheme::Decaf377Frost,
+            _ => bad.scheme = ThresholdScheme::JubjubFrost,
         }
         let before = vera.store().serialize();
         assert!(vera.finalize_ring_reshare(&context(), &bad).is_err());
