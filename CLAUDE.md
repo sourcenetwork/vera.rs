@@ -415,10 +415,18 @@ Collection runs off the async executor; disabled diagnostics start no sampler.
 Counters are non-atomic and exclude other allocations. Unsupported properties
 remain absent, and collection failures are logged rather than reported as zero.
 
-The same diagnostics target logs per-revision database-apply and query-state
-publication times, plus synchronization startup time. Startup ends when the
-Commonware durability handle is returned; it is not completion of that handle.
-These elapsed times include lock waits and executor scheduling.
+Both `vera_diagnostics=debug` and `vera_publication_diagnostics=debug` log marshal
+tip/block delivery to the stateful mailbox, per-revision database apply and query
+publication, sink lookup/history/index stages, and sink entry/completion. Delivery
+records include mailbox feedback; a tip is not a durable block delivery or an
+application acknowledgement. Missing delivery does not establish a network cause.
+
+Synchronization startup ends when Commonware returns its durability handle.
+A separate completion event records the original barrier's result, observed wait
+from first polling, and total time since synchronization began. These intervals
+include scheduling and may exceed storage I/O time. The height is absent until
+this state instance has observed a database apply with diagnostics enabled.
+Disabled diagnostics retain the original barrier without wrapping it.
 
 Snapshot diagnostics on the same target report database transfer, history handoff,
 and query-state hydration, with the selected revision at each stage. Transfer may

@@ -132,6 +132,7 @@ impl AcpModule {
             .map_err(relation_state_error)
     }
 
+    #[cfg(test)]
     pub(super) fn update_amendment_event(&mut self, event: &AmendmentEvent) -> Result<()> {
         self.update_amendment_event_with_budget(event, None)
     }

@@ -6,7 +6,7 @@ use vera_domain::{
 use vera_modules::{kv_store::ModuleKvStore, module_state::state_root_from_jmt};
 use vera_state::ModuleStateTree;
 
-const PREFIX: &[u8] = b"relationship/v4/p//rel/document/report/blocked/";
+const PREFIX: &[u8] = b"relationship/v5/p//rel/document/report/blocked/";
 const LIMITS: RelationProofLimits = RelationProofLimits {
     records: 32,
     bytes: 1 << 20,
@@ -18,7 +18,7 @@ fn fixture() -> InMemoryKvStore {
             [PREFIX, b"alice"].concat(),
             [PREFIX, b"nested/bob"].concat(),
             [PREFIX, b"carol"].concat(),
-            b"relationship/v4/p//rel/document/other/reader/dan".to_vec(),
+            b"relationship/v5/p//rel/document/other/reader/dan".to_vec(),
         ]
         .into_iter()
         .map(|key| (key, br#"{"archived":false}"#.to_vec()))
@@ -117,7 +117,7 @@ fn activation_preserves_legacy_roots_and_counts_archived_records() {
         verify_relation_prefix_proof(root(&tree, 2), 2, PREFIX, &proof, LIMITS).unwrap(),
         after.prefix_scan(PREFIX)
     );
-    let empty_prefix = b"relationship/v4/p//rel/document/absent/reader/";
+    let empty_prefix = b"relationship/v5/p//rel/document/absent/reader/";
     assert!(
         verify_relation_prefix_proof(
             root(&tree, 2),
@@ -200,7 +200,7 @@ fn counts_match_raw_scans_after_updates_and_deletions() {
         let next = prepare(&tree, &tree.snapshot().unwrap(), &before, &store);
         tree.commit_prepared(step + 1, &next).unwrap();
         for prefix in [
-            b"relationship/v4/".as_slice(),
+            b"relationship/v5/".as_slice(),
             PREFIX,
             [PREFIX, b"nested/"].concat().as_slice(),
         ] {
@@ -240,7 +240,7 @@ fn proof_verification_rejects_omissions_replacements_and_wrong_revisions() {
     altered = proof.clone();
     altered.records[0] = record(
         &tree,
-        b"relationship/v4/p//rel/document/other/reader/dan",
+        b"relationship/v5/p//rel/document/other/reader/dan",
         1,
     );
     assert!(verify(&altered).is_err());
@@ -248,7 +248,7 @@ fn proof_verification_rejects_omissions_replacements_and_wrong_revisions() {
     altered.records[0].value = None;
     assert!(verify(&altered).is_err());
     altered = proof.clone();
-    altered.count = record(&tree, &relation_count_key(b"relationship/v4/"), 1);
+    altered.count = record(&tree, &relation_count_key(b"relationship/v5/"), 1);
     assert!(verify(&altered).is_err());
     altered = proof.clone();
     altered.version = record(&tree, b"missing", 1);

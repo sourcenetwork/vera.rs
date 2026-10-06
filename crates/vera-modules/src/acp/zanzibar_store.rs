@@ -12,7 +12,7 @@ use super::types::{
     AccessRequest, PolicyMarshalingType, PolicyRecord, RecordMetadata, RelationGenerations,
     RelationPair, RelationshipRecord,
 };
-use super::{keys, relationship_index, relationship_mutations};
+use super::{keys, object_state, relationship_index, relationship_mutations};
 use crate::kv_store::InMemoryKvStore;
 use crate::types::Timestamp;
 
@@ -80,8 +80,8 @@ pub(super) fn evaluation_engine_for_policy<S: RecordStore>(
 
 /// A [`ZanzibarStore`] adapter over vera's module KV store.
 ///
-/// Selects current relationship generation buckets using authenticated policy
-/// records and subject directories, so
+/// Selects current relationship generation buckets and object incarnations using
+/// authenticated policy records, object points and subject directories, so
 /// [`zanzibar::PermissionEngine`] can evaluate permissions (including
 /// `TupleToUserset`) directly over committed module state instead of a
 /// divergent bespoke evaluator.
@@ -131,7 +131,12 @@ impl<S: RecordStore> QmdbZanzibarStore<S> {
         let Some(target) = policy.relations.generation(resource, relation) else {
             return Ok(vec![]);
         };
-        let suffix = keys::relation_prefix(resource, object_id, relation);
+        let incarnation = if relation == "owner" {
+            0
+        } else {
+            object_state::read(&*store, policy_id, resource, object_id)?
+        };
+        let suffix = keys::relation_prefix(resource, object_id, relation, incarnation);
         let mut records = Vec::new();
         for subject in
             relationship_index::live_pairs(&*store, policy_id, target, &policy.relations)?
@@ -161,10 +166,11 @@ impl<S: RecordStore> QmdbZanzibarStore<S> {
         let Ok(pair) = policy.relations.pair(rel) else {
             return Ok(false);
         };
+        let incarnation = object_state::for_relationship(&*store, policy_id, rel)?;
         let key = keys::relationship_generation_key(
             policy_id,
             pair,
-            &keys::relationship_storage_key(rel),
+            &keys::relationship_storage_key(rel, incarnation),
         );
         let Some(bytes) = store.read_record(&key)? else {
             return Ok(false);
@@ -204,11 +210,12 @@ fn decode_relationship(
 ) -> Result<RelationshipRecord> {
     let record: RelationshipRecord = serde_json::from_slice(bytes)?;
     if record.policy_id != policy
+        || (record.relationship.relation == "owner" && record.incarnation != 0)
         || record.generations != pair
         || keys::relationship_generation_key(
             policy,
             pair,
-            &keys::relationship_storage_key(&record.relationship),
+            &keys::relationship_storage_key(&record.relationship, record.incarnation),
         ) != key
     {
         return Err(invalid(
@@ -333,12 +340,22 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
                     "adapter policy deletion cannot remove scheduled ACP relation retirement",
                 ));
             }
+            if key.starts_with(&super::object_cleanup::marker_prefix(policy_id)) {
+                return Err(invalid(
+                    "adapter policy deletion cannot remove scheduled ACP object retirement",
+                ));
+            }
             if !removed.contains(key.as_slice()) {
                 return Err(invalid("policy deletion would retain relationship indexes"));
             }
         }
-        changes.push((keys::policy_key(policy_id), None));
-        changes.push((deleted_policy_key(policy_id), Some(vec![])));
+        for (key, value) in store.scan_records(&object_state::policy_prefix(policy_id))? {
+            object_state::parse_key(policy_id, &key)?;
+            object_state::decode(&value)?;
+            changes.push(store.prepare_write(&key, None)?);
+        }
+        changes.push(store.prepare_write(&keys::policy_key(policy_id), None)?);
+        changes.push(store.prepare_write(&deleted_policy_key(policy_id), Some(&[]))?);
         store.apply_records(changes)?;
         Ok(true)
     }
@@ -348,7 +365,9 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
         let policy = read_policy(&*store, policy_id)?
             .ok_or_else(|| invalid("relationship policy does not exist"))?;
         let pair = policy.relations.pair(rel)?;
+        let incarnation = object_state::for_relationship(&*store, policy_id, rel)?;
         let record = RelationshipRecord {
+            incarnation,
             generations: pair,
             supplied_metadata: Default::default(),
             policy_id: policy_id.to_string(),
@@ -359,7 +378,7 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
         let key = keys::relationship_generation_key(
             policy_id,
             pair,
-            &keys::relationship_storage_key(rel),
+            &keys::relationship_storage_key(rel, incarnation),
         );
         if let Some(bytes) = store.read_record(&key)? {
             let existing = decode_relationship(policy_id, pair, &key, &bytes)?;
@@ -378,10 +397,11 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
         let Ok(pair) = policy.relations.pair(rel) else {
             return Ok(false);
         };
+        let incarnation = object_state::for_relationship(&*store, policy_id, rel)?;
         let key = keys::relationship_generation_key(
             policy_id,
             pair,
-            &keys::relationship_storage_key(rel),
+            &keys::relationship_storage_key(rel, incarnation),
         );
         if let Some(bytes) = store.read_record(&key)? {
             let record = decode_relationship(policy_id, pair, &key, &bytes)?;
@@ -512,6 +532,7 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
 #[cfg(test)]
 mod tests {
     mod evaluation;
+    mod incarnations;
 
     use std::sync::Arc;
 
@@ -578,7 +599,10 @@ mod tests {
         keys::relationship_generation_key(
             POLICY,
             policy.relations.pair(rel).unwrap(),
-            &keys::relationship_storage_key(rel),
+            &keys::relationship_storage_key(
+                rel,
+                object_state::for_relationship(store, POLICY, rel).unwrap(),
+            ),
         )
     }
 
@@ -589,6 +613,7 @@ mod tests {
         }
         let policy = read_policy(store, POLICY).unwrap().unwrap();
         let record = RelationshipRecord {
+            incarnation: object_state::for_relationship(store, POLICY, rel).unwrap(),
             generations: policy.relations.pair(rel).unwrap(),
             supplied_metadata: Default::default(),
             policy_id: POLICY.to_string(),
@@ -1235,6 +1260,17 @@ mod tests {
         for target in record.relations.active_ids() {
             let mut subjects =
                 relationship_index::live_pairs(store, POLICY, target, &record.relations).unwrap();
+            for subject in &subjects {
+                if !relations.contains(target) || !relations.contains(*subject) {
+                    store.delete(&relationship_index::logical_key(
+                        POLICY,
+                        RelationPair {
+                            target,
+                            subject: *subject,
+                        },
+                    ));
+                }
+            }
             subjects.retain(|subject| relations.contains(target) && relations.contains(*subject));
             let key = relationship_index::active_key(POLICY, target);
             if subjects.is_empty() {

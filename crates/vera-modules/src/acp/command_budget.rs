@@ -6,8 +6,9 @@ use super::{AcpError, PermissionBudget, Result, types::SuppliedMetadata};
 
 /// Caller-owned command allowance shared across every owner/manager evaluation.
 /// Inputs cost eight units per 16 bytes; authorization reads and steps use the
-/// permission prices. Relationship point storage and retained delegated outcomes
-/// use the existing record prices. Archive's bulk scan/removals remain separate.
+/// permission prices. Relationship, commitment and amendment point storage and
+/// retained delegated outcomes use the existing record prices. Archive's bulk
+/// scan/removals remain separate.
 #[derive(Clone, Debug)]
 pub struct CommandBudget {
     pub(super) permissions: PermissionBudget,

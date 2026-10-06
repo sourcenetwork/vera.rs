@@ -120,7 +120,7 @@ impl AcpModule {
                 registrations_commitment,
             } => {
                 registrations_commitment.metadata = metadata;
-                self.update_commitment(registrations_commitment)?;
+                self.update_commitment_with_budget(registrations_commitment, Some(budget))?;
             }
             PolicyCmdResult::RevealRegistration { record, event } => {
                 record.metadata = metadata;

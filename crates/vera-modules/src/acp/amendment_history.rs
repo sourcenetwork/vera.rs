@@ -15,9 +15,36 @@ fn decode(bytes: &[u8], id: u64) -> Result<AmendmentEvent> {
 impl AcpModule {
     /// Read an amendment by its global identifier, validating the stored identity.
     pub fn get_amendment_event_by_id(&self, id: u64) -> Result<Option<AmendmentEvent>> {
+        self.get_amendment_event_by_id_with_budget(id, &CommandBudget::new(u64::MAX))
+    }
+
+    /// Reserve amendment and policy-liveness reads before decoding command state.
+    pub fn get_amendment_event_by_id_with_budget(
+        &self,
+        id: u64,
+        budget: &CommandBudget,
+    ) -> Result<Option<AmendmentEvent>> {
+        budget.finish(self.amendment_for_command(id, budget))
+    }
+
+    fn amendment_for_command(
+        &self,
+        id: u64,
+        budget: &CommandBudget,
+    ) -> Result<Option<AmendmentEvent>> {
+        let key = keys::amendment_event_key(id);
+        budget
+            .permissions
+            .records
+            .read(&key, self.store.get_ref(&key))?;
         let Some(record) = self.retained_amendment_by_id(id)? else {
             return Ok(None);
         };
+        let policy_key = keys::policy_key(&record.policy_id);
+        budget
+            .permissions
+            .records
+            .read(&policy_key, self.store.get_ref(&policy_key))?;
         if self.get_policy_record(&record.policy_id)?.is_none() {
             return Ok(None);
         }

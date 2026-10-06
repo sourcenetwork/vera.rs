@@ -52,27 +52,42 @@ pub(super) fn verify_policy(
     Ok(Some(record))
 }
 
-/// Check a physical row before exposing it as a current relationship. The policy
-/// must already be authenticated against the same root as this row.
-pub(super) fn current_relationship(
-    policy: &PolicyRecord,
+/// Decode a physical row and bind every stamp to its storage key.
+pub(super) fn relationship_record(
+    policy: &str,
     key: &[u8],
     value: &[u8],
-) -> Result<bool, PermissionError> {
+) -> Result<RelationshipRecord, PermissionError> {
     let record: RelationshipRecord = serde_json::from_slice(value)
         .map_err(|_| PermissionError::Invalid("relationship record encoding"))?;
-    if record.policy_id != policy.policy.id
+    if record.policy_id != policy
+        || (record.relationship.relation == "owner" && record.incarnation != 0)
         || keys::relationship_generation_key(
             &record.policy_id,
             record.generations,
-            &keys::relationship_storage_key(&record.relationship),
+            &keys::relationship_storage_key(&record.relationship, record.incarnation),
         ) != key
     {
         return Err(PermissionError::Invalid(
             "relationship record differs from its generation key",
         ));
     }
-    if !policy.relations.contains(record.generations.target)
+    Ok(record)
+}
+
+/// Check a canonical physical row against authenticated policy and object state.
+pub(super) fn current_relationship(
+    policy: &PolicyRecord,
+    record: &RelationshipRecord,
+    incarnation: u64,
+) -> Result<bool, PermissionError> {
+    if record.incarnation > incarnation {
+        return Err(PermissionError::Invalid(
+            "relationship incarnation exceeds object state",
+        ));
+    }
+    if record.incarnation < incarnation
+        || !policy.relations.contains(record.generations.target)
         || !policy.relations.contains(record.generations.subject)
     {
         return Ok(false);

@@ -3,9 +3,10 @@ use serde::{Deserialize, Serialize};
 use vera_domain::{ConsensusPublicKey, LIGHT_BLOCK_RESPONSE_BYTES, LightBlock, verify_light_block};
 
 use crate::{
-    ModuleId, PAGE_PROOF_BYTES, PermissionError, PrefixPageProof, PrefixPageRequest, RecordProof,
-    VerifiedPrefixPage, encoded_size,
-    policy::{current_relationship, verify_policy},
+    ModuleId, PAGE_DATA_BYTES, PAGE_PROOF_BYTES, PERMISSION_LIMITS, PermissionError,
+    PrefixPageProof, PrefixPageRequest, ReadLimits, RecordProof, VerifiedPrefixPage, encoded_size,
+    object_evidence::ObjectEvidence,
+    policy::{current_relationship, relationship_record, verify_policy},
     validate_policy_prefix,
 };
 
@@ -15,6 +16,8 @@ use crate::{
 pub struct PolicyPrefixPageProof {
     /// The live policy record or certified absence.
     pub policy: RecordProof,
+    /// Same-root incarnation membership or absence for every non-owner target object.
+    pub objects: Vec<RecordProof>,
     /// A bounded physical relationship page at the same root.
     pub page: PrefixPageProof,
 }
@@ -45,12 +48,27 @@ impl PolicyPrefixPageProof {
         }
         let policy_record = verify_policy(&self.policy, root, policy, maximum_bytes)?;
         let mut page = self.page.verify(root, request, maximum_bytes)?;
+        let objects = ObjectEvidence::verify(
+            root,
+            &self.policy,
+            policy,
+            &self.objects,
+            &page.entries,
+            ReadLimits {
+                bytes: PAGE_DATA_BYTES
+                    .checked_sub(request.prefix.len() + request.start.len())
+                    .ok_or(PermissionError::Limit)?,
+                ..PERMISSION_LIMITS.reads
+            },
+            maximum_bytes,
+        )?;
         let Some(policy_record) = policy_record else {
             return Ok(None);
         };
         let mut entries = Vec::with_capacity(page.entries.len());
         for entry in page.entries {
-            if current_relationship(&policy_record, &entry.key, &entry.value)? {
+            let record = relationship_record(policy, &entry.key, &entry.value)?;
+            if current_relationship(&policy_record, &record, objects.incarnation(&record)?)? {
                 entries.push(entry);
             }
         }

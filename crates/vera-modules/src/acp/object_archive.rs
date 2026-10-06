@@ -1,6 +1,7 @@
-//! Object-local archive planning over physical generation-pair counts.
+//! Atomic object archive over current incarnation counters.
 
 use super::*;
+use command_storage::CommandRecords;
 use record_store::RecordStore;
 
 impl AcpModule {
@@ -11,7 +12,6 @@ impl AcpModule {
         obj: Object,
         budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
-        let policy = self.query_policy(policy_id)?;
         let mut owner = self
             .registration_owner_record_with_budget(policy_id, &obj, Some(budget))?
             .ok_or_else(|| AcpError::ObjectNotRegistered {
@@ -34,81 +34,81 @@ impl AcpModule {
                 ),
             });
         }
-        let owner_key = keys::relationship_generation_key(
-            policy_id,
-            owner.generations,
-            &keys::relationship_storage_key(&owner.relationship),
-        );
-        let removals = self.archive_relationships(&policy, &obj, &owner_key)?;
-        let removed = u64::try_from(removals.len())
-            .ok()
-            .and_then(|count| count.checked_add(1))
-            .ok_or_else(|| AcpError::State("archive relationship count overflow".into()))?;
-        let changes = relationship_mutations::prepare_removals(&self.store, &removals)
+        let mut records = CommandRecords {
+            store: &mut self.store,
+            budget,
+        };
+        let bytes = records
+            .read_record(&keys::policy_key(policy_id))
+            .map_err(relation_state_error)?
+            .ok_or_else(|| AcpError::PolicyNotFound {
+                id: policy_id.into(),
+            })?;
+        let policy = Self::decode_policy_record(policy_id, &bytes)?;
+        let current = object_state::read(&records, policy_id, &obj.resource, &obj.id)
             .map_err(relation_state_error)?;
-        self.store
+        let active = policy.relations.active_ids();
+        let relations = policy
+            .relations
+            .active
+            .get(&obj.resource)
+            .ok_or_else(|| AcpError::State("archive resource missing".into()))?;
+        let mut removed = 1u64;
+        let mut changes = Vec::new();
+        for &target in relations.values().filter(|&&target| target != 0) {
+            let subjects =
+                relationship_index::live_pairs_for_active(&records, policy_id, target, &active)
+                    .map_err(relation_state_error)?;
+            for subject in subjects {
+                budget.permissions.records.pair()?;
+                let pair = RelationPair { target, subject };
+                let key = object_pairs::pair_key(policy_id, &obj.resource, &obj.id, current, pair);
+                let Some(bytes) = records.read_record(&key).map_err(relation_state_error)? else {
+                    continue;
+                };
+                let count =
+                    relationship_index::decode_count(&bytes).map_err(relation_state_error)?;
+                removed = removed
+                    .checked_add(count)
+                    .ok_or_else(|| AcpError::State("archive relationship count overflow".into()))?;
+                changes.push(
+                    relationship_index::prepare_archive_count(&records, policy_id, pair, count)
+                        .map_err(relation_state_error)?,
+                );
+            }
+        }
+        let owner_count = records
+            .read_record(&object_pairs::key(&owner))
+            .map_err(relation_state_error)?;
+        if owner_count.as_deref() != Some(1u64.to_be_bytes().as_slice()) {
+            return Err(AcpError::State(
+                "archive owner object counter is not one".into(),
+            ));
+        }
+        owner.archived = true;
+        changes.extend(
+            relationship_mutations::prepare_put(&records, &owner).map_err(relation_state_error)?,
+        );
+        let (next, state) =
+            object_state::prepare_advance(&records, policy_id, &obj.resource, &obj.id)
+                .map_err(relation_state_error)?;
+        if next.checked_sub(1) != Some(current) {
+            return Err(AcpError::State(
+                "archive incarnation changed during preparation".into(),
+            ));
+        }
+        changes.push(state);
+        changes.extend(
+            object_cleanup::prepare_job(&records, policy_id, &obj, current)
+                .map_err(relation_state_error)?,
+        );
+        records
             .apply_records(changes)
             .map_err(relation_state_error)?;
-        owner.archived = true;
-        self.set_relationship_with_budget(&owner, budget)?;
         Ok(PolicyCmdResult::ArchiveObject {
             found: true,
             relationships_removed: removed,
         })
-    }
-
-    fn archive_relationships(
-        &self,
-        policy: &PolicyRecord,
-        object: &Object,
-        owner_key: &[u8],
-    ) -> Result<Vec<Vec<u8>>> {
-        let prefix = object_pairs::prefix(&policy.policy.id, &object.resource, &object.id);
-        let suffix = keys::object_prefix(&object.resource, &object.id);
-        let active = policy.relations.active_ids();
-        let mut removals = Vec::new();
-        let mut owner_found = false;
-        for (key, value) in self.store.prefix_iter(&prefix) {
-            let pair = object_pairs::parse_pair(&prefix, key).map_err(relation_state_error)?;
-            let expected = relationship_index::decode_count(value).map_err(relation_state_error)?;
-            if pair.target >= policy.relations.next || pair.subject >= policy.relations.next {
-                return Err(AcpError::State(
-                    "object pair generation was never allocated".into(),
-                ));
-            }
-            if !active.contains(&pair.target) || !active.contains(&pair.subject) {
-                continue;
-            }
-            let rows = keys::relationship_generation_prefix(&policy.policy.id, pair, &suffix);
-            let mut count = 0u64;
-            for (key, value) in self.store.prefix_iter(&rows) {
-                if key.len() > crate::kv_store::NATIVE_MAX_KEY_BYTES
-                    || value.len() > crate::kv_store::NATIVE_MAX_VALUE_BYTES
-                {
-                    return Err(AcpError::State(
-                        "archive relationship exceeds native bounds".into(),
-                    ));
-                }
-                Self::decode_current_relationship(policy, key, value)?;
-                count = count
-                    .checked_add(1)
-                    .ok_or_else(|| AcpError::State("archive relationship count overflow".into()))?;
-                if key == owner_key {
-                    owner_found = true;
-                } else {
-                    removals.push(key.to_vec());
-                }
-            }
-            if count != expected {
-                return Err(AcpError::State(
-                    "object pair count differs from its relationships".into(),
-                ));
-            }
-        }
-        if !owner_found {
-            return Err(AcpError::State("object owner pair index missing".into()));
-        }
-        Ok(removals)
     }
 }
 

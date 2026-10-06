@@ -11,12 +11,15 @@ mod command_storage;
 pub use command_budget::CommandBudget;
 mod commitment_expiry;
 mod commitment_lookup;
+mod commitment_storage;
 mod index_validation;
 mod lifecycle;
 mod management;
 mod metadata;
 mod object_archive;
+mod object_cleanup;
 mod object_pairs;
+pub mod object_state;
 pub mod pages;
 mod policy_create;
 mod policy_create_budget;
@@ -100,7 +103,7 @@ pub const MAX_POLICY_DEFINITION_BYTES: usize = 64 << 10;
 /// "policy/retired/" + policy_id                         → RetiredPolicy (Borsh)
 /// "policy/cleanup/queue/" + BE(sequence)                → policy_id
 /// "policy/cleanup/counter"                             → u64 BE
-/// "relationship/v4/" + policy_id + "/" + pair + storage_key → RelationshipRecord (serde_json)
+/// "relationship/v5/" + policy_id + "/" + pair + storage_key → RelationshipRecord (serde_json)
 /// "relation_state/" + policy_id + "/" + index_key       → pair counts, current directories, retired names
 /// "relation_cleanup/queue/" + BE(sequence)             → RelationJob (serde_json)
 /// "access_decision/" + decision_id                     → AccessDecision (Borsh)
@@ -324,7 +327,7 @@ impl AcpModule {
                 self.cmd_unarchive_object(creator, policy_id, obj, budget)
             }
             PolicyCmd::CommitRegistrations { commitment } => {
-                self.cmd_commit_registrations(creator, policy_id, commitment)
+                self.cmd_commit_registrations(creator, policy_id, commitment, budget)
             }
             PolicyCmd::RevealRegistration {
                 registrations_commitment_id,
@@ -337,7 +340,7 @@ impl AcpModule {
                 budget,
             ),
             PolicyCmd::FlagHijackAttempt { event_id } => {
-                self.cmd_flag_hijack_attempt(creator, policy_id, event_id)
+                self.cmd_flag_hijack_attempt(creator, policy_id, event_id, budget)
             }
         }
     }
@@ -587,12 +590,14 @@ impl AcpModule {
         candidate.prune_operations(block_ctx.timestamp.seconds)?;
         let expired = candidate.expire_commitments(&block_ctx.timestamp)?;
         let mut budget = retirement_cleanup::Budget::new();
-        if block_ctx.timestamp.block_height.is_multiple_of(2) {
-            candidate.collect_retired_policies(&mut budget)?;
-            candidate.collect_retired_relations(&mut budget)?;
-        } else {
-            candidate.collect_retired_relations(&mut budget)?;
-            candidate.collect_retired_policies(&mut budget)?;
+        let collectors = [
+            Self::collect_retired_policies,
+            Self::collect_retired_relations,
+            Self::collect_retired_objects,
+        ];
+        let first = (block_ctx.timestamp.block_height % 3) as usize;
+        for offset in 0..collectors.len() {
+            collectors[(first + offset) % collectors.len()](&mut candidate, &mut budget)?;
         }
         *self = candidate;
         Ok(expired)
@@ -673,10 +678,12 @@ impl AcpModule {
         let Ok(pair) = policy.relations.pair(relationship) else {
             return Ok(None);
         };
+        let incarnation =
+            self.relationship_incarnation_with_budget(policy_id, relationship, budget)?;
         let key = keys::relationship_generation_key(
             policy_id,
             pair,
-            &keys::relationship_storage_key(relationship),
+            &keys::relationship_storage_key(relationship, incarnation),
         );
         let bytes = self.store.get_ref(&key);
         if let Some(budget) = budget {
@@ -689,6 +696,7 @@ impl AcpModule {
                 if record.policy_id != policy_id
                     || record.relationship != *relationship
                     || record.generations != pair
+                    || record.incarnation != incarnation
                 {
                     return Err(AcpError::State(
                         "relationship record identity mismatch".into(),
@@ -697,6 +705,27 @@ impl AcpModule {
                 Ok(record)
             })
             .transpose()
+    }
+
+    fn relationship_incarnation_with_budget(
+        &self,
+        policy: &str,
+        relationship: &Relationship,
+        budget: Option<&CommandBudget>,
+    ) -> Result<u64> {
+        if relationship.relation == "owner" {
+            return Ok(0);
+        }
+        object_state::validate_key(policy, &relationship.resource, &relationship.object_id)
+            .map_err(relation_state_error)?;
+        let key = object_state::key(policy, &relationship.resource, &relationship.object_id);
+        let value = self.store.get_ref(&key);
+        if let Some(budget) = budget {
+            budget.permissions.records.read(&key, value)?;
+        }
+        value
+            .map_or(Ok(0), object_state::decode)
+            .map_err(relation_state_error)
     }
 
     fn relationship_pair(
@@ -771,64 +800,6 @@ impl AcpModule {
         [keys::COMMITMENT_PREFIX, keys::OBJS_SUBPREFIX].concat()
     }
 
-    #[allow(unused_variables)]
-    fn create_commitment(&mut self, commitment: &mut RegistrationsCommitment) -> Result<()> {
-        let counter = self
-            .store
-            .get(&keys::commitment_counter_key())
-            .map(|bytes| {
-                bytes
-                    .try_into()
-                    .map(u64::from_be_bytes)
-                    .map_err(|_| AcpError::State("invalid record counter".into()))
-            })
-            .transpose()?
-            .unwrap_or(0);
-        let next = counter
-            .checked_add(1)
-            .ok_or_else(|| AcpError::State("record counter exhausted".into()))?;
-        if self.store.has(&keys::commitment_key(next)) {
-            return Err(AcpError::State(
-                "commitment identifier already exists".into(),
-            ));
-        }
-        commitment.id = next;
-        self.update_commitment(commitment)?;
-        self.store
-            .put(&keys::commitment_counter_key(), next.to_be_bytes().to_vec());
-        Ok(())
-    }
-
-    fn update_commitment(&mut self, commitment: &RegistrationsCommitment) -> Result<()> {
-        let bytes = borsh::to_vec(commitment)
-            .map_err(|e| AcpError::State(format!("serialize commitment: {e}")))?;
-        if let Some(previous) = self.get_commitment_by_id(commitment.id)? {
-            self.store.delete(&Self::commitment_expiry_key(&previous));
-            self.store.delete(&keys::commitment_by_commitment_index_key(
-                &previous.commitment,
-                previous.id,
-            ));
-            self.store.delete(&keys::commitment_policy_index_key(
-                &previous.policy_id,
-                previous.id,
-            ));
-        }
-        if !commitment.expired {
-            self.store
-                .put(&Self::commitment_expiry_key(commitment), Vec::new());
-        }
-        self.store.put(
-            &keys::commitment_by_commitment_index_key(&commitment.commitment, commitment.id),
-            Vec::new(),
-        );
-        self.store.put(
-            &keys::commitment_policy_index_key(&commitment.policy_id, commitment.id),
-            Vec::new(),
-        );
-        self.store.put(&keys::commitment_key(commitment.id), bytes);
-        Ok(())
-    }
-
     // ── Storage — Amendment events ───────────────────────────────────────
 
     fn amendment_event_objs_prefix() -> Vec<u8> {
@@ -898,6 +869,11 @@ impl AcpModule {
         };
 
         let record = RelationshipRecord {
+            incarnation: self.relationship_incarnation_with_budget(
+                policy_id,
+                &rel,
+                Some(budget),
+            )?,
             generations: self.relationship_pair(policy_id, &rel, budget)?,
             supplied_metadata: Default::default(),
             policy_id: policy_id.to_string(),
@@ -955,7 +931,7 @@ impl AcpModule {
             let key = keys::relationship_generation_key(
                 policy_id,
                 record.generations,
-                &keys::relationship_storage_key(&record.relationship),
+                &keys::relationship_storage_key(&record.relationship, record.incarnation),
             );
             self.remove_relationship_key_with_budget(&key, budget)?;
         }
@@ -974,7 +950,7 @@ impl AcpModule {
         budget: Option<&CommandBudget>,
     ) -> Result<()> {
         // Archiving preserves ownership; only unarchive may reactivate it.
-        let owner_prefix = keys::relation_prefix(&obj.resource, &obj.id, "owner");
+        let owner_prefix = keys::relation_prefix(&obj.resource, &obj.id, "owner", 0);
         let scan_prefix = keys::relationship_storage_prefix(policy_id, &owner_prefix);
         if let Some(budget) = budget {
             budget.permissions.records.read(&scan_prefix, None)?;
@@ -1038,6 +1014,7 @@ impl AcpModule {
         };
 
         let record = RelationshipRecord {
+            incarnation: 0,
             generations: self.relationship_pair(policy_id, &owner_rel, budget)?,
             supplied_metadata: Default::default(),
             policy_id: policy_id.to_string(),
@@ -1095,6 +1072,7 @@ impl AcpModule {
         creator: &Did,
         policy_id: &str,
         commitment: Vec<u8>,
+        budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
         if !self.zanzibar_policies.contains_key(policy_id) {
             return Err(AcpError::PolicyNotFound {
@@ -1111,6 +1089,10 @@ impl AcpModule {
             });
         }
 
+        budget
+            .permissions
+            .records
+            .read(keys::PARAMS_KEY, self.store.get_ref(keys::PARAMS_KEY))?;
         let params = self.get_params()?;
 
         let metadata = RecordMetadata {
@@ -1129,7 +1111,7 @@ impl AcpModule {
             metadata,
         };
 
-        self.create_commitment(&mut reg_commitment)?;
+        self.create_commitment_with_budget(&mut reg_commitment, Some(budget))?;
 
         Ok(PolicyCmdResult::CommitRegistrations {
             registrations_commitment: reg_commitment,
@@ -1189,6 +1171,7 @@ impl AcpModule {
                 creator.clone(),
             );
             let record = RelationshipRecord {
+                incarnation: 0,
                 generations: self.relationship_pair(policy_id, &owner_rel, budget)?,
                 supplied_metadata: Default::default(),
                 policy_id: policy_id.to_string(),
@@ -1226,6 +1209,7 @@ impl AcpModule {
             creator.clone(),
         );
         let record = RelationshipRecord {
+            incarnation: 0,
             generations: self.relationship_pair(policy_id, &amended_rel, budget)?,
             supplied_metadata: Default::default(),
             policy_id: policy_id.to_string(),
@@ -1250,7 +1234,7 @@ impl AcpModule {
             &keys::relationship_generation_key(
                 policy_id,
                 existing.generations,
-                &keys::relationship_storage_key(&existing.relationship),
+                &keys::relationship_storage_key(&existing.relationship, existing.incarnation),
             ),
             budget,
         )?;
@@ -1267,9 +1251,10 @@ impl AcpModule {
         creator: &Did,
         policy_id: &str,
         event_id: u64,
+        budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
         let mut event = self
-            .get_amendment_event_by_id(event_id)?
+            .get_amendment_event_by_id_with_budget(event_id, budget)?
             .ok_or(AcpError::State(format!(
                 "amendment event {event_id} not found"
             )))?;
@@ -1287,7 +1272,7 @@ impl AcpModule {
         }
 
         event.hijack_flag = true;
-        self.update_amendment_event(&event)?;
+        self.update_amendment_event_with_budget(&event, Some(budget))?;
 
         Ok(PolicyCmdResult::FlagHijackAttempt { event })
     }
@@ -1713,10 +1698,11 @@ resources:
         let key = keys::relationship_generation_key(
             &policy.policy.id,
             generations,
-            &keys::relationship_storage_key(&relationship),
+            &keys::relationship_storage_key(&relationship, 0),
         );
         module
             .set_relationship(&RelationshipRecord {
+                incarnation: 0,
                 generations,
                 supplied_metadata: Default::default(),
                 policy_id: policy.policy.id.clone(),

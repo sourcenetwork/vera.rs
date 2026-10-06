@@ -1,4 +1,4 @@
-//! Recovery validation of generation-qualified rows and their physical indexes.
+//! Recovery validation of generation-qualified rows, physical indexes and logical counts.
 
 use super::relation_cleanup::{
     decode_job, generation_suffix, relation_counter, sequence, validate_descriptor,
@@ -43,6 +43,8 @@ impl AcpModule {
         let descriptors = self.validate_relation_jobs(&catalogs, &mut known)?;
         let mut counts = BTreeMap::<(String, RelationPair), u64>::new();
         let mut object_counts = BTreeMap::<Vec<u8>, u64>::new();
+        let mut logical_counts = BTreeMap::<(String, RelationPair), u64>::new();
+        let object_jobs = self.validate_object_state(&catalogs, &mut known)?;
         for (key, bytes) in self.store.prefix_iter(keys::RELATIONSHIP_PREFIX) {
             record_size(key, bytes)?;
             let record: RelationshipRecord = serde_json::from_slice(bytes).map_err(|error| {
@@ -51,7 +53,7 @@ impl AcpModule {
             let expected = keys::relationship_generation_key(
                 &record.policy_id,
                 record.generations,
-                &keys::relationship_storage_key(&record.relationship),
+                &keys::relationship_storage_key(&record.relationship, record.incarnation),
             );
             if expected != key
                 || !self
@@ -95,6 +97,45 @@ impl AcpModule {
                     }
                 }
             }
+            let incarnation = object_state::for_relationship(
+                &self.store,
+                &record.policy_id,
+                &record.relationship,
+            )
+            .map_err(relation_state_error)?;
+            if record.incarnation > incarnation {
+                return Err(AcpError::State(
+                    "relationship incarnation exceeds object state".into(),
+                ));
+            }
+            if record.relationship.relation == "owner" && record.incarnation != 0 {
+                return Err(AcpError::State("owner incarnation must be zero".into()));
+            }
+            if record.incarnation < incarnation
+                && !object_jobs.contains(&object_cleanup::marker_key(
+                    &record.policy_id,
+                    &Object {
+                        resource: record.relationship.resource.clone(),
+                        id: record.relationship.object_id.clone(),
+                    },
+                    record.incarnation,
+                ))
+            {
+                return Err(AcpError::State(
+                    "old relationship incarnation has no cleanup descriptor".into(),
+                ));
+            }
+            if record.incarnation == incarnation
+                && catalog.contains(record.generations.target)
+                && catalog.contains(record.generations.subject)
+            {
+                let count = logical_counts
+                    .entry((record.policy_id.clone(), record.generations))
+                    .or_default();
+                *count = count
+                    .checked_add(1)
+                    .ok_or_else(|| AcpError::State("logical relationship count overflow".into()))?;
+            }
             let count = object_counts.entry(object_pairs::key(&record)).or_default();
             *count = count
                 .checked_add(1)
@@ -122,6 +163,22 @@ impl AcpModule {
                 if self.store.get_ref(&key) != Some(count.to_be_bytes().as_slice()) {
                     return Err(AcpError::State(
                         "restored physical relationship count mismatch".into(),
+                    ));
+                }
+                known.insert(key);
+            }
+        }
+        for (policy, pair) in counts.keys() {
+            let (catalog, _) = &catalogs[policy];
+            if catalog.contains(pair.target) && catalog.contains(pair.subject) {
+                let expected = logical_counts
+                    .get(&(policy.clone(), *pair))
+                    .copied()
+                    .unwrap_or(0);
+                let key = relationship_index::logical_key(policy, *pair);
+                if self.store.get_ref(&key) != Some(expected.to_be_bytes().as_slice()) {
+                    return Err(AcpError::State(
+                        "restored logical relationship count mismatch".into(),
                     ));
                 }
                 known.insert(key);
@@ -181,6 +238,91 @@ impl AcpModule {
             }
         }
         Ok(())
+    }
+
+    fn validate_object_state(
+        &self,
+        catalogs: &Catalogs,
+        known: &mut BTreeSet<Vec<u8>>,
+    ) -> Result<BTreeSet<Vec<u8>>> {
+        let counter = object_cleanup::counter(&self.store).map_err(relation_state_error)?;
+        let mut markers = BTreeSet::new();
+        let mut jobs = BTreeMap::new();
+        for (policy, (catalog, active)) in catalogs {
+            for (key, bytes) in self.store.prefix_iter(&object_state::policy_prefix(policy)) {
+                record_size(key, bytes)?;
+                let (resource, object) =
+                    object_state::parse_key(policy, key).map_err(relation_state_error)?;
+                object_state::decode(bytes).map_err(relation_state_error)?;
+                if !catalog.active.contains_key(&resource) {
+                    return Err(AcpError::State("object state resource is absent".into()));
+                }
+                if object_state::key(policy, &resource, &object) != key {
+                    return Err(AcpError::State("noncanonical object state key".into()));
+                }
+                known.insert(key.to_vec());
+            }
+            for (key, bytes) in self
+                .store
+                .prefix_iter(&object_cleanup::marker_prefix(policy))
+            {
+                record_size(key, bytes)?;
+                let job = object_cleanup::decode(bytes)?;
+                if job.policy != *policy
+                    || object_cleanup::marker_key(policy, &job.object, job.incarnation) != key
+                    || job.sequence > counter
+                    || !catalog.active.contains_key(&job.object.resource)
+                    || job.incarnation
+                        >= object_state::read(
+                            &self.store,
+                            policy,
+                            &job.object.resource,
+                            &job.object.id,
+                        )
+                        .map_err(relation_state_error)?
+                {
+                    return Err(AcpError::State("invalid object cleanup descriptor".into()));
+                }
+                if jobs.insert(job.sequence, job.clone()).is_some() {
+                    return Err(AcpError::State("duplicate object cleanup sequence".into()));
+                }
+                match self.store.get_ref(&object_cleanup::queue_key(job.sequence)) {
+                    Some(queued) if object_cleanup::decode(queued)? == job => (),
+                    None if !active => (),
+                    _ => return Err(AcpError::State("object cleanup queue mismatch".into())),
+                }
+                markers.insert(key.to_vec());
+                known.insert(key.to_vec());
+            }
+        }
+        for (key, bytes) in self.store.prefix_iter(object_state::PREFIX) {
+            record_size(key, bytes)?;
+            if !known.contains(key) {
+                return Err(AcpError::State("orphan object state".into()));
+            }
+            let (policy, _, _) = object_state::decode_key(key).map_err(relation_state_error)?;
+            if !self.retained_policy_allows(&policy, retirement::Phase::ObjectState)? {
+                return Err(AcpError::State(
+                    "object state retained after cleanup phase".into(),
+                ));
+            }
+        }
+        for (key, bytes) in self.store.prefix_iter(b"object_cleanup/") {
+            record_size(key, bytes)?;
+            if key == object_cleanup::COUNTER_KEY {
+                continue;
+            }
+            let sequence = key
+                .strip_prefix(object_cleanup::QUEUE_PREFIX)
+                .and_then(|b| b.try_into().ok())
+                .map(u64::from_be_bytes)
+                .ok_or_else(|| AcpError::State("unexpected object cleanup key".into()))?;
+            let job = object_cleanup::decode(bytes)?;
+            if jobs.get(&sequence) != Some(&job) || sequence != job.sequence || sequence > counter {
+                return Err(AcpError::State("orphan object cleanup queue".into()));
+            }
+        }
+        Ok(markers)
     }
 
     fn validate_relation_jobs(
@@ -272,3 +414,7 @@ fn validate_binding(
 #[cfg(test)]
 #[path = "object_pair_restoration_tests.rs"]
 mod object_pair_tests;
+
+#[cfg(test)]
+#[path = "logical_pair_tests.rs"]
+mod logical_pair_tests;

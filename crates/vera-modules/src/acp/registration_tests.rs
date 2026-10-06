@@ -160,7 +160,7 @@ fn amendment_moves_the_owner_key_and_revokes_the_previous_owner() {
     assert_eq!(event.previous_owner.0, first);
     assert_eq!(event.new_owner.0, second);
     let old = Relationship::with_entity("file", "report", "owner", first.clone());
-    assert!(!module.has_relationship(&policy, &keys::relationship_storage_key(&old)));
+    assert!(!module.has_relationship(&policy, &keys::relationship_storage_key(&old, 0)));
     let stored = module
         .get_relationship(&policy, &record.relationship)
         .unwrap()
@@ -612,7 +612,7 @@ fn corrupt_policy_and_relationship_records_cannot_authorize_or_be_overwritten() 
     let owner_key = keys::relationship_generation_key(
         &policy,
         relations.pair(&owner).unwrap(),
-        &keys::relationship_storage_key(&owner),
+        &keys::relationship_storage_key(&owner, 0),
     );
     let owner_bytes = module.store.get(&owner_key).unwrap();
     module.store.put(&owner_key, b"{".to_vec());
@@ -626,7 +626,7 @@ fn corrupt_policy_and_relationship_records_cannot_authorize_or_be_overwritten() 
     let grant_key = keys::relationship_generation_key(
         &policy,
         relations.pair(&grant).unwrap(),
-        &keys::relationship_storage_key(&grant),
+        &keys::relationship_storage_key(&grant, 0),
     );
     for invalid in [b"{".to_vec(), owner_bytes] {
         module.store.put(&grant_key, invalid);

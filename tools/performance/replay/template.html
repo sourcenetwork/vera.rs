@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vera · Measured workload replay</title>
+<style>__STYLE__</style>
+</head>
+<body>
+<main>
+<header><a class="wordmark" href="#">vera<span> / evidence</span></a><span class="tag">OFFLINE MEASURED-RUN REPLAY</span></header>
+<section class="intro">
+<div><p class="eyebrow">Recorded Vera workload</p><h1>Measured workload<br>replay.</h1>
+<p class="lede">Replay a measured run from its retained observations. These are recorded results, not a live network or a capacity forecast.</p></div>
+<aside><div id="status" class="status">Loading recorded evidence</div><p id="run-name"></p><p id="run-date" class="muted"></p><p id="source-short" class="mono"></p></aside>
+</section>
+<div id="issue" role="status" hidden></div>
+<section class="metrics" aria-label="Full-run measurements">
+<article><span>Completed workflows / second</span><strong id="throughput">Unknown</strong><small>Measured over workload + drain time</small></article>
+<article><span>Offered operations / second</span><strong id="offered">Unknown</strong><small>Configured schedule, not achieved throughput</small></article>
+<article><span>Certified receipt latency · p95</span><strong id="p95">Unknown</strong><small>Scheduled arrival → observed certified receipt</small></article>
+<article><span>Completed workflows</span><strong id="completed">Unknown</strong><small id="elapsed">Workload duration unknown</small></article>
+</section>
+<section class="replay panel">
+<div class="section-head"><div><p class="eyebrow">Explore the recorded interval</p><h2>Measurement timeline</h2></div><div class="transport"><button id="play" type="button">Play replay</button><select id="speed" aria-label="Replay speed"><option value="1">1×</option><option value="2" selected>2×</option><option value="5">5×</option></select><output id="clock">0.00 s</output></div></div>
+<label class="sr-only" for="scrubber">Measured elapsed time</label><input id="scrubber" type="range" min="0" max="1" step="any" value="1">
+<div class="timeline-stats"><span id="receipts">Receipt observations unknown</span><span id="workflows">Timed workflow completions unknown</span><span id="untimed"></span></div>
+<p class="note">Receipt times are derived from the recorded schedule (index ÷ offered rate) plus each measured receipt latency. RSS uses the sampler’s elapsed clock; its exact offset from workload start was not recorded. No block production or consensus finality is animated.</p>
+<div class="chart-title"><h3>Certified receipt observations</h3><span>Receipt latency in milliseconds · workload elapsed seconds · ≤1,000 actual points shown</span></div>
+<svg id="latency" viewBox="0 0 960 235" role="img" aria-label="Measured receipt latencies by derived observation time"></svg>
+<p id="latency-empty" class="empty" hidden>No timed receipt measurements available.</p>
+</section>
+<section class="memory-section">
+<div class="section-head"><div><p class="eyebrow">Resident memory · one host</p><h2>Members, individually measured</h2></div><span id="memory-coverage" class="muted"></span></div>
+<div id="members" class="members"></div>
+<p class="note">RSS is sampled process memory, not heap usage. Gaps remain unknown; lines do not bridge missing samples. Cards show the most recent sample at the scrubber position, not an estimate.</p>
+</section>
+<section class="bottom-grid">
+<article class="panel"><p class="eyebrow">Full-run result</p><h2>Outcomes & verification</h2><dl id="outcomes" class="facts"></dl><div class="gates"><div><span>Replica / proof reconciliation</span><strong id="proof-status">Unknown</strong><p id="proof-detail"></p></div><div><span>Hard-restart recovery</span><strong id="recovery-status">Unknown</strong><p id="recovery-detail"></p></div></div><p class="note">Verification and restart checks occur after the measured workload. They have no recorded position on this replay timeline. This report checks recorded results; it does not re-verify certificates or rebuild binary provenance offline.</p></article>
+<article class="panel"><p class="eyebrow">Inspect the cursor</p><h2>Latest receipt observations</h2><div class="table-scroll"><table><thead><tr><th>Operation</th><th>Observed</th><th>Latency</th><th>Outcome</th></tr></thead><tbody id="recent"></tbody></table></div><p class="note">Final outcomes without a receipt timestamp are included in full-run totals, not assigned invented times.</p></article>
+</section>
+<section class="panel provenance"><div class="section-head"><div><p class="eyebrow">Reproducibility</p><h2>The run behind the numbers</h2></div><span class="tag">RECORDED PROVENANCE</span></div><dl id="provenance" class="facts wide"></dl><details><summary>Full recorded configuration and evidence</summary><pre id="raw"></pre></details></section>
+<footer>Local workload evidence only. Receipt latency is not consensus finality latency. No maximum-capacity, sustained memory plateau, or WAN claim. All assets are embedded; no external requests.</footer>
+</main>
+<script id="replay-data" type="application/json">__DATA__</script>
+<script>__SCRIPT__</script>
+</body>
+</html>

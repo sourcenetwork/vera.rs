@@ -165,7 +165,7 @@ fn policy_evidence_revokes_retained_relationships_at_the_deletion_root() {
                         .verify(deleted, &policy, &prefix, RECORD_PROOF_BYTES)
                         .is_err()
                 );
-                let mut mixed = page.clone();
+                let mut mixed = page;
                 mixed.policy = live_page.policy;
                 assert!(
                     mixed
@@ -250,7 +250,7 @@ resources:
             let old_key = keys::relationship_generation_key(
                 id,
                 policy.relations.pair(&direct).unwrap(),
-                &keys::relationship_storage_key(&direct),
+                &keys::relationship_storage_key(&direct, 0),
             );
             let mut request = PrefixPageRequest {
                 module: ModuleId::Acp,
@@ -320,6 +320,7 @@ resources:
             assert_eq!(current.continuation, physical.continuation);
             let complete = vera_permission::PolicyPrefixProof {
                 policy: first.policy.clone(),
+                objects: first.objects.clone(),
                 prefix: raw,
             };
             assert!(

@@ -2,7 +2,7 @@
 
 The native node serves a finalized revision and its Commonware permission evidence together through `vera_getCurrentPermissionProof`. `vera_getPermissionProof` accepts a caller-selected revision when its evidence is available. `vera_getCurrentRecordProof` provides native record membership and absence; `vera_getCurrentPrefixProof` proves complete current prefixes. The older `vera_getStateProof` and `vera_getRelationProof` endpoints require an explicitly configured legacy JMT server.
 
-On a JMT server, `vera_getRelationProof(prefix, height)` returns every ACP relationship record under a raw prefix, with evidence for completeness at the requested finalized height. `prefix` is a hex byte string beginning with `relationship/v4/` and ending with `/`. A relation prefix has the form `relationship/v4/<policy-id>/<target-generation>/<subject-generation>/v2/<resource-hex>/<object-hex>/<relation-hex>/`; use the canonical key builders.
+On a JMT server, `vera_getRelationProof(prefix, height)` returns every ACP relationship record under a raw prefix, with evidence for completeness at the requested finalized height. `prefix` is a hex byte string beginning with `relationship/v5/` and ending with `/`. A relation prefix has the form `relationship/v5/<policy-id>/<target-generation>/<subject-generation>/v3/<resource-hex>/<object-hex>/<incarnation>/<relation-hex>/`; use the canonical key builders.
 
 The response contains `version`, `count`, and `records`. Each uses the existing `ModuleStateProof` encoding. The version proof establishes the relationship-index format. The count proof establishes the number of records under the exact prefix, including archived records. Records must have distinct, ordered keys under that prefix, with an inclusion proof for each value. A missing count means zero only when the format marker is authenticated at the same revision.
 
@@ -14,9 +14,9 @@ The server uses current module keys as enumeration candidates and proves their v
 
 ## Index activation and recovery
 
-Execution initializes relationship-index format 3 in the first selected revision whose parent lacks the marker. Other retained format markers are rejected. It derives counts from the resulting ACP records, so existing relationships are included. The marker and counts are authenticated ACP tree entries under the reserved null-prefixed namespace `vera/relationship_index`. Ordinary module record updates cannot write that namespace. Each later execution derives count changes from record presence before and after the update; changing or archiving a value does not change its count.
+Execution initializes relationship-index format 4 in the first selected revision whose parent lacks the marker. Other retained format markers are rejected. It derives counts from the resulting ACP records, so existing relationships are included. The marker and counts are authenticated ACP tree entries under the reserved null-prefixed namespace `vera/relationship_index`. Ordinary module record updates cannot write that namespace. Each later execution derives count changes from record presence before and after the update; changing or archiving a value does not change its count.
 
-All slash-terminated prefixes under `relationship/v4/` are counted, including delimiter ancestors. These counts establish physical scan completeness, including records awaiting policy cleanup. Counts and records enter the same branch-local tree update and durable revision. Pending alternatives do not change canonical counts, and revision rewind restores both together. Internal index entries are excluded from module record loading.
+All slash-terminated prefixes under `relationship/v5/` are counted, including delimiter ancestors. These counts establish physical scan completeness, including records awaiting policy cleanup. Counts and records enter the same branch-local tree update and durable revision. Pending alternatives do not change canonical counts, and revision rewind restores both together. Internal index entries are excluded from module record loading.
 
 Activation changes consensus execution and the next module commitment. This format targets fresh state; old relationship namespaces and older index markers have no automatic migration path. No disk rewrite changes a previously finalized root. This index does not replace the underlying storage engine or supply historical key enumeration.
 
@@ -74,14 +74,26 @@ can retain relationship records while bounded cleanup runs, so physical inclusio
 alone does not establish current ownership or policy membership.
 
 `vera_getCurrentPolicyPrefixProof(policy, prefix, minimum_height)` returns
-`PolicyPrefixResponse`: a finalized `revision` and `proof` containing the policy
-record witness and complete relationship-prefix witness. The server captures both
-under the same partition locks. `VeraClient::read_current_policy_prefix` and
-`PolicyPrefixResponse::verify` authenticate the policy key, relationship prefix,
-identical roots, finality and minimum revision. The policy witness shares the
-existing 4 MiB proof, 4,096-record and 1 MiB read budgets with the prefix; it is not
-an additional allowance. Certified policy absence returns `None`, even when
-physical relationships remain. Invalid or unavailable evidence remains an error.
+`PolicyPrefixResponse`: a finalized `revision` and `proof` containing `policy`,
+`objects`, and `prefix`. `objects` is a required array of object-incarnation
+`RecordProof` witnesses, one per distinct non-owner target in the physical rows,
+including obsolete rows. Owner-only prefixes carry an empty array. The server
+captures all witnesses under the same partition locks.
+
+`VeraClient::read_current_policy_prefix` and `PolicyPrefixResponse::verify`
+authenticate the policy key, requested prefix, identical roots, finality and
+minimum revision. Policy and object witnesses share limits of 256 reads, 4,096 present
+records, 1 MiB data and 4 MiB serialized-proof budgets with the prefix. Data charges
+include selection bytes and every point/relationship key and value. Certified
+policy absence returns `None` only after validating the complete evidence;
+invalid or unavailable evidence remains an error.
+
+Object points use `object_state/{policy}/{resource_hex}/{object_hex}`. A present
+value must be a positive eight-byte big-endian counter; authenticated absence
+means initial zero. Missing coverage is an error. Extra or duplicate witnesses,
+mixed roots, malformed points, and a row incarnation ahead of its object state
+are errors. Every row must carry a mandatory incarnation matching its canonical
+v5 key before liveness filtering. Owners always use zero and need no object point.
 
 `object_owner_prefix(policy, object)` constructs the canonical owner prefix.
 `PolicyPrefixResponse::verify_object_owner` also checks each relationship against
@@ -92,24 +104,27 @@ Ownership alone does not replace permission evaluation. Set the minimum revision
 to the finalized deletion height when a read must observe that deletion.
 
 `vera_getCurrentPolicyPrefixPageProof(policy, request, minimum_height)` returns
-`PolicyPrefixPageResponse`, pairing the policy witness with one relationship page.
-The request uses the ACP module and a prefix belonging to that policy. Both proofs
-share the existing 8 MiB encoded page-proof budget and one finalized root.
-`VeraClient::read_current_policy_prefix_page` verifies the combined response;
-`read_relationship_page` additionally decodes typed relationship records. Certified
-policy absence yields no records or continuation. Typed records must also match
-the policy's current relation generations. Pages filter inactive generations while
-preserving their physical continuation, so an empty page may still continue.
-A complete policy-prefix response rejects inactive rows instead of changing its
-proven successor chain. The page limits and revision rules below still apply;
-pages do not create a historical snapshot.
+`PolicyPrefixPageResponse` with `policy`, required `objects`, and `page` proofs.
+The request selects the ACP module and a prefix belonging to that policy. The
+response shares one finalized root and aggregate limits of 256 reads, 4,096
+present point/relationship records, 2 MiB of selection/key/value data and 8 MiB
+of serialized proof. A page contains at most 128 physical relationship rows;
+object witnesses are charged within the aggregate limits, not another allowance.
 
-These policy-scoped responses replace raw prefix responses for ownership and
-current relationship interpretation. Existing raw proof endpoints remain available
-for storage inspection. Fresh state uses the incompatible outer
-[`relationship/v4/` namespace](native-relationship-keys.md); updating consumers
-requires matching key builders, policy-liveness and relation-generation verification. Receipt and
-finality proof formats are unchanged.
+`VeraClient::read_current_policy_prefix_page` verifies the combined response;
+`read_relationship_page` also returns typed records. Certified policy absence
+yields no records or continuation. Pages filter obsolete relation generations
+and object incarnations while preserving the physical continuation, so an empty
+page may still continue. A complete policy-prefix response instead rejects any
+inactive row: it cannot expose a filtered subset as a complete successor chain.
+The page revision rules below still apply; pages do not create a historical snapshot.
+
+These policy-scoped responses replace raw prefix responses for current ownership
+and relationship interpretation. Generic proof endpoints remain physical storage
+APIs. The fresh-state [`relationship/v5/` namespace](native-relationship-keys.md),
+mandatory record incarnation and object witnesses require matching consumer
+verification. There is no legacy dual reader or fallback to raw inclusion.
+Receipt/finality formats and transport envelope allowances are unchanged.
 
 ## Permission requests
 
@@ -145,6 +160,12 @@ corresponding `PERMISSION_RESPONSE_BYTES` transport bound.
 `vera_getPermissionProof(policy, request, height)` returns the policy and relationship evidence needed to evaluate an `AccessRequest` at the requested finalized revision. The request contains an actor DID and one or more operations, each naming an object resource, object ID and permission. The response contains tagged point and complete-prefix reads. It carries no authoritative allow/deny flag.
 
 `vera_permission::verify_permission_proof` authenticates every read against the caller's trusted module root and height, then runs the shared ACP evaluator on the caller's policy ID, actor and operations. Missing coverage remains an error, including within an exclusion. Proven policy absence returns false. Duplicate reads, mixed revisions and malformed records are rejected. Repeated reads consume the evaluation budget even when they use the same evidence.
+
+Permission capture includes object-state point reads through the shared evaluator.
+These points consume the existing read budgets and authenticate at the same root
+as the policy, directories and relationship prefixes. Missing object coverage is
+an error, including for an exclusion; proven absence selects initial incarnation
+zero. An archived-away grant cannot authorize through a stale physical row.
 
 Direct entity-set grants follow the referenced object's named relation, including
 nested groups and computed permissions. Cycles do not grant access, and revoked

@@ -22,6 +22,7 @@ fn record(module: &AcpModule, policy: &str) -> RelationshipRecord {
     let policy_record = module.query_policy(policy).unwrap();
     let relationship = Relationship::with_entity("file", "report", "reader", did("reader"));
     RelationshipRecord {
+        incarnation: 0,
         generations: policy_record.relations.pair(&relationship).unwrap(),
         relationship,
         policy_id: policy.into(),
@@ -34,15 +35,21 @@ fn primary(record: &RelationshipRecord) -> Vec<u8> {
     keys::relationship_generation_key(
         &record.policy_id,
         record.generations,
-        &keys::relationship_storage_key(&record.relationship),
+        &keys::relationship_storage_key(&record.relationship, record.incarnation),
     )
 }
 fn reads(record: &RelationshipRecord) -> Vec<Vec<u8>> {
     vec![
         keys::policy_key(&record.policy_id),
         primary(record),
+        object_state::key(
+            &record.policy_id,
+            &record.relationship.resource,
+            &record.relationship.object_id,
+        ),
         relationship_index::outgoing_key(&record.policy_id, record.generations),
         relationship_index::incoming_key(&record.policy_id, record.generations),
+        relationship_index::logical_key(&record.policy_id, record.generations),
         relationship_index::active_key(&record.policy_id, record.generations.target),
         object_pairs::key(record),
     ]
@@ -84,7 +91,7 @@ fn central_point_plans_pay_each_primary_counter_and_directory_once() {
             relationship_mutations::put(&mut expected.store, &record).unwrap();
         }
         let changes = expected.store.diff_from(&current.store);
-        assert_eq!(changes.len(), if phase == 1 { 1 } else { 5 });
+        assert_eq!(changes.len(), if phase == 1 { 1 } else { 6 });
         let cost = price(&current.store, &reads(&record), &changes);
         let mut exact = current.clone();
         let budget = CommandBudget::new(cost);

@@ -102,16 +102,18 @@ A failed run is never presented as improved performance. Configuration changes
 are listed explicitly and suppress full-stack percentage comparisons. The driver
 also generates genesis/configuration and verifies native receipts and proofs.
 Before running workloads, committed ACP source supplies the explicit relationship
-namespace and its matching policy-record schema. Known `relationship/v3/` and
-`relationship/v4/` schemas are incompatible with each other's permission verifier.
-For that boundary, baseline full-stack passes are recorded as **not run** in
-`unavailable.json`; both head passes still require every correctness and recovery
+namespace and matching record schema. Known `relationship/v3/`, `relationship/v4/`
+and `relationship/v5/` schemas are mutually incompatible for permission verification.
+The v5 schema requires relation generations and a mandatory `RelationshipRecord`
+`incarnation: u64` without a deserialization default. For these boundaries,
+baseline full-stack passes are recorded as **not run** in `unavailable.json`; both head passes still require every correctness and recovery
 gate. Reports show head-only values, no baseline success and no full-stack delta.
 Unknown or inconsistent schemas fail. Other interface errors and failures on a
 compatible baseline still fail the job. There is no verifier relaxation or fallback
 to a different workload driver. Component passes retain their existing independent
-fixture and sampling checks. Block limits printed by the driver
-are its compiled configuration assumptions, not measurements of the base node's
+fixture and sampling checks. Earlier measurements do not qualify the v5 archive
+or proof paths; this schema check supplies no new performance result.
+Block limits printed by the driver are its compiled configuration assumptions, not measurements of the base node's
 capabilities.
 
 The component executable separately measures native BLS request verification,
@@ -355,7 +357,43 @@ writing (including blocking-pool scheduling), and query-index publication. These
 durations include lock waits and executor scheduling; database apply is not a
 disk-only measurement. Use this target without `vera_diagnostics` to avoid the
 per-receipt trace. It observes existing ordering and never publishes an index
-before its history write succeeds.
+before its history write succeeds. Both publication and general diagnostics also
+record marshal tip/block delivery to the stateful mailbox, its feedback, and sink
+entry/completion. A tip is not a durable block delivery or an application
+acknowledgement; missing delivery does not identify a network failure.
+
+Durability completion records the original barrier result, time from its first
+poll, and time since synchronization began. These are observed waits, including
+scheduling, not isolated disk latency. The height is unknown until a database
+apply has been observed with diagnostics enabled. Diagnostics do not wait for
+or acknowledge a barrier earlier than the normal finalization path.
+
+### Offline measured-run replay
+
+Generate a standalone interactive HTML file from an existing recorded run; this
+requires only Python, with no browser packages or external web dependencies:
+
+```sh
+python3 tools/performance/replay.py /tmp/vera-performance-run \
+  --output /tmp/vera-workload-replay.html
+```
+
+PR and main-branch benchmark artifacts include `replay.html` alongside each recorded
+run. Rendering runs after measurements, including for failed runs, so retained
+artifacts show their actual outcomes without adding work to the measured interval.
+
+The output must be a new file. The generator reuses `report.py` correctness gates
+and exits unsuccessfully after writing a clearly labelled failed or incomplete
+report when those gates do not pass. The scrubber shows measured RSS and receipt
+observations, with receipt times derived from the known arrival schedule plus
+recorded latency. RSS has a separate elapsed-clock origin; its exact offset is
+unavailable. Missing samples remain gaps; untimed outcomes and post-run proof and
+restart checks are not assigned invented timestamps. At most 1,000 actual receipt
+points are drawn; totals include every observation. Exact recorded source hashes,
+binary hashes and host details remain attached. Build details absent from the
+manifest stay unknown. This is a replay, not live telemetry, a capacity result or
+a measurement of consensus finality. Existing recordings retain their historical
+source identity when rendered by a newer checkout.
 
 ## Interpret the charts
 

@@ -107,6 +107,19 @@ jobs:
         run: |
           "$RUNNER_TEMP/performance-python/bin/python" head/tools/performance/run_pr.py \
             --head head --base base --binaries binaries --output performance-results --consensus pipelined
+      - name: Render interactive measurements
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          result=0
+          for manifest in performance-results/*/objects-*/manifest.json; do
+            directory="${manifest%/manifest.json}"
+            python3 head/tools/performance/replay.py "$directory" \
+              --output "$directory/replay.html" || result=1
+          done
+          exit "$result"
       - name: Publish check summary
         if: always()
         run: |
