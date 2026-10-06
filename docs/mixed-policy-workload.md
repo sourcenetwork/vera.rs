@@ -34,13 +34,15 @@ verification phase. JSONL records the verification concurrency.
 
 ## Build and run
 
-Build the example from the candidate source. Use the independently staged release
-daemon from Vera `382b36356de56ea17efdbda6b3ecf44da524fddc`, with its artifact hash
-recorded alongside the run. The driver source is layered on that revision.
+Build the daemon and driver from the same candidate source tree, then stage the
+daemon and record both executable hashes and source revisions with the results.
+The driver embeds the ACP proof verifier, so a driver from an older relationship
+schema cannot qualify a current daemon.
 Finish all compilation before starting the workload; do not measure while
 another build or workload is running.
 
 ```sh
+cargo +1.98.0 build --frozen --release -p verad --bin verad
 cargo +1.98.0 build --frozen --release -p vera-e2e --example mixed_policy_workload
 export VERAD_BINARY=/absolute/path/to/staged/verad
 export VERA_E2E_DIR=/absolute/path/to/private/mixed-policy-evidence/clusters
@@ -91,3 +93,50 @@ This is a local functional and offered-load qualification with a small synthetic
 dataset. It is not a capacity result, a WAN or adversarial-network test, or complete
 production qualification. It does not qualify other replica counts, threshold
 changes, or every failure point during recovery.
+
+## Current-schema local qualification
+
+On October 6, 2026, source `7d1b35ae356d16751553a62a8c778a803e10ebf4`
+completed `128 4 16 900` on one Apple M5 Max host with 18 CPU cores and 64 GiB RAM.
+Four validators used the normal release profile, RocksDB history and no span
+tracing (`RUST_LOG=warn`). The staged daemon was built from `4a91e354`, whose Git
+tree exactly matches the driver source. The `relationship/v5/` dataset grew to
+512 objects.
+
+| Measurement | Result |
+|---|---:|
+| Timed workflows completed | 128 / 128 |
+| Offered arrival rate | 4 workflows/s |
+| Timed interval, including drain | 34.382 s |
+| Completed workflows / timed interval | 3.723/s |
+| Certified submissions in timed phase | 640 |
+| Embedded mutations in timed phase | 1,664 |
+| Submission-to-verified-receipt p50 / p95 / p99 | 517.55 / 728.60 / 773.25 ms |
+| Complete-workflow p50 / p95 / p99 | 2,859.13 / 3,488.46 / 3,622.32 ms |
+| Peak sampled RSS per validator during timed phase | 224.03–231.48 MiB |
+| Explicit throttling responses across the run | 1 |
+| Hard restart plus all-replica verification | 19.804 s |
+| Whole run | 186.20 s |
+
+Each timed workflow contains five serial certified submissions and 60 verified
+permission checks. Percentiles use the same nearest-rank rule as
+`operation_baseline`; receipt latency includes submission, polling and proof
+verification. The restart measurement includes verification of all 128 workflows
+on all four replicas.
+
+Across setup, workload and final checks, all 771 submissions and 2,179 embedded
+mutations were certified successful. The run verified 38,400 permissions and
+10,240 ownership proofs. All five replica-check phases passed: after workload,
+after relation removal, after relation recreation with old grants still denied,
+after explicit regrant, and after hard restart. No issued submission was left
+unresolved. Resource and storage sampling reported no errors.
+
+These measurements qualify this local workload at the stated offered load.
+They do not establish maximum capacity, sustained memory behavior, WAN finality,
+or a comparison with the Go implementation. They are not comparable throughput
+figures to the single-write workflows in `operation_baseline`.
+
+Executable SHA-256 values for reproduction:
+
+- Driver: `7fc8a7acae33b76f21254eb45af0db81ce13694811e5e70d5677a4b8c966ffa0`
+- Daemon: `90b2c738af83e10a96ac49d4fafa3ed1dbc884518a142592a95c7863869422e1`
