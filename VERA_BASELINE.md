@@ -1,1 +1,0 @@
-/Users/ivan/Source/hub.rs/.vera-local/VERA_BASELINE.md
