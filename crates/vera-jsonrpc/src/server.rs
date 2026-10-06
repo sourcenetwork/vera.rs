@@ -1,6 +1,9 @@
 //! HTTP and JSON-RPC server implementation.
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::{SocketAddr, TcpListener},
+    sync::Arc,
+};
 
 use jsonrpsee_server::{BatchRequestConfig, PingConfig, Server, ServerHandle};
 use tokio::sync::broadcast;
@@ -257,6 +260,26 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
     ///
     /// This spawns background tasks for both HTTP and JSON-RPC servers and returns immediately.
     pub fn start(self) -> RpcServerHandle {
+        self.start_inner(None)
+    }
+
+    /// Start with an already bound listener, without releasing and rebinding its port.
+    pub fn start_with_listener(
+        self,
+        listener: TcpListener,
+    ) -> Result<RpcServerHandle, ServerError> {
+        let actual = listener.local_addr().map_err(ServerError::Bind)?;
+        if actual != self.addr {
+            return Err(ServerError::Build(format!(
+                "listener address {actual} does not match configured {}",
+                self.addr
+            )));
+        }
+        listener.set_nonblocking(true).map_err(ServerError::Bind)?;
+        Ok(self.start_inner(Some(listener)))
+    }
+
+    fn start_inner(self, listener: Option<TcpListener>) -> RpcServerHandle {
         let addr = self.addr;
         let node_state = Arc::new(self.state);
         let node_state_for_jsonrpc = Arc::clone(&node_state);
@@ -285,7 +308,7 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
         let extra_modules = self.extra_modules;
 
         let jsonrpc_handle = tokio::spawn(async move {
-            let server = match Server::builder()
+            let builder = Server::builder()
                 // Subscription acknowledgements echo the client's request id;
                 // keeping the response budget above the request budget keeps
                 // that echo from overflowing the response limit.
@@ -302,10 +325,12 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
                     PingConfig::default()
                         .ping_interval(std::time::Duration::from_secs(30))
                         .max_failures(2),
-                )
-                .build(addr)
-                .await
-            {
+                );
+            let result = match listener {
+                Some(listener) => builder.build_from_tcp(listener),
+                None => builder.build(addr).await,
+            };
+            let server = match result {
                 Ok(s) => s,
                 Err(e) => {
                     error!(error = %e, "Failed to build JSON-RPC server");
@@ -706,3 +731,7 @@ impl<S: StateProvider + Clone + 'static> JsonRpcServer<S> {
         Ok((server.start(module), local_addr))
     }
 }
+
+#[cfg(test)]
+#[path = "listener_tests.rs"]
+mod listener_tests;

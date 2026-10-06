@@ -78,6 +78,21 @@ pub(super) const PARTITION_PREFIX: &str = "vera";
 
 /// Run a validator until one of its actors stops.
 pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow::Result<()> {
+    run_node_with_rpc_listener(context, settings, None).await
+}
+
+/// Run with an optional prebound RPC listener; P2P still binds its configured address.
+pub async fn run_node_with_rpc_listener(
+    context: tokio::Context,
+    settings: NodeSettings,
+    rpc_listener: Option<std::net::TcpListener>,
+) -> anyhow::Result<()> {
+    if let Some(listener) = &rpc_listener {
+        anyhow::ensure!(
+            listener.local_addr()? == settings.rpc_addr,
+            "inherited RPC listener does not match configured address"
+        );
+    }
     let NodeSettings {
         config,
         genesis,
@@ -909,7 +924,7 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
         ));
     }
 
-    let rpc_handle = RpcServer::with_state_provider(node_state, rpc_addr, chain_id, state_provider)
+    let rpc_server = RpcServer::with_state_provider(node_state, rpc_addr, chain_id, state_provider)
         .with_max_connections(config.rpc.max_connections.get())
         .with_tx_submit(tx_submit)
         .with_subscriptions(heads_tx, logs_tx)
@@ -934,8 +949,11 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
                     .map_err(|error| error.to_string())
             })
         })
-        .with_vera_light_block_index(light_block_index)
-        .start();
+        .with_vera_light_block_index(light_block_index);
+    let rpc_handle = match rpc_listener {
+        Some(listener) => rpc_server.start_with_listener(listener)?,
+        None => rpc_server.start(),
+    };
     context.child("rpc").spawn(move |_| async move {
         rpc_handle.stopped().await;
         error!("RPC server stopped unexpectedly");

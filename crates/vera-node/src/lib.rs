@@ -35,7 +35,7 @@ mod marshal_floor;
 mod native_genesis;
 mod node;
 
-pub use node::run_node;
+pub use node::{run_node, run_node_with_rpc_listener};
 
 mod participants;
 pub use participants::{RegistryParticipants, validator_address};

@@ -61,6 +61,11 @@ pub(crate) struct ValidatorArgs {
     #[arg(long)]
     pub rpc_port: Option<u16>,
 
+    /// Inherit a listening TCP descriptor matching the configured RPC address (Unix).
+    #[cfg(unix)]
+    #[arg(long)]
+    pub rpc_listener_fd: Option<std::os::fd::RawFd>,
+
     /// Leader proposal timeout in milliseconds.
     #[arg(long)]
     pub leader_timeout_ms: Option<u64>,
@@ -83,6 +88,11 @@ pub(crate) struct DevnetArgs {
     /// JSON-RPC listen port.
     #[arg(long, default_value = "8545")]
     pub rpc_port: u16,
+
+    /// Inherit a listening TCP descriptor matching the configured RPC address (Unix).
+    #[cfg(unix)]
+    #[arg(long)]
+    pub rpc_listener_fd: Option<std::os::fd::RawFd>,
 
     /// Leader proposal timeout in milliseconds.
     #[arg(long)]
@@ -160,7 +170,14 @@ impl Cli {
             validator_index,
             "Starting vera validator"
         );
-        run(settings)
+        #[cfg(unix)]
+        let listener = args
+            .rpc_listener_fd
+            .map(|fd| vera_cli::inherited_tcp_listener(fd, settings.rpc_addr))
+            .transpose()?;
+        #[cfg(not(unix))]
+        let listener = None;
+        run(settings, listener)
     }
 
     fn run_genesis(&self, args: &GenesisArgs) -> eyre::Result<()> {
@@ -233,7 +250,14 @@ impl Cli {
             chain_id = settings.config.chain_id,
             "Starting vera devnet (single-node)"
         );
-        run(settings)
+        #[cfg(unix)]
+        let listener = args
+            .rpc_listener_fd
+            .map(|fd| vera_cli::inherited_tcp_listener(fd, settings.rpc_addr))
+            .transpose()?;
+        #[cfg(not(unix))]
+        let listener = None;
+        run(settings, listener)
     }
 }
 
@@ -313,18 +337,39 @@ fn node_settings(
 }
 
 /// Run the node on a commonware tokio runtime until it stops.
-fn run(settings: NodeSettings) -> eyre::Result<()> {
+fn run(settings: NodeSettings, listener: Option<std::net::TcpListener>) -> eyre::Result<()> {
     use commonware_runtime::{Runner as _, tokio};
     let runtime = tokio::Config::default()
         .with_storage_directory(settings.config.data_dir.join("commonware"));
     tokio::Runner::new(runtime)
-        .start(|context| async move { vera_node::run_node(context, settings).await })
+        .start(|context| async move {
+            vera_node::run_node_with_rpc_listener(context, settings, listener).await
+        })
         .map_err(|e| eyre::eyre!("node stopped: {e:#}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn rpc_listener_descriptor_is_explicit_for_validator_and_devnet() {
+        for mut arguments in [
+            vec!["verad", "validator", "--peers", "peers.json"],
+            vec!["verad", "devnet"],
+        ] {
+            let parsed = Cli::try_parse_from(&arguments).unwrap();
+            let descriptor = |cli: Cli| match cli.command.unwrap() {
+                Commands::Validator(args) => args.rpc_listener_fd,
+                Commands::Devnet(args) => args.rpc_listener_fd,
+                _ => unreachable!(),
+            };
+            assert_eq!(descriptor(parsed), None);
+            arguments.extend(["--rpc-listener-fd", "9"]);
+            assert_eq!(descriptor(Cli::try_parse_from(arguments).unwrap()), Some(9));
+        }
+    }
 
     #[test]
     fn devnet_initializes_registry_membership_and_rejects_a_different_key() {

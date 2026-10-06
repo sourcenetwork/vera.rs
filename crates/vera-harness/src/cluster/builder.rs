@@ -27,6 +27,7 @@ pub struct TestClusterBuilder {
     jmt_seeder: Option<JmtSeeder>,
     binary: Option<PathBuf>,
     rust_log: Option<String>,
+    inherit_rpc_listener: bool,
 }
 
 impl fmt::Debug for TestClusterBuilder {
@@ -40,6 +41,7 @@ impl fmt::Debug for TestClusterBuilder {
             .field("has_jmt_seeder", &self.jmt_seeder.is_some())
             .field("binary", &self.binary)
             .field("rust_log", &self.rust_log)
+            .field("inherit_rpc_listener", &self.inherit_rpc_listener)
             .finish()
     }
 }
@@ -56,6 +58,7 @@ impl Default for TestClusterBuilder {
             jmt_seeder: None,
             binary: None,
             rust_log: None,
+            inherit_rpc_listener: cfg!(unix),
         }
     }
 }
@@ -124,6 +127,17 @@ impl TestClusterBuilder {
         self
     }
 
+    /// Keep RPC ports reserved across child startup and restarts (Unix default).
+    ///
+    /// Disable only when deliberately testing an older binary without
+    /// `--rpc-listener-fd`. P2P ports still use address-based binding.
+    #[cfg(unix)]
+    #[must_use]
+    pub const fn inherit_rpc_listener(mut self, enabled: bool) -> Self {
+        self.inherit_rpc_listener = enabled;
+        self
+    }
+
     /// Build and start the cluster.
     pub async fn build(self) -> eyre::Result<TestCluster> {
         let n = self.node_count;
@@ -148,9 +162,36 @@ impl TestClusterBuilder {
             key_builder = key_builder.seed(seed);
         }
         let keys = key_builder.build()?;
-        let all_ports = test_infra::allocate_ports(n * 2)?;
-        let p2p_ports = &all_ports[0..n];
-        let rpc_ports = &all_ports[n..n * 2];
+        #[cfg(unix)]
+        let mut rpc_listeners = if self.inherit_rpc_listener {
+            (0..n)
+                .map(|_| {
+                    test_infra::ReservedTcpListener::bind("0.0.0.0:0".parse().unwrap()).map(Some)
+                })
+                .collect::<std::io::Result<Vec<_>>>()?
+        } else {
+            Vec::new()
+        };
+        let all_ports =
+            test_infra::allocate_ports(n + if self.inherit_rpc_listener { 0 } else { n })?;
+        let p2p_ports = &all_ports[..n];
+        #[cfg(unix)]
+        let rpc_ports = if self.inherit_rpc_listener {
+            rpc_listeners
+                .iter()
+                .map(|listener| {
+                    listener
+                        .as_ref()
+                        .unwrap()
+                        .local_addr()
+                        .map(|addr| addr.port())
+                })
+                .collect::<std::io::Result<Vec<_>>>()?
+        } else {
+            all_ports[n..].to_vec()
+        };
+        #[cfg(not(unix))]
+        let rpc_ports = all_ports[n..].to_vec();
         let validators = keys
             .participants()
             .iter()
@@ -266,8 +307,26 @@ impl TestClusterBuilder {
 
             let envs: Vec<(&str, &str)> = vec![("RUST_LOG", &rust_log), ("NO_COLOR", "1")];
 
+            #[cfg(unix)]
+            let process = if self.inherit_rpc_listener {
+                let listener = rpc_listeners[i].take().expect("reserved RPC listener");
+                let descriptor = listener.raw_fd().to_string();
+                let mut args = args;
+                args.extend(["--rpc-listener-fd", descriptor.as_str()]);
+                ManagedProcess::spawn_with_listener(
+                    &format!("node{i}"),
+                    &binary,
+                    &args,
+                    &envs,
+                    &log_dir,
+                    listener,
+                )?
+            } else {
+                ManagedProcess::spawn(&format!("node{i}"), &binary, &args, &envs, &log_dir)?
+            };
+            #[cfg(not(unix))]
             let process =
-                ManagedProcess::spawn(&format!("node{}", i), &binary, &args, &envs, &log_dir)?;
+                ManagedProcess::spawn(&format!("node{i}"), &binary, &args, &envs, &log_dir)?;
 
             nodes.push(TestNode {
                 rpc_port: rpc_ports[i],

@@ -33,6 +33,15 @@ VERAD_BINARY="$(pwd)/target/debug/verad" \
   cargo test -p vera-e2e --test vera_e2e_canonical
 ```
 
+On Unix, the harness reserves each RPC listener and passes it explicitly through
+`--rpc-listener-fd`. The parent retains the bound socket across node kills and
+restarts, so another process cannot claim that RPC port during startup or recovery.
+The runtime checks that the descriptor is a listening TCP socket at the configured
+address. This requires a matching runtime; use `.inherit_rpc_listener(false)` only
+when deliberately exercising an older external binary. There is no automatic
+fallback based on binary selection. P2P ports still use address-based binding and
+are not covered by this reservation.
+
 ## Serial / global-lock expectation
 
 Each target starts a real multi-process cluster, and the Fast timing preset is

@@ -9,6 +9,10 @@
 //! - Health check polling — configurable readiness detection
 
 pub mod binary;
+#[cfg(unix)]
+mod listener;
+#[cfg(unix)]
+pub use listener::ReservedTcpListener;
 /// Async log file tailing with pattern matching.
 pub mod log_tracker;
 /// Component version manifest (`backbone.toml`) parsing.
