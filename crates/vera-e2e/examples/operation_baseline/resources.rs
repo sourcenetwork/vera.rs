@@ -203,6 +203,19 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn rss_status_reads_the_current_process() {
+        let pid = std::process::id();
+        let sample = rss_sample(pid).await;
+        assert_eq!(sample["pid"], pid);
+        assert_eq!(sample["availability"], "complete");
+        assert!(sample["vm_rss_kib"].as_u64().unwrap() > 0);
+        for field in ["rss_anon_kib", "rss_file_kib", "rss_shmem_kib"] {
+            assert!(sample[field].as_u64().is_some(), "{field}: {sample}");
+        }
+    }
+
     #[test]
     fn storage_usage_counts_nested_files_without_following_symlinks() {
         let root = tempfile::tempdir().unwrap();
