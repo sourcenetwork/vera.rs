@@ -123,13 +123,16 @@ rejected and require an explicit migration decision, not silent reset.
 
 ## Capacity reference
 
-Single-host baseline (four validators, one machine, release build): sustained
-certified-registration throughput in the high tens of operations per second;
-certified-receipt p95 in the 1-2 s range locally; resident memory per node
-in the 300-500 MiB range with pruning active and a decelerating growth curve
-as caches fill. Wide-area expectations and their gate criteria are defined in
-[wan-gates.md](wan-gates.md). Re-baseline with the `operation_baseline`
-(local) and `wan_baseline` (remote) drivers after material changes.
+Size a deployment from a measured workload and its exact source, storage backend
+and host configuration. The [mixed-policy qualification](mixed-policy-workload.md#current-schema-local-qualification)
+records a four-validator release run with 128 workflows and 512 objects, including
+certified receipts, revocation and restart checks. Its offered load and short RSS
+sample do not establish maximum capacity or sustained memory behavior.
+
+Wide-area gate criteria are defined in [wan-gates.md](wan-gates.md); a qualified
+WAN capacity result is still required. Re-baseline with `operation_baseline`
+(local) and `wan_baseline` (remote) after material changes. Compare only matching
+workloads and measurement boundaries.
 
 ## Security notes for operators
 
