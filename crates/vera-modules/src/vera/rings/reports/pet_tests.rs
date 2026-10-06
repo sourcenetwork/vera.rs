@@ -96,6 +96,44 @@ fn pet_evidence_binds_envelope_and_rejects_trailing_or_truncated_bytes() {
 }
 
 #[test]
+fn pet_evidence_requires_generation_bound_v2_domains() {
+    for (domain, accepted) in [
+        ("orbis-pet-blind-reveal-response-v2", true),
+        ("orbis-pet-blind-reveal-response-v1", false),
+    ] {
+        let case = InvalidCryptoResponse::PetBlindReveal {
+            statement: PetBlindRevealStatement {
+                domain: domain.into(),
+                ..reveal()
+            },
+            response_signature: vec![9; 64],
+        };
+        assert_eq!(
+            evidence::validate(&envelope(&case)).is_ok(),
+            accepted,
+            "{domain}"
+        );
+    }
+    for (domain, accepted) in [
+        ("orbis-pet-blind-decrypt-response-v2", true),
+        ("orbis-pet-blind-decrypt-response-v1", false),
+    ] {
+        let case = InvalidCryptoResponse::PetBlindDecrypt {
+            statement: PetBlindDecryptStatement {
+                domain: domain.into(),
+                ..decrypt()
+            },
+            response_signature: vec![9; 64],
+        };
+        assert_eq!(
+            evidence::validate(&envelope(&case)).is_ok(),
+            accepted,
+            "{domain}"
+        );
+    }
+}
+
+#[test]
 fn pet_evidence_fields_are_bounded_without_interpreting_private_context() {
     let base = reveal();
     for statement in [
