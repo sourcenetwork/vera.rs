@@ -144,6 +144,8 @@ ark-ec = "0.4"
 ark-ff = "0.4"
 ark-serialize = "0.4"
 ark-std = "0.4"
+jubjub = { version = "0.11.1", default-features = false }
+group = { version = "0.14", default-features = false }
 
 # HTTP / RPC
 axum = "0.8"

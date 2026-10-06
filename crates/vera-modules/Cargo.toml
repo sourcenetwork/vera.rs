@@ -29,6 +29,8 @@ prost = "0.14"
 thiserror.workspace = true
 
 [dev-dependencies]
+jubjub.workspace = true
+group.workspace = true
 blst = "0.3"
 base64.workspace = true
 k256.workspace = true
