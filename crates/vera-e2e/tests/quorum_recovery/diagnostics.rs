@@ -1,4 +1,4 @@
-//! Bounded evidence collected once after a quorum-recovery failure.
+//! Bounded phase observations and failure evidence for quorum recovery.
 
 use std::{
     fs::File,
@@ -24,7 +24,9 @@ pub(super) async fn capture(
     signer: &str,
     trusted: &ConsensusPublicKey,
     cause: &str,
+    context: &Value,
 ) {
+    let failure_observed_at = timestamp_ms();
     let nodes = join_all((0..cluster.node_count()).map(|index| async move {
         let node = cluster.node(index);
         let client = VeraClient::new(node.rpc_url());
@@ -73,8 +75,9 @@ pub(super) async fn capture(
         "format_version": 1,
         "kind": "quorum_recovery_failure",
         "phase": "after_third_member_restart",
-        "observed_at_unix_ms": SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
-            .map(|elapsed| elapsed.as_millis()).ok(),
+        "observed_at_unix_ms": failure_observed_at,
+        "capture_completed_at_unix_ms": timestamp_ms(),
+        "context": context,
         "submission": submission,
         "cause": cause,
         "probe_timeout_ms": PROBE_TIMEOUT.as_millis(),
@@ -90,6 +93,33 @@ pub(super) async fn capture(
             path.display()
         ),
     }
+}
+
+pub(super) fn timestamp_ms() -> Option<u128> {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis())
+        .ok()
+}
+
+pub(super) async fn heights(clients: &[VeraClient]) -> Vec<Value> {
+    join_all(
+        clients
+            .iter()
+            .enumerate()
+            .map(|(index, client)| async move {
+                let started_at = timestamp_ms();
+                let height =
+                    probe(async { client.block_number().await.map(|height| json!(height)) }).await;
+                json!({
+                    "node": index,
+                    "started_at_unix_ms": started_at,
+                    "completed_at_unix_ms": timestamp_ms(),
+                    "indexed_height": height,
+                })
+            }),
+    )
+    .await
 }
 
 async fn probe(future: impl Future<Output = Result<Value, ClientError>>) -> Value {

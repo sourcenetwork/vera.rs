@@ -3,7 +3,9 @@
 use std::time::Duration;
 
 use alloy_sol_types::SolCall;
+use serde_json::json;
 use vera_client::{BULLETIN_ADDRESS, BlsSigner, VeraClient};
+use vera_domain::Tx;
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, TestCluster};
 use vera_modules::bulletin::abi::IBulletin;
 
@@ -75,17 +77,37 @@ async fn quorum_recovery(pipelined: bool) {
             .into(),
         )
         .unwrap();
+    let submitted_at = diagnostics::timestamp_ms();
     let id = clients[0].send_native_tx(&wire).await.unwrap();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while tokio::time::Instant::now() < deadline {
-        for client in &clients[..2] {
-            assert!(client.read_receipt(id, &trusted).await.unwrap().is_none());
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    let admitted_at = diagnostics::timestamp_ms();
+    let wire_transaction_id = Tx::new(wire.into()).id();
+    let ((), before_restart) = tokio::join!(
+        async {
+            while tokio::time::Instant::now() < deadline {
+                for client in &clients[..2] {
+                    assert!(client.read_receipt(id, &trusted).await.unwrap().is_none());
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        },
+        diagnostics::heights(&clients[..2]),
+    );
 
+    let restart_started_at = diagnostics::timestamp_ms();
     cluster.restart_node(2).unwrap();
-    let outcome = tokio::time::timeout(Duration::from_secs(60), async {
+    let recovery_deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    let context = json!({
+        "submission": id,
+        "wire_transaction_id": wire_transaction_id.0,
+        "submitted_at_unix_ms": submitted_at,
+        "admitted_at_unix_ms": admitted_at,
+        "restart_started_at_unix_ms": restart_started_at,
+        "restart_returned_at_unix_ms": diagnostics::timestamp_ms(),
+        "before_restart": before_restart,
+    });
+    eprintln!("quorum recovery context: {context}");
+    let outcome = tokio::time::timeout_at(recovery_deadline, async {
         loop {
             if let Some(proof) = clients[0]
                 .read_receipt(id, &trusted)
@@ -110,7 +132,7 @@ async fn quorum_recovery(pipelined: bool) {
     {
         Ok(revision) => revision,
         Err(cause) => {
-            diagnostics::capture(&cluster, id, signer.did(), &trusted, &cause).await;
+            diagnostics::capture(&cluster, id, signer.did(), &trusted, &cause, &context).await;
             panic!("the surviving replicas must retain and finalize the admitted write: {cause}");
         }
     };
