@@ -157,7 +157,7 @@ evidence. A stalled term is abandoned through Commonware's nullification path.
 Terms must contain 2–64 views. Optimistic lookahead may be zero to disable
 optimism, or at most 16 views and strictly less than the term length. The stall
 timeout must be 1–60000 milliseconds. All parameters are included in the genesis
-fingerprint and, for pipelined deployments, committed in the genesis header's
+fingerprint and, for all native deployments, committed in the genesis header's
 `prevrandao` field. Changing parameters requires a new deployment or an explicit
 migration; restarting against different parameters is rejected.
 

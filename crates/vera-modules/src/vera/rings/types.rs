@@ -19,6 +19,7 @@ pub struct RingConfig {
     pub threshold: u32,
     pub pss_interval: u64,
     pub current_version: u64,
+    pub requires_pet: bool,
     pub nonce: [u8; 32],
     /// None permanently disables relays; Some allows a bounded canonical set.
     pub trusted_auth_relay_dids: Option<Vec<String>>,
@@ -104,9 +105,30 @@ impl RingConfig {
             return Err(invalid("ring configuration exceeds byte limit"));
         }
         let mut hash = Sha256::new();
-        hash.update(b"vera/orbis/ring/v1\0");
+        hash.update(b"vera/orbis/ring/v2\0");
         hash.update(bytes);
         Ok(hex::encode(hash.finalize()))
+    }
+}
+
+/// Public key agreement produced by the configured DKG protocols.
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RingPublicKeys {
+    pub public_key: String,
+    pub pet_public_key: Option<String>,
+}
+
+impl RingPublicKeys {
+    pub fn validate(&self, requires_pet: bool) -> Result<()> {
+        public_key_value(&self.public_key)?;
+        if self.pet_public_key.is_some() != requires_pet {
+            return Err(invalid("public key agreement does not match ring PET mode"));
+        }
+        if let Some(key) = &self.pet_public_key {
+            public_key_value(key)?;
+        }
+        Ok(())
     }
 }
 
@@ -115,18 +137,18 @@ impl RingConfig {
 #[serde(deny_unknown_fields)]
 pub enum RingState {
     Pending {
-        public_key: Option<String>,
+        keys: Option<RingPublicKeys>,
         confirmations: Vec<String>,
     },
     Active {
-        public_key: String,
+        keys: RingPublicKeys,
     },
     Cancelled {
         by: String,
     },
     Conflict {
-        first_key: String,
-        conflicting_key: String,
+        first_keys: RingPublicKeys,
+        conflicting_keys: RingPublicKeys,
         by: String,
     },
 }
@@ -162,7 +184,7 @@ impl RingRecord {
         }
         match &self.state {
             RingState::Pending {
-                public_key,
+                keys: declared_keys,
                 confirmations,
             } => {
                 keys(confirmations, true)?;
@@ -170,26 +192,26 @@ impl RingRecord {
                     || confirmations
                         .iter()
                         .any(|key| self.config.peer_node_keys.binary_search(key).is_err())
-                    || public_key.is_some() == confirmations.is_empty()
+                    || declared_keys.is_some() == confirmations.is_empty()
                 {
                     return Err(invalid("invalid pending confirmations"));
                 }
-                if let Some(key) = public_key {
-                    public_key_value(key)?;
+                if let Some(keys) = declared_keys {
+                    keys.validate(self.config.requires_pet)?;
                 }
             }
-            RingState::Active { public_key } => public_key_value(public_key)?,
+            RingState::Active { keys } => keys.validate(self.config.requires_pet)?,
             RingState::Cancelled { by } => {
                 identity::Did::new(by).map_err(invalid)?;
             }
             RingState::Conflict {
-                first_key,
-                conflicting_key,
+                first_keys,
+                conflicting_keys,
                 by,
             } => {
-                public_key_value(first_key)?;
-                public_key_value(conflicting_key)?;
-                if first_key == conflicting_key
+                first_keys.validate(self.config.requires_pet)?;
+                conflicting_keys.validate(self.config.requires_pet)?;
+                if first_keys == conflicting_keys
                     || self.config.peer_node_keys.binary_search(by).is_err()
                 {
                     return Err(invalid("invalid conflicting confirmation"));
@@ -345,7 +367,7 @@ pub enum RingCommand {
 #[derive(Clone, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum RingParticipantCommand {
-    Confirm(String),
+    Confirm(RingPublicKeys),
     Cancel,
 }
 
@@ -368,7 +390,7 @@ impl RingParticipantRequest {
             return Err(invalid("confirmation exceeds byte limit"));
         }
         let mut hash = Sha256::new();
-        hash.update(b"vera/orbis/ring-participant/v1\0");
+        hash.update(b"vera/orbis/ring-participant/v2\0");
         hash.update(bytes);
         Ok(hash.finalize().into())
     }

@@ -358,6 +358,11 @@ vera.rs/
         vera-verifier/          # C shared-library verifier for receipts, records, prefixes and policies
 ```
 
+Native threshold rings retain a main/PET key pair when `requires_pet` is enabled.
+Every participant signs the same pair; documents retain bounded PET tag/proof
+attachments. See [native PET state](docs/native-pet.md) for signing domains,
+fresh-state deployment requirements, report trust and qualification limits.
+
 ## Building
 
 ```bash

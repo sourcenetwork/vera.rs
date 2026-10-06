@@ -8,6 +8,7 @@ use sha2::{Digest as _, Sha256};
 
 pub const MAX_OBJECT_REQUEST_BYTES: usize = 512 << 10;
 pub const MAX_OBJECT_RECORD_BYTES: usize = 1 << 20;
+pub const MAX_PET_FIELD_BYTES: usize = 4096;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -27,6 +28,10 @@ pub struct EncryptedDocument {
     pub permission: String,
     pub tier: Option<String>,
     pub timestamp: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pet_tag: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pet_tag_proof: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,6 +80,12 @@ struct Secret {
     enc_cmt: Vec<u8>,
     encrypted_data: Vec<u8>,
     nonce: Vec<u8>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PetTag {
+    ephemeral_point: Vec<u8>,
+    masked_fingerprint: Vec<u8>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -176,6 +187,7 @@ impl ThresholdObject {
                 write_string(&mut bytes, &d.permission);
                 write_optional_string(&mut bytes, d.tier.as_deref());
                 write_optional_u64(&mut bytes, d.timestamp);
+                d.write_pet_attachment(&mut bytes)?;
             }
             Self::KeyDerivation(d) => {
                 write_string(&mut bytes, "orbis/key_derivation/v1");
@@ -191,6 +203,33 @@ impl ThresholdObject {
             }
         }
         Ok(hex::encode(Sha256::digest(bytes)))
+    }
+}
+
+impl EncryptedDocument {
+    fn write_pet_attachment(&self, bytes: &mut Vec<u8>) -> Result<()> {
+        match (self.pet_tag.as_deref(), self.pet_tag_proof.as_deref()) {
+            (None, None) => Ok(()),
+            (Some(tag), Some(proof)) => {
+                text(tag, MAX_PET_FIELD_BYTES)?;
+                text(proof, MAX_PET_FIELD_BYTES)?;
+                let tag: PetTag = serde_json::from_str(tag).map_err(invalid)?;
+                let proof: Proof = serde_json::from_str(proof).map_err(invalid)?;
+                for field in [
+                    &tag.ephemeral_point,
+                    &tag.masked_fingerprint,
+                    &proof.challenge,
+                    &proof.response,
+                ] {
+                    if field.is_empty() {
+                        return Err(invalid("empty PET tag or proof field"));
+                    }
+                    write_bytes(bytes, field);
+                }
+                Ok(())
+            }
+            _ => Err(invalid("PET tag and proof must be present together")),
+        }
     }
 }
 

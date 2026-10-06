@@ -371,6 +371,7 @@ jobs:
               --test native_permission
               --test native_signed_operation
               --test native_bulletin
+              --test native_rings
               --test native_registration
               --test native_object_archive
               --test native_membership

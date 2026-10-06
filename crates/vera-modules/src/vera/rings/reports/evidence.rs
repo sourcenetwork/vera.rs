@@ -1,3 +1,5 @@
+mod pet;
+
 use super::*;
 use orbis_reporting::*;
 
@@ -8,6 +10,7 @@ pub(super) struct Metadata {
     pub accused: CommitteeScope,
     pub signing: CommitteeScope,
     pub attempt: Option<[u8; 32]>,
+    pub pet_node_id: Option<u32>,
 }
 impl Metadata {
     pub(super) fn session_id(&self, report: &ReportEnvelope) -> String {
@@ -82,6 +85,7 @@ impl Binding<'_> {
             accused: self.accused_scope,
             signing: self.signing_scope,
             attempt: None,
+            pet_node_id: None,
         })
     }
 }
@@ -184,17 +188,22 @@ pub(super) fn validate(report: &ReportEnvelope) -> Result<Metadata> {
             require(
                 matches!(
                     p.origin_protocol.as_str(),
-                    "pre" | "sign" | "pss_refresh" | "pss_reshare"
+                    "pre" | "sign" | "pet" | "pss_refresh" | "pss_reshare"
                 ),
                 "invalid offline origin",
             )?;
-            Ok(Metadata {
+            let metadata = Metadata {
                 origin: p.origin_protocol,
                 version: p.origin_protocol_version,
                 accused: p.accused_committee_scope,
                 signing: p.signing_committee_scope,
                 attempt: None,
-            })
+                pet_node_id: None,
+            };
+            if metadata.origin == "pet" {
+                current(&metadata)?;
+            }
+            Ok(metadata)
         }
         UNAUTHORIZED_REQUEST_REPORT_TYPE => {
             let p = UnauthorizedRequestPayload::from_canonical_bytes(&report.payload)
@@ -275,6 +284,14 @@ pub(super) fn validate(report: &ReportEnvelope) -> Result<Metadata> {
                     )
                     .validate(report, SIGN_RESPONSE_DOMAIN)?
                 }
+                InvalidCryptoResponse::PetBlindReveal {
+                    statement,
+                    response_signature,
+                } => pet::reveal(statement, response_signature, report)?,
+                InvalidCryptoResponse::PetBlindDecrypt {
+                    statement,
+                    response_signature,
+                } => pet::decrypt(statement, response_signature, report)?,
                 InvalidCryptoResponse::DkgShare {
                     statement: s,
                     response_signature,

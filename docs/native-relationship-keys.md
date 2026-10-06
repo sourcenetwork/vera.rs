@@ -55,7 +55,8 @@ or indexes. The optional JMT cardinality index uses format 4. There is no legacy
 dual reader, automatic migration or index backfill. Validators and consumers need
 matching keys and proof verification; updating key builders alone is insufficient.
 
-Native genesis fingerprints remain `vera/native-genesis/v2` followed by one zero
-byte and the serialized genesis configuration. This cutover does not change that
-domain or receipt/finality formats. Genesis records and initialization intents
-predating the v2 fingerprint remain incompatible.
+Native genesis fingerprints use `vera/native-genesis/v3` followed by one zero
+byte and the serialized genesis configuration. The [native PET format](native-pet.md)
+binds that fingerprint into every native deployment identity and rejects prior
+genesis records and initialization intents. Receipt and finality formats are
+unchanged.

@@ -10,8 +10,9 @@ pub use vera_modules::vera::rings::reports::{
 };
 pub use vera_modules::vera::rings::{
     ReportingConfig, ReshareTarget, RingCommand, RingConfig, RingParticipantCommand,
-    RingParticipantRequest, RingRecord, RingReshareRequest, RingSettings, RingState, RingUpdate,
-    ScheduledUpgrade, SignedRingParticipantRequest, ThresholdScheme, ring_deployment_label,
+    RingParticipantRequest, RingPublicKeys, RingRecord, RingReshareRequest, RingSettings,
+    RingState, RingUpdate, ScheduledUpgrade, SignedRingParticipantRequest, ThresholdScheme,
+    ring_deployment_label,
 };
 
 use crate::{ClientError, ModuleId, RECORD_PROOF_BYTES, VeraClient};

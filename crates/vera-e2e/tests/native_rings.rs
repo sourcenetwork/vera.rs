@@ -202,6 +202,7 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
         threshold: 2,
         pss_interval: 86400,
         current_version: 0,
+        requires_pet: false,
         nonce: [1; 32],
         trusted_auth_relay_dids: None,
         reporting: ReportingConfig {
@@ -265,7 +266,10 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
     let first = participant(
         &ring,
         &nodes[0],
-        RingParticipantCommand::Confirm(ring_public.clone()),
+        RingParticipantCommand::Confirm(RingPublicKeys {
+            public_key: ring_public.clone(),
+            pet_public_key: None,
+        }),
     );
     execute(
         &writer,
@@ -280,7 +284,10 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
     let duplicate = participant(
         &ring,
         &nodes[0],
-        RingParticipantCommand::Confirm("ccdd".into()),
+        RingParticipantCommand::Confirm(RingPublicKeys {
+            public_key: "ccdd".into(),
+            pet_public_key: None,
+        }),
     );
     execute(
         &writer,
@@ -295,7 +302,10 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
     let second = participant(
         &ring,
         &nodes[1],
-        RingParticipantCommand::Confirm(ring_public.clone()),
+        RingParticipantCommand::Confirm(RingPublicKeys {
+            public_key: ring_public.clone(),
+            pet_public_key: None,
+        }),
     );
     execute(
         &writer,
@@ -316,7 +326,10 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
         encode_ring_participant_request(&participant(
             &ring,
             &nodes[2],
-            RingParticipantCommand::Confirm(ring_public.clone()),
+            RingParticipantCommand::Confirm(RingPublicKeys {
+                public_key: ring_public.clone(),
+                pet_public_key: None,
+            }),
         ))
         .unwrap(),
         true,
@@ -332,6 +345,8 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
         ring_id: ring.clone(),
         document: r#"{"enc_cmt":[1],"encrypted_data":[2],"nonce":[3]}"#.into(),
         proof: r#"{"challenge":[4],"response":[5]}"#.into(),
+        pet_tag: None,
+        pet_tag_proof: None,
         policy_id: config.policy_id.clone(),
         resource: "document".into(),
         permission: "read".into(),
@@ -521,7 +536,10 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
     assert_eq!(
         recovered.state,
         RingState::Active {
-            public_key: ring_public.clone()
+            keys: RingPublicKeys {
+                public_key: ring_public.clone(),
+                pet_public_key: None
+            }
         }
     );
     assert_eq!(recovered.config, config);
@@ -672,7 +690,10 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
         encode_ring_participant_request(&participant(
             &ring,
             &nodes[1],
-            RingParticipantCommand::Confirm(ring_public.clone()),
+            RingParticipantCommand::Confirm(RingPublicKeys {
+                public_key: ring_public.clone(),
+                pet_public_key: None,
+            }),
         ))
         .unwrap(),
         false,
