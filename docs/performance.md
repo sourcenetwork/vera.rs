@@ -500,6 +500,44 @@ measurement. Tracing is off by default and recorded in workload provenance.
 Do not treat traced runs as throughput qualification.
 
 
+### Publication-event summary
+
+To record existing lifecycle timing events without storage span-close or syscall
+tracing, use matching prebuilt release binaries from the current checkout and a
+new private directory. The recorder captures the explicit logging settings and
+binary/source identities:
+
+```sh
+evidence="${RUNNER_TEMP:-/tmp}/vera-storage-publication"
+mkdir "$evidence"
+VERA_TRACE_SPANS=0 VERA_E2E_KEEP=1 VERA_E2E_DIR="$evidence/clusters" \
+  python3 tools/performance/record.py \
+  --node target/release/verad \
+  --runner target/release/examples/mixed_policy_workload \
+  --history rocksdb --output "$evidence/measurement" \
+  --rust-log warn,vera_publication_diagnostics=debug 32 4 16 300
+python3 tools/performance/storage_attribution.py --publication-only \
+  --run-root "$evidence" --output "$evidence/publication-summary.json"
+```
+
+The manual Performance workflow runs an uninstrumented comparator followed by
+this event-only recording when selected explicitly:
+
+```sh
+gh workflow run performance.yml --repo sourcenetwork/vera.rs --ref main \
+  -f storage_attribution=true -f storage_attribution_mode=publication
+```
+
+`--publication-only` selects the summary scope, not a claim about collection
+overhead. It requires all five lifecycle event kinds and a completed
+apply-to-synchronization-start window on each of four nodes. Syscall and span
+fields are `null` (unavailable), even if extra trace data exists; no `syscalls.log`
+is needed or read. Logs and configuration remain private. The manifest establishes
+the collection settings; missing close events alone cannot establish that tracing
+was disabled. Without this option, the parser retains its full-trace requirements,
+including completed durability syscalls. The scalar timing meanings below apply
+to both modes; neither reports isolated disk latency.
+
 ### Manual Linux storage attribution
 
 The existing Performance workflow accepts a manual `storage_attribution` option.
@@ -529,6 +567,19 @@ Raw node stdout, syscall traces, configuration and fixture keys remain under
 inside its supplied private run root and emits fixed labels, numbers and input hashes.
 It joins interleaved unfinished/resumed syscalls by thread ID; incomplete calls
 and failed calls remain explicit rather than becoming successful observations.
+
+Each node's `publication_groups` also summarizes explicit microsecond fields from
+`vera_publication_diagnostics`, converted to milliseconds: apply, synchronization
+preparation (`sync_start_us`), completion wait after polling (`wait_us`), total
+since finalize began (`since_finalize_us`), and sink lookup/history/index/total.
+Only that target is counted even when duplicate `vera_diagnostics` events are
+enabled. `durability_outcomes` keeps `durable` and `not_durable` observations
+separate; missing groups mean unavailable measurements. These events cover the
+whole run, including restart, independently of the span windows below. The total
+since finalize includes work before the barrier is polled; history includes
+blocking-pool scheduling and persistence. The fields overlap, cannot be added,
+and do not measure physical disk latency. Malformed recognized events reject the
+report instead of silently omitting their timings.
 
 Partition summaries collect close events inside complete execution-finalization
 windows, from applied-state publication to synchronization-start completion at
