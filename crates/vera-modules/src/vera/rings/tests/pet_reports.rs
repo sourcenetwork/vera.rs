@@ -87,6 +87,13 @@ fn pet_reports_require_the_right_ring_member_and_valid_aggregate_signature() {
             }
         };
         let before = vera.store().serialize();
+        let mut previous_domain = statement.clone();
+        previous_domain.domain = "orbis-pet-blind-reveal-response-v1".into();
+        assert!(
+            vera.submit_ring_report(&context(), &signed(previous_domain))
+                .is_err()
+        );
+        assert_eq!(vera.store().serialize(), before);
         let mut wrong_member = statement.clone();
         wrong_member.from_node_id = node_id % 3 + 1;
         assert!(

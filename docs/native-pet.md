@@ -46,12 +46,22 @@ The SDK encoder and certified object reads retain both attachment fields.
 ## Fault reports
 
 PET offline reports require a PET ring and current committees. The existing
-`invalid_crypto_response` report accepts Orbis's blinded reveal and decrypt evidence. Vera checks bounded fields, deployment/ring/state/time/attempt
-bindings, PET mode, the accused member's index and the current committee. The
-existing aggregate ring signature authorizes the report. Orbis cosigners perform
-the cryptographic proof and private-context checks; Vera does not infer a fault
-from malformed proof bytes alone. The published evidence carries context digests,
-not the private audit target or full PET context.
+`invalid_crypto_response` report accepts Orbis's v2 blinded reveal and decrypt
+evidence. Vera checks canonical decoding, field bounds, statement domains,
+deployment/ring/state/time/attempt bindings, PET mode, the accused member's index
+and the current committee. It verifies the aggregate ring signature over the
+report, including its opaque context and certificate digests. It does not
+reconstruct the private context or verify the individual PET proof.
+
+Orbis co-signers authenticate the accused's response and independently establish
+the proof failure before authorizing a report. Decrypt reports also require an out-of-band certificate
+whose threshold signed reveals bind the exact canonical polynomial to the
+context and current committee. Verification uses that certified polynomial, not
+the co-signer's local share generation; a genuine response does not become a
+fault merely because the co-signer has refreshed. The full context and
+certificate are not submitted to Vera. The signed evidence contains public proof
+material, including the decrypt polynomial, while the audit target remains
+out-of-band. Protocol participants and report co-signers still receive it.
 
 ## Deployment boundary
 
@@ -66,7 +76,9 @@ fingerprint into its identity. Startup rejects prior genesis records and
 interrupted initialization markers without rewriting them. Validators and SDK
 consumers must use the same schema and a new deployment root; old ring state,
 pending worker journals and signed requests cannot be reused. No migration reader
-or legacy confirmation type is provided.
+or legacy confirmation type is provided. PET report producers, co-signers and
+Vera's Orbis reporting codec must also use the aligned v2 domains. There is no v1
+PET evidence fallback; the outer report envelope and non-PET domains are unchanged.
 
 ## Qualification boundary
 

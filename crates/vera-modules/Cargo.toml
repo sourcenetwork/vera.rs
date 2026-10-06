@@ -9,7 +9,7 @@ description = "Vera module implementations (ACP, Bulletin, Vera)"
 acp.workspace = true
 vera-crypto.workspace = true
 identity.workspace = true
-orbis-reporting = { git = "https://github.com/sourcenetwork/orbis-rs", rev = "58e20004024ebe5eb557f893b42661b7b3bc91a1" }
+orbis-reporting = { git = "https://github.com/sourcenetwork/orbis-rs", rev = "74b5c8c7e74a3c2ade932a7c5ddfbe547a98e3ef" }
 zanzibar.workspace = true
 
 alloy-sol-types.workspace = true
