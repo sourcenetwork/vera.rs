@@ -124,10 +124,21 @@ rejected and require an explicit migration decision, not silent reset.
 ## Capacity reference
 
 Size a deployment from a measured workload and its exact source, storage backend
-and host configuration. The [mixed-policy qualification](mixed-policy-workload.md#current-schema-local-qualification)
-records a four-validator release run with 128 workflows and 512 objects, including
-certified receipts, revocation and restart checks. Its offered load and short RSS
-sample do not establish maximum capacity or sustained memory behavior.
+and host configuration. The [October 6 hosted Linux baseline](performance.md#hosted-linux-baseline-on-october-6-2026)
+at `04206bec` completed every operation in four 3,000-write runs offered at 50/s,
+covering growing registrations and fixed-object updates with both history
+backends. Each included certified permission checks, four-replica reconciliation
+and a member restart with zero receipt or state mismatches. Those approximately
+60-second runs on separate hosts establish that bounded load point, not maximum
+throughput, a backend speed comparison or a sustained memory bound.
+
+The [mixed-policy qualification](mixed-policy-workload.md#current-schema-local-qualification)
+at `a1cbace6` records a four-validator release run with 512 workflows and 2,048
+objects. All 3,075 submissions were certified successful, including revocation
+and regrant checks; five verification phases covered all four replicas and a
+hard restart. The timed workload offered 4 workflows/s for 129.988 seconds
+including drain. Its offered load and short RSS sample do not establish maximum
+capacity or sustained memory behavior.
 
 Wide-area gate criteria are defined in [wan-gates.md](wan-gates.md); a qualified
 WAN capacity result is still required. Re-baseline with `operation_baseline`

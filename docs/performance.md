@@ -1,11 +1,14 @@
 # Performance measurements
 
-Vera has two workload drivers:
+Vera provides these workload drivers:
 
 - `operation_baseline`: four local members; certified native ACP writes,
   optional verified permission reads, per-member resource samples, replica
   reconciliation, and hard-restart checks. Growing registrations and repeated
   updates to a fixed object set exercise different memory behavior.
+- [`mixed_policy_workload`](mixed-policy-workload.md): four local validators;
+  nested-policy grants, revocation, regrant, certified permission and owner
+  checks, and a hard restart over a growing dataset.
 - `wan_baseline`: externally provisioned members, with explicit network and
   deployment settings. See [WAN gates](wan-gates.md).
 
@@ -25,6 +28,63 @@ establish that later updates are visible. The `replica_state_barrier` record
 reports the selected receipt, replica count and wait duration separately from
 workload latency and throughput. Existing receipt, state and restart assertions
 remain required.
+
+## Hosted Linux baseline on October 6, 2026
+
+[Performance run 37446569842](https://github.com/sourcenetwork/vera.rs/actions/runs/37446569842)
+built the daemon and workload runner from clean source
+[`04206becaac360b8d22b6e032f2319b1d28c0000`](https://github.com/sourcenetwork/vera.rs/commit/04206becaac360b8d22b6e032f2319b1d28c0000)
+with Rust 1.98.0, `--release --frozen`. Both history backends passed growing
+registrations and archive/unarchive updates over 128 fixed objects. Each run
+offered 3,000 writes at 50/s, with one certified current-permission check per
+write, and completed all 3,000 workflows in 60.09–60.18 seconds including drain.
+
+| History | Workload | Completed/s | Receipt p95 (ms) | Permission p95 (ms) | Workflow p95 (ms) | Sampled member RSS (MiB) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| RocksDB | Growing registrations | 49.88 | 282.77 | 10.12 | 289.14 | 216.71–252.45 |
+| RocksDB | Fixed 128 updates | 49.85 | 282.85 | 11.55 | 290.76 | 219.60–240.27 |
+| Regolith | Growing registrations | 49.92 | 290.74 | 13.07 | 298.40 | 213.79–250.06 |
+| Regolith | Fixed 128 updates | 49.88 | 290.43 | 12.58 | 297.53 | 216.86–238.38 |
+
+All four runs recorded zero unsent, unknown, rejected, reverted, incomplete or
+verification-failed operations and zero client/server throttles. Each fixed
+workload checked 1,464 allowed and 1,536 denied permission outcomes. Each run
+reconciled all 3,000 outcomes across four replicas, killed one member, committed
+a probe with the remaining three, restarted the member, and checked all 3,000
+outcomes again with zero receipt or state mismatches. Restart to observed probe
+state took 1.08–1.32 seconds, outside the timed workload.
+
+Each backend used a separate Ubuntu 24.04 hosted runner with four logical CPUs
+and about 16 GB RAM, containing all four members and the workload client.
+RocksDB ran on an AMD EPYC 7763 and Regolith on an AMD EPYC 9V74; differing host
+models and background load prevent a controlled backend speed comparison.
+The artifacts record clean source revisions, binary hashes, runner image,
+configuration and observations. They use the `Normal` fixture preset (500 ms
+leader and 1,000 ms notarization timeouts), pipelining with 16-view terms and
+optimistic distance 4, a 100 ms proposal window,
+192-revision epochs, 256 retained consensus revisions and 128 outstanding
+workflows. Storage syscall tracing was disabled.
+
+These approximately 60-second runs qualify the offered 50/s load on those
+hosts; they do not establish maximum throughput, a soak result or a sustained
+memory bound. RSS ranges cover 61 one-second samples per member during each
+workload, with no missing members. Setup, signing, replica reconciliation and
+restart checks are outside throughput timing. Receipt latency includes
+scheduled-arrival delay and 50 ms polling, not just consensus finality. This
+simple ACP workload does not replace mixed-policy, WAN or power-loss gates.
+
+## Local mixed-policy qualification
+
+The [current-schema mixed-policy run](mixed-policy-workload.md#current-schema-local-qualification)
+at `a1cbace6` completed all 512 workflows and grew to 2,048 objects on four local
+validators. At 4 offered workflows/s and 16 outstanding workflows, its timed
+phase lasted 129.988 seconds and completed 3.939 workflows/s. Each workflow
+contains five serial certified submissions and 60 verified permission checks.
+All 3,075 submissions across setup, workload and final checks succeeded; all
+five replica-verification phases and hard restart passed. The 708.34-second
+whole run includes those final checks. This is a separate workload and host from
+the hosted Linux baseline, with detailed latency, resource and timing limits in
+the linked report.
 
 ## ACP lifecycle components
 
