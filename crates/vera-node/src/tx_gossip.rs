@@ -98,6 +98,7 @@ impl<S: Sender> TxGossip<S> {
 
     /// Admit a locally submitted transaction and forward it to every peer.
     pub async fn submit(&self, bytes: Bytes) -> Result<bool, String> {
+        let tx = Tx::new(bytes.clone());
         let inserted = admit(&self.mempool, &self.validator, self.chain_id, bytes.clone()).await?;
         if inserted {
             let feedback = self
@@ -105,7 +106,7 @@ impl<S: Sender> TxGossip<S> {
                 .lock()
                 .await
                 .send(Recipients::All, bytes.0, false);
-            trace!(?feedback, "forwarded transaction");
+            trace!(tx_id = ?tx.id(), ?feedback, "forwarded transaction");
         }
         Ok(inserted)
     }
@@ -151,10 +152,13 @@ pub fn spawn_tx_receiver<E: Spawner, R: Receiver + Send + 'static>(
             match receiver.recv().await {
                 Ok((peer, message)) => {
                     let bytes = Bytes::copy_from_slice(message.as_ref());
+                    let tx = Tx::new(bytes.clone());
                     match admit(&mempool, &validator, chain_id, bytes).await {
-                        Ok(true) => trace!(?peer, "admitted gossiped transaction"),
-                        Ok(false) => trace!(?peer, "duplicate gossiped transaction"),
-                        Err(e) => debug!(?peer, error = %e, "rejected gossiped transaction"),
+                        Ok(true) => trace!(tx_id = ?tx.id(), ?peer, "admitted gossiped transaction"),
+                        Ok(false) => trace!(tx_id = ?tx.id(), ?peer, "duplicate gossiped transaction"),
+                        Err(e) => {
+                            debug!(tx_id = ?tx.id(), ?peer, error = %e, "rejected gossiped transaction")
+                        }
                     }
                 }
                 Err(e) => {
