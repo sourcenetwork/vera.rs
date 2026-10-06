@@ -523,20 +523,29 @@ inside its supplied private run root and emits fixed labels, numbers and input h
 It joins interleaved unfinished/resumed syscalls by thread ID; incomplete calls
 and failed calls remain explicit rather than becoming successful observations.
 
-Partition summaries use only complete execution-finalization windows, from
-applied-state publication to synchronization-start completion at the same height.
-This excludes bootstrap's reused partition indices. Concurrent readers can still
-share those windows. Lock spans measure acquisition, not guard holding; finalize
-and start-sync spans overlap. Syscalls cover the whole run, including startup and
-restart, and do not identify a consensus revision or a QMDB partition. Neither
-span idle time nor syscall elapsed time isolates physical disk latency.
+Partition summaries collect close events inside complete execution-finalization
+windows, from applied-state publication to synchronization-start completion at
+the same height. This excludes bootstrap's reused partition indices. Concurrent
+users and retained spans still prevent exact revision attribution. Lock spans
+measure acquisition, not guard holding. Enabled blob completion spans retain
+parent finalize and start-sync spans beyond function return, so their close events
+may fall outside the originating window. `persistent_finalize_window_samples`
+counts captured persistent-partition finalize closes;
+`incomplete_persistent_finalize_windows` counts windows missing any of the seven
+persistent partitions. `persistent_finalize_window_coverage_complete` is false
+when that coverage is incomplete. Missing samples are not zero-duration work or
+evidence comparable to a trace without these retained children.
 
 Blob summaries cover the whole run, separately from the partition windows. Writes
-include awaited work and scheduling; sync-start measures initiation. Sync spans
+include awaited work and scheduling. A start-sync span remains open while its
+sync child exists; its close lifetime does not isolate initiation. Sync spans
 cover synchronous calls or observation of returned completion handles, potentially
-including time before first polling. Their overlapping populations cannot be
+including time before first polling. These overlapping populations cannot be
 added or have percentiles subtracted to attribute phases. They do not directly
 measure internal pending-sync waits; the actor completes the previous finalization
-barrier before starting another. Tracing and ptrace perturb scheduling; neither
-the uninstrumented comparator nor the traced run establishes capacity, and their
-difference does not qualify a production optimization.
+barrier before starting another. Syscalls also cover the whole run, including
+startup and restart, without revision or QMDB-partition attribution. Neither span
+idle time nor syscall elapsed time isolates physical disk latency. Tracing and
+ptrace perturb scheduling; neither the uninstrumented comparator nor the traced
+run establishes capacity, and their difference does not qualify a production
+optimization.

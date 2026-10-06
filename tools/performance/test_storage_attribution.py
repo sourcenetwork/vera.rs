@@ -50,6 +50,23 @@ class StorageAttributionTests(unittest.TestCase):
         self.assertAlmostEqual(groups['write']['elapsed']['p50_ms'], 1000.003)
         self.assertEqual(groups['write']['partition'], 'acp')
 
+    def test_retained_completion_children_expose_missing_finalize_window_coverage(self):
+        persistent = ''.join(FINALIZE.replace('index=3', f'index={index}') for index in range(7))
+        first = APPLY + persistent + START
+        complete = span_summary(io.StringIO(first))
+        self.assertTrue(complete['persistent_finalize_window_coverage_complete'])
+        self.assertEqual(complete['persistent_finalize_window_samples'], 7)
+        self.assertEqual(complete['incomplete_persistent_finalize_windows'], 0)
+        # Persistent parents close after the window when returned completion children retain them.
+        second = APPLY + FINALIZE.replace('index=3', 'index=7') + START + BLOB_COMPLETE + persistent
+        retained = span_summary(io.StringIO(first + second))
+        self.assertEqual(retained['completed_finalization_windows'], 2)
+        self.assertFalse(retained['persistent_finalize_window_coverage_complete'])
+        self.assertEqual(retained['incomplete_persistent_finalize_windows'], 1)
+        self.assertEqual(retained['persistent_finalize_window_samples'], 7)
+        self.assertEqual(retained['spans_outside_windows'], 7)
+        self.assertEqual(retained['blob_groups'][0]['operation'], 'sync')
+
     def test_child_close_is_not_double_counted_and_bad_units_fail(self):
         current = ('stateful.db.finalize{index=3}:qmdb.current.db.start_sync: '
                    'commonware_storage::qmdb::current::db: close time.busy=1ms time.idle=2ms\n')

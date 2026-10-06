@@ -92,7 +92,7 @@ def durations(values):
 def span_summary(lines):
     groups, blobs = defaultdict(list), defaultdict(list)
     height, pending = None, []
-    complete, discarded, outside = 0, 0, 0
+    complete, discarded, outside, incomplete_finalize = 0, 0, 0, 0
     for line in lines:
         blob = closed_blob_span(line)
         if blob:
@@ -106,6 +106,9 @@ def span_summary(lines):
         if started:
             if height == int(started.group(1)):
                 complete += 1
+                finalized = {index for operation, index, _, _ in pending
+                             if operation == 'finalize' and index < 7}
+                incomplete_finalize += int(len(finalized) != 7)
                 for operation, index, busy, idle in pending:
                     groups[operation, index].append((busy, idle))
             else:
@@ -123,7 +126,12 @@ def span_summary(lines):
         rows.append({'operation': operation, 'partition': PARTITIONS[index], 'index': index,
                      **durations(values)})
     return {'completed_finalization_windows': complete, 'discarded_windows': discarded,
-            'spans_outside_windows': outside, 'groups': rows,
+            'spans_outside_windows': outside,
+            'persistent_finalize_window_samples': sum(len(values) for (operation, index), values
+                                                      in groups.items() if operation == 'finalize' and index < 7),
+            'incomplete_persistent_finalize_windows': incomplete_finalize,
+            'persistent_finalize_window_coverage_complete': complete > 0 and incomplete_finalize == 0,
+            'groups': rows,
             'blob_groups': [{'operation': operation, **durations(values)}
                             for operation, values in sorted(blobs.items())]}
 
@@ -229,9 +237,9 @@ def summarize_run(run_root):
     return {
         'format_version': 2,
         'scope': 'Normal is an uninstrumented comparator only. Traced timings include scheduling, tracing and ptrace overhead; neither run establishes capacity or a baseline improvement.',
-        'span_scope': 'Only complete apply-to-synchronization-start windows at a matching revision; bootstrap and incomplete windows excluded. Lock users within a window may be concurrent. Finalize and start_sync overlap; do not add them or subtract their percentiles.',
-        'duration_scope': 'Read/write spans end at acquisition. Finalize starts after acquisition. Start_sync includes preparation and internal pending-sync checks; the actor completes the previous finalization barrier before starting another. Syscalls cover the whole run, including startup and restart, and are not attributed to a revision or partition.',
-        'blob_scope': 'Blob groups cover the whole run, including bootstrap and restart, without partition or revision attribution. Write_at includes the awaited write and scheduling. Start_sync measures initiation. Sync measures synchronous sync calls or observation of a returned completion handle, potentially including time before first polling. These overlapping populations do not isolate prior-sync waits or physical I/O; do not add their durations or subtract their percentiles.',
+        'span_scope': 'Close events are grouped only inside complete apply-to-synchronization-start windows at a matching revision; bootstrap and incomplete windows excluded. Concurrent users and retained child spans prevent exact revision attribution. Coverage reports windows missing any of seven persistent-partition finalize closes; missing samples are not zero-duration work. Finalize and start_sync overlap; do not add them or subtract their percentiles.',
+        'duration_scope': 'Read/write spans end at acquisition. Finalize starts after acquisition, but enabled completion spans retain finalize/start_sync ancestors beyond function return and potentially beyond the originating window. Their close lifetimes do not measure guard holding or initiation alone. The actor completes the previous finalization barrier before starting another. Syscalls cover the whole run, including startup and restart, without revision or partition attribution.',
+        'blob_scope': 'Blob groups cover the whole run, including bootstrap and restart, without partition or revision attribution. Write_at includes the awaited write and scheduling. Start_sync close lifetime includes retention by its sync child and does not isolate initiation. Sync measures synchronous sync calls or observation of a returned completion handle, potentially including time before first polling. These overlapping populations do not isolate prior-sync waits or physical I/O; do not add their durations or subtract their percentiles.',
         'nodes': nodes, 'syscalls': syscalls, 'private_input_sha256': hashes,
     }
 
