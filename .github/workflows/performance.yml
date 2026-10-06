@@ -2,6 +2,11 @@ name: Performance
 
 on:
   workflow_dispatch:
+    inputs:
+      storage_attribution:
+        description: Run the bounded RocksDB storage diagnostic instead of performance baselines
+        type: boolean
+        default: false
   workflow_run:
     workflows: [CI]
     types: [completed]
@@ -22,11 +27,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        history: [rocksdb, regolith]
+        history: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.storage_attribution && '["rocksdb"]' || '["rocksdb", "regolith"]') }}
     env:
       CARGO_TERM_COLOR: always
       HISTORY_BACKEND: ${{ matrix.history }}
       VERA_E2E_KEEP: '0'
+      STORAGE_ATTRIBUTION: ${{ github.event_name == 'workflow_dispatch' && inputs.storage_attribution }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -37,6 +43,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler python3-venv
+          if [[ "$STORAGE_ATTRIBUTION" == true ]]; then sudo apt-get install -y strace; fi
           python3 -m venv "$RUNNER_TEMP/performance-python"
           "$RUNNER_TEMP/performance-python/bin/pip" install -r tools/performance/requirements.txt
 
@@ -59,16 +66,22 @@ jobs:
           features=()
           if [[ "$HISTORY_BACKEND" == regolith ]]; then features=(--features regolith-history); fi
           cargo +1.98.0 build --frozen --release -p verad "${features[@]}"
-          cargo +1.98.0 build --frozen --release -p vera-e2e --example operation_baseline
-          cargo +1.98.0 build --frozen --release -p vera-e2e --example component_baseline
+          if [[ "$STORAGE_ATTRIBUTION" == true ]]; then
+            cargo +1.98.0 build --frozen --release -p vera-e2e --example mixed_policy_workload
+          else
+            cargo +1.98.0 build --frozen --release -p vera-e2e --example operation_baseline
+            cargo +1.98.0 build --frozen --release -p vera-e2e --example component_baseline
+          fi
           python3 -m unittest discover -s tools/performance -p 'test_*.py'
 
       - name: Measure local components
+        if: env.STORAGE_ATTRIBUTION != 'true'
         run: |
           mkdir -p performance-results
           target/release/examples/component_baseline > performance-results/components.jsonl
 
       - name: Measure growing and fixed state
+        if: env.STORAGE_ATTRIBUTION != 'true'
         env:
           VERA_E2E_DIR: ${{ runner.temp }}/vera-performance-nodes
         shell: bash
@@ -86,8 +99,45 @@ jobs:
           done
           exit "$result"
 
+      - name: Attribute Linux storage waits
+        if: env.STORAGE_ATTRIBUTION == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          private="$RUNNER_TEMP/vera-storage-attribution"
+          result=0
+          for mode in normal traced; do
+            mkdir -p "$private/$mode"
+            export VERA_E2E_DIR="$private/$mode/clusters" VERA_E2E_KEEP=1
+            export VERA_TRACE_SPANS=0
+            trace=()
+            filter=warn
+            if [[ "$mode" == traced ]]; then
+              export VERA_TRACE_SPANS=1
+              filter=warn,vera_publication_diagnostics=debug,commonware_glue::stateful::db=info,commonware_storage::qmdb=info,commonware_utils::sync=info
+              trace=(--sync-trace "$private/$mode/syscalls.log")
+            fi
+            python3 tools/performance/record.py "${trace[@]}" \
+              --node target/release/verad --runner target/release/examples/mixed_policy_workload \
+              --history rocksdb --output "$private/$mode/measurement" --rust-log "$filter" \
+              32 4 16 300 || result=1
+            output="performance-results/storage-attribution/$mode"
+            mkdir -p "$output"
+            # Raw node logs, syscall paths, stderr, configuration and keys stay in RUNNER_TEMP.
+            for artifact in manifest.json workload.jsonl; do
+              if [[ -f "$private/$mode/measurement/$artifact" ]]; then
+                cp "$private/$mode/measurement/$artifact" "$output/"
+              fi
+            done
+          done
+          python3 tools/performance/storage_attribution.py \
+            --run-root "$private/traced" \
+            --output performance-results/storage-attribution/summary.json || result=1
+          echo 'Storage attribution is diagnostic only. Both runs retain all mixed-policy correctness and restart assertions. Numeric trace summaries and workload provenance are in the artifact; raw traces remain private on the runner.' >> "$GITHUB_STEP_SUMMARY"
+          exit "$result"
+
       - name: Render interactive measurements
-        if: always()
+        if: always() && env.STORAGE_ATTRIBUTION != 'true'
         shell: bash
         run: |
           set -euo pipefail

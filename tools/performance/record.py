@@ -39,10 +39,21 @@ def main():
                         help='Checkout used to build the workload runner; defaults to the node checkout.')
     parser.add_argument('--history', required=True, choices=['rocksdb', 'regolith'])
     parser.add_argument('--rust-log', default='warn,vera_storage=info')
+    parser.add_argument('--sync-trace', type=Path,
+                        help='Private output for Linux fsync/fdatasync tracing of the runner and its children only.')
     parser.add_argument('workload_args', nargs='+')
     args = parser.parse_args()
     node, runner = args.node.resolve(strict=True), args.runner.resolve(strict=True)
     runner_source = args.runner_source.resolve(strict=True)
+    command = [str(runner), *args.workload_args]
+    if args.sync_trace is not None:
+        if not args.sync_trace.is_absolute():
+            parser.error('--sync-trace must be an absolute private output path')
+        # Reserve a new file; never replace an unrelated trace or follow an existing symlink.
+        with args.sync_trace.open('x'):
+            pass
+        command = ['strace', '-f', '-ttt', '-T', '-yy', '-e', 'trace=fsync,fdatasync',
+                   '-o', str(args.sync_trace), *command]
     args.output.mkdir(parents=True, exist_ok=False)
     manifest = {
         'format_version': 2,
@@ -66,11 +77,14 @@ def main():
         manifest['physical_memory_bytes'] = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
     except (ValueError, OSError):
         manifest['physical_memory_bytes'] = None
+    if args.sync_trace is not None:
+        manifest['sync_trace'] = {'tool': 'strace', 'syscalls': ['fsync', 'fdatasync'],
+                                  'scope': 'workload executable and descendants only'}
     path = args.output / 'manifest.json'
     path.write_text(json.dumps(manifest, indent=2) + '\n')
     environment = dict(os.environ, VERAD_BINARY=str(node), RUST_LOG=args.rust_log)
     with (args.output / 'workload.jsonl').open('w') as output, (args.output / 'stderr.log').open('w') as error:
-        process = subprocess.Popen([str(runner), *args.workload_args], env=environment,
+        process = subprocess.Popen(command, env=environment,
                                    stdout=output, stderr=error, start_new_session=True)
         try:
             exit_code = process.wait(timeout=900)
@@ -88,6 +102,8 @@ def main():
                 pass
             process.wait()
     manifest.update(exit_code=exit_code, load_after=os.getloadavg())
+    if args.sync_trace is not None:
+        manifest['sync_trace']['sha256'] = digest(args.sync_trace)
     path.write_text(json.dumps(manifest, indent=2) + '\n')
     raise SystemExit(exit_code)
 
