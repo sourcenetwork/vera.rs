@@ -82,8 +82,8 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
         .nodes(4)
         .seed(deployment)
         .chain_id(deployment)
-        // This fixture executes a report larger than 8 MiB; debug CI validation takes
-        // several seconds per node and must fit inside one consensus round.
+        // The report larger than 8 MiB must fit inside one consensus round
+        // even when validators share a busy runner.
         .consensus_params(ConsensusParams {
             leader_timeout: Duration::from_secs(10),
             notarization_timeout: Duration::from_secs(20),
