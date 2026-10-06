@@ -1,5 +1,7 @@
 """Recorder failures retain evidence and cannot overwrite an existing run."""
+import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -45,6 +47,44 @@ class RecorderTests(unittest.TestCase):
                 self.assertEqual(metadata['runner_source'], runner_revision)
                 self.assertEqual(metadata['runner_dirty'], dirty)
                 self.assertNotEqual(metadata['node_sha256'], metadata['runner_sha256'])
+
+    def test_sync_trace_wraps_only_runner_and_preserves_its_exit_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            checkout = root / 'source'
+            revision = self.checkout(checkout)
+            runner = root / 'runner'
+            runner.write_text('#!/bin/sh\nprintf "workload evidence\\n"\nexit 7\n')
+            runner.chmod(0o700)
+            tracer = root / 'strace'
+            tracer.write_text(
+                '#!/usr/bin/env python3\n'
+                'import pathlib, subprocess, sys\n'
+                'args = sys.argv[1:]\n'
+                'assert args[:6] == ["-f", "-ttt", "-T", "-yy", "-e", "trace=fsync,fdatasync"]\n'
+                'assert args[6] == "-o"\n'
+                'pathlib.Path(args[7]).write_text("private syscall trace")\n'
+                'assert pathlib.Path(args[8]).name == "runner"\n'
+                'assert args[9:] == ["fixture-argument"]\n'
+                'raise SystemExit(subprocess.run(args[8:]).returncode)\n')
+            tracer.chmod(0o700)
+            trace = root / 'sync.log'
+            output = root / 'result'
+            command = [sys.executable, str(Path(__file__).resolve().with_name('record.py')),
+                       '--node', str(runner), '--runner', str(runner), '--history', 'rocksdb',
+                       '--output', str(output), '--sync-trace', str(trace), 'fixture-argument']
+            environment = dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'])
+            result = subprocess.run(command, cwd=checkout, env=environment, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 7, result.stderr)
+            manifest = json.loads((output / 'manifest.json').read_text())
+            self.assertEqual(manifest['source'], revision)
+            self.assertEqual(manifest['exit_code'], 7)
+            self.assertEqual(manifest['sync_trace']['sha256'],
+                             hashlib.sha256(b'private syscall trace').hexdigest())
+            self.assertEqual(manifest['sync_trace']['syscalls'], ['fsync', 'fdatasync'])
+            self.assertNotIn(str(trace), json.dumps(manifest))
+            self.assertEqual((output / 'workload.jsonl').read_text(), 'workload evidence\n')
+            self.assertFalse((output / 'sync.log').exists())
 
     def test_failure_retains_exit_status_and_output(self):
         with tempfile.TemporaryDirectory() as directory:

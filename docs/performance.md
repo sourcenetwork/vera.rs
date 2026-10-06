@@ -491,3 +491,61 @@ accounts, storage, code, ACP, bulletin, identity, native sequences, commitment.
 Idle time includes awaited I/O and scheduling; it is not a direct disk-latency
 measurement. Tracing is off by default and recorded in workload provenance.
 Do not treat traced runs as throughput qualification.
+
+
+### Manual Linux storage attribution
+
+The existing Performance workflow accepts a manual `storage_attribution` option.
+It selects RocksDB only and builds the node and `mixed_policy_workload` in release
+mode before running `32 4 16 300` twice: first as an uninstrumented comparator,
+then with storage
+spans and `strace` restricted to `fsync` and `fdatasync` in the workload executable
+and its child processes. Recorder provenance commands run outside strace.
+All permission, ownership,
+policy-edit and hard-restart assertions remain required in both runs. Default
+scheduled and manual performance baselines are unchanged.
+
+```sh
+gh workflow run performance.yml --repo sourcenetwork/vera.rs --ref main \
+  -f storage_attribution=true
+```
+
+The artifact retains each run's executable/source manifest and workload JSONL,
+plus `storage-attribution/summary.json` with numeric span and syscall summaries.
+The trace also enables `commonware_runtime::storage::metered=info`; per-node
+`blob_groups` summarize existing blob write, sync-start and sync-completion spans
+using fixed operation labels, without exporting their partition names or fields.
+The target records every blob write, resize and sync span, including bootstrap
+and restart; these private logs can be large and add observer overhead.
+Raw node stdout, syscall traces, configuration and fixture keys remain under
+`RUNNER_TEMP` and are not uploaded. The offline parser accepts only paths
+inside its supplied private run root and emits fixed labels, numbers and input hashes.
+It joins interleaved unfinished/resumed syscalls by thread ID; incomplete calls
+and failed calls remain explicit rather than becoming successful observations.
+
+Partition summaries collect close events inside complete execution-finalization
+windows, from applied-state publication to synchronization-start completion at
+the same height. This excludes bootstrap's reused partition indices. Concurrent
+users and retained spans still prevent exact revision attribution. Lock spans
+measure acquisition, not guard holding. Enabled blob completion spans retain
+parent finalize and start-sync spans beyond function return, so their close events
+may fall outside the originating window. `persistent_finalize_window_samples`
+counts captured persistent-partition finalize closes;
+`incomplete_persistent_finalize_windows` counts windows missing any of the seven
+persistent partitions. `persistent_finalize_window_coverage_complete` is false
+when that coverage is incomplete. Missing samples are not zero-duration work or
+evidence comparable to a trace without these retained children.
+
+Blob summaries cover the whole run, separately from the partition windows. Writes
+include awaited work and scheduling. A start-sync span remains open while its
+sync child exists; its close lifetime does not isolate initiation. Sync spans
+cover synchronous calls or observation of returned completion handles, potentially
+including time before first polling. These overlapping populations cannot be
+added or have percentiles subtracted to attribute phases. They do not directly
+measure internal pending-sync waits; the actor completes the previous finalization
+barrier before starting another. Syscalls also cover the whole run, including
+startup and restart, without revision or QMDB-partition attribution. Neither span
+idle time nor syscall elapsed time isolates physical disk latency. Tracing and
+ptrace perturb scheduling; neither the uninstrumented comparator nor the traced
+run establishes capacity, and their difference does not qualify a production
+optimization.
