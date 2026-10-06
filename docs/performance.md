@@ -86,6 +86,44 @@ whole run includes those final checks. This is a separate workload and host from
 the hosted Linux baseline, with detailed latency, resource and timing limits in
 the linked report.
 
+## Manual sustained fixed-state run
+
+The same workflow accepts `sustained_fixed_state=true` only through manual
+dispatch. It selects one fixed-state run per history backend: 90,000 offered
+operations at 50/s against 128 objects, a 30-minute arrival schedule within the
+driver's 100,000-operation bound. It retains the normal release profile, normal
+deadlines, 128 outstanding workflows, one verified permission read per write,
+100 RPC connections, pipelined consensus, 192-revision epochs and 256 retained
+consensus revisions. Receipt verification, all-replica reconciliation, hard
+restart checks, per-member RSS sampling and both static and interactive reports
+remain enabled.
+
+```sh
+gh workflow run performance.yml --repo sourcenetwork/vera.rs --ref <branch-or-tag> \
+  -f sustained_fixed_state=true
+```
+
+Each backend's recorder receives these arguments:
+
+```text
+--timeout-seconds 7200 90000 50 128 1 normal 100 192 0 128 256 1
+```
+
+The recorder's two-hour process allowance includes request signing, the arrival
+schedule, draining, reconciliation and restart verification. The selected job
+has a three-hour allowance for cold compilation, measurement and reporting;
+neither allowance changes a request, consensus or restart deadline. Scheduled
+arrival time is not the driver's measured arrivals-and-drain duration or total
+job time. This option defines a workload; it does not assert a completed run,
+sustained capacity or a memory bound. A fixed live object set does not freeze
+retained history or receipts; memory growth still requires attribution.
+
+It is mutually exclusive with `storage_attribution`; conflicting inputs fail
+before checkout or build. Without this option, manual and successful main CI
+runs retain the existing two 3,000-operation baselines and 60-minute job limit.
+The workflow uploads only the named measurement, provenance and report artifacts;
+raw runtime logs, configuration, keys and state directories are excluded.
+
 ## ACP lifecycle components
 
 `component_baseline` includes policy edits and deletions with 32, 256 and 2,048
