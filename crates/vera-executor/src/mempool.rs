@@ -80,19 +80,20 @@ impl<S: StateDb> MempoolValidator<S> {
     ///
     /// Native nonces are loaded from the finalized module state so the
     /// validator correctly rejects replayed nonces and accepts the next
-    /// valid nonce for each BLS identity.
+    /// valid nonce for each BLS identity. Recheck retained transactions in
+    /// admission order before accepting new requests.
     pub fn reset(&mut self, base: S, native_nonces: NativeNonceStore) {
         self.base = base;
         self.evm_changes = ChangeSet::new();
         self.native_nonces = native_nonces;
     }
 
-    /// Stateless recheck against committed base state.
+    /// Recheck immutable transactions already authenticated at admission.
     ///
-    /// EVM txs: decode + recover signer + check nonce/balance (no branch mutation).
-    /// BLS native txs: decode + check chain_id/target (skip sig verification).
-    /// Native nonces are in-memory only, so native txs always pass recheck.
-    pub async fn recheck_tx_stateless(&self, tx_bytes: &[u8]) -> Result<(), ExecutionError> {
+    /// Call once per retained transaction, in admission order, after [`Self::reset`].
+    /// Native requests rebuild nonce reservations without repeating signature
+    /// verification. EVM requests check nonce/balance against committed base state.
+    pub async fn recheck_pending_tx(&mut self, tx_bytes: &[u8]) -> Result<(), ExecutionError> {
         if tx_bytes.is_empty() {
             return Err(ExecutionError::TxDecode("empty transaction".to_string()));
         }
@@ -110,7 +111,7 @@ impl<S: StateDb> MempoolValidator<S> {
         Ok(())
     }
 
-    fn recheck_native_tx(&self, tx_bytes: &[u8]) -> Result<(), ExecutionError> {
+    fn recheck_native_tx(&mut self, tx_bytes: &[u8]) -> Result<(), ExecutionError> {
         let native_tx = NativeTx::decode_wire(tx_bytes)
             .map_err(|e| ExecutionError::TxDecode(format!("native tx: {e}")))?;
 
@@ -129,6 +130,14 @@ impl<S: StateDb> MempoolValidator<S> {
             return Err(ExecutionError::UnknownNativeTarget(native_tx.target));
         }
 
+        let pubkey = bls::deserialize_pubkey(native_tx.bls_pubkey.as_slice())
+            .map_err(|e| ExecutionError::BlsVerification(format!("pubkey: {e}")))?;
+        let signer_did = bls::did_from_bls_pubkey(&pubkey)
+            .map_err(|e| ExecutionError::BlsVerification(format!("DID: {e}")))?;
+        self.admit_native(&PreValidatedNativeTx {
+            signer_did,
+            nonce: native_tx.nonce,
+        })?;
         Ok(())
     }
 
@@ -715,7 +724,8 @@ mod tests {
         let validated =
             MempoolValidator::<MockStateDb>::pre_validate_native(CHAIN_ID, &wire).unwrap();
         validator.admit_native(&validated).unwrap();
-        validator.recheck_tx_stateless(&wire).await.unwrap();
+        validator.reset(MockStateDb::new(), NativeNonceStore::default());
+        validator.recheck_pending_tx(&wire).await.unwrap();
         let mut legacy_entry = MempoolValidator::new(MockStateDb::new(), test_config(), 0);
         legacy_entry.validate_tx(&wire).await.unwrap();
         assert!(legacy_entry.validate_tx(&wire).await.is_err());
@@ -773,6 +783,85 @@ mod tests {
         let tx1 = signed_native_tx(&sk, &pk_bytes, 1);
         let result = validator.validate_tx(&tx1).await.unwrap();
         assert_eq!(result.nonce, 1);
+    }
+
+    #[tokio::test]
+    async fn reset_recheck_preserves_pending_native_nonce_reservations() {
+        let (key, public) = test_bls_keypair();
+        let state = MockStateDb::new();
+        let mut validator = MempoolValidator::new(state.clone(), test_config(), 0);
+        let first = signed_native_tx(&key, &public, 0);
+        validator.validate_tx(&first).await.unwrap();
+        let finalized_nonces = validator.native_nonces.clone();
+        let pending = signed_native_tx(&key, &public, 1);
+        validator.validate_tx(&pending).await.unwrap();
+
+        // The first request finalized; the second remains in the pending pool.
+        validator.reset(state, finalized_nonces);
+        assert!(matches!(
+            validator.recheck_pending_tx(&first).await,
+            Err(ExecutionError::NonceMismatch {
+                expected: 1,
+                got: 0,
+                ..
+            })
+        ));
+        validator.recheck_pending_tx(&pending).await.unwrap();
+        let next = signed_native_tx(&key, &public, 2);
+        assert_eq!(validator.validate_tx(&next).await.unwrap().nonce, 2);
+
+        let mut conflicting = NativeTx::decode_wire(&pending).unwrap();
+        conflicting.calldata = Bytes::from_static(b"different request");
+        conflicting.signature =
+            FixedBytes::from_slice(&bls::sign(&key, &conflicting.signing_data()).unwrap());
+        assert!(matches!(
+            validator.validate_tx(&conflicting.encode_wire()).await,
+            Err(ExecutionError::NonceMismatch {
+                expected: 3,
+                got: 1,
+                ..
+            })
+        ));
+        let following = signed_native_tx(&key, &public, 3);
+        assert_eq!(validator.validate_tx(&following).await.unwrap().nonce, 3);
+    }
+
+    #[test]
+    fn rejected_native_request_admits_after_peer_catches_up() {
+        let (key, public) = test_bls_keypair();
+        let predecessor = signed_native_tx(&key, &public, 0);
+        let predecessor =
+            MempoolValidator::<MockStateDb>::pre_validate_native(CHAIN_ID, &predecessor).unwrap();
+        let request = signed_native_tx(&key, &public, 1);
+        let request =
+            MempoolValidator::<MockStateDb>::pre_validate_native(CHAIN_ID, &request).unwrap();
+        let state = MockStateDb::new();
+        let mut source = MempoolValidator::new(state.clone(), test_config(), 0);
+        source.admit_native(&predecessor).unwrap();
+        let finalized_nonces = source.native_nonces.clone();
+        source.reset(state.clone(), finalized_nonces.clone());
+        source.admit_native(&request).unwrap();
+
+        let mut peer = MempoolValidator::new(state.clone(), test_config(), 0);
+        assert!(matches!(
+            peer.admit_native(&request),
+            Err(ExecutionError::NonceMismatch {
+                expected: 0,
+                got: 1,
+                ..
+            })
+        ));
+        peer.admit_native(&predecessor).unwrap();
+        peer.reset(state, finalized_nonces);
+        assert_eq!(peer.admit_native(&request).unwrap().nonce, 1);
+        assert!(matches!(
+            peer.admit_native(&request),
+            Err(ExecutionError::NonceMismatch {
+                expected: 2,
+                got: 1,
+                ..
+            })
+        ));
     }
 
     #[tokio::test]
