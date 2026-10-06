@@ -217,7 +217,7 @@ impl VeraModule {
         let retention = self.report_retention(&record.id, &session, now)?;
         let scheme = match signed.signature_scheme.as_str() {
             "bls12_381_g1_pk_g2_sig_aug_v1" => ThresholdScheme::Bls12381AugV1,
-            "decaf377_frost" => ThresholdScheme::Decaf377Frost,
+            "jubjub_frost" => ThresholdScheme::JubjubFrost,
             _ => return Err(invalid("unsupported report signature scheme")),
         };
         let signature = hex::decode(&signed.signature).map_err(invalid)?;
