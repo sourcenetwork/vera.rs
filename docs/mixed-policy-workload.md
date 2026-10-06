@@ -96,47 +96,74 @@ changes, or every failure point during recovery.
 
 ## Current-schema local qualification
 
-On October 6, 2026, source `7d1b35ae356d16751553a62a8c778a803e10ebf4`
-completed `128 4 16 900` on one Apple M5 Max host with 18 CPU cores and 64 GiB RAM.
-Four validators used the normal release profile, RocksDB history and no span
-tracing (`RUST_LOG=warn`). The staged daemon was built from `4a91e354`, whose Git
-tree exactly matches the driver source. The `relationship/v5/` dataset grew to
-512 objects.
+On October 6, 2026, clean source
+[`a1cbace66f2f88afaa0ee87148cdbfb7158db9a6`](https://github.com/sourcenetwork/vera.rs/commit/a1cbace66f2f88afaa0ee87148cdbfb7158db9a6)
+completed `512 4 16 900` on one Apple M5 Max host with 18 logical CPUs and
+64 GiB RAM. The daemon and driver used that same source, Rust 1.98.0 and the
+normal release profile. Four validators used RocksDB history, normal timing,
+pipelining and 192-revision epochs. The daemon was staged before test-feature
+unification; the driver was built and staged before measurement. Profile,
+deadline and KDF overrides were cleared. Span tracing was disabled and
+`RUST_LOG=warn`. The `relationship/v5/` dataset grew to 2,048 objects.
 
 | Measurement | Result |
 |---|---:|
-| Timed workflows completed | 128 / 128 |
+| Timed workflows completed | 512 / 512 |
 | Offered arrival rate | 4 workflows/s |
-| Timed interval, including drain | 34.382 s |
-| Completed workflows / timed interval | 3.723/s |
-| Certified submissions in timed phase | 640 |
-| Embedded mutations in timed phase | 1,664 |
-| Submission-to-verified-receipt p50 / p95 / p99 | 517.55 / 728.60 / 773.25 ms |
-| Complete-workflow p50 / p95 / p99 | 2,859.13 / 3,488.46 / 3,622.32 ms |
-| Peak sampled RSS per validator during timed phase | 224.03–231.48 MiB |
+| Maximum outstanding workflows | 16 |
+| Timed interval, including drain | 129.988 s |
+| Completed workflows / timed interval | 3.939/s |
+| Certified submissions in timed phase | 2,560 |
+| Embedded mutations in timed phase | 6,656 |
+| Verified permissions in timed phase | 30,720 |
+| Submission-to-verified-receipt p50 / p95 / p99 | 517.28 / 794.52 / 1,335.15 ms |
+| Complete-workflow p50 / p95 / p99 | 2,838.97 / 4,546.89 / 5,734.20 ms |
+| Schedule lag p50 / p95 / p99 | 2.36 / 920.08 / 1,726.93 ms |
+| Peak sampled RSS per validator during timed phase | 259.61–270.78 MiB |
 | Explicit throttling responses across the run | 1 |
-| Hard restart plus all-replica verification | 19.804 s |
-| Whole run | 186.20 s |
+| Hard restart plus all-replica verification | 66.124 s |
+| Whole recorder command | 708.34 s |
 
 Each timed workflow contains five serial certified submissions and 60 verified
 permission checks. Percentiles use the same nearest-rank rule as
-`operation_baseline`; receipt latency includes submission, polling and proof
-verification. The restart measurement includes verification of all 128 workflows
-on all four replicas.
+`operation_baseline`. Receipt latency starts before signing and includes
+submission, polling and proof verification. Workflow latency starts when that
+workflow begins; schedule lag separately measures delay from its offered arrival.
+The maximum schedule lag was 2,126.32 ms. Backpressure delayed arrivals rather
+than dropping workflows, so the completed rate differs from the offered rate.
 
-Across setup, workload and final checks, all 771 submissions and 2,179 embedded
-mutations were certified successful. The run verified 38,400 permissions and
-10,240 ownership proofs. All five replica-check phases passed: after workload,
-after relation removal, after relation recreation with old grants still denied,
-after explicit regrant, and after hard restart. No issued submission was left
-unresolved. Resource and storage sampling reported no errors.
+Across setup, workload and final checks, all 3,075 issued submissions and 8,707
+embedded mutations were certified successful, with 3,075 submission attempts.
+The run verified 153,600 permissions and 40,960 ownership proofs. All five
+replica-check phases passed: after workload, after relation removal, after
+relation recreation with old grants still denied, after explicit regrant, and
+after hard restart. No issued submission was left unresolved.
 
-These measurements qualify this local workload at the stated offered load.
-They do not establish maximum capacity, sustained memory behavior, WAN finality,
-or a comparison with the Go implementation. They are not comparable throughput
-figures to the single-write workflows in `operation_baseline`.
+The restart timer includes readiness and verification of all 512 workflows on
+all four replicas; the latter phase took 61.866 seconds. The 66.124-second total
+is not an isolated startup or recovery latency. The whole recorder command also
+includes setup, policy edits, serial regrants, all replica checks and cleanup;
+it is not 708 seconds of sustained arrivals.
+
+Resource sampling recorded 130 complete one-second samples per validator during
+the timed phase, spanning 205.14–270.78 MiB RSS. Each validator's peak was its
+last sample as the dataset grew. RSS and CPU sampling exclude the subsequent
+policy edits, replica checks and restart. Resource and storage sampling reported
+no errors. Per-validator filesystem snapshots were:
+
+| Snapshot | Logical file bytes (MiB) | Allocated file bytes (MiB) |
+|---|---:|---:|
+| Before timed workload | 0.56–0.57 | 0.73–0.73 |
+| After timed workload | 54.45–54.48 | 57.20–57.25 |
+| After all verification | 86.02–94.92 | 89.18–98.18 |
+
+These are recursive file-size snapshots, not physical write-volume measurements.
+This single local run qualifies the stated workload and offered load. It does
+not establish maximum capacity, sustained memory behavior, WAN finality or a
+comparison with the Go implementation. Its workflow rate is not comparable to
+the single-write workflows in `operation_baseline`.
 
 Executable SHA-256 values for reproduction:
 
-- Driver: `7fc8a7acae33b76f21254eb45af0db81ce13694811e5e70d5677a4b8c966ffa0`
-- Daemon: `90b2c738af83e10a96ac49d4fafa3ed1dbc884518a142592a95c7863869422e1`
+- Driver: `e0104fd88f180f0a5cc85b5093f64c2794a157a1b6d7896dafc70a5342ed12d5`
+- Daemon: `94b520010684a1692f99a4a6e5dd9055a3c790139d6939f04fa4598e96a1ed03`

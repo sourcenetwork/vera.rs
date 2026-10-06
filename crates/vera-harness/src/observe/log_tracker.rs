@@ -12,6 +12,9 @@ pub struct LogTracker {
     log_path: PathBuf,
     tx: broadcast::Sender<LogEvent>,
     latest_height: Arc<std::sync::atomic::AtomicU64>,
+    latest_indexed_height: Arc<std::sync::atomic::AtomicU64>,
+    #[cfg(test)]
+    eof: Arc<tokio::sync::Notify>,
     errors: Arc<parking_lot::Mutex<Vec<LogEvent>>>,
     _handle: Option<tokio::task::JoinHandle<()>>,
 }
@@ -21,21 +24,39 @@ impl LogTracker {
     pub fn new(log_path: PathBuf) -> Self {
         let (tx, _) = broadcast::channel(1024);
         let latest_height = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let latest_indexed_height = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        #[cfg(test)]
+        let eof = Arc::new(tokio::sync::Notify::new());
         let errors = Arc::new(parking_lot::Mutex::new(Vec::new()));
 
         let tracker_tx = tx.clone();
         let tracker_path = log_path.clone();
         let tracker_height = latest_height.clone();
+        let tracker_indexed_height = latest_indexed_height.clone();
+        #[cfg(test)]
+        let tracker_eof = eof.clone();
         let tracker_errors = errors.clone();
 
         let handle = tokio::spawn(async move {
-            Self::run_parser(tracker_path, tracker_tx, tracker_height, tracker_errors).await;
+            Self::run_parser(
+                tracker_path,
+                tracker_tx,
+                tracker_height,
+                tracker_indexed_height,
+                tracker_errors,
+                #[cfg(test)]
+                tracker_eof,
+            )
+            .await;
         });
 
         Self {
             log_path,
             tx,
             latest_height,
+            latest_indexed_height,
+            #[cfg(test)]
+            eof,
             errors,
             _handle: Some(handle),
         }
@@ -46,9 +67,15 @@ impl LogTracker {
         self.tx.subscribe()
     }
 
-    /// Get the latest block height seen in logs.
+    /// Get the greatest built or verified proposal height seen in logs.
     pub fn latest_height(&self) -> u64 {
         self.latest_height
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Get the greatest finalized height published to the execution index.
+    pub fn latest_indexed_height(&self) -> u64 {
+        self.latest_indexed_height
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
@@ -73,6 +100,7 @@ impl LogTracker {
                         let matches = match &event {
                             LogEvent::BlockBuilt { height, .. } => re.is_match(&format!("block built height={}", height)),
                             LogEvent::BlockVerified { height, .. } => re.is_match(&format!("block verified height={}", height)),
+                            LogEvent::BlockIndexed { height } => re.is_match(&format!("indexed finalized block height={}", height)),
                             LogEvent::Error { message, .. } => re.is_match(message),
                         };
                         if matches {
@@ -98,10 +126,22 @@ impl LogTracker {
         let tracker_tx = self.tx.clone();
         let tracker_path = self.log_path.clone();
         let tracker_height = self.latest_height.clone();
+        let tracker_indexed_height = self.latest_indexed_height.clone();
+        #[cfg(test)]
+        let tracker_eof = self.eof.clone();
         let tracker_errors = self.errors.clone();
 
         let handle = tokio::spawn(async move {
-            Self::run_parser(tracker_path, tracker_tx, tracker_height, tracker_errors).await;
+            Self::run_parser(
+                tracker_path,
+                tracker_tx,
+                tracker_height,
+                tracker_indexed_height,
+                tracker_errors,
+                #[cfg(test)]
+                tracker_eof,
+            )
+            .await;
         });
         self._handle = Some(handle);
     }
@@ -125,7 +165,9 @@ impl LogTracker {
         log_path: PathBuf,
         tx: broadcast::Sender<LogEvent>,
         latest_height: Arc<std::sync::atomic::AtomicU64>,
+        latest_indexed_height: Arc<std::sync::atomic::AtomicU64>,
         errors: Arc<parking_lot::Mutex<Vec<LogEvent>>>,
+        #[cfg(test)] eof: Arc<tokio::sync::Notify>,
     ) {
         use tokio::io::AsyncBufReadExt;
 
@@ -136,6 +178,8 @@ impl LogTracker {
         let block_verified_re =
             regex::Regex::new(r"verified block.*height=(\d+).*txs=(\d+).*total_ms=(\d+)")
                 .expect("valid regex");
+        let block_indexed_re =
+            regex::Regex::new(r"indexed finalized block\s+height=(\d+)\b").expect("valid regex");
         let error_re = regex::Regex::new(r"\bERROR\b(.*)").expect("valid regex");
 
         // Wait for the file to appear.
@@ -178,6 +222,12 @@ impl LogTracker {
                             txs,
                             total_ms,
                         });
+                    } else if let Some(caps) = block_indexed_re.captures(&line) {
+                        if let Ok(height) = caps[1].parse::<u64>() {
+                            latest_indexed_height
+                                .fetch_max(height, std::sync::atomic::Ordering::Relaxed);
+                            let _ = tx.send(LogEvent::BlockIndexed { height });
+                        }
                     } else if let Some(caps) = error_re.captures(&line) {
                         let message = caps[1].trim().to_string();
                         let event = LogEvent::Error {
@@ -189,6 +239,8 @@ impl LogTracker {
                     }
                 }
                 Ok(None) => {
+                    #[cfg(test)]
+                    eof.notify_one();
                     // EOF — file may still be written to, poll again.
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
@@ -197,3 +249,7 @@ impl LogTracker {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "log_tracker_tests.rs"]
+mod tests;

@@ -320,9 +320,26 @@ async fn cross_object_grant_replicates_across_nodes() {
         );
     }
 
-    state
-        .assert_heights_converged(2)
-        .expect("heights should converge");
+    // Each node is polled independently, so one cached sample can straddle
+    // several finalized blocks. Require convergence within a bounded wait.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let nodes = state.all_nodes();
+        let min = nodes.iter().map(|node| node.effective_height()).min();
+        let max = nodes.iter().map(|node| node.effective_height()).max();
+        if nodes.len() == cluster.node_count()
+            && nodes.iter().all(|node| node.is_healthy)
+            && matches!((min, max), (Some(min), Some(max))
+                if min > revoke_receipt.block_number && max - min <= 2)
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "all nodes should converge within two blocks past revocation: {nodes:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     state
         .assert_no_errors()
         .expect("no unexpected errors in cluster logs");

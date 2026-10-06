@@ -26,8 +26,8 @@ async fn cluster_observability_canonical() {
         .binary(vera_e2e::resolve_binary().expect("resolve verad binary"))
         .nodes(n)
         .chain_id(chain_id)
-        // The observability assertion requires these INFO events even under RUST_LOG=warn.
-        .rust_log("warn,vera_app::app=info")
+        // Index publication is logged after durable finalized execution.
+        .rust_log("warn,vera_node::finalize=trace")
         .build()
         .await
         .expect("cluster should start");
@@ -48,8 +48,6 @@ async fn cluster_observability_canonical() {
         .expect("observer should see all nodes healthy");
 
     // 5. Wait for BFT consensus to finalize blocks.
-    //    Height 6 gives the block index + RPC poller time to converge,
-    //    so we can assert latest_block_height >= 4 below.
     state
         .wait_for_height(6, Duration::from_secs(30))
         .await
@@ -60,9 +58,40 @@ async fn cluster_observability_canonical() {
         .assert_chain_id(chain_id)
         .expect("chain_id should match across all nodes");
 
-    // 7. All node snapshots should show consistent state.
-    for i in 0..n {
-        let snap = state.node(i);
+    // Proposal logs need not advance during finalized replay. Compare indexed
+    // block logs with the RPC block index, allowing both observers to catch up.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let snapshots = loop {
+        let nodes = state.all_nodes();
+        let log_heights: Vec<_> = (0..n)
+            .map(|i| state.node_logs(i).latest_indexed_height())
+            .collect();
+        let min = nodes.iter().map(|node| node.effective_height()).min();
+        let max = nodes.iter().map(|node| node.effective_height()).max();
+        if nodes.len() == n
+            && nodes.iter().zip(&log_heights).all(|(node, &height)| {
+                node.is_healthy
+                    && node.finalized_height.is_some_and(|finalized| {
+                        finalized >= 6 && finalized.abs_diff(node.latest_block_height) <= 5
+                    })
+                    && node.latest_block_height >= 4
+                    && height >= 6
+                    && height.abs_diff(node.latest_block_height) <= 5
+            })
+            && matches!((min, max), (Some(min), Some(max)) if max - min <= 2)
+        {
+            break nodes;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "indexed logs and RPC should agree within five blocks, with all four nodes healthy \
+             and finalized heights within two blocks: logs={log_heights:?}, nodes={nodes:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+
+    // 7. Validate the same snapshots that satisfied the observer bounds.
+    for (i, snap) in snapshots.iter().enumerate() {
         assert!(snap.is_healthy, "node{} should be healthy", i);
         assert_eq!(snap.chain_id, chain_id, "node{} snapshot chain_id", i);
         assert!(
@@ -94,53 +123,8 @@ async fn cluster_observability_canonical() {
         );
     }
 
-    // 8. LogTracker must be working — this test validates the observability framework.
-    //    Wait for actual parsed progress instead of assuming a fixed parser delay.
-    tokio::time::timeout(Duration::from_secs(15), async {
-        let mut poll = tokio::time::interval(Duration::from_millis(50));
-        loop {
-            poll.tick().await;
-            if (0..n).all(|i| state.node_logs(i).latest_height() >= 2) {
-                break;
-            }
-        }
-    })
-    .await
-    .expect("all log trackers should parse at least height 2");
-    for i in 0..n {
-        let log_height = state.node_logs(i).latest_height();
-        assert!(
-            log_height >= 2,
-            "node{} log tracker should have seen at least 2 blocks (got {}). \
-             Log parser regex may not match vera's output format.",
-            i,
-            log_height,
-        );
-    }
-
-    // 9. Cross-validate: log tracker heights and RPC poller heights must agree.
-    for i in 0..n {
-        let log_height = state.node_logs(i).latest_height();
-        let rpc_height = state.node(i).effective_height();
-        let diff = rpc_height.abs_diff(log_height);
-        assert!(
-            diff <= 5,
-            "node{} log height ({}) and RPC height ({}) diverged by {} blocks",
-            i,
-            log_height,
-            rpc_height,
-            diff,
-        );
-    }
-
-    // 10. All healthy nodes should have converged block heights (BFT guarantee).
-    state
-        .assert_heights_converged(2)
-        .expect("BFT nodes should have converged heights");
-
-    // 11. Verify node metadata across all validators.
-    for i in 0..n {
-        let snap = state.node(i);
+    // 8. Verify node metadata across all validators.
+    for (i, snap) in snapshots.iter().enumerate() {
         assert!(
             snap.uptime_secs > 0 || snap.finalized_count >= 6,
             "node{} should show progress (uptime={}, finalized={})",
@@ -150,7 +134,7 @@ async fn cluster_observability_canonical() {
         );
     }
 
-    // 12. Verify test infrastructure: each node has log and data files.
+    // 9. Verify test infrastructure: each node has log and data files.
     for i in 0..n {
         let node = cluster.node(i);
         assert!(
@@ -175,7 +159,7 @@ async fn cluster_observability_canonical() {
         );
     }
 
-    // 13. No errors should have been logged by any node.
+    // 10. No errors should have been logged by any node.
     state
         .assert_no_errors()
         .expect("cluster should have no errors");

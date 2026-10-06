@@ -21,6 +21,11 @@ pub enum LogEvent {
         /// Time to verify the block in milliseconds.
         total_ms: u64,
     },
+    /// A finalized block was published to this node's execution index.
+    BlockIndexed {
+        /// Indexed block height.
+        height: u64,
+    },
     /// An error log line.
     Error {
         /// Log level (ERROR).
