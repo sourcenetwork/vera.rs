@@ -88,6 +88,11 @@ code-changing same-repository PRs on one hosted Linux runner. It checks out the
 exact PR head and base-tip revisions and builds both node binaries with Rust
 1.98.0 in the release profile. One head-built `operation_baseline` drives both
 revisions, giving them identical workload generation and correctness checks.
+Before measurement, each node's `validator --help` is checked for
+`--rpc-listener-fd`. Listener inheritance is enabled for both sides only when both
+support it; otherwise both use address-based startup. Probe failures fail the job.
+The selected mode and each binary's capability are recorded in `comparison.json`,
+and the workload configuration records the selected mode.
 Component executables remain specific to each revision. All binaries are preserved
 before four passes run in head/base/base/head order, with no compilation or chart
 rendering between them.

@@ -12,6 +12,12 @@ from record import digest
 from protocol import baseline_incompatible, source_schema, unavailable
 
 
+def supports_rpc_listener(node):
+    help_text = subprocess.run([str(node), 'validator', '--help'], check=True,
+                               capture_output=True, text=True, timeout=10).stdout
+    return any(line.split()[:1] == ['--rpc-listener-fd'] for line in help_text.splitlines())
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--head', required=True, type=Path)
@@ -40,11 +46,14 @@ def main():
             'node_sha256': digest(binaries / side / 'verad'),
             'runner_sha256': runner_sha256,
             'components': (binaries / side / 'component_baseline').is_file(),
+            'supports_rpc_listener_fd': supports_rpc_listener(binaries / side / 'verad'),
         }
         if identity[side]['components']:
             identity[side]['component_sha256'] = digest(binaries / side / 'component_baseline')
     if not identity['head']['components']:
         raise ValueError('head component benchmark is required')
+    inherit_rpc_listener = all(identity[side]['supports_rpc_listener_fd'] for side in sources)
+    identity['inherit_rpc_listener'] = inherit_rpc_listener
     incompatible = baseline_incompatible(identity)
     (output / 'comparison.json').write_text(json.dumps(identity, indent=2) + '\n')
     pipelined = args.consensus == 'pipelined'
@@ -70,7 +79,7 @@ def main():
                        '--runner', str(runner), '--runner-source', str(sources['head']), '--history', 'rocksdb',
                        '--output', str(destination / f'objects-{objects}'), str(args.count), str(args.rate),
                        '128', '1', 'normal', '100', epoch, '0', str(objects), retained,
-                       '1' if pipelined else '0']
+                       '1' if pipelined else '0', '1' if inherit_rpc_listener else '0']
             environment = dict(os.environ, VERA_E2E_KEEP='0')
             failed |= subprocess.run(command, cwd=sources[side], env=environment, check=False).returncode != 0
     # Render only after every timed pass has finished.

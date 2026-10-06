@@ -51,6 +51,11 @@ captured values and verifies the early receipt against the trusted consensus key
 It repeats these checks on the hard-restarted replica. This waiting and checking
 is outside timing and does not extend the timed resource samples.
 
+An optional twelfth argument controls inherited RPC listeners (`1` by default on
+Unix, `0` elsewhere). Set `0` when driving a daemon that predates
+`--rpc-listener-fd`; the harness then uses address-based binding. The configuration
+record includes `inherit_rpc_listener`.
+
 Use the same epoch length when comparing timing presets or implementation
 changes. Short epochs exercise frequent DKG transitions. A run that finishes
 inside one long epoch measures steady-state traffic and does not qualify

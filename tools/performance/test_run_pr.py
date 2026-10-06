@@ -34,7 +34,7 @@ class RunPrTests(unittest.TestCase):
                             'commit', '-qm', side], cwd=source, check=True)
             self.revisions[side] = subprocess.check_output(
                 ['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip()
-            self.executable(side, 'verad', f'#!/bin/sh\nprintf "{side}\\n"\n')
+            self.node(side, supports_listener=True)
             self.executable(side, 'component_baseline', f'#!/bin/sh\nprintf \'{{"component":"{side}"}}\\n\'\n')
         self.executable('head', 'operation_baseline', f'''#!{sys.executable}
 import json
@@ -45,6 +45,15 @@ import sys
 print(json.dumps(dict(driver='head',
                       node=subprocess.check_output([os.environ['VERAD_BINARY']], text=True).strip(),
                       checkout=Path.cwd().name, arguments=sys.argv[1:])))
+''')
+
+    def node(self, side, supports_listener):
+        help_text = 'Usage: verad validator [OPTIONS]'
+        if supports_listener:
+            help_text += '\n      --rpc-listener-fd <RPC_LISTENER_FD>'
+        return self.executable(side, 'verad', f'''#!{sys.executable}
+import sys
+print({help_text!r} if sys.argv[1:] == ['validator', '--help'] else {side!r})
 ''')
 
     def write_schema(self, side, namespace):
@@ -99,9 +108,11 @@ print(json.dumps(dict(driver='head',
         self.measure()
         identity = json.loads((self.output / 'comparison.json').read_text())
         self.assertEqual(identity['format_version'], 2)
+        self.assertTrue(identity['inherit_rpc_listener'])
         runner_hash = digest(self.binaries / 'head' / 'operation_baseline')
         for tag in ('head1', 'base1', 'base2', 'head2'):
             side = tag.rstrip('12')
+            self.assertTrue(identity[side]['supports_rpc_listener_fd'])
             self.assertEqual(identity[side]['source'], self.revisions[side])
             self.assertEqual(identity[side]['runner_source'], self.revisions['head'])
             self.assertEqual(identity[side]['runner_sha256'], runner_hash)
@@ -115,13 +126,34 @@ print(json.dumps(dict(driver='head',
                 row = json.loads((destination / 'workload.jsonl').read_text())
                 self.assertEqual(row, dict(driver='head', node=side, checkout=side,
                                            arguments=['3', '7', '128', '1', 'normal', '100',
-                                                      '192', '0', str(objects), '256', '1']))
+                                                      '192', '0', str(objects), '256', '1', '1']))
                 self.assertEqual(manifest['format_version'], 2)
                 for field in ('source', 'runner_source', 'node_sha256', 'runner_sha256'):
                     self.assertEqual(manifest[field], identity[side][field])
                 self.assertFalse(manifest['dirty'])
                 self.assertFalse(manifest['runner_dirty'])
                 self.assertEqual(manifest['exit_code'], 0)
+
+    def test_older_node_disables_inheritance_for_both_sides(self):
+        self.node('base', supports_listener=False)
+        self.measure()
+        identity = json.loads((self.output / 'comparison.json').read_text())
+        self.assertTrue(identity['head']['supports_rpc_listener_fd'])
+        self.assertFalse(identity['base']['supports_rpc_listener_fd'])
+        self.assertFalse(identity['inherit_rpc_listener'])
+        for tag in ('head1', 'base1', 'base2', 'head2'):
+            for objects in (0, 32):
+                destination = self.output / tag / f'objects-{objects}'
+                row = json.loads((destination / 'workload.jsonl').read_text())
+                manifest = json.loads((destination / 'manifest.json').read_text())
+                self.assertEqual(row['arguments'][-1], '0')
+                self.assertEqual(manifest['arguments'], row['arguments'])
+
+    def test_failed_help_probe_does_not_silently_downgrade(self):
+        self.executable('base', 'verad', '#!/bin/sh\nexit 7\n')
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.measure()
+        self.assertFalse((self.output / 'head1').exists())
 
     def test_base_without_component_benchmark_keeps_workload_passes(self):
         (self.binaries / 'base' / 'component_baseline').unlink()
