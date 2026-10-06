@@ -1,13 +1,13 @@
 //! Transaction admission and gossip.
 //!
-//! Every validator forwards admitted transactions to every other validator, so
-//! whichever leader builds the next block has them.
+//! Local RPC submissions are sent to every peer and retried while pending.
+//! Transactions received from peers do not enter the local retry queue.
 
 use std::sync::{Arc, OnceLock};
 
 use alloy_primitives::Bytes;
 use commonware_p2p::{Receiver, Recipients, Sender};
-use commonware_runtime::Spawner;
+use commonware_runtime::{Clock, Spawner};
 use tokio::sync::Mutex;
 use tracing::{debug, trace, warn};
 use vera_consensus::{Mempool as _, components::InMemoryMempool};
@@ -21,16 +21,18 @@ use crate::CommittedState;
 pub type SharedValidator = Arc<OnceLock<Mutex<MempoolValidator<CommittedState>>>>;
 
 /// Admits transactions locally and forwards them to peers.
-pub struct TxGossip<S: Sender> {
+pub struct TxGossip<S: Sender, E: Clock> {
+    clock: Arc<E>,
     mempool: InMemoryMempool,
     validator: SharedValidator,
     chain_id: u64,
     sender: Arc<Mutex<S>>,
 }
 
-impl<S: Sender> Clone for TxGossip<S> {
+impl<S: Sender, E: Clock> Clone for TxGossip<S, E> {
     fn clone(&self) -> Self {
         Self {
+            clock: self.clock.clone(),
             mempool: self.mempool.clone(),
             validator: self.validator.clone(),
             chain_id: self.chain_id,
@@ -39,7 +41,7 @@ impl<S: Sender> Clone for TxGossip<S> {
     }
 }
 
-impl<S: Sender> std::fmt::Debug for TxGossip<S> {
+impl<S: Sender, E: Clock> std::fmt::Debug for TxGossip<S, E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TxGossip").finish_non_exhaustive()
     }
@@ -59,6 +61,10 @@ pub(crate) async fn admit(
         .get()
         .ok_or_else(|| "node is still starting".to_string())?;
     let tx = Tx::new(bytes.clone());
+    let id = tx.id();
+    if mempool.contains(&id) {
+        return Ok(false);
+    }
     let is_native = !bytes.is_empty() && NativeTx::is_native_tx(bytes[0]);
     let pre = if is_native {
         Some(
@@ -69,6 +75,9 @@ pub(crate) async fn admit(
         None
     };
     let mut guard = validator.lock().await;
+    if mempool.contains(&id) {
+        return Ok(false);
+    }
     if !mempool.can_insert(&tx) {
         return Err("pending request capacity reached".into());
     }
@@ -80,15 +89,17 @@ pub(crate) async fn admit(
     Ok(mempool.insert(tx))
 }
 
-impl<S: Sender> TxGossip<S> {
+impl<S: Sender, E: Clock> TxGossip<S, E> {
     /// Build the gossip handle over the mempool channel sender.
     pub fn new(
+        clock: E,
         mempool: InMemoryMempool,
         validator: SharedValidator,
         chain_id: u64,
         sender: S,
     ) -> Self {
         Self {
+            clock: Arc::new(clock),
             mempool,
             validator,
             chain_id,
@@ -98,16 +109,45 @@ impl<S: Sender> TxGossip<S> {
 
     /// Admit a locally submitted transaction and forward it to every peer.
     pub async fn submit(&self, bytes: Bytes) -> Result<bool, String> {
+        let tx = Tx::new(bytes.clone());
         let inserted = admit(&self.mempool, &self.validator, self.chain_id, bytes.clone()).await?;
         if inserted {
-            let feedback = self
-                .sender
-                .lock()
-                .await
-                .send(Recipients::All, bytes.0, false);
-            trace!(?feedback, "forwarded transaction");
+            self.forward_local(tx).await;
         }
         Ok(inserted)
+    }
+
+    async fn forward_local(&self, tx: Tx) {
+        let id = tx.id();
+        if !self.mempool.mark_local(&id, self.clock.current()) {
+            return;
+        }
+        let mut sender = self.sender.lock().await;
+        if !self.mempool.contains(&id) {
+            return;
+        }
+        let feedback = sender.send(Recipients::All, tx.bytes.0, false);
+        trace!(tx_id = ?id, ?feedback, "forwarded transaction");
+    }
+
+    pub(crate) async fn reannounce(&self) {
+        if !self.mempool.has_due_local(self.clock.current()) {
+            return;
+        }
+        let mut sender = self.sender.lock().await;
+        let pending = self.mempool.local_reannouncement(
+            self.clock.current(),
+            crate::tx_reannouncement::MAX_TRANSACTIONS,
+            vera_domain::MAX_TX_BYTES,
+        );
+        for tx in pending {
+            let id = tx.id();
+            if !self.mempool.contains(&id) {
+                continue;
+            }
+            let feedback = sender.send(Recipients::All, tx.bytes.0, false);
+            trace!(tx_id = ?id, ?feedback, "reannounced pending local transaction");
+        }
     }
 }
 
@@ -127,7 +167,7 @@ pub(crate) async fn recheck(
     let pending = mempool.build(usize::MAX, &std::collections::BTreeSet::new());
     let mut evict = Vec::new();
     for tx in &pending {
-        if let Err(e) = guard.recheck_tx_stateless(&tx.bytes).await {
+        if let Err(e) = guard.recheck_pending_tx(&tx.bytes).await {
             trace!(tx_id = ?tx.id(), error = %e, "evicting stale tx");
             evict.push(tx.id());
         }
@@ -151,10 +191,13 @@ pub fn spawn_tx_receiver<E: Spawner, R: Receiver + Send + 'static>(
             match receiver.recv().await {
                 Ok((peer, message)) => {
                     let bytes = Bytes::copy_from_slice(message.as_ref());
+                    let tx = Tx::new(bytes.clone());
                     match admit(&mempool, &validator, chain_id, bytes).await {
-                        Ok(true) => trace!(?peer, "admitted gossiped transaction"),
-                        Ok(false) => trace!(?peer, "duplicate gossiped transaction"),
-                        Err(e) => debug!(?peer, error = %e, "rejected gossiped transaction"),
+                        Ok(true) => trace!(tx_id = ?tx.id(), ?peer, "admitted gossiped transaction"),
+                        Ok(false) => trace!(tx_id = ?tx.id(), ?peer, "duplicate gossiped transaction"),
+                        Err(e) => {
+                            debug!(tx_id = ?tx.id(), ?peer, error = %e, "rejected gossiped transaction")
+                        }
                     }
                 }
                 Err(e) => {
@@ -165,3 +208,11 @@ pub fn spawn_tx_receiver<E: Spawner, R: Receiver + Send + 'static>(
         }
     })
 }
+
+#[cfg(test)]
+#[path = "tx_reannouncement_tests.rs"]
+mod reannouncement_tests;
+
+#[cfg(test)]
+#[path = "tx_admission_tests.rs"]
+mod admission_tests;

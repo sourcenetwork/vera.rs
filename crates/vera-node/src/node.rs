@@ -820,7 +820,17 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
         let _ = validator.set(::tokio::sync::Mutex::new(admission));
     }
     application_ready.send_replace(true);
-    let gossip = TxGossip::new(mempool.clone(), validator.clone(), chain_id, mempool_sender);
+    let gossip = TxGossip::new(
+        context.child("tx_clock"),
+        mempool.clone(),
+        validator.clone(),
+        chain_id,
+        mempool_sender,
+    );
+    state_resolver_handles.push(context.child("tx_reannouncement").spawn({
+        let gossip = gossip.clone();
+        move |context| crate::tx_reannouncement::run(context, gossip)
+    }));
     state_resolver_handles.push(spawn_tx_receiver(
         context.child("tx_receiver"),
         mempool_receiver,

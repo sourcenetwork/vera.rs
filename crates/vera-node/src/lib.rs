@@ -55,6 +55,7 @@ mod sink;
 pub use sink::{FinalizationArtifacts, FinalizationLookup, NodeSink, SinkParts};
 
 mod tx_gossip;
+mod tx_reannouncement;
 pub use tx_gossip::{SharedValidator, TxGossip, spawn_tx_receiver};
 
 mod vrf_elector;
