@@ -813,7 +813,7 @@ pub async fn run_node(context: tokio::Context, settings: NodeSettings) -> anyhow
     }
     application_ready.send_replace(true);
     let gossip = TxGossip::new(
-        context.clone(),
+        context.child("tx_clock"),
         mempool.clone(),
         validator.clone(),
         chain_id,

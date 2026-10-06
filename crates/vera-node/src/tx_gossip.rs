@@ -22,14 +22,14 @@ pub type SharedValidator = Arc<OnceLock<Mutex<MempoolValidator<CommittedState>>>
 
 /// Admits transactions locally and forwards them to peers.
 pub struct TxGossip<S: Sender, E: Clock> {
-    clock: E,
+    clock: Arc<E>,
     mempool: InMemoryMempool,
     validator: SharedValidator,
     chain_id: u64,
     sender: Arc<Mutex<S>>,
 }
 
-impl<S: Sender, E: Clock + Clone> Clone for TxGossip<S, E> {
+impl<S: Sender, E: Clock> Clone for TxGossip<S, E> {
     fn clone(&self) -> Self {
         Self {
             clock: self.clock.clone(),
@@ -61,6 +61,10 @@ pub(crate) async fn admit(
         .get()
         .ok_or_else(|| "node is still starting".to_string())?;
     let tx = Tx::new(bytes.clone());
+    let id = tx.id();
+    if mempool.contains(&id) {
+        return Ok(false);
+    }
     let is_native = !bytes.is_empty() && NativeTx::is_native_tx(bytes[0]);
     let pre = if is_native {
         Some(
@@ -71,6 +75,9 @@ pub(crate) async fn admit(
         None
     };
     let mut guard = validator.lock().await;
+    if mempool.contains(&id) {
+        return Ok(false);
+    }
     if !mempool.can_insert(&tx) {
         return Err("pending request capacity reached".into());
     }
@@ -92,7 +99,7 @@ impl<S: Sender, E: Clock> TxGossip<S, E> {
         sender: S,
     ) -> Self {
         Self {
-            clock,
+            clock: Arc::new(clock),
             mempool,
             validator,
             chain_id,
@@ -205,3 +212,7 @@ pub fn spawn_tx_receiver<E: Spawner, R: Receiver + Send + 'static>(
 #[cfg(test)]
 #[path = "tx_reannouncement_tests.rs"]
 mod reannouncement_tests;
+
+#[cfg(test)]
+#[path = "tx_admission_tests.rs"]
+mod admission_tests;

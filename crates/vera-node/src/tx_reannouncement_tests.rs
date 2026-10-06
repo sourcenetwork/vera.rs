@@ -2,7 +2,7 @@ use super::*;
 use commonware_actor::{Feedback, Unreliable};
 use commonware_cryptography::{Signer as _, ed25519};
 use commonware_p2p::{CheckedSender, LimitedSender};
-use commonware_runtime::{IoBufs, Runner as _, deterministic::Runner};
+use commonware_runtime::{IoBufs, Runner as _, Supervisor as _, deterministic::Runner};
 use futures::FutureExt as _;
 use std::{
     collections::VecDeque,
@@ -45,7 +45,7 @@ impl CheckedSender for MockSender {
 
     fn send(self, message: impl Into<IoBufs> + Send, priority: bool) -> Unreliable<Feedback> {
         assert!(!priority);
-        let bytes = message.into().coalesce().to_vec();
+        let bytes = message.into().coalesce().as_ref().to_vec();
         let mut observed = self.0.lock();
         observed.attempts.push(bytes.clone());
         match observed.outcomes.pop_front().unwrap_or(Delivery::Accepted) {
@@ -72,7 +72,7 @@ fn dropped_and_peer_rejected_initial_delivery_remains_retryable() {
             Delivery::Accepted,
         ]);
         let gossip = TxGossip::new(
-            context.clone(),
+            context.child("tx_clock"),
             pool.clone(),
             Arc::new(OnceLock::new()),
             1,
@@ -109,7 +109,7 @@ fn peer_transactions_and_pruned_local_entries_are_not_reannounced() {
         assert!(pool.insert(peer));
         let sender = MockSender::default();
         let gossip = TxGossip::new(
-            context.clone(),
+            context.child("tx_clock"),
             pool.clone(),
             Arc::new(OnceLock::new()),
             1,
