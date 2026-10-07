@@ -70,12 +70,12 @@ pub(super) fn validate(input: &[u8], remaining: &mut usize) -> Result<(), Precom
             .ok_or_else(invalid)?;
         let length = word(array, 0)?;
         if length > maximum {
-            return Err(PrecompileError::Other(
-                "ACP string-array count limit exceeded".into(),
+            return Err(PrecompileError::Fatal(
+                "ACP string-array count limit exceeded".to_string(),
             ));
         }
         if count.is_some_and(|expected| expected != length) {
-            return Err(PrecompileError::Other("array length mismatch".into()));
+            return Err(PrecompileError::Fatal("array length mismatch".to_string()));
         }
         count = Some(length);
         *head = array.get(32..).ok_or_else(invalid)?;
@@ -104,8 +104,8 @@ fn bearer_access(input: &[u8], remaining: &mut usize) -> Result<(), PrecompileEr
     body.get(..3 * 32).ok_or_else(invalid)?;
     let request = bytes(body, 64)?;
     if request.len() > 64 << 10 {
-        return Err(PrecompileError::Other(
-            "access request exceeds byte limit".into(),
+        return Err(PrecompileError::Fatal(
+            "access request exceeds byte limit".to_string(),
         ));
     }
     charge(remaining, request.len())?;
@@ -128,8 +128,8 @@ fn policy_create(input: &[u8], remaining: &mut usize) -> Result<(), PrecompileEr
     body.get(..fields * 32).ok_or_else(invalid)?;
     let payload = bytes(body, if bearer { 32 } else { 0 })?;
     if !options && payload.len() > vera_modules::acp::MAX_POLICY_DEFINITION_BYTES {
-        return Err(PrecompileError::Other(
-            "policy definition exceeds 64 KiB".into(),
+        return Err(PrecompileError::Fatal(
+            "policy definition exceeds 64 KiB".to_string(),
         ));
     }
     // Raw options JSON retains the transaction bound; semantic field limits are
@@ -152,8 +152,8 @@ fn policy_edit(input: &[u8], remaining: &mut usize) -> Result<(), PrecompileErro
     body.get(..fields * 32).ok_or_else(invalid)?;
     let policy = bytes(body, if bearer { 64 } else { 32 })?;
     if policy.len() > vera_modules::acp::MAX_POLICY_DEFINITION_BYTES {
-        return Err(PrecompileError::Other(
-            "policy definition exceeds 64 KiB".into(),
+        return Err(PrecompileError::Fatal(
+            "policy definition exceeds 64 KiB".to_string(),
         ));
     }
     charge(remaining, policy.len())?;
@@ -191,7 +191,7 @@ fn string(input: &[u8], offset: usize, remaining: &mut usize) -> Result<(), Prec
 fn charge(remaining: &mut usize, bytes: usize) -> Result<(), PrecompileError> {
     *remaining = remaining
         .checked_sub(bytes)
-        .ok_or_else(|| PrecompileError::Other("ACP decoded bytes limit exceeded".into()))?;
+        .ok_or_else(|| PrecompileError::Fatal("ACP decoded bytes limit exceeded".to_string()))?;
     Ok(())
 }
 
@@ -210,5 +210,5 @@ fn word(input: &[u8], offset: usize) -> Result<usize, PrecompileError> {
 }
 
 fn invalid() -> PrecompileError {
-    PrecompileError::Other("invalid ACP string-array ABI".into())
+    PrecompileError::Fatal("invalid ACP string-array ABI".to_string())
 }

@@ -71,7 +71,7 @@ impl Budget {
 }
 
 fn limit() -> PrecompileError {
-    PrecompileError::Other("ACP batch result byte limit exceeded".into())
+    PrecompileError::Fatal("ACP batch result byte limit exceeded".to_string())
 }
 
 #[cfg(test)]

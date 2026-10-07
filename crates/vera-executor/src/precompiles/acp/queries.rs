@@ -1,5 +1,6 @@
 //! Collection queries retain read charges even when filtering returns no records.
 
+use super::oog_dispatch;
 use super::*;
 
 pub(super) const fn handles(selector: [u8; 4]) -> bool {
@@ -17,9 +18,9 @@ pub(super) const fn handles(selector: [u8; 4]) -> bool {
 }
 
 pub(super) fn dispatch(module: &AcpModule, input: &[u8], gas_limit: u64) -> DispatchReturn {
-    let allowance = gas_limit
-        .checked_sub(READ_GAS)
-        .ok_or(PrecompileError::OutOfGas)?;
+    let Some(allowance) = gas_limit.checked_sub(READ_GAS) else {
+        return Ok(oog_dispatch());
+    };
     let budget = QueryBudget::new(allowance);
     let selector: [u8; 4] = input[..4].try_into().expect("selector checked by parent");
     match selector {
@@ -61,7 +62,7 @@ pub(super) fn dispatch(module: &AcpModule, input: &[u8], gas_limit: u64) -> Disp
         IAcp::getRelationshipsPageCall::SELECTOR => {
             let call = IAcp::getRelationshipsPageCall::abi_decode(input).map_err(decode_error)?;
             let request = serde_json::from_slice(&call.request).map_err(|error| {
-                PrecompileError::Other(format!("invalid relationship query: {error}").into())
+                PrecompileError::Fatal(format!("invalid relationship query: {error}"))
             })?;
             output(
                 module.query_relationships_page_with_budget(
@@ -129,7 +130,9 @@ pub(super) fn dispatch(module: &AcpModule, input: &[u8], gas_limit: u64) -> Disp
                 |records| IAcp::hasRelationshipCall::abi_encode_returns(&!records.is_empty()),
             )
         }
-        _ => Err(PrecompileError::Other("unknown ACP query selector".into())),
+        _ => Err(PrecompileError::Fatal(
+            "unknown ACP query selector".to_string(),
+        )),
     }
 }
 
@@ -139,11 +142,11 @@ fn output<T>(
     encode: impl FnOnce(T) -> Vec<u8>,
 ) -> DispatchReturn {
     if budget.is_exhausted() {
-        return Err(PrecompileError::OutOfGas);
+        return Ok(oog_dispatch());
     }
-    let gas_used = READ_GAS
-        .checked_add(budget.consumed())
-        .ok_or(PrecompileError::OutOfGas)?;
+    let Some(gas_used) = READ_GAS.checked_add(budget.consumed()) else {
+        return Ok(oog_dispatch());
+    };
     match result {
         Ok(value) => Ok(ok_dispatch(gas_used, encode(value), vec![])),
         Err(error) => {

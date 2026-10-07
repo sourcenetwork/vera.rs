@@ -10,7 +10,7 @@ use vera_modules::types::{BlockExecCtx, TxExecCtx};
 
 use super::{
     BULLETIN_ADDRESS, DispatchReturn, decode_error, did_from_signer, err_dispatch, event_log,
-    json_bytes, ok_dispatch,
+    json_bytes, ok_dispatch, oog_dispatch,
 };
 
 /// Flat gas cost for read operations (real metering is Phase 10).
@@ -28,9 +28,7 @@ pub(super) fn dispatch(
     gas_limit: u64,
 ) -> DispatchReturn {
     if input.len() < 4 {
-        return Err(PrecompileError::Other(
-            "input too short for selector".into(),
-        ));
+        return Ok(err_dispatch("input too short for selector"));
     }
     let selector: [u8; 4] = input[..4].try_into().expect("checked length above");
 
@@ -38,7 +36,7 @@ pub(super) fn dispatch(
         // ── Write methods ────────────────────────────────────────────
         IBulletin::registerNamespaceCall::SELECTOR => {
             if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IBulletin::registerNamespaceCall::abi_decode(input).map_err(decode_error)?;
             let creator = did_from_signer(&tx_ctx.signer)?;
@@ -68,7 +66,7 @@ pub(super) fn dispatch(
 
         IBulletin::createPostCall::SELECTOR => {
             if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IBulletin::createPostCall::abi_decode(input).map_err(decode_error)?;
             let creator = did_from_signer(&tx_ctx.signer)?;
@@ -105,7 +103,7 @@ pub(super) fn dispatch(
 
         IBulletin::addCollaboratorCall::SELECTOR => {
             if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IBulletin::addCollaboratorCall::abi_decode(input).map_err(decode_error)?;
             let creator = did_from_signer(&tx_ctx.signer)?;
@@ -135,7 +133,7 @@ pub(super) fn dispatch(
 
         IBulletin::removeCollaboratorCall::SELECTOR => {
             if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call =
                 IBulletin::removeCollaboratorCall::abi_decode(input).map_err(decode_error)?;
@@ -166,14 +164,13 @@ pub(super) fn dispatch(
 
         IBulletin::updateParamsCall::SELECTOR => {
             if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IBulletin::updateParamsCall::abi_decode(input).map_err(decode_error)?;
             let authority = did_from_signer(&tx_ctx.signer)?;
             let params: vera_modules::bulletin::types::BulletinParams =
-                serde_json::from_slice(&call.params).map_err(|e| {
-                    PrecompileError::Other(format!("params JSON decode: {e}").into())
-                })?;
+                serde_json::from_slice(&call.params)
+                    .map_err(|e| PrecompileError::Fatal(format!("params JSON decode: {e}")))?;
 
             match module.update_params(&authority, params) {
                 Ok(()) => {}
@@ -186,7 +183,7 @@ pub(super) fn dispatch(
         // ── Read methods ─────────────────────────────────────────────
         IBulletin::getPostCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IBulletin::getPostCall::abi_decode(input).map_err(decode_error)?;
 
@@ -201,7 +198,7 @@ pub(super) fn dispatch(
 
         IBulletin::getNamespaceCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IBulletin::getNamespaceCall::abi_decode(input).map_err(decode_error)?;
 
@@ -216,7 +213,7 @@ pub(super) fn dispatch(
 
         IBulletin::getNamespacesCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
 
             let namespaces = match module.query_namespaces() {
@@ -230,7 +227,7 @@ pub(super) fn dispatch(
 
         IBulletin::getNamespaceCollaboratorsCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IBulletin::getNamespaceCollaboratorsCall::abi_decode(input)
                 .map_err(decode_error)?;
@@ -248,7 +245,7 @@ pub(super) fn dispatch(
 
         IBulletin::getNamespacePostsCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IBulletin::getNamespacePostsCall::abi_decode(input).map_err(decode_error)?;
 
@@ -263,7 +260,7 @@ pub(super) fn dispatch(
 
         IBulletin::getPostsCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
 
             let posts = match module.query_posts() {
@@ -277,7 +274,7 @@ pub(super) fn dispatch(
 
         IBulletin::iterateGlobCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IBulletin::iterateGlobCall::abi_decode(input).map_err(decode_error)?;
 
@@ -292,7 +289,7 @@ pub(super) fn dispatch(
 
         IBulletin::getParamsCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
 
             let params = match module.query_params() {
@@ -304,9 +301,10 @@ pub(super) fn dispatch(
             Ok(ok_dispatch(READ_GAS, ret, vec![]))
         }
 
-        _ => Err(PrecompileError::Other(
-            format!("unknown Bulletin selector: 0x{}", hex::encode(selector)).into(),
-        )),
+        _ => Err(PrecompileError::Fatal(format!(
+            "unknown Bulletin selector: 0x{}",
+            hex::encode(selector)
+        ))),
     }
 }
 
@@ -337,7 +335,7 @@ mod tests {
             WRITE_GAS,
         )
         .unwrap();
-        assert!(!result.precompile.reverted);
+        assert!(!result.precompile.status.is_revert());
         let create = IBulletin::createPostCall {
             namespace: "posts".into(),
             payload: b"payload".to_vec().into(),
@@ -353,7 +351,7 @@ mod tests {
             WRITE_GAS,
         )
         .unwrap();
-        assert!(!result.precompile.reverted);
+        assert!(!result.precompile.status.is_revert());
         let posts = module.query_namespace_posts("posts").unwrap();
         assert_eq!(posts.len(), 1);
         let expected: B256 = posts[0].id.parse().unwrap();

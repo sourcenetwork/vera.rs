@@ -87,9 +87,9 @@ fn word(input: &[u8], offset: usize) -> Result<usize, PrecompileError> {
 }
 
 fn invalid() -> PrecompileError {
-    PrecompileError::Other("invalid ACP batch ABI".into())
+    PrecompileError::Fatal("invalid ACP batch ABI".to_string())
 }
 
 fn limit(resource: &str) -> PrecompileError {
-    PrecompileError::Other(format!("ACP batch {resource} limit exceeded").into())
+    PrecompileError::Fatal(format!("ACP batch {resource} limit exceeded"))
 }

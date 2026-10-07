@@ -25,8 +25,10 @@ use revm::{
     handler::{EthPrecompiles, PrecompileProvider},
     interpreter::{CallInputs, InterpreterResult},
     precompile::{
-        Precompile, PrecompileError, PrecompileId, PrecompileOutput, PrecompileResult, Precompiles,
+        Precompile, PrecompileError, PrecompileHalt, PrecompileId, PrecompileOutput,
+        PrecompileResult, Precompiles,
     },
+    primitives::AddressSet,
     primitives::hardfork::SpecId,
 };
 use vera_modules::acp::AcpModule;
@@ -54,20 +56,15 @@ const fn address_from_last_two_bytes(hi: u8, lo: u8) -> Address {
 }
 
 pub(super) fn did_from_signer(signer: &str) -> Result<Did, PrecompileError> {
-    Did::new(signer).map_err(|e| PrecompileError::Other(format!("DID: {e}").into()))
+    Did::new(signer).map_err(|e| PrecompileError::Fatal(format!("DID: {e}")))
 }
 
 pub(super) fn decode_error(e: alloy_sol_types::Error) -> PrecompileError {
-    PrecompileError::Other(format!("ABI decode: {e}").into())
+    PrecompileError::Fatal(format!("ABI decode: {e}"))
 }
 
 pub(super) fn module_error(e: impl core::fmt::Display) -> PrecompileOutput {
-    PrecompileOutput {
-        gas_used: 0,
-        gas_refunded: 0,
-        bytes: Bytes::from(e.to_string().into_bytes()),
-        reverted: true,
-    }
+    PrecompileOutput::revert(0, Bytes::from(e.to_string().into_bytes()), 0)
 }
 
 pub(super) fn json_bytes(v: &impl serde::Serialize) -> Bytes {
@@ -75,11 +72,34 @@ pub(super) fn json_bytes(v: &impl serde::Serialize) -> Bytes {
 }
 
 pub(super) fn ok_output(gas: u64, ret: Vec<u8>) -> PrecompileOutput {
-    PrecompileOutput {
-        gas_used: gas,
-        gas_refunded: 0,
-        bytes: ret.into(),
-        reverted: false,
+    PrecompileOutput::new(gas, ret.into(), 0)
+}
+
+pub(super) const fn oog_dispatch() -> DispatchResult {
+    DispatchResult {
+        precompile: PrecompileOutput::halt(PrecompileHalt::OutOfGas, 0),
+        logs: vec![],
+    }
+}
+
+/// Sentinels an out-of-gas halt while it propagates through dispatch helpers;
+/// the dispatch boundary converts it back into an out-of-gas halt result.
+pub(super) const OUT_OF_GAS_MESSAGE: &str = "\u{0}out-of-gas";
+
+pub(super) fn out_of_gas_error() -> PrecompileError {
+    PrecompileError::Fatal(OUT_OF_GAS_MESSAGE.to_string())
+}
+
+pub(super) fn is_out_of_gas(error: &PrecompileError) -> bool {
+    matches!(error, PrecompileError::Fatal(message) if message == OUT_OF_GAS_MESSAGE)
+}
+
+/// Message carried by a recoverable dispatch error, without the fatal-error
+/// display prefix — module-style reverts report the bare cause.
+pub(super) fn recoverable_message(error: &PrecompileError) -> String {
+    match error {
+        PrecompileError::Fatal(message) => message.clone(),
+        other => other.to_string(),
     }
 }
 
@@ -116,13 +136,12 @@ pub(super) fn event_log<E: alloy_sol_types::SolEvent>(address: Address, event: &
     }
 }
 
-const fn stub_precompile(_input: &[u8], _gas_limit: u64) -> PrecompileResult {
-    Ok(PrecompileOutput {
-        gas_used: 0,
-        gas_refunded: 0,
-        bytes: revm::primitives::Bytes::new(),
-        reverted: true,
-    })
+const fn stub_precompile(_input: &[u8], _gas_limit: u64, _reservoir: u64) -> PrecompileResult {
+    Ok(PrecompileOutput::revert(
+        0,
+        revm::primitives::Bytes::new(),
+        0,
+    ))
 }
 
 /// Vera precompile provider that extends standard Ethereum precompiles
@@ -132,6 +151,7 @@ pub struct VeraPrecompiles {
     eth: EthPrecompiles,
     custom: Precompiles,
     journal: Arc<Mutex<ModuleJournal>>,
+    warm: AddressSet,
     current_tx_hash: B256,
     current_signer_did: String,
     genesis_id: [u8; 32],
@@ -192,9 +212,15 @@ fn new_custom_precompiles() -> Precompiles {
 impl VeraPrecompiles {
     /// Create a new vera precompile provider for the given spec.
     pub fn new(spec: SpecId) -> Self {
+        let eth = EthPrecompiles::new(spec);
+        let custom = new_custom_precompiles();
+        let mut warm = AddressSet::default();
+        warm.extend(eth.warm_addresses().iter().copied());
+        warm.extend(custom.addresses().copied());
         Self {
-            eth: EthPrecompiles::new(spec),
-            custom: new_custom_precompiles(),
+            eth,
+            custom,
+            warm,
             journal: Arc::default(),
             current_tx_hash: B256::ZERO,
             current_signer_did: String::new(),
@@ -210,9 +236,15 @@ impl VeraPrecompiles {
         bulletin_module: BulletinModule,
         vera_module: VeraModule,
     ) -> Self {
+        let eth = EthPrecompiles::new(spec);
+        let custom = new_custom_precompiles();
+        let mut warm = AddressSet::default();
+        warm.extend(eth.warm_addresses().iter().copied());
+        warm.extend(custom.addresses().copied());
         Self {
-            eth: EthPrecompiles::new(spec),
-            custom: new_custom_precompiles(),
+            eth,
+            custom,
+            warm,
             journal: Arc::new(Mutex::new(ModuleJournal::new((
                 acp_module,
                 bulletin_module,
@@ -309,13 +341,11 @@ impl<CTX: ContextTr> PrecompileProvider<CTX> for VeraPrecompiles {
 
             if inputs.bytecode_address == VALIDATOR_REGISTRY_ADDRESS {
                 if !direct_caller && !validator_registry::is_query(&calldata) {
-                    return Self::dispatch_result_to_interpreter(
-                        inputs,
-                        Err(PrecompileError::Other(
-                            "module write requires an authenticated caller".into(),
-                        )),
-                    )
-                    .map(|(result, _)| result);
+                    let mut rejected =
+                        err_dispatch("module write requires an authenticated caller");
+                    rejected.precompile.gas_used = inputs.gas_limit;
+                    return Self::dispatch_result_to_interpreter(inputs, Ok(rejected))
+                        .map(|(result, _)| result);
                 }
                 if inputs.is_static && !validator_registry::is_query(&calldata) {
                     return Ok(Some(Self::static_write_error(inputs)));
@@ -346,14 +376,12 @@ impl<CTX: ContextTr> PrecompileProvider<CTX> for VeraPrecompiles {
         self.eth.run(context, inputs)
     }
 
-    fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
-        let eth_addrs: Vec<Address> = self.eth.warm_addresses().collect();
-        let custom_addrs: Vec<Address> = self.custom.addresses().cloned().collect();
-        Box::new(eth_addrs.into_iter().chain(custom_addrs))
+    fn warm_addresses(&self) -> &AddressSet {
+        &self.warm
     }
 
     fn contains(&self, address: &Address) -> bool {
-        self.eth.contains(address) || self.custom.contains(address)
+        self.warm.contains(address)
     }
 }
 
@@ -372,32 +400,29 @@ impl VeraPrecompiles {
         match dispatch_result {
             Ok(dr) => {
                 result.gas.record_refund(dr.precompile.gas_refunded);
-                if !result.gas.record_cost(dr.precompile.gas_used) {
+                if !result.gas.record_regular_cost(dr.precompile.gas_used) {
                     result.result = InstructionResult::PrecompileOOG;
                     return Ok((Some(result), vec![]));
                 }
-                result.result = if dr.precompile.reverted {
+                result.result = if dr.precompile.status.is_revert() {
                     InstructionResult::Revert
                 } else {
                     InstructionResult::Return
                 };
                 result.output = dr.precompile.bytes;
-                let logs = if dr.precompile.reverted {
+                let logs = if dr.precompile.status.is_revert() {
                     vec![]
                 } else {
                     dr.logs
                 };
                 Ok((Some(result), logs))
             }
-            Err(revm::precompile::PrecompileError::Fatal(e)) => Err(e),
-            Err(e) => {
-                result.result = if e.is_oog() {
-                    InstructionResult::PrecompileOOG
-                } else {
-                    InstructionResult::PrecompileError
-                };
+            Err(error) if is_out_of_gas(&error) => {
+                result.result = InstructionResult::PrecompileOOG;
                 Ok((Some(result), vec![]))
             }
+            Err(revm::precompile::PrecompileError::Fatal(e)) => Err(e),
+            Err(revm::precompile::PrecompileError::FatalAny(e)) => Err(e.to_string()),
         }
     }
 
@@ -436,19 +461,23 @@ impl VeraPrecompiles {
                 Ok(None) => return Ok((None, vec![])),
                 Err(_) => {
                     tracing::warn!("module call panicked");
-                    Err(PrecompileError::Other("module execution failed".into()))
+                    Err(PrecompileError::Fatal(
+                        "module execution failed".to_string(),
+                    ))
                 }
             };
 
         if inputs.is_static && journal.changed() {
             return Ok((Some(Self::static_write_error(inputs)), vec![]));
         }
-        if matches!(&dispatch_result, Ok(result) if !result.precompile.reverted)
+        if matches!(&dispatch_result, Ok(result) if !result.precompile.status.is_revert())
             && !journal.writes_fit_native_bounds()
         {
-            dispatch_result = Err(PrecompileError::Other(
-                "module record exceeds native storage bounds".into(),
-            ));
+            // Charge the full allowance: the record cannot be published, so the
+            // writer loses the call the same way an out-of-gas precompile does.
+            let mut rejected = err_dispatch("module record exceeds native storage bounds");
+            rejected.precompile.gas_used = inputs.gas_limit;
+            dispatch_result = Ok(rejected);
         }
         Self::dispatch_result_to_interpreter(inputs, dispatch_result)
     }
@@ -554,6 +583,8 @@ mod tests {
         let precompiles = test_precompiles();
         let warm: Vec<Address> =
             <VeraPrecompiles as PrecompileProvider<TestCtx>>::warm_addresses(&precompiles)
+                .iter()
+                .copied()
                 .collect();
         assert!(warm.contains(&ACP_ADDRESS));
         assert!(warm.contains(&BULLETIN_ADDRESS));

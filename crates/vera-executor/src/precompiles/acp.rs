@@ -43,7 +43,8 @@ use vera_modules::vera::VeraModule;
 
 use super::{
     ACP_ADDRESS, DispatchResult, DispatchReturn, decode_error, did_from_signer, err_dispatch,
-    event_log, json_bytes, ok_dispatch,
+    event_log, is_out_of_gas, json_bytes, ok_dispatch, oog_dispatch, out_of_gas_error,
+    recoverable_message,
 };
 
 /// Base gas cost for reads and each batch wrapper.
@@ -54,22 +55,24 @@ const WRITE_GAS: u64 = 5000;
 // Keep work charges on ordinary reverts; snapshots restore state, never spent gas.
 fn edit_gas(budget: &PolicyEditBudget) -> Result<u64, PrecompileError> {
     if budget.is_exhausted() {
-        return Err(PrecompileError::OutOfGas);
+        return Err(out_of_gas_error());
     }
     WRITE_GAS
         .checked_add(budget.consumed())
-        .ok_or(PrecompileError::OutOfGas)
+        .ok_or_else(out_of_gas_error)
 }
 
 fn edit_error(error: impl core::fmt::Display, budget: &PolicyEditBudget) -> DispatchReturn {
-    let gas_used = edit_gas(budget)?;
+    let Ok(gas_used) = edit_gas(budget) else {
+        return Ok(oog_dispatch());
+    };
     let mut result = err_dispatch(error);
     result.precompile.gas_used = gas_used;
     Ok(result)
 }
 
 fn did_from_actor(actor: &str) -> Result<Did, PrecompileError> {
-    Did::new(actor).map_err(|e| PrecompileError::Other(format!("actor DID: {e}").into()))
+    Did::new(actor).map_err(|e| PrecompileError::Fatal(format!("actor DID: {e}")))
 }
 
 /// Decode a structured subject — a `subjectKind` discriminant plus the discrete
@@ -141,7 +144,7 @@ fn decode_subject(
 }
 
 fn subject_field_error(msg: &str) -> PrecompileError {
-    PrecompileError::Other(format!("subject: {msg}").into())
+    PrecompileError::Fatal(format!("subject: {msg}"))
 }
 
 fn policy_id_to_string(b: &B256) -> String {
@@ -162,7 +165,7 @@ fn build_operations(
     permissions: &[String],
 ) -> Result<Vec<Operation>, PrecompileError> {
     if resources.len() != object_ids.len() || resources.len() != permissions.len() {
-        return Err(PrecompileError::Other("array length mismatch".into()));
+        return Err(PrecompileError::Fatal("array length mismatch".to_string()));
     }
     Ok(resources
         .iter()
@@ -197,20 +200,18 @@ fn batch_revert(
     };
 
     Ok(DispatchResult {
-        precompile: PrecompileOutput {
-            gas_used,
-            gas_refunded: 0,
-            bytes: message.into_bytes().into(),
-            reverted: true,
-        },
+        precompile: PrecompileOutput::revert(gas_used, message.into_bytes().into(), 0),
         logs: vec![],
     })
 }
 
 fn batch_error(index: usize, err: PrecompileError) -> PrecompileError {
+    if is_out_of_gas(&err) {
+        return err;
+    }
     match err {
-        PrecompileError::Other(message) => {
-            PrecompileError::Other(format!("batch call {}: {message}", index + 1).into())
+        PrecompileError::Fatal(message) => {
+            PrecompileError::Fatal(format!("batch call {}: {message}", index + 1))
         }
         other => other,
     }
@@ -232,11 +233,11 @@ pub(super) fn dispatch(
     });
     if let Some(minimum) = preflight_gas {
         if gas_limit < minimum {
-            return Err(PrecompileError::OutOfGas);
+            return Ok(oog_dispatch());
         }
         batch::validate(input)?;
     }
-    dispatch_validated(
+    let result = dispatch_validated(
         module,
         vera,
         block_ctx,
@@ -244,7 +245,11 @@ pub(super) fn dispatch(
         input,
         gas_limit,
         &mut batch_results::Budget::new(),
-    )
+    );
+    match result {
+        Err(error) if is_out_of_gas(&error) => Ok(oog_dispatch()),
+        other => other,
+    }
 }
 
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
@@ -258,9 +263,7 @@ fn dispatch_validated(
     result_budget: &mut batch_results::Budget,
 ) -> DispatchReturn {
     if input.len() < 4 {
-        return Err(PrecompileError::Other(
-            "input too short for selector".into(),
-        ));
+        return Ok(err_dispatch("input too short for selector"));
     }
     let selector: [u8; 4] = input[..4].try_into().expect("checked length above");
 
@@ -280,7 +283,7 @@ fn dispatch_validated(
         // ── Write methods ────────────────────────────────────────────
         IAcp::batchCallsCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IAcp::batchCallsCall::abi_decode(input).map_err(decode_error)?;
             result_budget.begin_batch(call.calls.len())?;
@@ -311,11 +314,21 @@ fn dispatch_validated(
                     Some(total) => total,
                     None => {
                         (*module, *vera) = snapshot;
-                        return Err(PrecompileError::OutOfGas);
+                        return Ok(oog_dispatch());
                     }
                 };
 
-                if inner.precompile.reverted {
+                if matches!(
+                    inner.precompile.status,
+                    revm::precompile::PrecompileStatus::Halt(
+                        revm::precompile::PrecompileHalt::OutOfGas
+                    )
+                ) {
+                    (*module, *vera) = snapshot;
+                    return Ok(oog_dispatch());
+                }
+
+                if inner.precompile.status.is_revert() {
                     (*module, *vera) = snapshot;
                     return batch_revert(index, inner_gas, &inner.precompile.bytes, result_budget);
                 }
@@ -341,12 +354,12 @@ fn dispatch_validated(
 
         IAcp::bearerEditPolicyCall::SELECTOR => {
             if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let budget = PolicyEditBudget::new(gas_limit - WRITE_GAS);
             let call = IAcp::bearerEditPolicyCall::abi_decode(input).map_err(decode_error)?;
             let policy = std::str::from_utf8(&call.policy)
-                .map_err(|_| PrecompileError::Other("invalid UTF-8 in policy".into()))?;
+                .map_err(|_| PrecompileError::Fatal("invalid UTF-8 in policy".to_string()))?;
             let policy_id = policy_id_to_string(&call.policyId);
             let (removed, record) = match module.bearer_edit_policy_with_budget(
                 vera,
@@ -366,8 +379,11 @@ fn dispatch_validated(
                 creator: record.metadata.owner_did.clone(),
                 relationshipsRemoved: alloy_primitives::U256::from(removed),
             };
+            let Ok(gas) = edit_gas(&budget) else {
+                return Ok(oog_dispatch());
+            };
             Ok(ok_dispatch(
-                edit_gas(&budget)?,
+                gas,
                 IAcp::bearerEditPolicyCall::abi_encode_returns(&IAcp::bearerEditPolicyReturn {
                     relationshipsRemoved: removed,
                     record: json_bytes(&record),
@@ -378,14 +394,14 @@ fn dispatch_validated(
 
         IAcp::editPolicyCall::SELECTOR => {
             if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let budget = PolicyEditBudget::new(gas_limit - WRITE_GAS);
             let call = IAcp::editPolicyCall::abi_decode(input).map_err(decode_error)?;
             let creator = did_from_signer(&tx_ctx.signer)?;
             let policy_id = policy_id_to_string(&call.policyId);
             let policy_str = std::str::from_utf8(&call.policy)
-                .map_err(|_| PrecompileError::Other("invalid UTF-8 in policy".into()))?;
+                .map_err(|_| PrecompileError::Fatal("invalid UTF-8 in policy".to_string()))?;
             let marshal_type = marshal_type_from_u8(call.marshalType);
 
             let (relationships_removed, record) = match module.edit_policy_at_with_budget(
@@ -409,11 +425,10 @@ fn dispatch_validated(
                 relationshipsRemoved: relationships_removed,
                 record: json_bytes(&record),
             });
-            Ok(ok_dispatch(
-                edit_gas(&budget)?,
-                ret,
-                vec![event_log(ACP_ADDRESS, &event)],
-            ))
+            let Ok(gas) = edit_gas(&budget) else {
+                return Ok(oog_dispatch());
+            };
+            Ok(ok_dispatch(gas, ret, vec![event_log(ACP_ADDRESS, &event)]))
         }
 
         IAcp::bearerCheckAccessCall::SELECTOR
@@ -424,12 +439,12 @@ fn dispatch_validated(
 
         IAcp::updateParamsCall::SELECTOR => {
             if gas_limit < WRITE_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IAcp::updateParamsCall::abi_decode(input).map_err(decode_error)?;
             let authority = did_from_signer(&tx_ctx.signer)?;
             let params: AcpParams = serde_json::from_slice(&call.params)
-                .map_err(|e| PrecompileError::Other(format!("params JSON decode: {e}").into()))?;
+                .map_err(|e| PrecompileError::Fatal(format!("params JSON decode: {e}")))?;
 
             match module.update_params(&authority, params) {
                 Ok(()) => {}
@@ -442,7 +457,7 @@ fn dispatch_validated(
         // ── Read methods ─────────────────────────────────────────────
         IAcp::getObjectOwnerCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IAcp::getObjectOwnerCall::abi_decode(input).map_err(decode_error)?;
             let policy_id = policy_id_to_string(&call.policyId);
@@ -467,7 +482,7 @@ fn dispatch_validated(
 
         IAcp::getAccessDecisionCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IAcp::getAccessDecisionCall::abi_decode(input).map_err(decode_error)?;
 
@@ -482,7 +497,7 @@ fn dispatch_validated(
 
         IAcp::getRegistrationsCommitmentCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call =
                 IAcp::getRegistrationsCommitmentCall::abi_decode(input).map_err(decode_error)?;
@@ -499,7 +514,7 @@ fn dispatch_validated(
 
         IAcp::getRegistrationsCommitmentByValueCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IAcp::getRegistrationsCommitmentByValueCall::abi_decode(input)
                 .map_err(decode_error)?;
@@ -518,7 +533,7 @@ fn dispatch_validated(
 
         IAcp::getHijackAttemptsCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IAcp::getHijackAttemptsCall::abi_decode(input).map_err(decode_error)?;
             let policy_id = policy_id_to_string(&call.policyId);
@@ -534,14 +549,14 @@ fn dispatch_validated(
 
         IAcp::generateCommitmentCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             let call = IAcp::generateCommitmentCall::abi_decode(input).map_err(decode_error)?;
             let policy_id = policy_id_to_string(&call.policyId);
             let actor_did = did_from_actor(&call.actor)?;
 
             if call.resources.len() != call.objectIds.len() {
-                return Err(PrecompileError::Other("array length mismatch".into()));
+                return Err(PrecompileError::Fatal("array length mismatch".to_string()));
             }
             let objects: Vec<Object> = call
                 .resources
@@ -565,7 +580,7 @@ fn dispatch_validated(
 
         IAcp::getParamsCall::SELECTOR => {
             if gas_limit < READ_GAS {
-                return Err(PrecompileError::OutOfGas);
+                return Ok(oog_dispatch());
             }
             // Zero-parameter function — no ABI decoding needed.
             let params = match module.query_params() {
@@ -577,9 +592,10 @@ fn dispatch_validated(
             Ok(ok_dispatch(READ_GAS, ret, vec![]))
         }
 
-        _ => Err(PrecompileError::Other(
-            format!("unknown ACP selector: 0x{}", hex::encode(selector)).into(),
-        )),
+        _ => Err(PrecompileError::Fatal(format!(
+            "unknown ACP selector: 0x{}",
+            hex::encode(selector)
+        ))),
     }
 }
 
@@ -594,8 +610,8 @@ fn build_relationship_selector(
     let object_selector = if resource.is_empty() && object_id.is_empty() {
         None
     } else if resource.is_empty() {
-        return Err(PrecompileError::Other(
-            "object selector requires a resource".into(),
+        return Err(PrecompileError::Fatal(
+            "object selector requires a resource".to_string(),
         ));
     } else if object_id.is_empty() {
         Some(ObjectSelector::ResourcePredicate(resource.to_owned()))
@@ -682,7 +698,7 @@ resources:
         match &result {
             Ok(dr) => {
                 assert!(
-                    !dr.precompile.reverted,
+                    !dr.precompile.status.is_revert(),
                     "dispatch should not revert, output bytes: {}",
                     String::from_utf8_lossy(&dr.precompile.bytes)
                 );
@@ -735,7 +751,7 @@ resources:
             1_000_000,
         )
         .unwrap();
-        assert!(!result.precompile.reverted);
+        assert!(!result.precompile.status.is_revert());
         assert_eq!(result.logs.len(), 2);
         assert_eq!(module.query_policy_ids().unwrap().len(), 2);
     }
@@ -794,7 +810,7 @@ resources:
             1_000_000,
         )
         .unwrap();
-        assert!(result.precompile.reverted);
+        assert!(result.precompile.status.is_revert());
         assert!(result.precompile.gas_used > READ_GAS + 2 * WRITE_GAS);
         let message = std::str::from_utf8(&result.precompile.bytes).unwrap();
         assert!(
@@ -977,7 +993,7 @@ resources:
         )
         .unwrap();
         assert!(
-            !dr.precompile.reverted,
+            !dr.precompile.status.is_revert(),
             "set subject should not revert: {}",
             String::from_utf8_lossy(&dr.precompile.bytes)
         );
@@ -1021,7 +1037,10 @@ resources:
             1_000_000,
         )
         .unwrap();
-        assert!(!dr.precompile.reverted, "delete subject should not revert");
+        assert!(
+            !dr.precompile.status.is_revert(),
+            "delete subject should not revert"
+        );
         let rels = module
             .query_filter_relationships(&policy_id, &selector)
             .unwrap();

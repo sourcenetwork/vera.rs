@@ -1,5 +1,6 @@
 //! Native permission checks share an execution allowance across reads and evaluation.
 
+use super::oog_dispatch;
 use super::*;
 use vera_modules::acp::PermissionBudget;
 
@@ -17,17 +18,16 @@ pub(super) fn dispatch(
     } else {
         WRITE_GAS
     };
-    let budget = PermissionBudget::new(
-        gas_limit
-            .checked_sub(base)
-            .ok_or(PrecompileError::OutOfGas)?,
-    );
+    let Some(allowance) = gas_limit.checked_sub(base) else {
+        return Ok(oog_dispatch());
+    };
+    let budget = PermissionBudget::new(allowance);
     match selector {
         IAcp::bearerCheckAccessCall::SELECTOR => {
             let call = IAcp::bearerCheckAccessCall::abi_decode(input).map_err(decode_error)?;
             let request: AccessRequest =
                 serde_json::from_slice(&call.request).map_err(|error| {
-                    PrecompileError::Other(format!("access request JSON decode: {error}").into())
+                    PrecompileError::Fatal(format!("access request JSON decode: {error}"))
                 })?;
             output(
                 module.bearer_check_access_with_budget(
@@ -93,11 +93,11 @@ fn output<T>(
     encode: impl FnOnce(T) -> Vec<u8>,
 ) -> DispatchReturn {
     if budget.is_exhausted() {
-        return Err(PrecompileError::OutOfGas);
+        return Ok(oog_dispatch());
     }
-    let gas = base
-        .checked_add(budget.consumed())
-        .ok_or(PrecompileError::OutOfGas)?;
+    let Some(gas) = base.checked_add(budget.consumed()) else {
+        return Ok(oog_dispatch());
+    };
     match result {
         Ok(value) => Ok(ok_dispatch(gas, encode(value), vec![])),
         Err(error) => {

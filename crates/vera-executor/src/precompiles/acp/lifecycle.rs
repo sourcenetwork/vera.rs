@@ -1,3 +1,4 @@
+use super::oog_dispatch;
 use super::*;
 use vera_modules::acp::types::SuppliedMetadata;
 
@@ -25,7 +26,7 @@ pub(super) fn dispatch(
     );
     let gas = if write { WRITE_GAS } else { READ_GAS };
     if gas_limit < gas {
-        return Err(PrecompileError::OutOfGas);
+        return Ok(oog_dispatch());
     }
     match selector {
         IAcp::deletePolicyCall::SELECTOR => {
@@ -53,7 +54,7 @@ pub(super) fn dispatch(
             let call = IAcp::editPolicyMetadataCall::abi_decode(input).map_err(decode_error)?;
             let metadata: SuppliedMetadata =
                 serde_json::from_slice(&call.metadata).map_err(|error| {
-                    PrecompileError::Other(format!("invalid policy metadata: {error}").into())
+                    PrecompileError::Fatal(format!("invalid policy metadata: {error}"))
                 })?;
             let actor = did_from_signer(&tx.signer)?;
             match module.edit_policy_metadata(
@@ -104,8 +105,8 @@ pub(super) fn dispatch(
             }
         }
 
-        _ => Err(PrecompileError::Other(
-            "unknown ACP lifecycle selector".into(),
+        _ => Err(PrecompileError::Fatal(
+            "unknown ACP lifecycle selector".to_string(),
         )),
     }
 }

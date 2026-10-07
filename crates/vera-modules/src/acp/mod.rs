@@ -1,6 +1,9 @@
 //! ACP module — Zanzibar-style access control policies.
 
 /// Solidity ABI interface for the ACP precompile.
+// alloy-sol-types 1.7 generates 8-argument builder functions for multi-arg
+// solidity methods, tripping clippy::too_many_arguments inside the macro.
+#[allow(clippy::too_many_arguments)]
 pub mod abi;
 mod amendment_history;
 pub mod catalogue;
