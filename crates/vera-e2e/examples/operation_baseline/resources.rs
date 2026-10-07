@@ -75,9 +75,146 @@ fn size_overflow() -> io::Error {
     io::Error::other("storage size overflow")
 }
 
+#[cfg(any(target_os = "linux", test))]
+const STATUS_LIMIT: usize = 16 * 1024;
+
+#[cfg(any(target_os = "linux", test))]
+fn parse_rss_status(status: &str) -> Result<[Option<u64>; 4], io::Error> {
+    let invalid = || io::Error::new(io::ErrorKind::InvalidData, "invalid RSS status field");
+    if status.len() > STATUS_LIMIT {
+        return Err(invalid());
+    }
+    let mut values = [None; 4];
+    for line in status.lines() {
+        let mut fields = line.split_whitespace();
+        let index = match fields.next() {
+            Some("VmRSS:") => 0,
+            Some("RssAnon:") => 1,
+            Some("RssFile:") => 2,
+            Some("RssShmem:") => 3,
+            _ => continue,
+        };
+        let number = fields.next().ok_or_else(invalid)?;
+        if values[index].is_some()
+            || !number.bytes().all(|byte| byte.is_ascii_digit())
+            || fields.next() != Some("kB")
+            || fields.next().is_some()
+        {
+            return Err(invalid());
+        }
+        values[index] = Some(
+            number
+                .parse::<u64>()
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?,
+        );
+    }
+    Ok(values)
+}
+
+#[cfg(target_os = "linux")]
+async fn read_rss_status(pid: u32) -> Result<[Option<u64>; 4], io::Error> {
+    use tokio::io::AsyncReadExt;
+
+    let file = tokio::fs::File::open(format!("/proc/{pid}/status")).await?;
+    let mut status = String::new();
+    file.take((STATUS_LIMIT + 1) as u64)
+        .read_to_string(&mut status)
+        .await?;
+    parse_rss_status(&status)
+}
+
+async fn rss_sample(pid: u32) -> serde_json::Value {
+    #[cfg(target_os = "linux")]
+    let (values, availability) =
+        match tokio::time::timeout(Duration::from_secs(2), read_rss_status(pid)).await {
+            Ok(Ok(values)) => {
+                let availability = if values.iter().all(Option::is_some) {
+                    "complete"
+                } else {
+                    "partial"
+                };
+                (values, availability)
+            }
+            Ok(Err(error)) if error.kind() == io::ErrorKind::InvalidData => {
+                ([None; 4], "invalid_data")
+            }
+            Ok(Err(_)) => ([None; 4], "read_error"),
+            Err(_) => ([None; 4], "timed_out"),
+        };
+    #[cfg(not(target_os = "linux"))]
+    let (values, availability) = ([None::<u64>; 4], "unsupported");
+    json!({
+        "pid": pid, "availability": availability,
+        "vm_rss_kib": values[0], "rss_anon_kib": values[1],
+        "rss_file_kib": values[2], "rss_shmem_kib": values[3],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rss_status_preserves_units_zero_and_missing_fields() {
+        assert_eq!(
+            parse_rss_status(
+                "Name:\tverad\nRssFile:\t 256 kB\nVmRSS: 1024 kB\nRssAnon: 768 kB\nRssShmem: 0 kB\n"
+            )
+            .unwrap(),
+            [Some(1024), Some(768), Some(256), Some(0)]
+        );
+        assert_eq!(
+            parse_rss_status("VmRSS: 42 kB\nRssFile: 0 kB\n").unwrap(),
+            [Some(42), None, Some(0), None]
+        );
+        assert_eq!(parse_rss_status("Name: verad\n").unwrap(), [None; 4]);
+        assert_eq!(
+            parse_rss_status("RssAnon: 18446744073709551615 kB").unwrap()[1],
+            Some(u64::MAX)
+        );
+    }
+
+    #[test]
+    fn rss_status_rejects_ambiguous_or_unbounded_measurements() {
+        for input in [
+            "VmRSS:",
+            "VmRSS: kB",
+            "VmRSS: -1 kB",
+            "VmRSS: +1 kB",
+            "VmRSS: 1.5 kB",
+            "VmRSS: 18446744073709551616 kB",
+            "VmRSS: 1024 B",
+            "VmRSS: 1 KiB",
+            "VmRSS: 1 kB extra",
+            "RssAnon: 1 kB\nRssAnon: 2 kB",
+        ] {
+            assert_eq!(
+                parse_rss_status(input).unwrap_err().kind(),
+                io::ErrorKind::InvalidData,
+                "{input}"
+            );
+        }
+        assert!(parse_rss_status(&" ".repeat(STATUS_LIMIT)).is_ok());
+        assert_eq!(
+            parse_rss_status(&" ".repeat(STATUS_LIMIT + 1))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn rss_status_reads_the_current_process() {
+        let pid = std::process::id();
+        let sample = rss_sample(pid).await;
+        assert_eq!(sample["pid"], pid);
+        assert_eq!(sample["availability"], "complete");
+        assert!(sample["vm_rss_kib"].as_u64().unwrap() > 0);
+        for field in ["rss_anon_kib", "rss_file_kib", "rss_shmem_kib"] {
+            assert!(sample[field].as_u64().is_some(), "{field}: {sample}");
+        }
+    }
 
     #[test]
     fn storage_usage_counts_nested_files_without_following_symlinks() {
@@ -113,7 +250,8 @@ pub(super) fn start(cluster: &TestCluster) -> (oneshot::Sender<()>, JoinHandle<(
     println!(
         "{}",
         json!({"kind": "resource_configuration", "node_pids": pids,
-        "sample_interval_ms": 1000, "rss_unit": "KiB", "cpu_time": "cumulative ps time"})
+        "sample_interval_ms": 1000, "rss_unit": "KiB", "cpu_time": "cumulative ps time",
+        "rss_breakdown_source": if cfg!(target_os = "linux") { "linux_proc_status" } else { "unsupported" }})
     );
     let selection = pids
         .iter()
@@ -130,15 +268,20 @@ pub(super) fn start(cluster: &TestCluster) -> (oneshot::Sender<()>, JoinHandle<(
                 _ = &mut stopped => break,
                 _ = interval.tick() => {}
             }
-            let output = tokio::time::timeout(
-                Duration::from_secs(2),
-                Command::new("ps")
-                    .args(["-p", &selection, "-o", "pid=,rss=,time="])
-                    .kill_on_drop(true)
-                    .output(),
-            )
-            .await;
-            let sample = match output {
+            let (output, rss_breakdown) = tokio::join!(
+                async {
+                    tokio::time::timeout(
+                        Duration::from_secs(2),
+                        Command::new("ps")
+                            .args(["-p", &selection, "-o", "pid=,rss=,time="])
+                            .kill_on_drop(true)
+                            .output(),
+                    )
+                    .await
+                },
+                futures::future::join_all(pids.iter().copied().map(rss_sample)),
+            );
+            let mut sample = match output {
                 Ok(Ok(output)) if output.status.success() => match String::from_utf8(output.stdout)
                 {
                     Ok(rows) => json!({"rows": rows}),
@@ -148,6 +291,7 @@ pub(super) fn start(cluster: &TestCluster) -> (oneshot::Sender<()>, JoinHandle<(
                 Ok(Err(error)) => json!({"error": error.to_string()}),
                 Err(_) => json!({"error": "process sampling timed out"}),
             };
+            sample["rss_breakdown"] = json!(rss_breakdown);
             println!(
                 "{}",
                 json!({"kind": "resources", "elapsed_seconds": started.elapsed().as_secs_f64(), "sample": sample})
