@@ -36,6 +36,31 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(result[5], {42: []})
         self.assertEqual(result[6], 1)
 
+    def test_rss_breakdown_preserves_legacy_report_and_missing_ps_samples(self):
+        self.rows[-1]['sample'] = {'rows': '42 2048 00:00:01\n'}
+        legacy = self.load()
+        self.assertEqual(legacy[5], {42: [(1, 2.0)]})
+        for source, availability, values in [
+                ('linux_proc_status', 'complete', [2048, 1536, 512, 0]),
+                ('linux_proc_status', 'partial', [2048, None, 512, None]),
+                ('unsupported', 'unsupported', [None] * 4),
+                ('linux_proc_status', 'read_error', [None] * 4)]:
+            with self.subTest(availability=availability):
+                self.rows[-2]['rss_breakdown_source'] = source
+                self.rows[-1]['sample']['rss_breakdown'] = [dict(
+                    pid=42, availability=availability,
+                    vm_rss_kib=values[0], rss_anon_kib=values[1],
+                    rss_file_kib=values[2], rss_shmem_kib=values[3])]
+                self.assertEqual(self.load(), legacy)
+        # Component measurements never fill a missing legacy ps observation.
+        del self.rows[-1]['sample']['rows']
+        self.rows[-1]['sample']['rss_breakdown'][0].update(
+            availability='complete', vm_rss_kib=2048, rss_anon_kib=1536,
+            rss_file_kib=512, rss_shmem_kib=0)
+        result = self.load()
+        self.assertEqual(result[5], {42: []})
+        self.assertEqual(result[6], 1)
+
     def test_missing_recovery_cannot_pass(self):
         self.rows = [row for row in self.rows if row['kind'] != 'recovery']
         result = self.load()
