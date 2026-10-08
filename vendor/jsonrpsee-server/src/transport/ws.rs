@@ -2,21 +2,22 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::future::{IntervalStream, SessionClose};
-use crate::middleware::rpc::{RpcService, RpcServiceBuilder, RpcServiceCfg, RpcServiceT};
-use crate::server::{handle_rpc_call, ConnectionState, ServerConfig};
-use crate::{HttpBody, HttpRequest, HttpResponse, PingConfig, LOG_TARGET};
+use crate::middleware::rpc::{RpcService, RpcServiceCfg};
+use crate::server::{ConnectionState, ServerConfig, handle_rpc_call};
+use crate::{HttpBody, HttpRequest, HttpResponse, LOG_TARGET, PingConfig};
 
 use futures_util::future::{self, Either};
 use futures_util::io::{BufReader, BufWriter};
 use futures_util::{Future, StreamExt, TryStreamExt};
 use hyper::upgrade::Upgraded;
 use hyper_util::rt::TokioIo;
-use jsonrpsee_core::server::{BoundedSubscriptions, MethodSink, Methods};
-use jsonrpsee_types::error::{reject_too_big_request, ErrorCode};
+use jsonrpsee_core::middleware::{RpcServiceBuilder, RpcServiceT};
+use jsonrpsee_core::server::{BoundedSubscriptions, MethodResponse, MethodSink, Methods};
 use jsonrpsee_types::Id;
+use jsonrpsee_types::error::{ErrorCode, reject_too_big_request};
+use serde_json::value::RawValue;
 use soketto::connection::Error as SokettoError;
 use soketto::data::ByteSlice125;
-
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{interval, interval_at};
 use tokio_stream::wrappers::ReceiverStream;
@@ -32,9 +33,9 @@ enum Incoming {
 	Pong,
 }
 
-pub(crate) async fn send_message(sender: &mut Sender, response: String) -> Result<(), SokettoError> {
-	sender.send_text_owned(response).await?;
-	sender.flush().await.map_err(Into::into)
+pub(crate) async fn send_message(sender: &mut Sender, response: Box<RawValue>) -> Result<(), SokettoError> {
+	sender.send_text_owned(String::from(Box::<str>::from(response))).await?;
+	sender.flush().await
 }
 
 pub(crate) async fn send_ping(sender: &mut Sender) -> Result<(), SokettoError> {
@@ -44,7 +45,7 @@ pub(crate) async fn send_ping(sender: &mut Sender) -> Result<(), SokettoError> {
 	// Byte slice fails if the provided slice is larger than 125 bytes.
 	let byte_slice = ByteSlice125::try_from(slice).expect("Empty slice should fit into ByteSlice125");
 	sender.send_ping(byte_slice).await?;
-	sender.flush().await.map_err(Into::into)
+	sender.flush().await
 }
 
 pub(crate) struct BackgroundTaskParams<S> {
@@ -54,7 +55,7 @@ pub(crate) struct BackgroundTaskParams<S> {
 	pub(crate) ws_receiver: Receiver,
 	pub(crate) rpc_service: S,
 	pub(crate) sink: MethodSink,
-	pub(crate) rx: mpsc::Receiver<String>,
+	pub(crate) rx: mpsc::Receiver<Box<RawValue>>,
 	pub(crate) pending_calls_completed: mpsc::Receiver<()>,
 	pub(crate) on_session_close: Option<SessionClose>,
 	pub(crate) extensions: http::Extensions,
@@ -62,7 +63,13 @@ pub(crate) struct BackgroundTaskParams<S> {
 
 pub(crate) async fn background_task<S>(params: BackgroundTaskParams<S>)
 where
-	for<'a> S: RpcServiceT<'a> + Send + Sync + 'static,
+	S: RpcServiceT<
+			MethodResponse = MethodResponse,
+			BatchResponse = MethodResponse,
+			NotificationResponse = MethodResponse,
+		> + Send
+		+ Sync
+		+ 'static,
 {
 	let BackgroundTaskParams {
 		server_cfg,
@@ -76,8 +83,7 @@ where
 		mut on_session_close,
 		extensions,
 	} = params;
-	let ServerConfig { ping_config, batch_requests_config, max_request_body_size, max_response_body_size, .. } =
-		server_cfg;
+	let ServerConfig { ping_config, batch_requests_config, max_request_body_size, .. } = server_cfg;
 
 	let (mut conn_tx, conn_rx) = oneshot::channel();
 
@@ -170,30 +176,28 @@ where
 				}
 			};
 
-			if let Some(rp) = handle_rpc_call(
-				&data[idx..],
-				is_single,
-				batch_requests_config,
-				max_response_body_size,
-				&*rpc_service,
-				extensions,
-			)
-			.await
-			{
-				if !rp.is_subscription() {
-					let is_success = rp.is_success();
-					let (serialized_rp, mut on_close) = rp.into_parts();
+			// Calls are not tied to the connection task, so stop them once the connection is closed
+			// instead of running them to completion without anyone to send the response to.
+			let rp = tokio::select! {
+				_ = sink.closed() => return,
+				rp = handle_rpc_call(&data[idx..], is_single, batch_requests_config, &*rpc_service, extensions) => rp,
+			};
 
-					// The connection is closed, just quit.
-					if sink.send(serialized_rp).await.is_err() {
-						return;
-					}
+			// Subscriptions are handled by the subscription callback and
+			// "ordinary notifications" should not be sent back to the client.
+			if rp.is_method_call() || rp.is_batch() {
+				let is_success = rp.is_success();
+				let (json, mut on_close, _) = rp.into_parts();
 
-					// Notify that the message has been sent out to the internal
-					// WebSocket buffer.
-					if let Some(n) = on_close.take() {
-						n.notify(is_success);
-					}
+				// The connection is closed, just quit.
+				if sink.send(json).await.is_err() {
+					return;
+				}
+
+				// Notify that the message has been sent out to the internal
+				// WebSocket buffer.
+				if let Some(n) = on_close.take() {
+					n.notify(is_success);
 				}
 			}
 		});
@@ -218,7 +222,7 @@ where
 
 /// A task that waits for new messages via the `rx channel` and sends them out on the `WebSocket`.
 async fn send_task(
-	rx: mpsc::Receiver<String>,
+	rx: mpsc::Receiver<Box<RawValue>>,
 	mut ws_sender: Sender,
 	ping_config: Option<PingConfig>,
 	stop: oneshot::Receiver<()>,
@@ -411,7 +415,8 @@ async fn graceful_shutdown<S>(
 ///
 /// ```no_run
 /// use jsonrpsee_server::{ws, ServerConfig, Methods, ConnectionState, HttpRequest, HttpResponse};
-/// use jsonrpsee_server::middleware::rpc::{RpcServiceBuilder, RpcServiceT, RpcService};
+/// use jsonrpsee_server::middleware::rpc::{RpcServiceBuilder, RpcServiceT, RpcService, MethodResponse};
+/// use std::convert::Infallible;
 ///
 /// async fn handle_websocket_conn<L>(
 ///     req: HttpRequest,
@@ -422,9 +427,8 @@ async fn graceful_shutdown<S>(
 ///     mut disconnect: tokio::sync::mpsc::Receiver<()>
 /// ) -> HttpResponse
 /// where
-///     L: for<'a> tower::Layer<RpcService> + 'static,
-///     <L as tower::Layer<RpcService>>::Service: Send + Sync + 'static,
-///     for<'a> <L as tower::Layer<RpcService>>::Service: RpcServiceT<'a> + 'static,
+///     L: tower::Layer<RpcService> + 'static,
+///     <L as tower::Layer<RpcService>>::Service: RpcServiceT<MethodResponse = MethodResponse, BatchResponse = MethodResponse, NotificationResponse = MethodResponse> + Send + Sync + 'static,
 /// {
 ///   match ws::connect(req, server_cfg, methods, conn, rpc_middleware).await {
 ///     Ok((rp, conn_fut)) => {
@@ -450,15 +454,20 @@ pub async fn connect<L, B>(
 	rpc_middleware: RpcServiceBuilder<L>,
 ) -> Result<(HttpResponse, impl Future<Output = ()>), HttpResponse>
 where
-	L: for<'a> tower::Layer<RpcService>,
-	<L as tower::Layer<RpcService>>::Service: Send + Sync + 'static,
-	for<'a> <L as tower::Layer<RpcService>>::Service: RpcServiceT<'a>,
+	L: tower::Layer<RpcService>,
+	<L as tower::Layer<RpcService>>::Service: RpcServiceT<
+			MethodResponse = MethodResponse,
+			BatchResponse = MethodResponse,
+			NotificationResponse = MethodResponse,
+		> + Send
+		+ Sync
+		+ 'static,
 {
 	let mut server = soketto::handshake::http::Server::new();
 
 	match server.receive_request(&req) {
 		Ok(response) => {
-			let (tx, rx) = mpsc::channel::<String>(server_cfg.message_buffer_capacity as usize);
+			let (tx, rx) = mpsc::channel(server_cfg.message_buffer_capacity as usize);
 			let sink = MethodSink::new(tx);
 
 			// On each method call the `pending_calls` is cloned

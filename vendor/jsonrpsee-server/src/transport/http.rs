@@ -1,14 +1,15 @@
 use crate::{
-	middleware::rpc::{RpcService, RpcServiceBuilder, RpcServiceCfg, RpcServiceT},
-	server::{handle_rpc_call, ServerConfig},
 	BatchRequestConfig, ConnectionState, HttpRequest, HttpResponse, LOG_TARGET,
+	middleware::rpc::{RpcService, RpcServiceCfg},
+	server::{ServerConfig, handle_rpc_call},
 };
 use http::Method;
 use hyper::body::{Body, Bytes};
 use jsonrpsee_core::{
-	http_helpers::{read_body, HttpError},
-	server::Methods,
 	BoxError,
+	http_helpers::{HttpError, read_body},
+	middleware::{RpcServiceBuilder, RpcServiceT},
+	server::{MethodResponse, Methods},
 };
 
 /// Checks that content type of received request is valid for JSON-RPC.
@@ -18,7 +19,7 @@ pub fn content_type_is_json<T: Body>(request: &HttpRequest<T>) -> bool {
 
 /// Returns true if the `content_type` header indicates a valid JSON message.
 pub fn is_json(content_type: Option<&hyper::header::HeaderValue>) -> bool {
-	content_type.and_then(|val| val.to_str().ok()).map_or(false, |content| {
+	content_type.and_then(|val| val.to_str().ok()).is_some_and(|content| {
 		content.eq_ignore_ascii_case("application/json")
 			|| content.eq_ignore_ascii_case("application/json; charset=utf-8")
 			|| content.eq_ignore_ascii_case("application/json;charset=utf-8")
@@ -42,9 +43,12 @@ where
 	B: http_body::Body<Data = Bytes> + Send + 'static,
 	B::Data: Send,
 	B::Error: Into<BoxError>,
-	L: for<'a> tower::Layer<RpcService>,
-	<L as tower::Layer<RpcService>>::Service: Send + Sync + 'static,
-	for<'a> <L as tower::Layer<RpcService>>::Service: RpcServiceT<'a>,
+	L: tower::Layer<RpcService>,
+	<L as tower::Layer<RpcService>>::Service: RpcServiceT<
+			MethodResponse = MethodResponse,
+			BatchResponse = MethodResponse,
+			NotificationResponse = MethodResponse,
+		> + Send,
 {
 	let ServerConfig { max_response_body_size, batch_requests_config, max_request_body_size, .. } = server_cfg;
 
@@ -55,9 +59,7 @@ where
 		RpcServiceCfg::OnlyCalls,
 	));
 
-	let rp =
-		call_with_service(request, batch_requests_config, max_request_body_size, rpc_service, max_response_body_size)
-			.await;
+	let rp = call_with_service(request, batch_requests_config, max_request_body_size, rpc_service).await;
 
 	drop(conn);
 
@@ -72,13 +74,16 @@ pub async fn call_with_service<S, B>(
 	batch_config: BatchRequestConfig,
 	max_request_size: u32,
 	rpc_service: S,
-	max_response_size: u32,
 ) -> HttpResponse
 where
 	B: http_body::Body<Data = Bytes> + Send + 'static,
 	B::Data: Send,
 	B::Error: Into<BoxError>,
-	for<'a> S: RpcServiceT<'a> + Send,
+	S: RpcServiceT<
+			MethodResponse = MethodResponse,
+			BatchResponse = MethodResponse,
+			NotificationResponse = MethodResponse,
+		> + Send,
 {
 	// Only the `POST` method is allowed.
 	match *request.method() {
@@ -95,12 +100,11 @@ where
 				}
 			};
 
-			let rp = handle_rpc_call(&body, is_single, batch_config, max_response_size, &rpc_service, parts.extensions)
-				.await;
+			let rp = handle_rpc_call(&body, is_single, batch_config, &rpc_service, parts.extensions).await;
 
 			// If the response is empty it means that it was a notification or empty batch.
 			// For HTTP these are just ACK:ed with a empty body.
-			response::ok_response(rp.map_or(String::new(), |r| r.into_result()))
+			response::from_method_response(rp)
 		}
 		// Error scenarios:
 		Method::POST => response::unsupported_content_type(),
@@ -110,8 +114,9 @@ where
 
 /// HTTP response helpers.
 pub mod response {
-	use jsonrpsee_types::error::{reject_too_big_request, ErrorCode};
-	use jsonrpsee_types::{ErrorObjectOwned, Id, Response, ResponsePayload};
+	use jsonrpsee_core::server::MethodResponse;
+	use jsonrpsee_types::error::{ErrorCode, reject_too_big_request};
+	use jsonrpsee_types::{ErrorObject, ErrorObjectOwned, Id, Response, ResponsePayload};
 
 	use crate::{HttpBody, HttpResponse};
 
@@ -124,6 +129,12 @@ pub mod response {
 		let rp = Response::new(err, Id::Null);
 		let error = serde_json::to_string(&rp).expect("built from known-good data; qed");
 
+		from_template(hyper::StatusCode::INTERNAL_SERVER_ERROR, error, JSON)
+	}
+
+	/// Create a json response for general errors returned by the called method.
+	pub fn error_response(error: ErrorObject) -> HttpResponse {
+		let error = serde_json::to_string(&error).expect("JSON serialization infallible; qed");
 		from_template(hyper::StatusCode::INTERNAL_SERVER_ERROR, error, JSON)
 	}
 
@@ -159,7 +170,11 @@ pub mod response {
 	}
 
 	/// Create a response body.
-	fn from_template(status: hyper::StatusCode, body: impl Into<HttpBody>, content_type: &'static str) -> HttpResponse {
+	pub(crate) fn from_template(
+		status: hyper::StatusCode,
+		body: impl Into<HttpBody>,
+		content_type: &'static str,
+	) -> HttpResponse {
 		HttpResponse::builder()
 			.status(status)
 			.header("content-type", hyper::header::HeaderValue::from_static(content_type))
@@ -172,6 +187,16 @@ pub mod response {
 	/// Create a valid JSON response.
 	pub fn ok_response(body: impl Into<HttpBody>) -> HttpResponse {
 		from_template(hyper::StatusCode::OK, body, JSON)
+	}
+
+	/// Create a response from a method response.
+	///
+	/// This will include the body and extensions from the method response.
+	pub fn from_method_response(rp: MethodResponse) -> HttpResponse {
+		let (body, _, extensions) = rp.into_parts();
+		let mut rp = from_template(hyper::StatusCode::OK, String::from(Box::<str>::from(body)), JSON);
+		rp.extensions_mut().extend(extensions);
+		rp
 	}
 
 	/// Create a response for unsupported content type.

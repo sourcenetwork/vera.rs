@@ -24,51 +24,47 @@
 // IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use std::error::Error as StdError;
 use std::future::Future;
 use std::net::{SocketAddr, TcpListener as StdTcpListener};
 use std::pin::Pin;
-use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
 use std::task::Poll;
 use std::time::Duration;
 
-use crate::future::{session_close, ConnectionGuard, ServerHandle, SessionClose, SessionClosedFuture, StopHandle};
-use crate::middleware::rpc::{RpcService, RpcServiceBuilder, RpcServiceCfg, RpcServiceT};
+use crate::future::{ConnectionGuard, ServerHandle, SessionClose, SessionClosedFuture, StopHandle, session_close};
+use crate::middleware::rpc::{RpcService, RpcServiceCfg};
 use crate::transport::ws::BackgroundTaskParams;
 use crate::transport::{http, ws};
-use crate::utils::deserialize;
+use crate::utils::{DEFAULT_FIRST_REQUEST_TIMEOUT, NotifyOnRequest, deserialize_with_ext, no_request_within};
 use crate::{Extensions, HttpBody, HttpRequest, HttpResponse, LOG_TARGET};
 
-use futures_util::future::{self, Either, FutureExt};
+use futures_util::future::{Either, FutureExt};
 use futures_util::io::{BufReader, BufWriter};
-
 use hyper::body::Bytes;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use jsonrpsee_core::id_providers::RandomIntegerIdProvider;
+use jsonrpsee_core::middleware::{Batch, BatchEntry, BatchEntryErr, RpcServiceBuilder, RpcServiceT};
 use jsonrpsee_core::server::helpers::prepare_error;
-use jsonrpsee_core::server::{
-	BatchResponseBuilder, BoundedSubscriptions, ConnectionId, MethodResponse, MethodSink, Methods,
-};
+use jsonrpsee_core::server::{BoundedSubscriptions, ConnectionId, MethodResponse, MethodSink, Methods};
 use jsonrpsee_core::traits::IdProvider;
 use jsonrpsee_core::{BoxError, JsonRawValue, TEN_MB_SIZE_BYTES};
-
 use jsonrpsee_types::error::{
-	reject_too_big_batch_request, ErrorCode, BATCHES_NOT_SUPPORTED_CODE, BATCHES_NOT_SUPPORTED_MSG,
+	BATCHES_NOT_SUPPORTED_CODE, BATCHES_NOT_SUPPORTED_MSG, ErrorCode, reject_too_big_batch_request,
 };
-use jsonrpsee_types::{ErrorObject, Id, InvalidRequest, Notification};
+use jsonrpsee_types::{ErrorObject, Id};
 use soketto::handshake::http::is_upgrade_request;
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
-use tokio::sync::{mpsc, watch, OwnedSemaphorePermit};
+use tokio::sync::{Notify, OwnedSemaphorePermit, mpsc, watch};
 use tokio_util::compat::TokioAsyncReadCompatExt;
 use tower::layer::util::Identity;
 use tower::{Layer, Service};
-use tracing::{instrument, Instrument};
-
-type Notif<'a> = Notification<'a, Option<&'a JsonRawValue>>;
+use tracing::{Instrument, instrument};
 
 /// Default maximum connections allowed.
 const MAX_CONNECTIONS: u32 = 100;
+
+type Notif<'a> = Option<std::borrow::Cow<'a, JsonRawValue>>;
 
 /// JSON RPC server.
 pub struct Server<HttpMiddleware = Identity, RpcMiddleware = Identity> {
@@ -100,15 +96,14 @@ impl<RpcMiddleware, HttpMiddleware> Server<RpcMiddleware, HttpMiddleware> {
 
 impl<HttpMiddleware, RpcMiddleware, Body> Server<HttpMiddleware, RpcMiddleware>
 where
-	RpcMiddleware: tower::Layer<RpcService> + Clone + Send + 'static,
-	for<'a> <RpcMiddleware as Layer<RpcService>>::Service: RpcServiceT<'a>,
+	RpcMiddleware: Layer<RpcService> + Clone + Send + 'static,
+	<RpcMiddleware as Layer<RpcService>>::Service: RpcServiceT,
 	HttpMiddleware: Layer<TowerServiceNoHttp<RpcMiddleware>> + Send + 'static,
 	<HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service:
-		Send + Clone + Service<HttpRequest, Response = HttpResponse<Body>, Error = BoxError>,
+		Service<HttpRequest, Response = HttpResponse<Body>, Error = BoxError> + Clone + Send,
 	<<HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service as Service<HttpRequest>>::Future: Send,
 	Body: http_body::Body<Data = Bytes> + Send + 'static,
 	<Body as http_body::Body>::Error: Into<BoxError>,
-	<Body as http_body::Body>::Data: Send,
 {
 	/// Start responding to connections requests.
 	///
@@ -201,8 +196,15 @@ pub struct ServerConfig {
 	pub(crate) id_provider: Arc<dyn IdProvider>,
 	/// `TCP_NODELAY` settings.
 	pub(crate) tcp_no_delay: bool,
+	/// `KEEP_ALIVE` duration.
+	pub(crate) keep_alive: Option<std::time::Duration>,
+	/// `KEEP_ALIVE_TIMEOUT` duration.
+	pub(crate) keep_alive_timeout: Duration,
+	/// Timeout for receiving the first request of a connection.
+	pub(crate) first_request_timeout: Option<Duration>,
 }
 
+/// The builder to configure and create a JSON-RPC server configuration.
 #[derive(Debug, Clone)]
 pub struct ServerConfigBuilder {
 	/// Maximum size in bytes of a request.
@@ -215,6 +217,8 @@ pub struct ServerConfigBuilder {
 	max_subscriptions_per_connection: u32,
 	/// Whether batch requests are supported by this server or not.
 	batch_requests_config: BatchRequestConfig,
+	/// Custom tokio runtime to run the server on.
+	tokio_runtime: Option<tokio::runtime::Handle>,
 	/// Enable HTTP.
 	enable_http: bool,
 	/// Enable WS.
@@ -225,6 +229,14 @@ pub struct ServerConfigBuilder {
 	ping_config: Option<PingConfig>,
 	/// ID provider.
 	id_provider: Arc<dyn IdProvider>,
+	/// `TCP_NODELAY` settings.
+	tcp_no_delay: bool,
+	/// `KEEP_ALIVE` duration.
+	keep_alive: Option<std::time::Duration>,
+	/// `KEEP_ALIVE_TIMEOUT` duration.
+	keep_alive_timeout: std::time::Duration,
+	/// Timeout for receiving the first request of a connection.
+	first_request_timeout: Option<Duration>,
 }
 
 /// Builder for [`TowerService`].
@@ -337,20 +349,7 @@ impl PingConfig {
 
 impl Default for ServerConfig {
 	fn default() -> Self {
-		Self {
-			max_request_body_size: TEN_MB_SIZE_BYTES,
-			max_response_body_size: TEN_MB_SIZE_BYTES,
-			max_connections: MAX_CONNECTIONS,
-			max_subscriptions_per_connection: 1024,
-			batch_requests_config: BatchRequestConfig::Unlimited,
-			tokio_runtime: None,
-			enable_http: true,
-			enable_ws: true,
-			message_buffer_capacity: 1024,
-			ping_config: None,
-			id_provider: Arc::new(RandomIntegerIdProvider),
-			tcp_no_delay: true,
-		}
+		ServerConfig::builder().build()
 	}
 }
 
@@ -363,19 +362,23 @@ impl ServerConfig {
 
 impl Default for ServerConfigBuilder {
 	fn default() -> Self {
-		let this = ServerConfig::default();
-
 		ServerConfigBuilder {
-			max_request_body_size: this.max_request_body_size,
-			max_response_body_size: this.max_response_body_size,
-			max_connections: this.max_connections,
-			max_subscriptions_per_connection: this.max_subscriptions_per_connection,
-			batch_requests_config: this.batch_requests_config,
-			enable_http: this.enable_http,
-			enable_ws: this.enable_ws,
-			message_buffer_capacity: this.message_buffer_capacity,
-			ping_config: this.ping_config,
-			id_provider: this.id_provider,
+			max_request_body_size: TEN_MB_SIZE_BYTES,
+			max_response_body_size: TEN_MB_SIZE_BYTES,
+			max_connections: MAX_CONNECTIONS,
+			max_subscriptions_per_connection: 1024,
+			batch_requests_config: BatchRequestConfig::Unlimited,
+			tokio_runtime: None,
+			enable_http: true,
+			enable_ws: true,
+			message_buffer_capacity: 1024,
+			ping_config: None,
+			id_provider: Arc::new(RandomIntegerIdProvider),
+			tcp_no_delay: true,
+			keep_alive: None,
+			//same as `hyper` default
+			keep_alive_timeout: Duration::from_secs(20),
+			first_request_timeout: Some(DEFAULT_FIRST_REQUEST_TIMEOUT),
 		}
 	}
 }
@@ -386,76 +389,195 @@ impl ServerConfigBuilder {
 		Self::default()
 	}
 
-	/// See [`Builder::max_request_body_size`] for documentation.
+	/// Set the maximum size of a request body in bytes. Default is 10 MiB.
 	pub fn max_request_body_size(mut self, size: u32) -> Self {
 		self.max_request_body_size = size;
 		self
 	}
 
-	/// See [`Builder::max_response_body_size`] for documentation.
+	/// Set the maximum size of a response body in bytes. Default is 10 MiB.
 	pub fn max_response_body_size(mut self, size: u32) -> Self {
 		self.max_response_body_size = size;
 		self
 	}
 
-	/// See [`Builder::max_connections`] for documentation.
+	/// Set the maximum number of connections allowed. Default is 100.
 	pub fn max_connections(mut self, max: u32) -> Self {
 		self.max_connections = max;
 		self
 	}
 
-	/// See [`Builder::set_batch_request_config`] for documentation.
-	pub fn set_batch_request_config(mut self, cfg: BatchRequestConfig) -> Self {
-		self.batch_requests_config = cfg;
-		self
-	}
-
-	/// See [`Builder::max_subscriptions_per_connection`] for documentation.
+	/// Set the maximum number of connections allowed. Default is 1024.
 	pub fn max_subscriptions_per_connection(mut self, max: u32) -> Self {
 		self.max_subscriptions_per_connection = max;
 		self
 	}
 
-	/// See [`Builder::http_only`] for documentation.
+	/// Configure how [batch requests](https://www.jsonrpc.org/specification#batch) shall be handled
+	/// by the server.
+	///
+	/// Default: batch requests are allowed and can be arbitrary big but the maximum payload size is limited.
+	pub fn set_batch_request_config(mut self, cfg: BatchRequestConfig) -> Self {
+		self.batch_requests_config = cfg;
+		self
+	}
+
+	/// Configure a custom [`tokio::runtime::Handle`] to run the server on.
+	///
+	/// Default: [`tokio::spawn`]
+	pub fn custom_tokio_runtime(mut self, rt: tokio::runtime::Handle) -> Self {
+		self.tokio_runtime = Some(rt);
+		self
+	}
+
+	/// Configure the server to only serve JSON-RPC HTTP requests.
+	///
+	/// Default: both http and ws are enabled.
 	pub fn http_only(mut self) -> Self {
 		self.enable_http = true;
 		self.enable_ws = false;
 		self
 	}
 
-	/// See [`Builder::ws_only`] for documentation.
+	/// Configure the server to only serve JSON-RPC WebSocket requests.
+	///
+	/// That implies that server just denies HTTP requests which isn't a WebSocket upgrade request
+	///
+	/// Default: both http and ws are enabled.
 	pub fn ws_only(mut self) -> Self {
 		self.enable_http = false;
 		self.enable_ws = true;
 		self
 	}
 
-	/// See [`Builder::set_message_buffer_capacity`] for documentation.
+	/// The server enforces backpressure which means that
+	/// `n` messages can be buffered and if the client
+	/// can't keep with up the server.
+	///
+	/// This `capacity` is applied per connection and
+	/// applies globally on the connection which implies
+	/// all JSON-RPC messages.
+	///
+	/// For example if a subscription produces plenty of new items
+	/// and the client can't keep up then no new messages are handled.
+	///
+	/// If this limit is exceeded then the server will "back-off"
+	/// and only accept new messages once the client reads pending messages.
+	///
+	/// # Panics
+	///
+	/// Panics if the buffer capacity is 0.
+	///
 	pub fn set_message_buffer_capacity(mut self, c: u32) -> Self {
+		assert!(c > 0, "buffer capacity must be set to > 0");
 		self.message_buffer_capacity = c;
 		self
 	}
 
-	/// See [`Builder::enable_ws_ping`] for documentation.
+	/// Enable WebSocket ping/pong on the server.
+	///
+	/// Default: pings are disabled.
+	///
+	/// # Examples
+	///
+	/// ```rust
+	/// use std::{time::Duration, num::NonZeroUsize};
+	/// use jsonrpsee_server::{ServerConfigBuilder, PingConfig};
+	///
+	/// // Set the ping interval to 10 seconds but terminates the connection if a client is inactive for more than 2 minutes
+	/// let ping_cfg = PingConfig::new().ping_interval(Duration::from_secs(10)).inactive_limit(Duration::from_secs(60 * 2));
+	/// let builder = ServerConfigBuilder::default().enable_ws_ping(ping_cfg);
+	/// ```
 	pub fn enable_ws_ping(mut self, config: PingConfig) -> Self {
 		self.ping_config = Some(config);
 		self
 	}
 
-	/// See [`Builder::disable_ws_ping`] for documentation.
+	/// Disable WebSocket ping/pong on the server.
+	///
+	/// Default: pings are disabled.
 	pub fn disable_ws_ping(mut self) -> Self {
 		self.ping_config = None;
 		self
 	}
 
-	/// See [`Builder::set_id_provider`] for documentation.
+	/// Configure custom `subscription ID` provider for the server to use
+	/// to when getting new subscription calls.
+	///
+	/// You may choose static dispatch or dynamic dispatch because
+	/// `IdProvider` is implemented for `Box<T>`.
+	///
+	/// Default: [`RandomIntegerIdProvider`].
+	///
+	/// # Examples
+	///
+	/// ```rust
+	/// use jsonrpsee_server::{ServerConfigBuilder, RandomStringIdProvider, IdProvider};
+	///
+	/// // static dispatch
+	/// let builder1 = ServerConfigBuilder::default().set_id_provider(RandomStringIdProvider::new(16));
+	///
+	/// // or dynamic dispatch
+	/// let builder2 = ServerConfigBuilder::default().set_id_provider(Box::new(RandomStringIdProvider::new(16)));
+	/// ```
+	///
 	pub fn set_id_provider<I: IdProvider + 'static>(mut self, id_provider: I) -> Self {
 		self.id_provider = Arc::new(id_provider);
 		self
 	}
+
+	/// Configure `TCP_NODELAY` on the socket to the supplied value `nodelay`.
+	///
+	/// Default is `true`.
+	pub fn set_tcp_no_delay(mut self, no_delay: bool) -> Self {
+		self.tcp_no_delay = no_delay;
+		self
+	}
+
+	/// Configure `KEEP_ALIVE` hyper to the supplied value `keep_alive`.
+	pub fn set_keep_alive(mut self, keep_alive: Option<std::time::Duration>) -> Self {
+		self.keep_alive = keep_alive;
+		self
+	}
+
+	/// Configure `KEEP_ALIVE_TIMEOUT` hyper to the supplied value `keep_alive_timeout`.
+	pub fn set_keep_alive_timeout(mut self, keep_alive_timeout: Duration) -> Self {
+		self.keep_alive_timeout = keep_alive_timeout;
+		self
+	}
+
+	/// Configure how long a connection may take to send its first request, e.g. the WebSocket
+	/// upgrade request, before it is closed. `None` disables the timeout.
+	///
+	/// Default is 30 seconds.
+	pub fn set_first_request_timeout(mut self, first_request_timeout: Option<Duration>) -> Self {
+		self.first_request_timeout = first_request_timeout;
+		self
+	}
+
+	/// Build the [`ServerConfig`].
+	pub fn build(self) -> ServerConfig {
+		ServerConfig {
+			max_request_body_size: self.max_request_body_size,
+			max_response_body_size: self.max_response_body_size,
+			max_connections: self.max_connections,
+			max_subscriptions_per_connection: self.max_subscriptions_per_connection,
+			batch_requests_config: self.batch_requests_config,
+			tokio_runtime: self.tokio_runtime,
+			enable_http: self.enable_http,
+			enable_ws: self.enable_ws,
+			message_buffer_capacity: self.message_buffer_capacity,
+			ping_config: self.ping_config,
+			id_provider: self.id_provider,
+			tcp_no_delay: self.tcp_no_delay,
+			keep_alive: self.keep_alive,
+			keep_alive_timeout: self.keep_alive_timeout,
+			first_request_timeout: self.first_request_timeout,
+		}
+	}
 }
 
-/// Builder to configure and create a JSON-RPC server
+/// Builder to configure and create a JSON-RPC server.
 #[derive(Debug)]
 pub struct Builder<HttpMiddleware, RpcMiddleware> {
 	server_cfg: ServerConfig,
@@ -477,6 +599,11 @@ impl Builder<Identity, Identity> {
 	/// Create a default server builder.
 	pub fn new() -> Self {
 		Self::default()
+	}
+
+	/// Create a server builder with the given [`ServerConfig`].
+	pub fn with_config(config: ServerConfig) -> Self {
+		Self { server_cfg: config, ..Default::default() }
 	}
 }
 
@@ -545,36 +672,9 @@ impl<RpcMiddleware, HttpMiddleware> TowerServiceBuilder<RpcMiddleware, HttpMiddl
 }
 
 impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
-	/// Set the maximum size of a request body in bytes. Default is 10 MiB.
-	pub fn max_request_body_size(mut self, size: u32) -> Self {
-		self.server_cfg.max_request_body_size = size;
-		self
-	}
-
-	/// Set the maximum size of a response body in bytes. Default is 10 MiB.
-	pub fn max_response_body_size(mut self, size: u32) -> Self {
-		self.server_cfg.max_response_body_size = size;
-		self
-	}
-
-	/// Set the maximum number of connections allowed. Default is 100.
-	pub fn max_connections(mut self, max: u32) -> Self {
-		self.server_cfg.max_connections = max;
-		self
-	}
-
-	/// Configure how [batch requests](https://www.jsonrpc.org/specification#batch) shall be handled
-	/// by the server.
-	///
-	/// Default: batch requests are allowed and can be arbitrary big but the maximum payload size is limited.
-	pub fn set_batch_request_config(mut self, cfg: BatchRequestConfig) -> Self {
-		self.server_cfg.batch_requests_config = cfg;
-		self
-	}
-
-	/// Set the maximum number of connections allowed. Default is 1024.
-	pub fn max_subscriptions_per_connection(mut self, max: u32) -> Self {
-		self.server_cfg.max_subscriptions_per_connection = max;
+	/// Configure the [`ServerConfig`].
+	pub fn set_config(mut self, cfg: ServerConfig) -> Self {
+		self.server_cfg = cfg;
 		self
 	}
 
@@ -585,26 +685,23 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 	/// which means that you can't use built-in middleware from tower.
 	///
 	/// Another consequence of `&self` is that you must wrap any of the middleware state in
-	/// a type which is Send and provides interior mutability such `Arc<Mutex>`.
+	/// a type which is Send and provides interior mutability such as `Arc<Mutex>`.
 	///
 	/// The builder itself exposes a similar API as the [`tower::ServiceBuilder`]
 	/// where it is possible to compose layers to the middleware.
 	///
-	/// To add a middleware [`crate::middleware::rpc::RpcServiceBuilder`] exposes a few different layer APIs that
-	/// is wrapped on top of the [`tower::ServiceBuilder`].
+	/// To add middleware [`RpcServiceBuilder`] exposes a few different layer APIs that
+	/// are wrapped on top of the [`tower::ServiceBuilder`].
 	///
-	/// When the server is started these layers are wrapped in the [`crate::middleware::rpc::RpcService`] and
+	/// When the server is started these layers are wrapped in the [`RpcService`] and
 	/// that's why the service APIs is not exposed.
 	/// ```
 	///
 	/// use std::{time::Instant, net::SocketAddr, sync::Arc};
 	/// use std::sync::atomic::{Ordering, AtomicUsize};
 	///
-	/// use jsonrpsee_server::middleware::rpc::{RpcServiceT, RpcService, RpcServiceBuilder};
-	/// use jsonrpsee_server::{ServerBuilder, MethodResponse};
-	/// use jsonrpsee_core::async_trait;
-	/// use jsonrpsee_types::Request;
-	/// use futures_util::future::BoxFuture;
+	/// use jsonrpsee_server::middleware::rpc::{RpcService, RpcServiceBuilder, RpcServiceT, MethodResponse, Notification, Request, Batch};
+	/// use jsonrpsee_server::ServerBuilder;
 	///
 	/// #[derive(Clone)]
 	/// struct MyMiddleware<S> {
@@ -612,23 +709,34 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 	///     count: Arc<AtomicUsize>,
 	/// }
 	///
-	/// impl<'a, S> RpcServiceT<'a> for MyMiddleware<S>
-	/// where S: RpcServiceT<'a> + Send + Sync + Clone + 'static,
+	/// impl<S> RpcServiceT for MyMiddleware<S>
+	/// where
+	///     S: RpcServiceT + Clone + Send + Sync + 'static,
 	/// {
-	///    type Future = BoxFuture<'a, MethodResponse>;
+	///     type MethodResponse = S::MethodResponse;
+	///     type NotificationResponse = S::NotificationResponse;
+	///     type BatchResponse = S::BatchResponse;
 	///
-	///    fn call(&self, req: Request<'a>) -> Self::Future {
+	///     fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
 	///         tracing::info!("MyMiddleware processed call {}", req.method);
 	///         let count = self.count.clone();
 	///         let service = self.service.clone();
 	///
-	///         Box::pin(async move {
+	///         async move {
 	///             let rp = service.call(req).await;
 	///             // Modify the state.
 	///             count.fetch_add(1, Ordering::Relaxed);
 	///             rp
-	///         })
-	///    }
+	///         }
+	///     }
+	///
+	///     fn batch<'a>(&self, batch: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+	///          self.service.batch(batch)
+	///     }
+	///
+	///     fn notification<'a>(&self, notif: Notification<'a>) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
+	///          self.service.notification(notif)
+	///     }
 	/// }
 	///
 	/// // Create a state per connection
@@ -638,66 +746,6 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 	/// ```
 	pub fn set_rpc_middleware<T>(self, rpc_middleware: RpcServiceBuilder<T>) -> Builder<HttpMiddleware, T> {
 		Builder { server_cfg: self.server_cfg, rpc_middleware, http_middleware: self.http_middleware }
-	}
-
-	/// Configure a custom [`tokio::runtime::Handle`] to run the server on.
-	///
-	/// Default: [`tokio::spawn`]
-	pub fn custom_tokio_runtime(mut self, rt: tokio::runtime::Handle) -> Self {
-		self.server_cfg.tokio_runtime = Some(rt);
-		self
-	}
-
-	/// Enable WebSocket ping/pong on the server.
-	///
-	/// Default: pings are disabled.
-	///
-	/// # Examples
-	///
-	/// ```rust
-	/// use std::{time::Duration, num::NonZeroUsize};
-	/// use jsonrpsee_server::{ServerBuilder, PingConfig};
-	///
-	/// // Set the ping interval to 10 seconds but terminates the connection if a client is inactive for more than 2 minutes
-	/// let ping_cfg = PingConfig::new().ping_interval(Duration::from_secs(10)).inactive_limit(Duration::from_secs(60 * 2));
-	/// let builder = ServerBuilder::default().enable_ws_ping(ping_cfg);
-	/// ```
-	pub fn enable_ws_ping(mut self, config: PingConfig) -> Self {
-		self.server_cfg.ping_config = Some(config);
-		self
-	}
-
-	/// Disable WebSocket ping/pong on the server.
-	///
-	/// Default: pings are disabled.
-	pub fn disable_ws_ping(mut self) -> Self {
-		self.server_cfg.ping_config = None;
-		self
-	}
-
-	/// Configure custom `subscription ID` provider for the server to use
-	/// to when getting new subscription calls.
-	///
-	/// You may choose static dispatch or dynamic dispatch because
-	/// `IdProvider` is implemented for `Box<T>`.
-	///
-	/// Default: [`RandomIntegerIdProvider`].
-	///
-	/// # Examples
-	///
-	/// ```rust
-	/// use jsonrpsee_server::{ServerBuilder, RandomStringIdProvider, IdProvider};
-	///
-	/// // static dispatch
-	/// let builder1 = ServerBuilder::default().set_id_provider(RandomStringIdProvider::new(16));
-	///
-	/// // or dynamic dispatch
-	/// let builder2 = ServerBuilder::default().set_id_provider(Box::new(RandomStringIdProvider::new(16)));
-	/// ```
-	///
-	pub fn set_id_provider<I: IdProvider + 'static>(mut self, id_provider: I) -> Self {
-		self.server_cfg.id_provider = Arc::new(id_provider);
-		self
 	}
 
 	/// Configure a custom [`tower::ServiceBuilder`] middleware for composing layers to be applied to the RPC service.
@@ -726,57 +774,6 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 		Builder { server_cfg: self.server_cfg, http_middleware, rpc_middleware: self.rpc_middleware }
 	}
 
-	/// Configure `TCP_NODELAY` on the socket to the supplied value `nodelay`.
-	///
-	/// Default is `true`.
-	pub fn set_tcp_no_delay(mut self, no_delay: bool) -> Self {
-		self.server_cfg.tcp_no_delay = no_delay;
-		self
-	}
-
-	/// Configure the server to only serve JSON-RPC HTTP requests.
-	///
-	/// Default: both http and ws are enabled.
-	pub fn http_only(mut self) -> Self {
-		self.server_cfg.enable_http = true;
-		self.server_cfg.enable_ws = false;
-		self
-	}
-
-	/// Configure the server to only serve JSON-RPC WebSocket requests.
-	///
-	/// That implies that server just denies HTTP requests which isn't a WebSocket upgrade request
-	///
-	/// Default: both http and ws are enabled.
-	pub fn ws_only(mut self) -> Self {
-		self.server_cfg.enable_http = false;
-		self.server_cfg.enable_ws = true;
-		self
-	}
-
-	/// The server enforces backpressure which means that
-	/// `n` messages can be buffered and if the client
-	/// can't keep with up the server.
-	///
-	/// This `capacity` is applied per connection and
-	/// applies globally on the connection which implies
-	/// all JSON-RPC messages.
-	///
-	/// For example if a subscription produces plenty of new items
-	/// and the client can't keep up then no new messages are handled.
-	///
-	/// If this limit is exceeded then the server will "back-off"
-	/// and only accept new messages once the client reads pending messages.
-	///
-	/// # Panics
-	///
-	/// Panics if the buffer capacity is 0.
-	///
-	pub fn set_message_buffer_capacity(mut self, c: u32) -> Self {
-		self.server_cfg.message_buffer_capacity = c;
-		self
-	}
-
 	/// Convert the server builder to a [`TowerServiceBuilder`].
 	///
 	/// This can be used to utilize the [`TowerService`] from jsonrpsee.
@@ -784,7 +781,7 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use jsonrpsee_server::{Methods, ServerHandle, ws, stop_channel, serve_with_graceful_shutdown};
+	/// use jsonrpsee_server::{Methods, ServerConfig, ServerHandle, ws, stop_channel, serve_with_graceful_shutdown};
 	/// use tower::Service;
 	/// use std::{error::Error as StdError, net::SocketAddr};
 	/// use futures_util::future::{self, Either};
@@ -792,7 +789,9 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 	///
 	/// fn run_server() -> ServerHandle {
 	///     let (stop_handle, server_handle) = stop_channel();
-	///     let svc_builder = jsonrpsee_server::Server::builder().max_connections(33).to_service_builder();
+	///     let svc_builder = jsonrpsee_server::Server::builder()
+	///         .set_config(ServerConfig::builder().max_connections(33).build())
+	///         .to_service_builder();
 	///     let methods = Methods::new();
 	///     let stop_handle = stop_handle.clone();
 	///
@@ -972,16 +971,15 @@ impl<RpcMiddleware, HttpMiddleware> TowerService<RpcMiddleware, HttpMiddleware> 
 
 impl<RequestBody, ResponseBody, RpcMiddleware, HttpMiddleware> Service<HttpRequest<RequestBody>> for TowerService<RpcMiddleware, HttpMiddleware>
 where
-	RpcMiddleware: for<'a> tower::Layer<RpcService> + Clone,
-	<RpcMiddleware as Layer<RpcService>>::Service: Send + Sync + 'static,
-	for<'a> <RpcMiddleware as Layer<RpcService>>::Service: RpcServiceT<'a>,
+	RpcMiddleware: Layer<RpcService> + Clone,
+	<RpcMiddleware as Layer<RpcService>>::Service: RpcServiceT + 'static,
 	HttpMiddleware: Layer<TowerServiceNoHttp<RpcMiddleware>> + Send + 'static,
 	<HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service:
-		Send + Service<HttpRequest<RequestBody>, Response = HttpResponse<ResponseBody>, Error = Box<dyn StdError + Send + Sync + 'static>>,
+		Service<HttpRequest<RequestBody>, Response = HttpResponse<ResponseBody>, Error = BoxError> + Send,
 	<<HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service as Service<HttpRequest<RequestBody>>>::Future:
 		Send + 'static,
 	RequestBody: http_body::Body<Data = Bytes> + Send + 'static,
-	RequestBody::Error: Into<BoxError>,
+	<RequestBody as http_body::Body>::Error: Into<BoxError>,
 {
 	type Response = HttpResponse<ResponseBody>;
 	type Error = BoxError;
@@ -1009,11 +1007,16 @@ pub struct TowerServiceNoHttp<L> {
 
 impl<Body, RpcMiddleware> Service<HttpRequest<Body>> for TowerServiceNoHttp<RpcMiddleware>
 where
-	RpcMiddleware: for<'a> tower::Layer<RpcService>,
-	<RpcMiddleware as Layer<RpcService>>::Service: Send + Sync + 'static,
-	for<'a> <RpcMiddleware as Layer<RpcService>>::Service: RpcServiceT<'a>,
+	RpcMiddleware: Layer<RpcService>,
+	<RpcMiddleware as Layer<RpcService>>::Service: RpcServiceT<
+			MethodResponse = MethodResponse,
+			BatchResponse = MethodResponse,
+			NotificationResponse = MethodResponse,
+		> + Send
+		+ Sync
+		+ 'static,
 	Body: http_body::Body<Data = Bytes> + Send + 'static,
-	Body::Error: Into<BoxError>,
+	<Body as http_body::Body>::Error: Into<BoxError>,
 {
 	type Response = HttpResponse;
 
@@ -1023,7 +1026,7 @@ where
 
 	type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-	fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+	fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
 		Poll::Ready(Ok(()))
 	}
 
@@ -1060,7 +1063,7 @@ where
 
 			let response = match server.receive_request(&request) {
 				Ok(response) => {
-					let (tx, rx) = mpsc::channel::<String>(this.server_cfg.message_buffer_capacity as usize);
+					let (tx, rx) = mpsc::channel(this.server_cfg.message_buffer_capacity as usize);
 					let sink = MethodSink::new(tx);
 
 					// On each method call the `pending_calls` is cloned
@@ -1098,7 +1101,7 @@ where
 								}
 							};
 
-							let io = hyper_util::rt::TokioIo::new(upgraded);
+							let io = TokioIo::new(upgraded);
 
 							let stream = BufReader::new(BufWriter::new(io.compat()));
 							let mut ws_builder = server.into_builder(stream);
@@ -1147,9 +1150,7 @@ where
 			));
 
 			Box::pin(async move {
-				let rp =
-					http::call_with_service(request, batch_config, max_request_size, rpc_service, max_response_size)
-						.await;
+				let rp = http::call_with_service(request, batch_config, max_request_size, rpc_service).await;
 				// NOTE: The `conn guard` must be held until the response is processed
 				// to respect the `max_connections` limit.
 				drop(conn);
@@ -1179,15 +1180,13 @@ struct ProcessConnection<'a, HttpMiddleware, RpcMiddleware> {
 #[instrument(name = "connection", skip_all, fields(remote_addr = %params.remote_addr, conn_id = %params.conn_id), level = "INFO")]
 fn process_connection<'a, RpcMiddleware, HttpMiddleware, Body>(params: ProcessConnection<HttpMiddleware, RpcMiddleware>)
 where
-	RpcMiddleware: 'static,
 	HttpMiddleware: Layer<TowerServiceNoHttp<RpcMiddleware>> + Send + 'static,
 	<HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service:
-		Send + 'static + Clone + Service<HttpRequest, Response = HttpResponse<Body>, Error = BoxError>,
+		Service<HttpRequest, Response = HttpResponse<Body>, Error = BoxError> + Clone + Send + 'static,
 	<<HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service as Service<HttpRequest>>::Future:
 		Send + 'static,
 	Body: http_body::Body<Data = Bytes> + Send + 'static,
 	<Body as http_body::Body>::Error: Into<BoxError>,
-	<Body as http_body::Body>::Data: Send,
 {
 	let ProcessConnection {
 		http_middleware,
@@ -1207,6 +1206,10 @@ where
 		return;
 	}
 
+	let keep_alive = server_cfg.keep_alive;
+	let keep_alive_timeout = server_cfg.keep_alive_timeout;
+	let first_request_timeout = server_cfg.first_request_timeout;
+
 	let tower_service = TowerServiceNoHttp {
 		inner: ServiceData {
 			server_cfg,
@@ -1221,25 +1224,30 @@ where
 
 	let service = http_middleware.service(tower_service);
 
-	tokio::spawn(async {
+	tokio::spawn(async move {
+		let request_received = Arc::new(Notify::new());
 		// this requires Clone.
-		let service = crate::utils::TowerToHyperService::new(service);
+		let service = NotifyOnRequest::new(crate::utils::TowerToHyperService::new(service), request_received.clone());
 		let io = TokioIo::new(socket);
-		let builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+		let mut builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+
+		//default is true for http1, if set to false then websocket connections will not be upgraded.
+		builder.http2().keep_alive_interval(keep_alive).keep_alive_timeout(keep_alive_timeout);
 
 		let conn = builder.serve_connection_with_upgrades(io, service);
 		let stopped = stop_handle.shutdown();
 
 		tokio::pin!(stopped, conn);
 
-		let res = match future::select(conn, stopped).await {
-			Either::Left((conn, _)) => conn,
-			Either::Right((_, mut conn)) => {
+		let res = tokio::select! {
+			res = &mut conn => res,
+			_ = &mut stopped => {
 				// NOTE: the connection should continue to be polled until shutdown can finish.
 				// Thus, both lines below are needed and not a nit.
 				conn.as_mut().graceful_shutdown();
 				conn.await
 			}
+			err = no_request_within(&request_received, first_request_timeout) => Err(err),
 		};
 
 		if let Err(e) = res {
@@ -1275,22 +1283,25 @@ pub(crate) async fn handle_rpc_call<S>(
 	body: &[u8],
 	is_single: bool,
 	batch_config: BatchRequestConfig,
-	max_response_size: u32,
 	rpc_service: &S,
 	extensions: Extensions,
-) -> Option<MethodResponse>
+) -> MethodResponse
 where
-	for<'a> S: RpcServiceT<'a> + Send,
+	S: RpcServiceT<
+			MethodResponse = MethodResponse,
+			BatchResponse = MethodResponse,
+			NotificationResponse = MethodResponse,
+		> + Send,
 {
 	// Single request or notification
 	if is_single {
-		if let Ok(req) = deserialize::from_slice_with_extensions(body, extensions) {
-			Some(rpc_service.call(req).await)
-		} else if let Ok(_notif) = serde_json::from_slice::<Notif>(body) {
-			None
+		if let Ok(req) = deserialize_with_ext::call::from_slice(body, &extensions) {
+			rpc_service.call(req).await
+		} else if let Ok(notif) = deserialize_with_ext::notif::from_slice::<Notif>(body, &extensions) {
+			rpc_service.notification(notif).await
 		} else {
 			let (id, code) = prepare_error(body);
-			Some(MethodResponse::error(id, ErrorObject::from(code)))
+			MethodResponse::error(id, ErrorObject::from(code))
 		}
 	}
 	// Batch of requests.
@@ -1301,53 +1312,37 @@ where
 					Id::Null,
 					ErrorObject::borrowed(BATCHES_NOT_SUPPORTED_CODE, BATCHES_NOT_SUPPORTED_MSG, None),
 				);
-				return Some(rp);
+				return rp;
 			}
 			BatchRequestConfig::Limit(limit) => limit as usize,
 			BatchRequestConfig::Unlimited => usize::MAX,
 		};
 
-		if let Ok(batch) = serde_json::from_slice::<Vec<&JsonRawValue>>(body) {
-			if batch.len() > max_len {
-				return Some(MethodResponse::error(Id::Null, reject_too_big_batch_request(max_len)));
+		if let Ok(unchecked_batch) = serde_json::from_slice::<Vec<&JsonRawValue>>(body) {
+			if unchecked_batch.len() > max_len {
+				return MethodResponse::error(Id::Null, reject_too_big_batch_request(max_len));
 			}
 
-			let mut got_notif = false;
-			let mut batch_response = BatchResponseBuilder::new_with_limit(max_response_size as usize);
+			let mut batch = Vec::with_capacity(unchecked_batch.len());
 
-			for call in batch {
-				if let Ok(req) = deserialize::from_str_with_extensions(call.get(), extensions.clone()) {
-					let rp = rpc_service.call(req).await;
-
-					if let Err(too_large) = batch_response.append(&rp) {
-						return Some(too_large);
-					}
-				} else if let Ok(_notif) = serde_json::from_str::<Notif>(call.get()) {
-					// notifications should not be answered.
-					got_notif = true;
+			for call in unchecked_batch {
+				if let Ok(req) = deserialize_with_ext::call::from_str(call.get(), &extensions) {
+					batch.push(Ok(BatchEntry::Call(req)));
+				} else if let Ok(notif) = deserialize_with_ext::notif::from_str::<Notif>(call.get(), &extensions) {
+					batch.push(Ok(BatchEntry::Notification(notif)));
 				} else {
-					// valid JSON but could be not parsable as `InvalidRequest`
-					let id = match serde_json::from_str::<InvalidRequest>(call.get()) {
+					let id = match serde_json::from_str::<jsonrpsee_types::InvalidRequest>(call.get()) {
 						Ok(err) => err.id,
 						Err(_) => Id::Null,
 					};
 
-					if let Err(too_large) =
-						batch_response.append(&MethodResponse::error(id, ErrorObject::from(ErrorCode::InvalidRequest)))
-					{
-						return Some(too_large);
-					}
+					batch.push(Err(BatchEntryErr::new(id, ErrorCode::InvalidRequest.into())));
 				}
 			}
 
-			if got_notif && batch_response.is_empty() {
-				None
-			} else {
-				let batch_rp = batch_response.finish();
-				Some(MethodResponse::from_batch(batch_rp))
-			}
+			rpc_service.batch(Batch::from(batch)).await
 		} else {
-			Some(MethodResponse::error(Id::Null, ErrorObject::from(ErrorCode::ParseError)))
+			MethodResponse::error(Id::Null, ErrorObject::from(ErrorCode::ParseError))
 		}
 	}
 }
