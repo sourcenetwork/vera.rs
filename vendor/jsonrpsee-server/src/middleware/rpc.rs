@@ -26,18 +26,18 @@
 
 //! JSON-RPC service middleware.
 
-use super::ResponseFuture;
+pub use jsonrpsee_core::middleware::*;
+pub use jsonrpsee_core::server::MethodResponse;
+
 use std::sync::Arc;
 
-use crate::middleware::rpc::RpcServiceT;
 use crate::ConnectionId;
-use futures_util::future::BoxFuture;
 use jsonrpsee_core::server::{
-	BoundedSubscriptions, MethodCallback, MethodResponse, MethodSink, Methods, SubscriptionState,
+	BatchResponseBuilder, BoundedSubscriptions, MethodCallback, MethodSink, Methods, SubscriptionState,
 };
 use jsonrpsee_core::traits::IdProvider;
-use jsonrpsee_types::error::{reject_too_many_subscriptions, ErrorCode};
-use jsonrpsee_types::{ErrorObject, Request};
+use jsonrpsee_types::ErrorObject;
+use jsonrpsee_types::error::{ErrorCode, reject_too_many_subscriptions};
 
 /// JSON-RPC service middleware.
 #[derive(Clone, Debug)]
@@ -74,12 +74,12 @@ impl RpcService {
 	}
 }
 
-impl<'a> RpcServiceT<'a> for RpcService {
-	// The rpc module is already boxing the futures and
-	// it's used to under the hood by the RpcService.
-	type Future = ResponseFuture<BoxFuture<'a, MethodResponse>>;
+impl RpcServiceT for RpcService {
+	type BatchResponse = MethodResponse;
+	type MethodResponse = MethodResponse;
+	type NotificationResponse = MethodResponse;
 
-	fn call(&self, req: Request<'a>) -> Self::Future {
+	fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
 		let conn_id = self.conn_id;
 		let max_response_body_size = self.max_response_body_size;
 
@@ -96,8 +96,8 @@ impl<'a> RpcServiceT<'a> for RpcService {
 				MethodCallback::Async(callback) => {
 					let params = params.into_owned();
 					let id = id.into_owned();
-
 					let fut = (callback)(id, params, conn_id, max_response_body_size, extensions);
+
 					ResponseFuture::future(fut)
 				}
 				MethodCallback::Sync(callback) => {
@@ -122,7 +122,7 @@ impl<'a> RpcServiceT<'a> for RpcService {
 						let conn_state =
 							SubscriptionState { conn_id, id_provider: &*id_provider.clone(), subscription_permit: p };
 
-						let fut = callback(id.clone(), params, sink, conn_state, extensions);
+						let fut = (callback)(id.clone(), params, sink, conn_state, extensions);
 						ResponseFuture::future(fut)
 					} else {
 						let max = bounded_subscriptions.max();
@@ -146,5 +146,51 @@ impl<'a> RpcServiceT<'a> for RpcService {
 				}
 			},
 		}
+	}
+
+	fn batch<'a>(&self, batch: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+		let mut batch_rp = BatchResponseBuilder::new_with_limit(self.max_response_body_size);
+		let service = self.clone();
+		async move {
+			let mut got_notification = false;
+
+			for batch_entry in batch.into_iter() {
+				match batch_entry {
+					Ok(BatchEntry::Call(req)) => {
+						let rp = service.call(req).await;
+						if let Err(err) = batch_rp.append(rp) {
+							return err;
+						}
+					}
+					Ok(BatchEntry::Notification(n)) => {
+						got_notification = true;
+						service.notification(n).await;
+					}
+					Err(err) => {
+						let (err, id) = err.into_parts();
+						let rp = MethodResponse::error(id, err);
+						if let Err(err) = batch_rp.append(rp) {
+							return err;
+						}
+					}
+				}
+			}
+
+			// If the batch is empty and we got a notification, we return an empty response.
+			if batch_rp.is_empty() && got_notification {
+				MethodResponse::notification()
+			}
+			// An empty batch is regarded as an invalid request here.
+			else {
+				MethodResponse::from_batch(batch_rp.finish())
+			}
+		}
+	}
+
+	fn notification<'a>(&self, n: Notification<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+		// The notification should not be replied to with a response
+		// but we propogate the extensions to the response which can be useful
+		// for example HTTP transport to set the headers.
+		async move { MethodResponse::notification().with_extensions(n.extensions) }
 	}
 }

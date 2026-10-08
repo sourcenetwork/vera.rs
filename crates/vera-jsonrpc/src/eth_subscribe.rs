@@ -147,7 +147,11 @@ impl EthSubscriptionApiServer for EthSubscriptionApiImpl {
                                         break;
                                     }
                                 };
-                                let msg = match SubscriptionMessage::from_json(&value) {
+                                let msg = match SubscriptionMessage::new(
+                                    "eth_subscription",
+                                    sink.subscription_id(),
+                                    &value,
+                                ) {
                                     Ok(m) => m,
                                     Err(e) => {
                                         warn!(error = %e, "failed to build newHeads subscription message");
@@ -225,7 +229,11 @@ impl EthSubscriptionApiServer for EthSubscriptionApiImpl {
                                             return;
                                         }
                                     };
-                                    let msg = match SubscriptionMessage::from_json(&value) {
+                                    let msg = match SubscriptionMessage::new(
+                                        "eth_subscription",
+                                        sink.subscription_id(),
+                                        &value,
+                                    ) {
                                         Ok(m) => m,
                                         Err(e) => {
                                             warn!(error = %e, "failed to build log subscription message");
@@ -268,7 +276,8 @@ async fn signal_lag(sink: &jsonrpsee::core::server::SubscriptionSink, missed: u6
     let notice = serde_json::json!({
         "error": format!("subscription lagged by {missed} messages; resubscribe"),
     });
-    if let Ok(message) = SubscriptionMessage::from_json(&notice)
+    if let Ok(message) =
+        SubscriptionMessage::new("eth_subscription", sink.subscription_id(), &notice)
         && sink.send(message).await.is_err()
     {
         trace!("lagging subscriber already disconnected");

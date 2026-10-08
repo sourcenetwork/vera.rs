@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use jsonrpsee_server::{BatchRequestConfig, PingConfig, Server, ServerHandle};
+use jsonrpsee_server::{BatchRequestConfig, PingConfig, Server, ServerConfig, ServerHandle};
 use tokio::sync::broadcast;
 use tracing::{error, info};
 
@@ -308,7 +308,7 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
         let extra_modules = self.extra_modules;
 
         let jsonrpc_handle = tokio::spawn(async move {
-            let builder = Server::builder()
+            let config = ServerConfig::builder()
                 // Subscription acknowledgements echo the client's request id;
                 // keeping the response budget above the request budget keeps
                 // that echo from overflowing the response limit.
@@ -325,7 +325,9 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
                     PingConfig::default()
                         .ping_interval(std::time::Duration::from_secs(30))
                         .max_failures(2),
-                );
+                )
+                .build();
+            let builder = Server::builder().set_config(config);
             let result = match listener {
                 Some(listener) => builder.build_from_tcp(listener),
                 None => builder.build(addr).await,
@@ -643,15 +645,20 @@ impl<S: StateProvider + Clone + 'static> JsonRpcServer<S> {
     /// Returns the server handle and the actual bound address (useful when binding to port 0).
     pub async fn start(self) -> Result<(ServerHandle, SocketAddr), ServerError> {
         let server = Server::builder()
-            .max_request_body_size(vera_domain::SUBMISSION_REQUEST_BYTES)
-            .max_response_body_size(
-                vera_permission::PERMISSION_RESPONSE_BYTES.max(vera_domain::RECEIPT_RESPONSE_BYTES)
-                    as u32,
+            .set_config(
+                ServerConfig::builder()
+                    .max_request_body_size(vera_domain::SUBMISSION_REQUEST_BYTES)
+                    .max_response_body_size(
+                        vera_permission::PERMISSION_RESPONSE_BYTES
+                            .max(vera_domain::RECEIPT_RESPONSE_BYTES)
+                            as u32,
+                    )
+                    .max_connections(self.max_connections)
+                    .set_batch_request_config(BatchRequestConfig::Limit(64))
+                    .max_subscriptions_per_connection(8)
+                    .set_message_buffer_capacity(8)
+                    .build(),
             )
-            .max_connections(self.max_connections)
-            .set_batch_request_config(BatchRequestConfig::Limit(64))
-            .max_subscriptions_per_connection(8)
-            .set_message_buffer_capacity(8)
             .build(self.addr)
             .await
             .map_err(|e| ServerError::Build(e.to_string()))?;

@@ -1,15 +1,17 @@
 use std::net::SocketAddr;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::{fmt, sync::atomic::AtomicUsize};
 
-use crate::{serve_with_graceful_shutdown, stop_channel, RpcModule, Server, ServerBuilder, ServerHandle};
+use crate::{
+	RpcModule, Server, ServerBuilder, ServerConfigBuilder, ServerHandle, serve_with_graceful_shutdown, stop_channel,
+};
 
 use futures_util::FutureExt;
 use jsonrpsee_core::server::Methods;
-use jsonrpsee_core::{DeserializeOwned, RpcResult, StringError};
+use jsonrpsee_core::{DeserializeOwned, RpcResult, SubscriptionError};
 use jsonrpsee_test_utils::TimeoutFutureExt;
-use jsonrpsee_types::{error::ErrorCode, ErrorObject, ErrorObjectOwned, Response, ResponseSuccess};
+use jsonrpsee_types::{ErrorObject, ErrorObjectOwned, Response, ResponseSuccess, error::ErrorCode};
 use tokio::net::TcpListener;
 use tower::Service;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
@@ -86,7 +88,7 @@ pub(crate) async fn server_with_handles() -> (SocketAddr, ServerHandle) {
 		})
 		.unwrap();
 	module
-		.register_subscription::<Result<(), StringError>, _, _>(
+		.register_subscription::<Result<(), SubscriptionError>, _, _>(
 			"subscribe_hello",
 			"subscribe_hello",
 			"unsubscribe_hello",
@@ -213,7 +215,10 @@ pub(crate) async fn ws_server_with_stats(metrics: Metrics) -> SocketAddr {
 	let (stop_handle, server_handle) = stop_channel();
 	let metrics = metrics.clone();
 
-	let rpc_svc = Server::builder().max_connections(33).to_service_builder().build(Methods::new(), stop_handle.clone());
+	let rpc_svc = Server::builder()
+		.set_config(ServerConfigBuilder::new().max_connections(33).build())
+		.to_service_builder()
+		.build(Methods::new(), stop_handle.clone());
 
 	tokio::spawn(async move {
 		loop {

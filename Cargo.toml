@@ -151,7 +151,7 @@ group = { version = "0.14", default-features = false }
 axum = "0.8"
 tower = { version = "0.5", features = ["limit"] }
 tower-http = { version = "0.6", features = ["cors"] }
-jsonrpsee = { version = "0.24", features = ["server-core", "macros", "ws-client"] }
+jsonrpsee = { version = "0.26", features = ["server-core", "macros", "ws-client"] }
 reqwest = { version = "0.12", features = ["json", "blocking"] }
 
 # Concurrency

@@ -1,9 +1,9 @@
 # Vera transport patch
 
-This directory vendors jsonrpsee-server 0.24.10 from crates.io, upstream commit
-8b29cca3d9721997275a5f51cd4eb488b61b63e6 (server/). Original source copyright and
+This directory vendors jsonrpsee-server 0.26.1 from crates.io, upstream commit
+bcc84901f3c882f4233f293e5acf018643cbd412 (server/). Original source copyright and
 MIT notices are preserved. The registry archive SHA-256 is
-21429bcdda37dcf2d43b68621b994adede0e28061f816b038b0f18c70c143d51.
+c01a2a627365144221ad5883ce2ea3953e152e29d102f2eeca8cbfc1be4bb286.
 
 The change in src/transport/ws.rs replaces detached request tasks with a
 connection-owned JoinSet. Its size is limited by message_buffer_capacity;

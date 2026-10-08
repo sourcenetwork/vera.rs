@@ -30,8 +30,8 @@ use crate::middleware::http::authority::{Authority, AuthorityError, Port};
 use crate::transport::http;
 use crate::{HttpBody, HttpRequest, LOG_TARGET};
 use futures_util::{Future, FutureExt, TryFutureExt};
-use hyper::body::Bytes;
 use hyper::Response;
+use hyper::body::Bytes;
 use jsonrpsee_core::BoxError;
 use route_recognizer::Router;
 use std::collections::BTreeMap;
@@ -122,7 +122,7 @@ where
 			return async { Ok(http::response::malformed()) }.boxed();
 		};
 
-		if self.filter.as_ref().map_or(true, |f| f.recognize(&authority)) {
+		if self.filter.as_ref().is_none_or(|f| f.recognize(&authority)) {
 			Box::pin(self.inner.call(request).map_err(Into::into))
 		} else {
 			tracing::debug!(target: LOG_TARGET, "Denied request: {:?}", request);

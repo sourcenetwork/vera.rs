@@ -36,7 +36,9 @@ pub(crate) async fn stream_headers(
                     Err(_) => break,
                 },
             };
-            let Ok(message) = SubscriptionMessage::from_json(&header) else {
+            let Ok(message) =
+                SubscriptionMessage::new("vera_subscribeHeaders", sink.subscription_id(), &header)
+            else {
                 break;
             };
             if sink.send(message).await.is_err() {

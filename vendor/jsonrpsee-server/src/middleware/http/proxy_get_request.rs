@@ -24,28 +24,36 @@
 // IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-//! Middleware that proxies requests at a specified URI to internal
-//! RPC method calls.
+//! Middleware that proxies HTTP GET requests at a specified URI to an internal RPC method call.
+
 use crate::transport::http;
 use crate::{HttpBody, HttpRequest, HttpResponse};
-
+use futures_util::{FutureExt, TryFutureExt};
 use http_body_util::BodyExt;
 use hyper::body::Bytes;
 use hyper::header::{ACCEPT, CONTENT_TYPE};
 use hyper::http::HeaderValue;
-use hyper::{Method, Uri};
+use hyper::{Method, StatusCode, Uri};
 use jsonrpsee_core::BoxError;
-use jsonrpsee_types::{Id, RequestSer};
+use jsonrpsee_types::{ErrorCode, ErrorObject, Id, Request};
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
 
 /// Error that occur if the specified path doesn't start with `/<path>`
 #[derive(Debug, thiserror::Error)]
-#[error("ProxyGetRequestLayer path must start with `/`, got `{0}`")]
-pub struct InvalidPath(String);
+pub enum ProxyGetRequestError {
+	/// Duplicated path.
+	#[error("ProxyGetRequestLayer path must be unique, got duplicated `{0}`")]
+	DuplicatedPath(String),
+	/// Invalid path.
+	#[error("ProxyGetRequestLayer path must start with `/`, got `{0}`")]
+	InvalidPath(String),
+}
 
 /// Layer that applies [`ProxyGetRequest`] which proxies the `GET /path` requests to
 /// specific RPC method calls and that strips the response.
@@ -53,29 +61,44 @@ pub struct InvalidPath(String);
 /// See [`ProxyGetRequest`] for more details.
 #[derive(Debug, Clone)]
 pub struct ProxyGetRequestLayer {
-	path: String,
-	method: String,
+	// path => method mapping
+	methods: Arc<HashMap<String, String>>,
 }
 
 impl ProxyGetRequestLayer {
 	/// Creates a new [`ProxyGetRequestLayer`].
 	///
-	/// See [`ProxyGetRequest`] for more details.
-	pub fn new(path: impl Into<String>, method: impl Into<String>) -> Result<Self, InvalidPath> {
-		let path = path.into();
-		if !path.starts_with('/') {
-			return Err(InvalidPath(path));
+	/// The request `GET /path` is redirected to the provided method.
+	/// Fails if the path does not start with `/`.
+	pub fn new<P, M>(pairs: impl IntoIterator<Item = (P, M)>) -> Result<Self, ProxyGetRequestError>
+	where
+		P: Into<String>,
+		M: Into<String>,
+	{
+		let mut methods = HashMap::new();
+
+		for (path, method) in pairs {
+			let path = path.into();
+			let method = method.into();
+
+			if !path.starts_with('/') {
+				return Err(ProxyGetRequestError::InvalidPath(path));
+			}
+
+			if let Some(path) = methods.insert(path, method) {
+				return Err(ProxyGetRequestError::DuplicatedPath(path));
+			}
 		}
 
-		Ok(Self { path, method: method.into() })
+		Ok(Self { methods: Arc::new(methods) })
 	}
 }
+
 impl<S> Layer<S> for ProxyGetRequestLayer {
 	type Service = ProxyGetRequest<S>;
 
 	fn layer(&self, inner: S) -> Self::Service {
-		ProxyGetRequest::new(inner, &self.path, &self.method)
-			.expect("Path already validated in ProxyGetRequestLayer; qed")
+		ProxyGetRequest { inner, methods: self.methods.clone() }
 	}
 }
 
@@ -94,22 +117,8 @@ impl<S> Layer<S> for ProxyGetRequestLayer {
 #[derive(Debug, Clone)]
 pub struct ProxyGetRequest<S> {
 	inner: S,
-	path: Arc<str>,
-	method: Arc<str>,
-}
-
-impl<S> ProxyGetRequest<S> {
-	/// Creates a new [`ProxyGetRequest`].
-	///
-	/// The request `GET /path` is redirected to the provided method.
-	/// Fails if the path does not start with `/`.
-	pub fn new(inner: S, path: &str, method: &str) -> Result<Self, InvalidPath> {
-		if !path.starts_with('/') {
-			return Err(InvalidPath(path.to_string()));
-		}
-
-		Ok(Self { inner, path: Arc::from(path), method: Arc::from(method) })
-	}
+	// path => method mapping
+	methods: Arc<HashMap<String, String>>,
 }
 
 impl<S, B> Service<HttpRequest<B>> for ProxyGetRequest<S>
@@ -132,65 +141,85 @@ where
 	}
 
 	fn call(&mut self, mut req: HttpRequest<B>) -> Self::Future {
-		let modify = self.path.as_ref() == req.uri() && req.method() == Method::GET;
+		let path = req.uri().path();
+		let method = self.methods.get(path);
 
-		// Proxy the request to the appropriate method call.
-		let req = if modify {
-			// RPC methods are accessed with `POST`.
-			*req.method_mut() = Method::POST;
-			// Precautionary remove the URI.
-			*req.uri_mut() = Uri::from_static("/");
+		match (method, req.method()) {
+			// Proxy the `GET /path` request to the appropriate method call.
+			(Some(method), &Method::GET) => {
+				// RPC methods are accessed with `POST`.
+				*req.method_mut() = Method::POST;
+				// Precautionary remove the URI path.
+				*req.uri_mut() = if let Some(query) = req.uri().query() {
+					Uri::from_str(&format!("/?{}", query)).expect("The query comes from a valid URI; qed")
+				} else {
+					Uri::from_static("/")
+				};
+				// Requests must have the following headers:
+				req.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+				req.headers_mut().insert(ACCEPT, HeaderValue::from_static("application/json"));
 
-			// Requests must have the following headers:
-			req.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-			req.headers_mut().insert(ACCEPT, HeaderValue::from_static("application/json"));
+				// Adjust the body to reflect the method call.
+				let bytes =
+					serde_json::to_vec(&Request::borrowed(method, None, Id::Number(0))).expect("Valid request; qed");
+				let req = req.map(|_| HttpBody::from(bytes));
 
-			// Adjust the body to reflect the method call.
-			let bytes = serde_json::to_vec(&RequestSer::borrowed(&Id::Number(0), &self.method, None))
-				.expect("Valid request; qed");
+				// Call the inner service and get a future that resolves to the response.
+				let fut = self.inner.call(req);
 
-			let body = HttpBody::from(bytes);
+				async move {
+					let res = fut.await.map_err(Into::into)?;
 
-			req.map(|_| body)
-		} else {
-			req.map(HttpBody::new)
-		};
+					let (parts, body) = res.into_parts();
+					let mut body = http_body_util::BodyStream::new(body);
+					let mut bytes = Vec::new();
 
-		// Call the inner service and get a future that resolves to the response.
-		let fut = self.inner.call(req);
+					while let Some(frame) = body.frame().await {
+						let data = frame?.into_data().map_err(|e| format!("{e:?}"))?;
+						bytes.extend(data);
+					}
 
-		// Adjust the response if needed.
-		let res_fut = async move {
-			let res = fut.await.map_err(|err| err.into())?;
+					#[derive(serde::Deserialize)]
+					struct SuccessResponse<'a> {
+						#[serde(borrow)]
+						result: &'a serde_json::value::RawValue,
+					}
 
-			// Nothing to modify: return the response as is.
-			if !modify {
-				return Ok(res);
+					let mut response = if let Ok(payload) = serde_json::from_slice::<SuccessResponse>(&bytes) {
+						http::response::ok_response(payload.result.to_string())
+					} else {
+						internal_proxy_error(&bytes)
+					};
+
+					response.extensions_mut().extend(parts.extensions);
+
+					Ok(response)
+				}
+				.boxed()
 			}
-
-			let mut body = http_body_util::BodyStream::new(res.into_body());
-			let mut bytes = Vec::new();
-
-			while let Some(frame) = body.frame().await {
-				let data = frame?.into_data().map_err(|e| format!("{e:?}"))?;
-				bytes.extend(data);
+			// Call the inner service and get a future that resolves to the response.
+			_ => {
+				let req = req.map(HttpBody::new);
+				self.inner.call(req).map_err(Into::into).boxed()
 			}
-
-			#[derive(serde::Deserialize, Debug)]
-			struct RpcPayload<'a> {
-				#[serde(borrow)]
-				result: &'a serde_json::value::RawValue,
-			}
-
-			let response = if let Ok(payload) = serde_json::from_slice::<RpcPayload>(&bytes) {
-				http::response::ok_response(payload.result.to_string())
-			} else {
-				http::response::internal_error()
-			};
-
-			Ok(response)
-		};
-
-		Box::pin(res_fut)
+		}
 	}
+}
+
+fn internal_proxy_error(bytes: &[u8]) -> HttpResponse {
+	#[derive(serde::Deserialize)]
+	struct ErrorResponse<'a> {
+		#[serde(borrow)]
+		error: ErrorObject<'a>,
+	}
+
+	let error = serde_json::from_slice::<ErrorResponse>(bytes)
+		.map(|payload| payload.error)
+		.unwrap_or_else(|_| ErrorObject::from(ErrorCode::InternalError));
+
+	http::response::from_template(
+		StatusCode::INTERNAL_SERVER_ERROR,
+		serde_json::to_string(&error).expect("JSON serialization infallible; qed"),
+		"application/json; charset=utf-8",
+	)
 }
