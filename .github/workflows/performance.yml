@@ -7,6 +7,14 @@ on:
         description: Offer 90,000 operations over 30 minutes against 128 fixed objects
         type: boolean
         default: false
+      sustained_growing_state:
+        description: Offer 90,000 operations over 30 minutes against a growing dataset
+        type: boolean
+        default: false
+      sustained_memory_attribution:
+        description: Record numeric vera_diagnostics snapshots during a sustained run
+        type: boolean
+        default: false
       storage_attribution:
         description: Run the bounded RocksDB storage diagnostic instead of performance baselines
         type: boolean
@@ -32,7 +40,7 @@ jobs:
   workload:
     if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.sustained_fixed_state && 180 || 60 }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && (inputs.sustained_fixed_state || inputs.sustained_growing_state) && 180 || 60 }}
     strategy:
       fail-fast: false
       matrix:
@@ -44,13 +52,23 @@ jobs:
       STORAGE_ATTRIBUTION: ${{ github.event_name == 'workflow_dispatch' && inputs.storage_attribution }}
       STORAGE_ATTRIBUTION_MODE: ${{ inputs.storage_attribution_mode || 'full' }}
       SUSTAINED_FIXED_STATE: ${{ github.event_name == 'workflow_dispatch' && inputs.sustained_fixed_state }}
+      SUSTAINED_GROWING_STATE: ${{ github.event_name == 'workflow_dispatch' && inputs.sustained_growing_state }}
+      SUSTAINED_MEMORY_ATTRIBUTION: ${{ github.event_name == 'workflow_dispatch' && inputs.sustained_memory_attribution }}
     steps:
       - name: Validate measurement selection
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$SUSTAINED_FIXED_STATE" == true && "$STORAGE_ATTRIBUTION" == true ]]; then
-            echo 'sustained_fixed_state and storage_attribution are mutually exclusive' >&2
+          if [[ "$SUSTAINED_FIXED_STATE" == true && "$SUSTAINED_GROWING_STATE" == true ]]; then
+            echo 'sustained_fixed_state and sustained_growing_state are mutually exclusive' >&2
+            exit 1
+          fi
+          if [[ ( "$SUSTAINED_FIXED_STATE" == true || "$SUSTAINED_GROWING_STATE" == true ) && "$STORAGE_ATTRIBUTION" == true ]]; then
+            echo 'sustained modes and storage_attribution are mutually exclusive' >&2
+            exit 1
+          fi
+          if [[ "$SUSTAINED_MEMORY_ATTRIBUTION" == true && "$SUSTAINED_FIXED_STATE" != true && "$SUSTAINED_GROWING_STATE" != true ]]; then
+            echo 'sustained_memory_attribution requires a sustained mode' >&2
             exit 1
           fi
 
@@ -118,12 +136,23 @@ jobs:
             object_counts=(128)
             recorder+=(--timeout-seconds 7200)
           fi
+          if [[ "$SUSTAINED_GROWING_STATE" == true ]]; then
+            count=90000
+            object_counts=(0)
+            recorder+=(--timeout-seconds 7200)
+          fi
+          if [[ "$SUSTAINED_MEMORY_ATTRIBUTION" == true ]]; then
+            recorder+=(--rust-log 'warn,vera_storage=info,vera_diagnostics=debug')
+          fi
           for objects in "${object_counts[@]}"; do
             directory="performance-results/objects-$objects"
             "${recorder[@]}" \
               --node target/release/verad --runner target/release/examples/operation_baseline \
               --history "$HISTORY_BACKEND" --output "$directory" \
               "$count" 50 128 1 normal 100 192 0 "$objects" 256 1 || result=1
+            if [[ "$SUSTAINED_MEMORY_ATTRIBUTION" == true ]]; then
+              python3 tools/performance/snapshot_metrics.py "$directory" || result=1
+            fi
             "$RUNNER_TEMP/performance-python/bin/python" tools/performance/report.py "$directory" || result=1
             if [[ -f "$directory/report.md" ]]; then sed '/^!\[/d' "$directory/report.md" >> "$GITHUB_STEP_SUMMARY"; fi
           done
@@ -197,6 +226,7 @@ jobs:
             performance-results/**/manifest.json
             performance-results/**/workload.jsonl
             performance-results/**/components.jsonl
+            performance-results/**/diagnostics.jsonl
             performance-results/**/summary.json
             performance-results/**/report.md
             performance-results/**/report.json
