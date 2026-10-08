@@ -103,6 +103,28 @@ gh workflow run performance.yml --repo sourcenetwork/vera.rs --ref <branch-or-ta
   -f sustained_fixed_state=true
 ```
 
+`sustained_growing_state=true` selects the same schedule against a growing
+dataset (the driver's zero-seeded object mode) instead of 128 fixed objects.
+The two sustained modes are mutually exclusive.
+
+```sh
+gh workflow run performance.yml --repo sourcenetwork/vera.rs --ref <branch-or-tag> \
+  -f sustained_growing_state=true
+```
+
+`sustained_memory_attribution=true` combines with either sustained mode. The
+recorder enables the opt-in `vera_diagnostics` target and, after the run,
+`tools/performance/snapshot_metrics.py` flattens each 30-second node snapshot
+into numeric records (`diagnostics.jsonl`: history backend memtable,
+table-reader and block-cache bytes, execution index bytes and counts, light
+block cache entries and bytes, durable height). Raw node logs remain excluded
+from artifacts; only the numeric extraction is uploaded.
+
+```sh
+gh workflow run performance.yml --repo sourcenetwork/vera.rs --ref <branch-or-tag> \
+  -f sustained_growing_state=true -f sustained_memory_attribution=true
+```
+
 Each backend's recorder receives these arguments:
 
 ```text
@@ -118,9 +140,10 @@ job time. This option defines a workload; it does not assert a completed run,
 sustained capacity or a memory bound. A fixed live object set does not freeze
 retained history or receipts; memory growth still requires attribution.
 
-It is mutually exclusive with `storage_attribution`; conflicting inputs fail
-before checkout or build. Without this option, manual and successful main CI
-runs retain the existing two 3,000-operation baselines and 60-minute job limit.
+All sustained modes are mutually exclusive with `storage_attribution`;
+conflicting inputs fail before checkout or build. Without a sustained option,
+manual and successful main CI runs retain the existing two 3,000-operation
+baselines and 60-minute job limit.
 The workflow uploads only the named measurement, provenance and report artifacts;
 raw runtime logs, configuration, keys and state directories are excluded.
 
