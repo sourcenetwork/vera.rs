@@ -3,6 +3,9 @@
 #[path = "support/administration.rs"]
 mod administration;
 
+#[path = "support/membership_load.rs"]
+mod membership_load;
+
 #[path = "support/epoch_share.rs"]
 mod epoch_share;
 
@@ -177,6 +180,11 @@ async fn admit_member(interrupt: bool, crash_share: bool, pipelined: bool) {
         .await
         .unwrap();
     receipt(&origin, initialized.transaction_hash, &trusted).await;
+    let load = if pipelined {
+        Some(membership_load::Load::start(cluster.node(0).rpc_url(), deployment, trusted).await)
+    } else {
+        None
+    };
 
     let local = tempfile::Builder::new()
         .prefix("incoming-")
@@ -423,6 +431,18 @@ async fn admit_member(interrupt: bool, crash_share: bool, pipelined: bool) {
     )
     .await;
     assert!(final_write > reduced.height);
+    if let Some(load) = load {
+        load.finish(
+            admitted,
+            final_write,
+            &[
+                cluster.node(0).rpc_url(),
+                cluster.node(1).rpc_url(),
+                format!("http://127.0.0.1:{rpc_port}"),
+            ],
+        )
+        .await;
+    }
     incoming.kill().await.unwrap();
     incoming.wait().await.unwrap();
 }
