@@ -179,10 +179,9 @@ async fn recover_replica_from(
     let from_backup = source == ReplicaSource::StoppedBackup;
     assert!(!from_backup || !(snapshot || interrupt || pruning || stale_floor));
     let epoch_length = if from_backup { 192 } else { 20 };
-    let mut genesis = GenesisBuilder::devnet().blocks_per_epoch(epoch_length);
-    if from_backup {
-        genesis = genesis.simplex(vera_domain::SimplexParameters::default());
-    }
+    let genesis = GenesisBuilder::devnet()
+        .blocks_per_epoch(epoch_length)
+        .simplex(vera_domain::SimplexParameters::default());
     let deployment = 9041;
     let keys = KeySet::builder().seed(deployment).build().unwrap();
     let trusted_key = *keys.epoch_info().output.public().public();
