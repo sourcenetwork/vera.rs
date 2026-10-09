@@ -30,8 +30,9 @@ jobs:
     env:
       CARGO_BUILD_JOBS: '2'
       PROTOC: /usr/bin/protoc
-      CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
+      CARGO_PROFILE_RELEASE_DEBUG: full
       CARGO_PROFILE_RELEASE_STRIP: none
+      RUSTFLAGS: '-C force-frame-pointers=yes'
       HISTORY_BACKEND: ${{ inputs.history || 'rocksdb' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

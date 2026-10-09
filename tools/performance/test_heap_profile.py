@@ -7,12 +7,57 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from heap_profile import demangle_stacks, heap_timeline, retained_sites, rust_demangler, source_location
+from heap_profile import demangle_stacks, heap_timeline, profile_settings, retained_sites, rust_demangler, source_location
 
 LAUNCHER = Path(__file__).resolve().parents[2] / '.github/scripts/profiled-verad.sh'
 
 
 class HeapEvidence(unittest.TestCase):
+    def test_profile_build_flags_are_explicit_and_not_overridden(self):
+        environment = {'CARGO_PROFILE_RELEASE_DEBUG': 'full',
+                       'CARGO_PROFILE_RELEASE_STRIP': 'none',
+                       'RUSTFLAGS': '-C force-frame-pointers=yes'}
+        self.assertEqual(profile_settings(environment), {
+            'release_debug': 'full', 'release_strip': 'none',
+            'rustflags': '-C force-frame-pointers=yes'})
+        for key in environment:
+            for value in (None, '', 'private_value'):
+                changed = dict(environment)
+                if value is None:
+                    changed.pop(key)
+                else:
+                    changed[key] = value
+                with self.assertRaisesRegex(ValueError, '^unsupported allocation build settings$'):
+                    profile_settings(changed)
+        for value in ('', '-Cprivate'):
+            with self.assertRaises(ValueError):
+                profile_settings(dict(environment, CARGO_ENCODED_RUSTFLAGS=value))
+
+    def test_allocator_symbol_does_not_establish_component_attribution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'stacks'
+            path.write_text('std::alloc::System (unix.rs);??; 64\n'
+                            'vera_app::apply (app.rs);std::alloc::System (unix.rs); 32\n'
+                            'rocksdb::Arena::AllocateNewBlock (arena.cc); 16\n'
+                            'private_secret (/secret/key.rs:1); 8\n')
+            attribution = collections.Counter()
+            sites = retained_sites(path, attribution=attribution)
+            self.assertEqual(attribution, {'allocator_only': 64, 'vera_commonware_caller': 32,
+                                          'library_caller': 16, 'unresolved': 8})
+            self.assertEqual(sum(sites.values()), sum(attribution.values()))
+            self.assertNotIn('private', json.dumps(attribution))
+
+    def test_attribution_includes_callers_outside_the_display_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'stacks'
+            path.write_text(''.join('vera_app::site%d (app.rs); 1\n' % index for index in range(60)) +
+                            'std::alloc::System (unix.rs); 2\n')
+            attribution = collections.Counter()
+            sites = retained_sites(path, attribution=attribution)
+            self.assertEqual(attribution, {'vera_commonware_caller': 60, 'allocator_only': 2})
+            self.assertEqual(sum(sites.values()), 62)
+            self.assertLess(sum(amount for _, amount in sites.most_common(50)), sum(attribution.values()))
+
     def test_retained_sites_charge_each_allocation_once(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'stacks'

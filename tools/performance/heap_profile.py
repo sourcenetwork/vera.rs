@@ -18,6 +18,32 @@ COUNT = 6000
 RATE = 20
 
 
+def profile_settings(environment):
+    expected = {'CARGO_PROFILE_RELEASE_DEBUG': 'full',
+                'CARGO_PROFILE_RELEASE_STRIP': 'none',
+                'RUSTFLAGS': '-C force-frame-pointers=yes'}
+    if ('CARGO_ENCODED_RUSTFLAGS' in environment or
+            any(environment.get(key) != value for key, value in expected.items())):
+        raise ValueError('unsupported allocation build settings')
+    return {'release_debug': 'full', 'release_strip': 'none',
+            'rustflags': expected['RUSTFLAGS']}
+
+
+def component_site(location):
+    return (location.startswith(('crates/vera-', 'commonware-', 'vera_', 'commonware_')) or
+            re.match(r'^(storage|runtime|consensus|p2p|utils|broadcast|marshal|glue)/src/', location))
+
+
+def attribution_class(location):
+    if component_site(location):
+        return 'vera_commonware_caller'
+    if location == 'unresolved':
+        return 'unresolved'
+    if location.startswith(('std::alloc::', 'std::sys::alloc::', 'alloc::')):
+        return 'allocator_only'
+    return 'library_caller'
+
+
 def source_location(frame):
     match = re.search(r"(?:^|/)(crates/vera-[\w-]+/src/[\w/.-]+\.rs|"
                       r"commonware-[\w-]+-[0-9.]+/src/[\w/.-]+\.rs|"
@@ -44,7 +70,7 @@ def unresolved_format(frames):
     return 'unrecognized_symbols'
 
 
-def retained_sites(path, unresolved=None):
+def retained_sites(path, unresolved=None, attribution=None):
     sites = collections.Counter()
     with path.open() as stream:
         for line in stream:
@@ -54,12 +80,13 @@ def retained_sites(path, unresolved=None):
                 raise ValueError('negative allocation weight')
             frames = [frame for frame in stack.split(';') if frame]
             locations = [source_location(frame) for frame in frames]
-            owned = [location for location in locations if location.startswith(('crates/vera-', 'commonware-', 'vera_', 'commonware_'))
-                     or re.match(r'^(storage|runtime|consensus|p2p|utils|broadcast|marshal|glue)/src/', location)]
+            owned = [location for location in locations if component_site(location)]
             # Each allocation contributes once, at its innermost known source location.
             known = [location for location in locations if location != 'unresolved']
             site = (owned or known or ['unresolved'])[-1]
             sites[site] += amount
+            if attribution is not None:
+                attribution[attribution_class(site)] += amount
             if site == 'unresolved' and unresolved is not None:
                 unresolved[unresolved_format(frames)] += amount
     return sites
@@ -125,6 +152,7 @@ def main():
     parser.add_argument('--history', required=True, choices=('rocksdb', 'regolith'))
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
+    build = profile_settings(os.environ)
     args.output.mkdir(parents=True, exist_ok=False)
     node = Path('target/release/verad').resolve(strict=True)
     launcher = Path('.github/scripts/profiled-verad.sh').resolve(strict=True)
@@ -156,7 +184,7 @@ def main():
         manifest['node_launcher_sha256'] = manifest.pop('node_sha256')
         manifest['node_sha256'] = digest(node)
         manifest['heap_profile'] = {'member': 3, 'tool': subprocess.check_output(['heaptrack', '--version'], text=True).strip(),
-                                    'library_sha256': digest(library), 'release_debug': 'line-tables-only', 'release_strip': 'none',
+                                    'library_sha256': digest(library), **build,
                                     'instrumented': True, 'capacity_measurement': False, 'profiled_first_boot_only': True, 'rust_demangler': demangler_version}
         manifest['source_binding'] += ' The launcher execs the hashed node; allocation instrumentation is restricted to member3 first boot.'
         workload_evidence = {'manifest': manifest, 'workload_exit_code': result.returncode,
@@ -186,12 +214,17 @@ def main():
         decoded = private / 'retained.rust.stacks'
         demangle_stacks(stacks, decoded, demangler)
         unresolved = collections.Counter()
-        sites = retained_sites(decoded, unresolved)
+        attribution = collections.Counter()
+        sites = retained_sites(decoded, unresolved, attribution)
         if sum(original_sites.values()) != sum(sites.values()):
             raise ValueError('symbol decoding changed allocation accounting')
+        if sum(attribution.values()) != sum(sites.values()):
+            raise ValueError('allocation attribution changed accounting')
         evidence = {'manifest': manifest, 'outcomes': {key: value for key, value in records.items() if key != 'first_resources'},
                     'timeline': timeline, 'total_retained_bytes': sum(sites.values()),
                     'retained_sites': dict(sites.most_common(50)),
+                    'attribution_bytes': {kind: attribution[kind] for kind in
+                                          ('vera_commonware_caller', 'library_caller', 'allocator_only', 'unresolved')},
                     'symbolization': {'unresolved_before_bytes': original_sites['unresolved'],
                                       'unresolved_after_bytes': sites['unresolved'],
                                       'unresolved_stack_formats': dict(unresolved)},
