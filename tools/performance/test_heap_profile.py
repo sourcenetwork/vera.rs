@@ -1,3 +1,4 @@
+import collections
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,27 @@ class HeapEvidence(unittest.TestCase):
                             'alloc::alloc (/private/storage/src/cache.rs:24); 64\n'
                             'private_secret (/secret/key.rs:1); 8\n')
             self.assertEqual(retained_sites(path), {'storage/src/cache.rs:24': 64, 'unresolved': 8})
+
+    def test_unknown_leaf_does_not_discard_known_allocator_frames(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'stacks'
+            path.write_text('rocksdb::Arena::AllocateNewBlock (arena.cc);??; 64\n'
+                            'alloc::raw_vec::RawVecInner (mod.rs);private_secret; 32\n')
+            self.assertEqual(retained_sites(path), {
+                'rocksdb::Arena::AllocateNewBlock': 64,
+                'alloc::raw_vec::RawVecInner (mod.rs)': 32,
+            })
+
+    def test_unresolved_formats_retain_weights_without_private_names(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'stacks'
+            path.write_text('??;0x123; 64\n_Rprivate_secret; 32\n'
+                            'private_secret (/secret/key.rs:1); 16\n 8\n')
+            details = collections.Counter()
+            self.assertEqual(retained_sites(path, details), {'unresolved': 120})
+            self.assertEqual(details, {'missing_symbols': 64, 'mangled_symbols': 32,
+                                       'unrecognized_symbols': 16, 'missing_stack': 8})
+            self.assertNotIn('secret', json.dumps(details))
 
     def test_source_names_do_not_expose_private_paths(self):
         self.assertEqual(source_location('private_secret (/secret/credentials.rs:1)'), 'unresolved')

@@ -33,7 +33,18 @@ def source_location(frame):
     return match.group() + (' (%s)' % filename.group(1) if filename else '')
 
 
-def retained_sites(path):
+def unresolved_format(frames):
+    symbols = [frame.split(' (', 1)[0] for frame in frames]
+    if not symbols:
+        return 'missing_stack'
+    if any(symbol.startswith(('_R', '_ZN')) for symbol in symbols):
+        return 'mangled_symbols'
+    if all(symbol == '??' or re.fullmatch(r'0x[0-9a-fA-F]+', symbol) for symbol in symbols):
+        return 'missing_symbols'
+    return 'unrecognized_symbols'
+
+
+def retained_sites(path, unresolved=None):
     sites = collections.Counter()
     with path.open() as stream:
         for line in stream:
@@ -41,11 +52,16 @@ def retained_sites(path):
             amount = int(weight)
             if amount < 0:
                 raise ValueError('negative allocation weight')
-            locations = [source_location(frame) for frame in stack.split(';') if frame]
+            frames = [frame for frame in stack.split(';') if frame]
+            locations = [source_location(frame) for frame in frames]
             owned = [location for location in locations if location.startswith(('crates/vera-', 'commonware-', 'vera_', 'commonware_'))
                      or re.match(r'^(storage|runtime|consensus|p2p|utils|broadcast|marshal|glue)/src/', location)]
             # Each allocation contributes once, at its innermost known source location.
-            sites[(owned or locations or ['unresolved'])[-1]] += amount
+            known = [location for location in locations if location != 'unresolved']
+            site = (owned or known or ['unresolved'])[-1]
+            sites[site] += amount
+            if site == 'unresolved' and unresolved is not None:
+                unresolved[unresolved_format(frames)] += amount
     return sites
 
 
@@ -169,14 +185,16 @@ def main():
         original_sites = retained_sites(stacks)
         decoded = private / 'retained.rust.stacks'
         demangle_stacks(stacks, decoded, demangler)
-        sites = retained_sites(decoded)
+        unresolved = collections.Counter()
+        sites = retained_sites(decoded, unresolved)
         if sum(original_sites.values()) != sum(sites.values()):
             raise ValueError('symbol decoding changed allocation accounting')
         evidence = {'manifest': manifest, 'outcomes': {key: value for key, value in records.items() if key != 'first_resources'},
                     'timeline': timeline, 'total_retained_bytes': sum(sites.values()),
                     'retained_sites': dict(sites.most_common(50)),
                     'symbolization': {'unresolved_before_bytes': original_sites['unresolved'],
-                                      'unresolved_after_bytes': sites['unresolved']},
+                                      'unresolved_after_bytes': sites['unresolved'],
+                                      'unresolved_stack_formats': dict(unresolved)},
                     'retained_interpretation': 'Bytes still allocated when the first process ended; these are not necessarily leaks.'}
         (args.output / 'allocations.json').write_text(json.dumps(evidence, indent=2) + '\n')
         if result.returncode:
