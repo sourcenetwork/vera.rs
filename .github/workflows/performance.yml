@@ -3,6 +3,10 @@ name: Performance
 on:
   workflow_dispatch:
     inputs:
+      archive_retention:
+        description: Verify lookup retention over 6,000 operations against 128 fixed objects
+        type: boolean
+        default: false
       sustained_fixed_state:
         description: Offer 90,000 operations over 30 minutes against 128 fixed objects
         type: boolean
@@ -51,14 +55,19 @@ jobs:
       VERA_E2E_KEEP: '0'
       STORAGE_ATTRIBUTION: ${{ github.event_name == 'workflow_dispatch' && inputs.storage_attribution }}
       STORAGE_ATTRIBUTION_MODE: ${{ inputs.storage_attribution_mode || 'full' }}
+      ARCHIVE_RETENTION: ${{ github.event_name == 'workflow_dispatch' && inputs.archive_retention }}
       SUSTAINED_FIXED_STATE: ${{ github.event_name == 'workflow_dispatch' && inputs.sustained_fixed_state }}
       SUSTAINED_GROWING_STATE: ${{ github.event_name == 'workflow_dispatch' && inputs.sustained_growing_state }}
-      SUSTAINED_MEMORY_ATTRIBUTION: ${{ github.event_name == 'workflow_dispatch' && inputs.sustained_memory_attribution }}
+      SUSTAINED_MEMORY_ATTRIBUTION: ${{ github.event_name == 'workflow_dispatch' && (inputs.sustained_memory_attribution || inputs.archive_retention) }}
     steps:
       - name: Validate measurement selection
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "$ARCHIVE_RETENTION" == true && ( "$SUSTAINED_FIXED_STATE" == true || "$SUSTAINED_GROWING_STATE" == true || "$STORAGE_ATTRIBUTION" == true ) ]]; then
+            echo 'archive_retention requires its own bounded workload' >&2
+            exit 1
+          fi
           if [[ "$SUSTAINED_FIXED_STATE" == true && "$SUSTAINED_GROWING_STATE" == true ]]; then
             echo 'sustained_fixed_state and sustained_growing_state are mutually exclusive' >&2
             exit 1
@@ -67,8 +76,8 @@ jobs:
             echo 'sustained modes and storage_attribution are mutually exclusive' >&2
             exit 1
           fi
-          if [[ "$SUSTAINED_MEMORY_ATTRIBUTION" == true && "$SUSTAINED_FIXED_STATE" != true && "$SUSTAINED_GROWING_STATE" != true ]]; then
-            echo 'sustained_memory_attribution requires a sustained mode' >&2
+          if [[ "$SUSTAINED_MEMORY_ATTRIBUTION" == true && "$SUSTAINED_FIXED_STATE" != true && "$SUSTAINED_GROWING_STATE" != true && "$ARCHIVE_RETENTION" != true ]]; then
+            echo 'sustained_memory_attribution requires a sustained mode or archive_retention' >&2
             exit 1
           fi
 
@@ -148,6 +157,10 @@ jobs:
           count=3000
           object_counts=(0 128)
           recorder=(python3 tools/performance/record.py)
+          if [[ "$ARCHIVE_RETENTION" == true ]]; then
+            count=6000
+            object_counts=(128)
+          fi
           if [[ "$SUSTAINED_FIXED_STATE" == true ]]; then
             count=90000
             object_counts=(128)
@@ -176,6 +189,9 @@ jobs:
             if [[ "$SUSTAINED_MEMORY_ATTRIBUTION" == true ]]; then
               python3 tools/performance/snapshot_metrics.py "$directory" \
                 --node-logs "$node_logs" --minimum-samples "$((count / 50 / 30))" || result=1
+            fi
+            if [[ "$ARCHIVE_RETENTION" == true ]]; then
+              python3 tools/performance/archive_retention.py "$directory" || result=1
             fi
             "$RUNNER_TEMP/performance-python/bin/python" tools/performance/report.py "$directory" || result=1
             if [[ -f "$directory/report.md" ]]; then sed '/^!\[/d' "$directory/report.md" >> "$GITHUB_STEP_SUMMARY"; fi
@@ -251,6 +267,7 @@ jobs:
             performance-results/**/workload.jsonl
             performance-results/**/components.jsonl
             performance-results/**/diagnostics.jsonl
+            performance-results/**/archive-retention.json
             performance-results/**/summary.json
             performance-results/**/report.md
             performance-results/**/report.json
