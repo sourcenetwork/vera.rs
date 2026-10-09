@@ -11,7 +11,7 @@ its PID and inherited RPC listener. Only member3's first process receives the
 Heaptrack preload library; the other validators, workload driver and restarted
 member run without it. The production allocator and runtime source are unchanged.
 
-The artifact records source/binary/tool provenance, operation outcomes, live
+The artifact records source/binary/tool provenance, operation outcomes, interval peak
 heap samples and the largest retained allocation owners. Each allocation is
 charged once to its innermost resolved Vera/Commonware frame. Heaptrack1.5's
 folded stacks expose function names and file basenames; source paths and line
@@ -19,7 +19,7 @@ numbers are retained only when the installed tool includes them. Unresolved
 frames remain explicit. Raw traces, node files and full profiler output stay in
 a private runner directory and are removed when the profiling step ends.
 
-Compare live heap growth with previously measured RSS and bounded cache/pool
+Compare sampled heap peaks with previously measured RSS and bounded cache/pool
 counters. Bytes retained when a process is stopped include ordinary live caches
 and state; retention alone does not establish a leak. Instrumented throughput
 and latency are diagnostic observations and must not be used as capacity numbers.
@@ -27,3 +27,11 @@ Heaptrack's own bookkeeping also adds memory outside the reported application
 allocations. A suspected fix still needs confirmation without the profiler.
 
 The collection mechanism follows [Heaptrack's preload implementation](https://github.com/KDE/heaptrack/blob/v1.5.0/src/track/heaptrack_preload.cpp).
+
+Heaptrack1.5 writes Massif timestamps in seconds, including fractional values.
+The collector normalizes these to integer milliseconds and rejects unknown units
+or regressing samples. Massif `mem_heap_B` is the peak between timestamp samples,
+not an instantaneous live-heap measurement; the artifact names it
+`interval_peak_heap_bytes`. These details follow [the upstream Massif writer](https://github.com/KDE/heaptrack/blob/v1.5.0/src/analyze/print/heaptrack_print.cpp).
+Workload provenance and outcomes are saved separately before allocation analysis,
+so an extraction failure does not discard the completed workload evidence.

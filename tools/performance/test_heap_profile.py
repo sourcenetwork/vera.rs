@@ -35,11 +35,34 @@ class HeapEvidence(unittest.TestCase):
             path = Path(directory) / 'massif'
             path.write_text('time_unit: ms\nsnapshot=0\ntime=10\nmem_heap_B=100\nheap_tree=detailed\n'
                             'n1: 100 secret_frame (/secret/key.rs:1)\nsnapshot=1\ntime=20\nmem_heap_B=200\n')
-            self.assertEqual(heap_timeline(path), [{'milliseconds': 10, 'live_heap_bytes': 100},
-                                                  {'milliseconds': 20, 'live_heap_bytes': 200}])
+            self.assertEqual(heap_timeline(path), [{'milliseconds': 10, 'interval_peak_heap_bytes': 100},
+                                                  {'milliseconds': 20, 'interval_peak_heap_bytes': 200}])
             path.write_text('time_unit: ms\nsnapshot=0\ntime=10\n')
             with self.assertRaises(ValueError):
                 heap_timeline(path)
+
+    def test_heaptrack_seconds_are_normalized_exactly(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'massif'
+            path.write_text('desc: heaptrack\ncmd: private command\ntime_unit: s\n'
+                            'snapshot=0\ntime=0.01\nmem_heap_B=100\n'
+                            'snapshot=1\ntime=300.125\nmem_heap_B=200\n')
+            self.assertEqual(heap_timeline(path), [{'milliseconds': 10, 'interval_peak_heap_bytes': 100},
+                                                  {'milliseconds': 300125, 'interval_peak_heap_bytes': 200}])
+
+    def test_timeline_rejects_unknown_units_nonfinite_and_regressing_samples(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'massif'
+            for text in ('time_unit: i\nsnapshot=0\ntime=10\nmem_heap_B=100\n',
+                         'time_unit: s\nsnapshot=0\ntime=NaN\nmem_heap_B=100\n',
+                         'time_unit: s\nsnapshot=0\ntime=-1\nmem_heap_B=100\n',
+                         'time_unit: s\nsnapshot=0\ntime=0.0001\nmem_heap_B=100\n',
+                         'time_unit: s\nsnapshot=0\ntime=10\nmem_heap_B=-1\n',
+                         'time_unit: s\nsnapshot=0\ntime=10\nmem_heap_B=100\n'
+                         'snapshot=1\ntime=9\nmem_heap_B=200\n'):
+                path.write_text(text)
+                with self.assertRaises(ValueError):
+                    heap_timeline(path)
 
     def test_launcher_execs_only_selected_first_boot(self):
         with tempfile.TemporaryDirectory() as directory:

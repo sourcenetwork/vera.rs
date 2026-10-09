@@ -2,6 +2,7 @@
 """Attribute allocations in one validator; retain only numeric and source-location evidence."""
 import argparse
 import collections
+from decimal import Decimal
 import gzip
 import json
 import os
@@ -51,21 +52,30 @@ def retained_sites(path):
 def heap_timeline(path):
     samples, current = [], {}
     content = path.read_text()
-    if 'time_unit: ms\n' not in content:
+    units = re.findall(r'^time_unit: (\w+)$', content, re.M)
+    if len(units) != 1 or units[0] not in ('s', 'ms'):
         raise ValueError('unsupported allocation timeline units')
+    multiplier = 1000 if units[0] == 's' else 1
     for line in content.splitlines():
         key, separator, value = line.partition('=')
         if key == 'snapshot' and separator:
             if current:
                 samples.append(current)
             current = {}
-        elif key in ('time', 'mem_heap_B') and separator:
+        elif key == 'time' and separator:
+            milliseconds = Decimal(value) * multiplier
+            if not milliseconds.is_finite() or milliseconds < 0 or milliseconds != milliseconds.to_integral_value():
+                raise ValueError('invalid allocation timeline timestamp')
+            current[key] = int(milliseconds)
+        elif key == 'mem_heap_B' and separator:
             current[key] = int(value)
     if current:
         samples.append(current)
-    if not samples or any(set(sample) != {'time', 'mem_heap_B'} for sample in samples):
-        raise ValueError('missing allocation timeline')
-    return [{'milliseconds': sample['time'], 'live_heap_bytes': sample['mem_heap_B']} for sample in samples]
+    if not samples or any(set(sample) != {'time', 'mem_heap_B'} or sample['mem_heap_B'] < 0 for sample in samples):
+        raise ValueError('missing or invalid allocation timeline')
+    if any(right['time'] < left['time'] for left, right in zip(samples, samples[1:])):
+        raise ValueError('allocation timeline regressed')
+    return [{'milliseconds': sample['time'], 'interval_peak_heap_bytes': sample['mem_heap_B']} for sample in samples]
 
 
 def installed_tool(name):
@@ -109,6 +119,16 @@ def main():
                     records[row['kind']] = row
                 if row.get('kind') == 'resources' and 'first_resources' not in records:
                     records['first_resources'] = row['sample']['rss_breakdown']
+        manifest = json.loads((record / 'manifest.json').read_text())
+        manifest['node_launcher_sha256'] = manifest.pop('node_sha256')
+        manifest['node_sha256'] = digest(node)
+        manifest['heap_profile'] = {'member': 3, 'tool': subprocess.check_output(['heaptrack', '--version'], text=True).strip(),
+                                    'library_sha256': digest(library), 'release_debug': 'line-tables-only', 'release_strip': 'none',
+                                    'instrumented': True, 'capacity_measurement': False, 'profiled_first_boot_only': True}
+        manifest['source_binding'] += ' The launcher execs the hashed node; allocation instrumentation is restricted to member3 first boot.'
+        workload_evidence = {'manifest': manifest, 'workload_exit_code': result.returncode,
+                             'outcomes': {key: value for key, value in records.items() if key != 'first_resources'}}
+        (args.output / 'workload.json').write_text(json.dumps(workload_evidence, indent=2) + '\n')
         pid = int((private / 'pid').read_text())
         if records['first_resources'][3]['pid'] != pid:
             raise ValueError('profile did not preserve the selected validator PID')
@@ -129,13 +149,6 @@ def main():
         timeline = heap_timeline(massif)
         if timeline[-1]['milliseconds'] < COUNT / RATE * 1000:
             raise ValueError('profile ended before the required workload duration')
-        manifest = json.loads((record / 'manifest.json').read_text())
-        manifest['node_launcher_sha256'] = manifest.pop('node_sha256')
-        manifest['node_sha256'] = digest(node)
-        manifest['heap_profile'] = {'member': 3, 'tool': subprocess.check_output(['heaptrack', '--version'], text=True).strip(),
-                                    'library_sha256': digest(library), 'release_debug': 'line-tables-only', 'release_strip': 'none',
-                                    'instrumented': True, 'capacity_measurement': False, 'profiled_first_boot_only': True}
-        manifest['source_binding'] += ' The launcher execs the hashed node; allocation instrumentation is restricted to member3 first boot.'
         sites = retained_sites(stacks)
         evidence = {'manifest': manifest, 'outcomes': {key: value for key, value in records.items() if key != 'first_resources'},
                     'timeline': timeline, 'total_retained_bytes': sum(sites.values()),
