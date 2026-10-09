@@ -1,0 +1,54 @@
+name: Native header protocol
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['iverc/native-header-notification']
+    paths:
+      - crates/vera-jsonrpc/**
+      - .github/workflows/native-header-protocol.yml
+  pull_request:
+    paths:
+      - crates/vera-jsonrpc/**
+      - .github/workflows/native-header-protocol.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-header-protocol-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-header-protocol:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: '2'
+      PROTOC: /usr/bin/protoc
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@62ae3a85dbdd2bedbb5819da8ce45635129289a1 # 1.98.0
+        with:
+          components: clippy
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: hosted-linux-checks
+      - name: Fetch locked dependencies
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
+        run: cargo fetch --locked
+      - name: Check native header wire protocol and subscription lifecycle
+        run: 'cargo test --frozen -p vera-jsonrpc header_subscribe::tests::'
+      - name: Lint RPC crate
+        run: cargo clippy --frozen -p vera-jsonrpc --all-targets -- -D warnings
