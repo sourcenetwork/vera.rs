@@ -22,6 +22,7 @@ vera-harness.workspace = true
 vera-node.workspace = true
 
 [dev-dependencies]
+vera-cli.workspace = true
 orbis-reporting = { git = "https://github.com/sourcenetwork/orbis-rs", rev = "74b5c8c7e74a3c2ade932a7c5ddfbe547a98e3ef" }
 blst = "0.3"
 tempfile.workspace = true

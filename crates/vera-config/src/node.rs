@@ -191,7 +191,12 @@ impl NodeConfig {
         let key_path = self.data_dir.join("validator.key");
 
         // Try to load existing key
-        match std::fs::read(&key_path) {
+        match vera_cli::open_private(&key_path).and_then(|mut file| {
+            use std::io::Read as _;
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes)?;
+            Ok(bytes)
+        }) {
             Ok(key_bytes) => {
                 if key_bytes.len() != 32 {
                     return Err(ConfigError::InvalidKeyLength(key_bytes.len()));
@@ -390,6 +395,41 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nonexistent.toml");
         assert!(NodeConfig::load(Some(&path)).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validator_rejects_exposed_and_linked_identity_without_regeneration() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let directory = tempfile::tempdir().unwrap();
+        let config = NodeConfig {
+            data_dir: directory.path().to_path_buf(),
+            ..Default::default()
+        };
+        config.validator_key().unwrap();
+        let path = config.data_dir.join("validator.key");
+        let original = std::fs::read(&path).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(matches!(
+            config.validator_key(),
+            Err(ConfigError::Read { .. })
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert_eq!(path.metadata().unwrap().permissions().mode() & 0o777, 0o644);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let retained = directory.path().join("retained.key");
+        std::fs::rename(&path, &retained).unwrap();
+        std::os::unix::fs::symlink(&retained, &path).unwrap();
+        assert!(matches!(
+            config.validator_key(),
+            Err(ConfigError::Read { .. })
+        ));
+        assert_eq!(std::fs::read_link(&path).unwrap(), retained);
+        assert_eq!(std::fs::read(&retained).unwrap(), original);
+        std::fs::remove_file(&path).unwrap();
+        std::fs::rename(&retained, &path).unwrap();
+        assert!(config.validator_key().is_ok());
+        assert_eq!(std::fs::read(&path).unwrap(), original);
     }
 
     #[test]

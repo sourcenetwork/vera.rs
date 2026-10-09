@@ -3,6 +3,7 @@
 use std::{
     collections::BTreeMap,
     fs,
+    io::Read as _,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -47,7 +48,11 @@ impl FileSecretStore {
     /// Open the store at `path`, starting empty if the file does not exist.
     pub fn load(path: impl Into<PathBuf>) -> anyhow::Result<Self> {
         let path = path.into();
-        let inner: SecretData = match fs::read_to_string(&path) {
+        let inner: SecretData = match vera_cli::open_private(&path).and_then(|mut file| {
+            let mut contents = String::new();
+            file.read_to_string(&mut contents)?;
+            Ok(contents)
+        }) {
             Ok(contents) => serde_json::from_str(&contents)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 match fs::symlink_metadata(&path) {

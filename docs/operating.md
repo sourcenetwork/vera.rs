@@ -194,8 +194,12 @@ workloads and measurement boundaries.
 
 ## Security notes for operators
 
-- `validator.key` and `secrets.json` are created with owner-only permissions;
-  keep the data directory off shared storage.
+- `validator.key` and `secrets.json` are created with owner-only permissions.
+  On Unix, startup rejects symlinks, non-regular files, hard links and group or
+  other access to existing private material. Reads check the opened descriptor
+  before decoding; they do not repair permissions. Restore independent files
+  with owner-only permissions (`chmod 600`), and protect the data directory and
+  its parents from other writers. Keep the data directory off shared storage.
 - Peer messaging is authenticated (see `peers.json`); RPC traffic should be
   TLS-terminated or network-isolated as appropriate for the deployment.
 - Certificate and proof endpoints apply fixed budgets; a client exceeding
