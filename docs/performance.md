@@ -790,3 +790,38 @@ idle time nor syscall elapsed time isolates physical disk latency. Tracing and
 ptrace perturb scheduling; neither the uninstrumented comparator nor the traced
 run establishes capacity, and their difference does not qualify a production
 optimization.
+
+
+## Archive lookup retention
+
+The `Performance` workflow's `archive_retention` input runs 6,000 updates at an
+offered 50 operations per second against 128 fixed objects on each history
+backend. It collects numeric snapshots from all four validators and writes
+`archive-retention.json`. Each member must cover at least 512 finalized heights
+and four snapshots. The gate compares lookup entries with primary retained
+archive entries; it tolerates 64 entries of skew because the gauges are read
+separately. That tolerance is one sync cadence in this fixture.
+
+This checks the lookup index after multiple pruning windows. It does not establish
+a whole-process memory bound, maximum throughput, or a WAN latency guarantee.
+Diagnostic collection is enabled for this run; use runs without that collection
+for capacity comparisons.
+
+The first qualification passed on both backends in
+[run 37926474338](https://github.com/sourcenetwork/vera.rs/actions/runs/37926474338),
+using Vera `1fafe1157b` and Commonware `0ebcf16459`. Across all four members,
+lookup item counts matched retained archive item counts in every sampled
+snapshot: the observed excess was zero. RocksDB peaked at 481 block entries
+and 480 height-finalization entries; Regolith peaked at 543 entries in each
+archive. Members spanned 940–1,081 finalized heights, exceeding the 512-height
+minimum. The earlier unpatched 90,000-operation runs accumulated over 15,000
+lookup entries while primary archive entries remained below 600.
+
+Each backend certified all 6,000 operations, verified their outcomes on four
+replicas and reconciled receipts and state after restart, with no throttles,
+rejections or verification failures. Measured certified receipt p95 was
+284.06 ms for RocksDB and 283.43 ms for Regolith at an offered 50 operations/s.
+These diagnostic runs demonstrate retention correctness under continued
+finalization. Their duration, instrumentation and host scheduling differ from
+the earlier sustained measurements, so they do not establish a throughput,
+latency or whole-process memory improvement.
