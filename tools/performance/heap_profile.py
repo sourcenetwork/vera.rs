@@ -4,6 +4,7 @@ import argparse
 import collections
 from decimal import Decimal
 import gzip
+import itertools
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 
 from record import digest
 
@@ -132,9 +134,48 @@ def rust_demangler():
 
 
 def demangle_stacks(source, destination, command):
-    with source.open('rb') as raw, destination.open('wb') as decoded:
-        subprocess.run(command, stdin=raw, stdout=decoded, stderr=subprocess.DEVNULL,
-                       check=True, timeout=120)
+    deadline = time.monotonic() + 120
+    symbols = {}
+    symbol_bytes = 0
+    mangled = re.compile(r'(?:_R|_ZN)[a-zA-Z_0-9]+(?:\.[a-zA-Z_0-9]+)*')
+    with source.open() as raw:
+        for line in raw:
+            if time.monotonic() >= deadline:
+                raise ValueError('allocation symbol decoding exceeded its deadline')
+            stack, _ = line.rstrip().rsplit(' ', 1)
+            for frame in stack.split(';'):
+                symbol = frame.partition(' (')[0]
+                if mangled.fullmatch(symbol) and symbol not in symbols:
+                    symbol_bytes += len(symbol)
+                    if len(symbol) > 65536 or len(symbols) >= 65536 or symbol_bytes > 16 * 1024 * 1024:
+                        raise ValueError('allocation symbol inventory exceeds decoding budget')
+                    symbols[symbol] = None
+
+    # Shared frames recur across many allocation stacks; decode each symbol once.
+    pending = iter(symbols)
+    while batch := list(itertools.islice(pending, 256)):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ValueError('allocation symbol decoding exceeded its deadline')
+        result = subprocess.run(command, input='\n'.join(batch) + '\n', text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                check=True, timeout=remaining)
+        decoded = result.stdout.splitlines()
+        if len(decoded) != len(batch) or any(not symbol for symbol in decoded):
+            raise ValueError('allocation decoder changed the symbol count')
+        # Rust array types can contain semicolons, which delimit flamegraph frames.
+        symbols.update((symbol, value.replace(';', r'\x3b')) for symbol, value in zip(batch, decoded))
+
+    with source.open() as raw, destination.open('w') as decoded:
+        for line in raw:
+            if time.monotonic() >= deadline:
+                raise ValueError('allocation symbol decoding exceeded its deadline')
+            stack, separator, weight = line.rpartition(' ')
+            frames = []
+            for frame in stack.split(';'):
+                symbol, location_separator, location = frame.partition(' (')
+                frames.append(symbols.get(symbol, symbol) + location_separator + location)
+            decoded.write(';'.join(frames) + separator + weight)
 
 
 def installed_tool(name):

@@ -148,9 +148,8 @@ class HeapEvidence(unittest.TestCase):
                             b'private_secret (/secret/credentials.rs:1); 8\n')
 
             def decode(command, **options):
-                options['stdout'].write(options['stdin'].read().replace(
-                    symbol, b'commonware_storage::qmdb::Store'))
-                return subprocess.CompletedProcess(command, 0)
+                self.assertEqual(options['input'], symbol.decode() + '\n')
+                return subprocess.CompletedProcess(command, 0, stdout='commonware_storage::qmdb::Store\n')
 
             with patch('heap_profile.subprocess.run', side_effect=decode):
                 demangle_stacks(raw, decoded, ['fixture-decoder'])
@@ -161,10 +160,79 @@ class HeapEvidence(unittest.TestCase):
                                      'unresolved': 8})
             self.assertNotIn('/secret', json.dumps(after))
 
+    def test_repeated_symbols_are_decoded_once_without_changing_frames_or_weights(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raw, decoded = (Path(directory) / name for name in ('raw', 'decoded'))
+            raw.write_text(('_RNvC6_123foo3bar (foo.rs);_RNvC6_123foo3bar (bar.rs); 7\n') * 2000)
+            response = subprocess.CompletedProcess([], 0, stdout='commonware_storage::cache::Entry\n')
+            with patch('heap_profile.subprocess.run', return_value=response) as run:
+                demangle_stacks(raw, decoded, ['fixture-decoder'])
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(run.call_args.kwargs['input'], '_RNvC6_123foo3bar\n')
+            self.assertEqual(decoded.read_text(),
+                             ('commonware_storage::cache::Entry (foo.rs);'
+                              'commonware_storage::cache::Entry (bar.rs); 7\n') * 2000)
+            self.assertEqual(sum(retained_sites(raw).values()), sum(retained_sites(decoded).values()))
+
+    def test_symbol_batches_are_bounded_and_array_types_preserve_frame_boundaries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raw, decoded = (Path(directory) / name for name in ('raw', 'decoded'))
+            raw.write_text(''.join('_RNvC6_fixture%d (mod.rs); 1\n' % index for index in range(257)))
+
+            def decode(command, **options):
+                count = len(options['input'].splitlines())
+                self.assertLessEqual(count, 256)
+                return subprocess.CompletedProcess(command, 0,
+                                                   stdout='commonware_storage::cache::Entry<[u8; 32]>\n' * count)
+
+            with patch('heap_profile.subprocess.run', side_effect=decode) as run:
+                demangle_stacks(raw, decoded, ['fixture-decoder'])
+            self.assertEqual(run.call_count, 2)
+            self.assertEqual(sum(retained_sites(decoded).values()), 257)
+            self.assertTrue(all(line.count(';') == 1 for line in decoded.read_text().splitlines()))
+
+    def test_llvm_suffixed_symbols_are_decoded_and_plain_frames_are_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raw, decoded = (Path(directory) / name for name in ('raw', 'decoded'))
+            raw.write_text('_RNvC6_123foo3bar.llvm.123ABC (foo.rs);??; 64\n'
+                           'std::alloc::System (unix.rs); 8\n')
+            response = subprocess.CompletedProcess([], 0, stdout='commonware_storage::cache::Entry\n')
+            with patch('heap_profile.subprocess.run', return_value=response) as run:
+                demangle_stacks(raw, decoded, ['fixture-decoder'])
+            self.assertEqual(run.call_args.kwargs['input'], '_RNvC6_123foo3bar.llvm.123ABC\n')
+            self.assertEqual(decoded.read_text(),
+                             'commonware_storage::cache::Entry (foo.rs);??; 64\n'
+                             'std::alloc::System (unix.rs); 8\n')
+
+    def test_decoder_rejects_missing_or_extra_symbols(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raw, decoded = (Path(directory) / name for name in ('raw', 'decoded'))
+            raw.write_text('_RNvC6_123foo3bar; 64\n')
+            for output in ('', '\n', 'first\nsecond\n'):
+                response = subprocess.CompletedProcess([], 0, stdout=output)
+                with patch('heap_profile.subprocess.run', return_value=response):
+                    with self.assertRaisesRegex(ValueError, 'symbol count'):
+                        demangle_stacks(raw, decoded, ['fixture-decoder'])
+
+    def test_decoder_budget_and_deadline_are_enforced(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raw, decoded = (Path(directory) / name for name in ('raw', 'decoded'))
+            raw.write_text('_R' + 'x' * 65536 + '; 1\n')
+            with patch('heap_profile.subprocess.run') as run:
+                with self.assertRaisesRegex(ValueError, 'budget'):
+                    demangle_stacks(raw, decoded, ['fixture-decoder'])
+                run.assert_not_called()
+            raw.write_text('_RNvC6_123foo3bar; 64\n')
+            with patch('heap_profile.time.monotonic', side_effect=[0, 0, 121]), \
+                    patch('heap_profile.subprocess.run') as run:
+                with self.assertRaisesRegex(ValueError, 'deadline'):
+                    demangle_stacks(raw, decoded, ['fixture-decoder'])
+                run.assert_not_called()
+
     def test_decoder_failure_is_propagated(self):
         with tempfile.TemporaryDirectory() as directory:
             raw, decoded = (Path(directory) / name for name in ('raw', 'decoded'))
-            raw.write_text('unresolved; 64\n')
+            raw.write_text('_RNvC6_123foo3bar; 64\n')
             with patch('heap_profile.subprocess.run', side_effect=subprocess.CalledProcessError(1, ['decoder'])):
                 with self.assertRaises(subprocess.CalledProcessError):
                     demangle_stacks(raw, decoded, ['fixture-decoder'])
