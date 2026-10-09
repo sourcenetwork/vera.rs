@@ -5,11 +5,11 @@ use std::{fs, time::Duration};
 use commonware_codec::Encode as _;
 use serde_json::json;
 use vera_client::{
-    AccessRequest, Actor, BlsSigner, ModuleId, Object, Operation, VeraClient, PERMISSION_LIMITS,
-    RECORD_PROOF_BYTES,
+    AccessRequest, Actor, BlsSigner, ModuleId, Object, Operation, PERMISSION_LIMITS,
+    RECORD_PROOF_BYTES, VeraClient,
 };
 use vera_domain::{
-    verify_finalized_block, verify_light_block, ConsensusPublicKey, DkgPayload, LightBlock,
+    ConsensusPublicKey, DkgPayload, LightBlock, verify_finalized_block, verify_light_block,
 };
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, TestCluster};
 
@@ -273,10 +273,12 @@ async fn recover_replica_from(
     .await
     .expect("origin startup deadline");
     let signer = BlsSigner::new(7u64.into(), deployment).unwrap();
-    let mut receipts = vec![origin
-        .native_create_policy(&signer, POLICY, 1)
-        .await
-        .unwrap()];
+    let mut receipts = vec![
+        origin
+            .native_create_policy(&signer, POLICY, 1)
+            .await
+            .unwrap(),
+    ];
     let policies = origin.get_policy_ids().await.unwrap();
     assert_eq!(policies.len(), 1);
     let policy = policies[0].parse().unwrap();
@@ -426,10 +428,12 @@ async fn recover_replica_from(
             !crash_marker.exists(),
             "crash must occur after a durable history record"
         );
-        assert!(VeraClient::new(cluster.node(3).rpc_url())
-            .chain_id()
-            .await
-            .is_err());
+        assert!(
+            VeraClient::new(cluster.node(3).rpc_url())
+                .chain_id()
+                .await
+                .is_err()
+        );
         let path = directory.join("config.toml");
         let config = fs::read_to_string(&path).unwrap();
         let (base, _) = config
