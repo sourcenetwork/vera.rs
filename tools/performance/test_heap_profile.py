@@ -4,8 +4,9 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from heap_profile import heap_timeline, retained_sites, source_location
+from heap_profile import demangle_stacks, heap_timeline, retained_sites, rust_demangler, source_location
 
 LAUNCHER = Path(__file__).resolve().parents[2] / '.github/scripts/profiled-verad.sh'
 
@@ -63,6 +64,43 @@ class HeapEvidence(unittest.TestCase):
                 path.write_text(text)
                 with self.assertRaises(ValueError):
                     heap_timeline(path)
+
+    def test_unsupported_rust_decoder_fails_before_profiling(self):
+        response = subprocess.CompletedProcess([], 0, stdout='_RNvC6_123foo3bar\n')
+        with patch('heap_profile.subprocess.run', return_value=response), \
+                patch('heap_profile.subprocess.check_output') as version:
+            with self.assertRaises(ValueError):
+                rust_demangler()
+            version.assert_not_called()
+
+    def test_decoded_symbols_preserve_weights_and_private_frame_filter(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raw, decoded = (Path(directory) / name for name in ('raw', 'decoded'))
+            symbol = b'_RNvNtC18commonware_storage4qmdb5Store'
+            raw.write_bytes(symbol + b' (mod.rs); 64\n'
+                            b'private_secret (/secret/credentials.rs:1); 8\n')
+
+            def decode(command, **options):
+                options['stdout'].write(options['stdin'].read().replace(
+                    symbol, b'commonware_storage::qmdb::Store'))
+                return subprocess.CompletedProcess(command, 0)
+
+            with patch('heap_profile.subprocess.run', side_effect=decode):
+                demangle_stacks(raw, decoded, ['fixture-decoder'])
+            before, after = retained_sites(raw), retained_sites(decoded)
+            self.assertEqual(sum(before.values()), sum(after.values()))
+            self.assertEqual(before['unresolved'], 72)
+            self.assertEqual(after, {'commonware_storage::qmdb::Store (mod.rs)': 64,
+                                     'unresolved': 8})
+            self.assertNotIn('/secret', json.dumps(after))
+
+    def test_decoder_failure_is_propagated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raw, decoded = (Path(directory) / name for name in ('raw', 'decoded'))
+            raw.write_text('unresolved; 64\n')
+            with patch('heap_profile.subprocess.run', side_effect=subprocess.CalledProcessError(1, ['decoder'])):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    demangle_stacks(raw, decoded, ['fixture-decoder'])
 
     def test_launcher_execs_only_selected_first_boot(self):
         with tempfile.TemporaryDirectory() as directory:

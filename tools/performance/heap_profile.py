@@ -78,6 +78,22 @@ def heap_timeline(path):
     return [{'milliseconds': sample['time'], 'interval_peak_heap_bytes': sample['mem_heap_B']} for sample in samples]
 
 
+def rust_demangler():
+    command = ['c++filt', '--format=rust', '--no-strip-underscore', '--no-verbose']
+    probe = subprocess.run(command, input='_RNvC6_123foo3bar\n', text=True,
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True, timeout=10)
+    if probe.stdout != '123foo::bar\n':
+        raise ValueError('allocation decoder cannot resolve Rust v0 symbols')
+    version = subprocess.check_output(['c++filt', '--version'], text=True, timeout=10).splitlines()[0]
+    return command, version
+
+
+def demangle_stacks(source, destination, command):
+    with source.open('rb') as raw, destination.open('wb') as decoded:
+        subprocess.run(command, stdin=raw, stdout=decoded, stderr=subprocess.DEVNULL,
+                       check=True, timeout=120)
+
+
 def installed_tool(name):
     result = subprocess.run(['dpkg-query', '-L', 'heaptrack', 'libheaptrack'],
                             text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -98,6 +114,7 @@ def main():
     launcher = Path('.github/scripts/profiled-verad.sh').resolve(strict=True)
     library = installed_tool('libheaptrack_preload.so')
     interpreter = installed_tool('heaptrack_interpret')
+    demangler, demangler_version = rust_demangler()
     with tempfile.TemporaryDirectory(prefix='vera-heap-', dir=os.environ['RUNNER_TEMP']) as directory:
         private = Path(directory)
         environment = dict(os.environ, VERA_PROFILE_BINARY=str(node), VERA_PROFILE_ROOT=str(private),
@@ -124,7 +141,7 @@ def main():
         manifest['node_sha256'] = digest(node)
         manifest['heap_profile'] = {'member': 3, 'tool': subprocess.check_output(['heaptrack', '--version'], text=True).strip(),
                                     'library_sha256': digest(library), 'release_debug': 'line-tables-only', 'release_strip': 'none',
-                                    'instrumented': True, 'capacity_measurement': False, 'profiled_first_boot_only': True}
+                                    'instrumented': True, 'capacity_measurement': False, 'profiled_first_boot_only': True, 'rust_demangler': demangler_version}
         manifest['source_binding'] += ' The launcher execs the hashed node; allocation instrumentation is restricted to member3 first boot.'
         workload_evidence = {'manifest': manifest, 'workload_exit_code': result.returncode,
                              'outcomes': {key: value for key, value in records.items() if key != 'first_resources'}}
@@ -149,10 +166,17 @@ def main():
         timeline = heap_timeline(massif)
         if timeline[-1]['milliseconds'] < COUNT / RATE * 1000:
             raise ValueError('profile ended before the required workload duration')
-        sites = retained_sites(stacks)
+        original_sites = retained_sites(stacks)
+        decoded = private / 'retained.rust.stacks'
+        demangle_stacks(stacks, decoded, demangler)
+        sites = retained_sites(decoded)
+        if sum(original_sites.values()) != sum(sites.values()):
+            raise ValueError('symbol decoding changed allocation accounting')
         evidence = {'manifest': manifest, 'outcomes': {key: value for key, value in records.items() if key != 'first_resources'},
                     'timeline': timeline, 'total_retained_bytes': sum(sites.values()),
                     'retained_sites': dict(sites.most_common(50)),
+                    'symbolization': {'unresolved_before_bytes': original_sites['unresolved'],
+                                      'unresolved_after_bytes': sites['unresolved']},
                     'retained_interpretation': 'Bytes still allocated when the first process ended; these are not necessarily leaks.'}
         (args.output / 'allocations.json').write_text(json.dumps(evidence, indent=2) + '\n')
         if result.returncode:

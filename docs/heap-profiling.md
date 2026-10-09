@@ -35,3 +35,21 @@ not an instantaneous live-heap measurement; the artifact names it
 `interval_peak_heap_bytes`. These details follow [the upstream Massif writer](https://github.com/KDE/heaptrack/blob/v1.5.0/src/analyze/print/heaptrack_print.cpp).
 Workload provenance and outcomes are saved separately before allocation analysis,
 so an extraction failure does not discard the completed workload evidence.
+
+Rust v0 names need a separate decoder: [Heaptrack1.5 only demangles names with
+an `_Z` prefix](https://github.com/KDE/heaptrack/blob/v1.5.0/src/interpret/dwarfdiecache.cpp#L215).
+Before collecting a workload, the script checks GNU `c++filt` against a known
+Rust v0 symbol. It then decodes folded stacks privately, preserving recursion
+limits and checking that total allocation weights remain unchanged. The manifest
+records the decoder version; numeric unresolved bytes are reported before and
+after decoding. The existing source-name filter still governs public owners.
+This improves attribution without changing the measured binary or allocator.
+
+The first successful RocksDB profile at `96b28a49` qualified all6,000 operations,
+all4 replicas and full restart verification. It recorded255,984,599 bytes still
+allocated at process end;235,325,360 bytes (91.93%) were unresolved by the original
+extractor. Identified Marshal storage accounted for12,629,024 bytes. Interval
+peaks rose from about241.3MB at10seconds to256.0MB at process end (321.2seconds).
+Those figures describe one instrumented five-minute workload, not a sustained
+memory plateau or an identified leak. The missing symbol coverage prevents
+assigning most bytes to a component; corrected decoding requires fresh evidence.
