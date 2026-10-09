@@ -32,7 +32,10 @@ existing participant identity. Validator key creation rejects existing paths,
 including symlinks; testnet initialization cannot replace a retained key. On Unix,
 creation syncs the key and its parent directory before success. A failed initial
 write may leave a file that needs inspection; do not remove or replace an existing
-identity to retry initialization.
+identity to retry initialization. Automatic key creation also stops if the key
+is missing alongside retained `secrets.json`, `native-genesis.bin` or `history/`,
+including dangling links. Restore the original identity with its retained state;
+the node does not generate a replacement key for that directory.
 
 ## Filesystem layout
 

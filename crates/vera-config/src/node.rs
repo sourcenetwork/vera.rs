@@ -203,6 +203,14 @@ impl NodeConfig {
                 )?)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                for name in ["secrets.json", "native-genesis.bin", "history"] {
+                    let path = self.data_dir.join(name);
+                    match std::fs::symlink_metadata(&path) {
+                        Ok(_) => return Err(ConfigError::MissingValidatorKey(key_path)),
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(source) => return Err(ConfigError::Read { path, source }),
+                    }
+                }
                 // Generate new key
                 let mut seed = [0u8; 32];
                 rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut seed);
@@ -414,6 +422,54 @@ mod tests {
         std::os::unix::fs::symlink(&target, &path).unwrap();
         assert!(config.validator_key().is_err());
         assert_eq!(std::fs::read_link(path).unwrap(), target);
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn missing_validator_key_preserves_retained_state() {
+        for name in ["secrets.json", "native-genesis.bin", "history"] {
+            let directory = tempfile::tempdir().unwrap();
+            let config = NodeConfig {
+                data_dir: directory.path().to_path_buf(),
+                ..Default::default()
+            };
+            let retained = config.data_dir.join(name);
+            if name == "history" {
+                std::fs::create_dir(&retained).unwrap();
+            } else {
+                std::fs::write(&retained, b"retained").unwrap();
+            }
+            let path = config.data_dir.join("validator.key");
+            assert!(matches!(
+                config.validator_key(),
+                Err(ConfigError::MissingValidatorKey(missing)) if missing == path
+            ));
+            assert!(!path.exists());
+            if name == "history" {
+                assert_eq!(std::fs::read_dir(retained).unwrap().count(), 0);
+            } else {
+                assert_eq!(std::fs::read(retained).unwrap(), b"retained");
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn retained_state_links_also_prevent_validator_key_regeneration() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = NodeConfig {
+            data_dir: directory.path().to_path_buf(),
+            ..Default::default()
+        };
+        let retained = config.data_dir.join("secrets.json");
+        let target = directory.path().join("missing-secrets.json");
+        std::os::unix::fs::symlink(&target, &retained).unwrap();
+        assert!(matches!(
+            config.validator_key(),
+            Err(ConfigError::MissingValidatorKey(_))
+        ));
+        assert!(!config.data_dir.join("validator.key").exists());
+        assert_eq!(std::fs::read_link(retained).unwrap(), target);
         assert!(!target.exists());
     }
 }
