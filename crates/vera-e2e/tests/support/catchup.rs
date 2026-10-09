@@ -16,6 +16,15 @@ use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, TestCluster};
 #[path = "epoch_share.rs"]
 mod epoch_share;
 
+#[path = "backup.rs"]
+mod backup;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ReplicaSource {
+    Empty,
+    StoppedBackup,
+}
+
 const OBJECT: &str = "doc/child";
 const POLL: Duration = Duration::from_millis(100);
 fn deadline() -> Duration {
@@ -128,8 +137,20 @@ async fn check_pruned_rosters(
     assert_eq!(selected, expected);
 }
 
-pub(super) async fn recover_replica(snapshot: bool, interrupt: bool, pruning: bool) {
-    recover_replica_with_delay(snapshot, interrupt, pruning, false).await;
+pub(super) async fn recover_replica(
+    snapshot: bool,
+    interrupt: bool,
+    pruning: bool,
+    source: ReplicaSource,
+) {
+    match source {
+        ReplicaSource::Empty => {
+            recover_replica_with_delay(snapshot, interrupt, pruning, false).await
+        }
+        ReplicaSource::StoppedBackup => {
+            recover_replica_from(snapshot, interrupt, pruning, false, source).await;
+        }
+    }
 }
 
 pub(super) async fn recover_replica_with_delay(
@@ -138,6 +159,30 @@ pub(super) async fn recover_replica_with_delay(
     pruning: bool,
     stale_floor: bool,
 ) {
+    recover_replica_from(
+        snapshot,
+        interrupt,
+        pruning,
+        stale_floor,
+        ReplicaSource::Empty,
+    )
+    .await;
+}
+
+async fn recover_replica_from(
+    snapshot: bool,
+    interrupt: bool,
+    pruning: bool,
+    stale_floor: bool,
+    source: ReplicaSource,
+) {
+    let from_backup = source == ReplicaSource::StoppedBackup;
+    assert!(!from_backup || !(snapshot || interrupt || pruning || stale_floor));
+    let epoch_length = if from_backup { 192 } else { 20 };
+    let mut genesis = GenesisBuilder::devnet().blocks_per_epoch(epoch_length);
+    if from_backup {
+        genesis = genesis.simplex(vera_domain::SimplexParameters::default());
+    }
     let deployment = 9041;
     let keys = KeySet::builder().seed(deployment).build().unwrap();
     let trusted_key = *keys.epoch_info().output.public().public();
@@ -153,7 +198,7 @@ pub(super) async fn recover_replica_with_delay(
         .nodes(4)
         .seed(deployment)
         .chain_id(deployment)
-        .genesis(GenesisBuilder::devnet().blocks_per_epoch(20))
+        .genesis(genesis)
         .preset(ConsensusPreset::Normal)
         .jmt_seeder(move |dir, _| {
             if pruning {
@@ -169,25 +214,29 @@ pub(super) async fn recover_replica_with_delay(
         .await
         .unwrap();
 
-    cluster.kill_node(3);
     let directory = cluster.node(3).data_dir.clone();
-    let archived = directory.with_file_name("node3-before-replay");
-    fs::rename(&directory, &archived).unwrap();
-    fs::create_dir(&directory).unwrap();
-    fs::rename(archived.join("logs"), directory.join("logs")).unwrap();
-    for filename in ["config.toml", "genesis.json", "validator.key"] {
-        fs::copy(archived.join(filename), directory.join(filename)).unwrap();
+    let backup_root = tempfile::tempdir().unwrap();
+    let backup_directory = backup_root.path().join("validator");
+    if !from_backup {
+        cluster.kill_node(3);
+        let archived = directory.with_file_name("node3-before-replay");
+        fs::rename(&directory, &archived).unwrap();
+        fs::create_dir(&directory).unwrap();
+        fs::rename(archived.join("logs"), directory.join("logs")).unwrap();
+        for filename in ["config.toml", "genesis.json", "validator.key"] {
+            fs::copy(archived.join(filename), directory.join(filename)).unwrap();
+        }
+        fs::write(
+            directory.join("secrets.json"),
+            serde_json::to_vec(&json!({
+                "shares": {"0": hex::encode(keys.share(3).unwrap().encode())},
+                "seeds": {},
+                "dealings": {},
+            }))
+            .unwrap(),
+        )
+        .unwrap();
     }
-    fs::write(
-        directory.join("secrets.json"),
-        serde_json::to_vec(&json!({
-            "shares": {"0": hex::encode(keys.share(3).unwrap().encode())},
-            "seeds": {},
-            "dealings": {},
-        }))
-        .unwrap(),
-    )
-    .unwrap();
 
     if snapshot {
         let path = directory.join("config.toml");
@@ -248,6 +297,30 @@ pub(super) async fn recover_replica_with_delay(
     )
     .await;
     assert!(allowed);
+    if from_backup {
+        let replica = VeraClient::new(cluster.node(3).rpc_url());
+        let (_, allowed) = current_access(
+            &replica,
+            &policies[0],
+            &request,
+            receipts.last().unwrap().block_number,
+            &trusted_key,
+        )
+        .await;
+        assert!(
+            allowed,
+            "the backup must contain the grant before revocation"
+        );
+        cluster.kill_node(3);
+        backup::copy_directory(&directory, &backup_directory).unwrap();
+        for name in ["validator.key", "secrets.json", "native-genesis.bin"] {
+            assert!(
+                fs::read(directory.join(name)).unwrap()
+                    == fs::read(backup_directory.join(name)).unwrap(),
+                "the backup must preserve identity and deployment material"
+            );
+        }
+    }
     receipts.push(
         origin
             .native_delete_relationship(&signer, policy, "file", OBJECT, "reader", READER)
@@ -259,7 +332,8 @@ pub(super) async fn recover_replica_with_delay(
         &origin,
         &policies[0],
         &request,
-        (if snapshot { 82u64 } else { 42 }).max(receipts.last().unwrap().block_number),
+        ((if snapshot { 4 } else { 2 }) * epoch_length + 2)
+            .max(receipts.last().unwrap().block_number),
         &trusted_key,
     )
     .await;
@@ -286,6 +360,18 @@ pub(super) async fn recover_replica_with_delay(
     let pause = directory.join("snapshot-probe-pause");
     if stale_floor {
         fs::write(&pause, []).unwrap();
+    }
+    if from_backup {
+        assert!(!cluster.node_mut(3).process.is_running());
+        fs::remove_dir_all(&directory).unwrap();
+        backup::copy_directory(&backup_directory, &directory).unwrap();
+        for name in ["validator.key", "secrets.json", "native-genesis.bin"] {
+            assert!(
+                fs::read(directory.join(name)).unwrap()
+                    == fs::read(backup_directory.join(name)).unwrap(),
+                "restoration must preserve identity and deployment material"
+            );
+        }
     }
     cluster.restart_node(3).unwrap();
     if stale_floor {
@@ -415,10 +501,15 @@ pub(super) async fn recover_replica_with_delay(
     // replica can reach any earlier height by replaying history without
     // participating in a resharing ceremony, and killing a peer before the
     // replica's current-epoch share exists drops the online set below quorum.
-    let ready = certified_height(&replica, (caught_up.epoch + 3) * 20 + 2, &trusted_key).await;
+    let ready = certified_height(
+        &replica,
+        (caught_up.epoch + 3) * epoch_length + 2,
+        &trusted_key,
+    )
+    .await;
     epoch_share::wait_for_epoch_share(
         &cluster.node(3).data_dir.join("secrets.json"),
-        ready.height / 20,
+        ready.height / epoch_length,
         deadline(),
     )
     .await;
@@ -442,7 +533,7 @@ pub(super) async fn recover_replica_with_delay(
         &replica,
         &policies[0],
         &request,
-        (ready.epoch + 1) * 20 + 2,
+        (ready.epoch + 1) * epoch_length + 2,
         &trusted_key,
     )
     .await;

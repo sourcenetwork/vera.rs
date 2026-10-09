@@ -57,6 +57,46 @@ stalls and converges without network quiescence, though it still exits at its
 deadline if peers cannot serve any retained target; a secret backup alone does
 not establish that a restore will succeed. Exercise restores before relying on this recovery path.
 
+## Stopped-validator backup and restore
+
+Stop the validator and confirm its process has exited before copying its entire
+data directory. Retain the validator key, DKG secrets, all Commonware journals,
+native genesis record and history together. A copy of only the application state
+or keys is not a complete checkpoint. Store the backup in an owner-only directory
+on protected storage; keep independently provisioned genesis, peers, configuration
+and the exact node build alongside it. Verify the copy before removing the source.
+Never run two processes with the same restored validator identity.
+
+Restore into an empty directory using the same history backend and compatible
+node build. Preserve key permissions and update explicit configuration paths if
+the directory moves. Restore the participant's latest durable signing state:
+an older backup must not replace journals from later signing activity. If those
+journals are lost, use operator-authorized member replacement with a fresh
+identity rather than assuming a stale backup is safe. The validator must remain
+stopped between capture and restore for the qualification scenario below.
+
+After startup, independently verify a certified revision and the expected policy
+and revocation state at the current checkpoint. RPC availability alone does not
+prove that the member has caught up or holds the current voting share. Exercise
+a certified write requiring that member's quorum contribution before relying on
+it for service availability. Peer retention and network reachability still bound
+how far an offline member can recover.
+
+The focused `cold_replay` case
+`stopped_backup_restores_revocations_and_rejoins_pipelined_consensus` captures a
+full stopped directory after a certified grant, commits its revocation on the
+remaining replicas, discards the original directory and restores the backup.
+The existing recovery assertions check historical receipts, policy and nonce
+state, certified revocation denial, a current epoch share and a subsequent write
+after stopping another voter. It uses four validators, normal timing, pipelined
+Simplex and 192-revision epochs. Linux CI selects RocksDB through the lifecycle
+job and Regolith through its dedicated backup job.
+
+This is a prepared process-level filesystem-copy qualification. Passing results
+must be tied to the tested source; it does not establish live filesystem snapshot
+consistency, stale-signing-state rollback safety, backup encryption, physical
+media failure or power-loss behavior. Those require deployment-specific validation.
+
 ## Recovery behaviour
 
 - **Restart after clean stop** — startup aligns all journals to the durable
