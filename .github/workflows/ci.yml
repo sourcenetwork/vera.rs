@@ -342,6 +342,8 @@ jobs:
 
       - name: Unit and storage tests
         run: |
+          cargo test --frozen -p vera-cli --lib
+          cargo test --frozen -p vera-config --lib validator_
           cargo test --frozen -p vera-modules --lib
           cargo test --frozen -p vera-modules --test acp_go_parity --test acp_v1_lifecycle --test acp_v1_pages --test acp_conformance
           cargo test --frozen -p vera-backend --lib
