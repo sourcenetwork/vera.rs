@@ -123,7 +123,7 @@ async fn disk_full_validator_recovers_acknowledged_operations() {
         .await
         .unwrap();
     cluster.wait_ready(deadline()).await.unwrap();
-    let signer = BlsSigner::random(deployment);
+    let signer = BlsSigner::random(deployment).expect("construct native signer");
     let origin = VeraClient::new(cluster.node(0).rpc_url());
     let mut receipts = vec![create_policy(&origin, &signer, "before-disk-full").await];
     assert_replicas(&cluster, &signer, &receipts, 4, &trusted).await;
