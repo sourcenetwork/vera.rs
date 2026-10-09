@@ -204,6 +204,19 @@ class HeapEvidence(unittest.TestCase):
                              'commonware_storage::cache::Entry (foo.rs);??; 64\n'
                              'std::alloc::System (unix.rs); 8\n')
 
+    def test_decoder_only_replaces_complete_frame_symbols(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raw, decoded = (Path(directory) / name for name in ('raw', 'decoded'))
+            raw.write_text('plain (_RNvC6_123foo3bar.rs);_RNvC6_123foo3bar (foo.rs);'
+                           '_RNvC6_123foo3bar extra;_RNvC6_123foo3bar; 17\n')
+            response = subprocess.CompletedProcess([], 0, stdout='commonware_storage::cache::Entry\n')
+            with patch('heap_profile.subprocess.run', return_value=response) as run:
+                demangle_stacks(raw, decoded, ['fixture-decoder'])
+            self.assertEqual(run.call_args.kwargs['input'], '_RNvC6_123foo3bar\n')
+            self.assertEqual(decoded.read_text(),
+                             'plain (_RNvC6_123foo3bar.rs);commonware_storage::cache::Entry (foo.rs);'
+                             '_RNvC6_123foo3bar extra;commonware_storage::cache::Entry; 17\n')
+
     def test_decoder_rejects_missing_or_extra_symbols(self):
         with tempfile.TemporaryDirectory() as directory:
             raw, decoded = (Path(directory) / name for name in ('raw', 'decoded'))

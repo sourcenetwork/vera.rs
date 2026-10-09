@@ -3,6 +3,7 @@
 import argparse
 import collections
 from decimal import Decimal
+from functools import lru_cache
 import gzip
 import itertools
 import json
@@ -138,14 +139,19 @@ def demangle_stacks(source, destination, command):
     symbols = {}
     symbol_bytes = 0
     mangled = re.compile(r'(?:_R|_ZN)[a-zA-Z_0-9]+(?:\.[a-zA-Z_0-9]+)*')
+
+    @lru_cache(maxsize=4096)
+    def frame_symbol(frame):
+        symbol = frame.partition(' (')[0]
+        return symbol if mangled.fullmatch(symbol) else None
     with source.open() as raw:
         for line in raw:
             if time.monotonic() >= deadline:
                 raise ValueError('allocation symbol decoding exceeded its deadline')
             stack, _ = line.rstrip().rsplit(' ', 1)
             for frame in stack.split(';'):
-                symbol = frame.partition(' (')[0]
-                if mangled.fullmatch(symbol) and symbol not in symbols:
+                symbol = frame_symbol(frame)
+                if symbol is not None and symbol not in symbols:
                     symbol_bytes += len(symbol)
                     if len(symbol) > 65536 or len(symbols) >= 65536 or symbol_bytes > 16 * 1024 * 1024:
                         raise ValueError('allocation symbol inventory exceeds decoding budget')
@@ -166,16 +172,20 @@ def demangle_stacks(source, destination, command):
         # Rust array types can contain semicolons, which delimit flamegraph frames.
         symbols.update((symbol, value.replace(';', r'\x3b')) for symbol, value in zip(batch, decoded))
 
+    frame_symbol.cache_clear()
+
+    @lru_cache(maxsize=4096)
+    def decode_frame(frame):
+        symbol = frame.partition(' (')[0]
+        value = symbols.get(symbol)
+        return value + frame[len(symbol):] if value is not None else frame
+
     with source.open() as raw, destination.open('w') as decoded:
         for line in raw:
             if time.monotonic() >= deadline:
                 raise ValueError('allocation symbol decoding exceeded its deadline')
             stack, separator, weight = line.rpartition(' ')
-            frames = []
-            for frame in stack.split(';'):
-                symbol, location_separator, location = frame.partition(' (')
-                frames.append(symbols.get(symbol, symbol) + location_separator + location)
-            decoded.write(';'.join(frames) + separator + weight)
+            decoded.write(';'.join(map(decode_frame, stack.split(';'))) + separator + weight)
 
 
 def installed_tool(name):
