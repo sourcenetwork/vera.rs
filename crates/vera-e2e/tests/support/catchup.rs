@@ -5,11 +5,11 @@ use std::{fs, time::Duration};
 use commonware_codec::Encode as _;
 use serde_json::json;
 use vera_client::{
-    AccessRequest, Actor, BlsSigner, ModuleId, Object, Operation, PERMISSION_LIMITS,
-    RECORD_PROOF_BYTES, VeraClient,
+    AccessRequest, Actor, BlsSigner, ModuleId, Object, Operation, VeraClient, PERMISSION_LIMITS,
+    RECORD_PROOF_BYTES,
 };
 use vera_domain::{
-    ConsensusPublicKey, DkgPayload, LightBlock, verify_finalized_block, verify_light_block,
+    verify_finalized_block, verify_light_block, ConsensusPublicKey, DkgPayload, LightBlock,
 };
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, TestCluster};
 
@@ -179,9 +179,26 @@ async fn recover_replica_from(
     let from_backup = source == ReplicaSource::StoppedBackup;
     assert!(!from_backup || !(snapshot || interrupt || pruning || stale_floor));
     let epoch_length = if from_backup { 192 } else { 20 };
+    let simplex = if from_backup {
+        vera_domain::SimplexParameters::default()
+    } else {
+        // Short epochs still need a leader opportunity for all four dealers.
+        vera_domain::SimplexParameters {
+            term_length: 2,
+            optimistic_views: 1,
+            ..vera_domain::SimplexParameters::default()
+        }
+    };
+    simplex.validate().unwrap();
+    assert!(
+        vera_domain::max_epoch_participants(
+            std::num::NonZeroU64::new(epoch_length).unwrap(),
+            std::num::NonZeroU64::new(simplex.term_length).unwrap(),
+        ) >= 4
+    );
     let genesis = GenesisBuilder::devnet()
         .blocks_per_epoch(epoch_length)
-        .simplex(vera_domain::SimplexParameters::default());
+        .simplex(simplex);
     let deployment = 9041;
     let keys = KeySet::builder().seed(deployment).build().unwrap();
     let trusted_key = *keys.epoch_info().output.public().public();
@@ -256,12 +273,10 @@ async fn recover_replica_from(
     .await
     .expect("origin startup deadline");
     let signer = BlsSigner::new(7u64.into(), deployment).unwrap();
-    let mut receipts = vec![
-        origin
-            .native_create_policy(&signer, POLICY, 1)
-            .await
-            .unwrap(),
-    ];
+    let mut receipts = vec![origin
+        .native_create_policy(&signer, POLICY, 1)
+        .await
+        .unwrap()];
     let policies = origin.get_policy_ids().await.unwrap();
     assert_eq!(policies.len(), 1);
     let policy = policies[0].parse().unwrap();
@@ -411,12 +426,10 @@ async fn recover_replica_from(
             !crash_marker.exists(),
             "crash must occur after a durable history record"
         );
-        assert!(
-            VeraClient::new(cluster.node(3).rpc_url())
-                .chain_id()
-                .await
-                .is_err()
-        );
+        assert!(VeraClient::new(cluster.node(3).rpc_url())
+            .chain_id()
+            .await
+            .is_err());
         let path = directory.join("config.toml");
         let config = fs::read_to_string(&path).unwrap();
         let (base, _) = config
