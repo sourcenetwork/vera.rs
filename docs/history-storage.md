@@ -115,3 +115,30 @@ pauses the joining node after discovery while peers advance beyond retention,
 then requires convergence into durable history import, where an injected crash
 exercises recovery, certified state, receipts, restart persistence and quorum
 participation.
+
+## Physical history-table damage
+
+Two focused storage cases materialize and close a compacted history table, then
+change its actual bytes: one flips a trailing footer bit and one removes the
+eight-byte table magic. The fixture synchronizes and rereads the damaged file
+before reopening history. Opening or recovery must report physical table damage
+without publishing a block or stored finalization. Restoring the pristine table
+must recover the exact durable records and stored finalization bytes and permit
+a subsequent append.
+
+```sh
+cargo test --frozen -p vera-node --lib history::tests::physical_tests::
+cargo test --frozen -p vera-node --lib --features regolith-history \
+  history::tests::physical_tests::
+```
+
+The `History file corruption` workflow selects those two cases independently
+for RocksDB and Regolith and lints the affected node tests. The compacting hook
+exists only in test builds; production history behavior and dependencies are
+unchanged. Hosted execution must pass before these cases count as qualification.
+
+This is physical file-corruption coverage at the history boundary, using small
+synthetic finalized records. It does not qualify device power loss, writes during
+compaction, Commonware journal corruption or restoration of a complete running
+validator. Those require separate checks; replacing individual files is not an
+operator recovery procedure.
