@@ -413,6 +413,11 @@ jobs:
             test-features: ""
             tests: --test snapshot_catchup snapshot_replica_recovers_from_pruned_peers
             exact: --exact
+          - suite: regolith-backup
+            binary-features: "--features regolith-history"
+            test-features: ""
+            tests: --test cold_replay stopped_backup_restores_revocations_and_rejoins_pipelined_consensus
+            exact: --exact
           - suite: regolith-interrupted
             binary-features: "--features regolith-history,fault-injection"
             test-features: "--features fault-injection"
