@@ -1,4 +1,4 @@
-use jsonrpsee::{PendingSubscriptionSink, SubscriptionMessage, proc_macros::rpc};
+use jsonrpsee::{PendingSubscriptionSink, proc_macros::rpc};
 use tokio::sync::broadcast;
 use vera_domain::GossipHeader;
 
@@ -36,9 +36,7 @@ pub(crate) async fn stream_headers(
                     Err(_) => break,
                 },
             };
-            let Ok(message) =
-                SubscriptionMessage::new("vera_subscribeHeaders", sink.subscription_id(), &header)
-            else {
+            let Ok(message) = serde_json::value::to_raw_value(&header) else {
                 break;
             };
             if sink.send(message).await.is_err() {
@@ -57,6 +55,49 @@ mod tests {
         params::BatchRequestBuilder,
     };
     use std::time::Duration;
+
+    #[tokio::test]
+    async fn native_header_notification_matches_declared_wire_protocol() {
+        let headers = broadcast::channel(4).0;
+        let module = HeaderSubscriptionApiImpl(headers.clone()).into_rpc();
+        let (acknowledgement, mut stream) = module
+            .raw_json_request(
+                r#"{"jsonrpc":"2.0","method":"vera_subscribeHeaders","params":[],"id":1}"#,
+                4,
+            )
+            .await
+            .unwrap();
+        let acknowledgement: serde_json::Value =
+            serde_json::from_str(acknowledgement.get()).unwrap();
+        assert!(acknowledgement.get("error").is_none());
+        let subscription = acknowledgement.get("result").unwrap();
+        assert!(subscription.is_string() || subscription.as_u64().is_some());
+        let header = GossipHeader {
+            chain_id: 1,
+            height: 7,
+            block_hash: Default::default(),
+            parent_hash: Default::default(),
+            timestamp: 123,
+            state_root: Default::default(),
+            module_state_root: Default::default(),
+            tx_count: 2,
+            publisher_index: 0,
+            signature: vec![3; 96],
+        };
+        headers.send(header.clone()).unwrap();
+        let notification = tokio::time::timeout(Duration::from_secs(2), stream.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let notification: serde_json::Value = serde_json::from_str(notification.get()).unwrap();
+        assert_eq!(notification["jsonrpc"], "2.0");
+        assert_eq!(notification["method"], "vera_header");
+        assert_eq!(&notification["params"]["subscription"], subscription);
+        assert_eq!(
+            notification["params"]["result"],
+            serde_json::to_value(header).unwrap()
+        );
+    }
 
     #[tokio::test]
     async fn native_headers_stream_and_release_idle_subscription() {
