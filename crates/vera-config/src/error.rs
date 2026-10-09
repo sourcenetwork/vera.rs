@@ -26,6 +26,10 @@ pub enum ConfigError {
     #[error("failed to serialize config to TOML: {0}")]
     TomlSerialize(#[from] toml::ser::Error),
 
+    /// Retained validator state requires the original private identity.
+    #[error("validator key is missing from an existing data directory: {0}")]
+    MissingValidatorKey(PathBuf),
+
     /// Invalid validator key format.
     #[error("invalid validator key format: expected 32 bytes, got {0}")]
     InvalidKeyLength(usize),

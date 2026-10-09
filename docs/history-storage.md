@@ -43,6 +43,18 @@ reports the engine's current memtable-size counter; it is not directly comparabl
 to RocksDB's allocation accounting. Unsupported `table_readers` accounting remains
 absent, and block-cache usage is reported separately.
 
+Linux recovery CI runs `disk_full_validator_recovers_acknowledged_operations`
+with each history backend. Before startup, the fixture places one validator's
+data on a private 256 MiB tmpfs and keeps its logs on separate storage. Filling
+that filesystem must produce a real `ENOSPC` write failure and stop that
+validator; the remaining three must continue committing native policies. After
+space is restored, recovery must preserve every acknowledged receipt, policy
+and actor sequence, match certified headers, and restore quorum participation.
+The fixture uses only its own mounts and reaps validators before unmounting.
+It requires non-interactive `sudo` mount access; unavailable access fails the
+test. This checks filesystem exhaustion and durable-anchor recovery, not
+power-loss persistence, failed-device fsync or storage capacity.
+
 To exercise authenticated snapshot import from pruned peers with Regolith,
 build the feature above, then point the harness at that binary:
 

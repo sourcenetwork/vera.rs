@@ -342,6 +342,8 @@ jobs:
 
       - name: Unit and storage tests
         run: |
+          cargo test --frozen -p vera-cli --lib
+          cargo test --frozen -p vera-config --lib validator_
           cargo test --frozen -p vera-modules --lib
           cargo test --frozen -p vera-modules --test acp_go_parity --test acp_v1_lifecycle --test acp_v1_pages --test acp_conformance
           cargo test --frozen -p vera-backend --lib
@@ -410,6 +412,21 @@ jobs:
             binary-features: "--features regolith-history"
             test-features: ""
             tests: --test snapshot_catchup snapshot_replica_recovers_from_pruned_peers
+            exact: --exact
+          - suite: regolith-backup
+            binary-features: "--features regolith-history"
+            test-features: ""
+            tests: --test cold_replay stopped_backup_restores_revocations_and_rejoins_pipelined_consensus
+            exact: --exact
+          - suite: disk-full
+            binary-features: ""
+            test-features: ""
+            tests: --test disk_full disk_full_validator_recovers_acknowledged_operations
+            exact: --exact
+          - suite: regolith-disk-full
+            binary-features: "--features regolith-history"
+            test-features: ""
+            tests: --test disk_full disk_full_validator_recovers_acknowledged_operations
             exact: --exact
           - suite: regolith-interrupted
             binary-features: "--features regolith-history,fault-injection"
