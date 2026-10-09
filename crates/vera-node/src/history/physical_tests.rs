@@ -9,7 +9,7 @@ enum Damage {
 
 fn table_path(directory: &Path) -> PathBuf {
     #[cfg(feature = "regolith-history")]
-    let directory = &directory.join("regolith");
+    let directory = &directory.join("regolith/sst");
     let mut tables = fs::read_dir(directory)
         .unwrap()
         .map(|entry| entry.unwrap())
