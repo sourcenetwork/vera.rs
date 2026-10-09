@@ -383,4 +383,37 @@ mod tests {
         let path = dir.path().join("nonexistent.toml");
         assert!(NodeConfig::load(Some(&path)).is_err());
     }
+
+    #[test]
+    fn validator_identity_is_reused_after_initial_creation() {
+        use commonware_codec::Encode as _;
+
+        let directory = tempfile::tempdir().unwrap();
+        let config = NodeConfig {
+            data_dir: directory.path().join("node"),
+            ..Default::default()
+        };
+        let first = config.validator_key().unwrap().encode();
+        assert_eq!(config.validator_key().unwrap().encode(), first);
+        assert_eq!(
+            std::fs::read(config.data_dir.join("validator.key")).unwrap(),
+            first.as_ref()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn missing_validator_link_target_is_not_regenerated() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = NodeConfig {
+            data_dir: directory.path().to_path_buf(),
+            ..Default::default()
+        };
+        let path = config.data_dir.join("validator.key");
+        let target = directory.path().join("missing.key");
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        assert!(config.validator_key().is_err());
+        assert_eq!(std::fs::read_link(path).unwrap(), target);
+        assert!(!target.exists());
+    }
 }

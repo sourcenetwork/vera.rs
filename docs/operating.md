@@ -28,7 +28,11 @@ verad --config nodeN/config.toml --data-dir nodeN \
 
 `validator.key` and `secrets.json` in the data directory are the node's
 identity: they are created owner-only and must never be regenerated for an
-existing participant identity.
+existing participant identity. Validator key creation rejects existing paths,
+including symlinks; testnet initialization cannot replace a retained key. On Unix,
+creation syncs the key and its parent directory before success. A failed initial
+write may leave a file that needs inspection; do not remove or replace an existing
+identity to retry initialization.
 
 ## Filesystem layout
 
