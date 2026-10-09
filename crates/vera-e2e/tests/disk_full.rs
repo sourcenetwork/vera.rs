@@ -147,14 +147,20 @@ async fn disk_full_validator_recovers_acknowledged_operations() {
     })
     .await
     .expect("persistence failure must stop the affected validator");
+    volume
+        .confirm_full()
+        .expect("independently confirm ENOSPC after validator exit");
     let log_dir = &cluster.node(3).log_dir;
     let logs = ["stdout.log", "stderr.log"]
         .into_iter()
         .map(|name| fs::read_to_string(log_dir.join(name)).unwrap())
         .collect::<String>();
+    // Commonware's blob-header writes report WriteFailed without the underlying OS error.
     assert!(
-        logs.contains("No space left on device") || logs.contains("os error 28"),
-        "validator exit must report the real storage-full error (log_bytes={}, io_errors={}, panics={})",
+        logs.contains("No space left on device")
+            || logs.contains("os error 28")
+            || logs.contains("unable to append to journal: Runtime(WriteFailed)"),
+        "validator exit must report a storage write failure while the volume reports ENOSPC (log_bytes={}, io_errors={}, panics={})",
         logs.len(),
         logs.matches("I/O error").count() + logs.matches("io error").count(),
         logs.matches("panicked").count()

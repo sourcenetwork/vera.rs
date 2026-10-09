@@ -79,6 +79,25 @@ impl Quota {
         }
     }
 
+    pub(super) fn confirm_full(&self) -> io::Result<()> {
+        let path = self.volume.join("enospc-probe");
+        let result = File::options()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .and_then(|mut file| file.write_all(&[0; 4096]));
+        if path.try_exists()? {
+            fs::remove_file(path)?;
+        }
+        match result {
+            Err(error) if error.raw_os_error() == Some(28) => Ok(()),
+            Err(error) => Err(error),
+            Ok(()) => Err(io::Error::other(
+                "validator volume no longer reports ENOSPC",
+            )),
+        }
+    }
+
     pub(super) fn release_space(&self) -> io::Result<()> {
         fs::remove_file(self.volume.join("filler"))
     }
