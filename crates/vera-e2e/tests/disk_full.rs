@@ -154,7 +154,10 @@ async fn disk_full_validator_recovers_acknowledged_operations() {
         .collect::<String>();
     assert!(
         logs.contains("No space left on device") || logs.contains("os error 28"),
-        "validator exit must report the real storage-full error"
+        "validator exit must report the real storage-full error (log_bytes={}, io_errors={}, panics={})",
+        logs.len(),
+        logs.matches("I/O error").count() + logs.matches("io error").count(),
+        logs.matches("panicked").count()
     );
     assert_replicas(&cluster, &signer, &receipts, 3, &trusted).await;
 

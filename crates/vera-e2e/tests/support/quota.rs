@@ -16,6 +16,7 @@ pub(super) struct Quota {
     mounts: Mutex<Vec<PathBuf>>,
     volume: PathBuf,
     root: tempfile::TempDir,
+    log_destination: Mutex<Option<PathBuf>>,
 }
 
 impl Quota {
@@ -41,6 +42,7 @@ impl Quota {
             mounts: Mutex::new(vec![volume.clone()]),
             volume,
             root,
+            log_destination: Mutex::new(None),
         })
     }
 
@@ -55,7 +57,8 @@ impl Quota {
         let destination = directory.join("logs");
         fs::create_dir_all(&destination)?;
         privileged(&["mount", "--bind", path_arg(&logs)?, path_arg(&destination)?])?;
-        self.mounts.lock().unwrap().push(destination);
+        self.mounts.lock().unwrap().push(destination.clone());
+        *self.log_destination.lock().unwrap() = Some(destination);
         Ok(())
     }
 
@@ -85,6 +88,16 @@ impl Quota {
         while let Some(path) = mounts.last() {
             privileged(&["umount", path_arg(path)?])?;
             mounts.pop();
+        }
+        // Restore process logs to the cluster directory after removing the private mounts.
+        if let Some(destination) = self.log_destination.lock().unwrap().as_ref() {
+            fs::create_dir_all(destination)?;
+            for name in ["stdout.log", "stderr.log"] {
+                let source = self.root.path().join("logs").join(name);
+                if source.try_exists()? {
+                    fs::copy(source, destination.join(name))?;
+                }
+            }
         }
         Ok(())
     }
