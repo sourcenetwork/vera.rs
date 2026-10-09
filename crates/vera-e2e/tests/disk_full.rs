@@ -4,8 +4,8 @@
 use std::{collections::BTreeSet, fs, sync::Arc, time::Duration};
 
 use alloy_sol_types::SolCall as _;
-use vera_client::{ACP_ADDRESS, BlsSigner, TransactionReceipt, VeraClient};
-use vera_domain::{SimplexParameters, verify_light_block};
+use vera_client::{ACP_ADDRESS, BlsSigner, ClientError, TransactionReceipt, VeraClient};
+use vera_domain::SimplexParameters;
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, TestCluster};
 use vera_modules::acp::abi::IAcp;
 
@@ -69,14 +69,23 @@ async fn assert_replicas(
                     serde_json::to_value(actual).unwrap(),
                     serde_json::to_value(receipt).unwrap()
                 );
-                let light = client
-                    .rpc_call_typed(
-                        "vera_getLightBlock",
-                        serde_json::json!([format!("0x{:x}", receipt.block_number)]),
-                    )
-                    .await
-                    .unwrap();
-                verify_light_block(&light, trusted).unwrap();
+                // Receipt publication can precede the marshal certificate callback.
+                let pending = format!(
+                    "internal error: finalization certificate not found for height {} within retained proof limits",
+                    receipt.block_number
+                );
+                let light = loop {
+                    match client
+                        .read_finalized_revision(receipt.block_number, trusted)
+                        .await
+                    {
+                        Ok(light) => break light,
+                        Err(ClientError::Rpc { code: -32603, message }) if message == pending => {
+                            tokio::time::sleep(POLL).await;
+                        }
+                        Err(error) => panic!("replica {index} finality proof failed: {error}"),
+                    }
+                };
                 assert_eq!(light.height, receipt.block_number);
                 assert_eq!(
                     light.block_hash.parse::<alloy_primitives::B256>().unwrap(),
