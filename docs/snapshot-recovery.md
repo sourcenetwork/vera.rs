@@ -86,6 +86,11 @@ boundary verification. `Pruned` is a fork wire extension, not an upstream
 response. An exhausted invalid source fails with upstream's `InvalidResponse`
 error; only explicit pruning hints receive bounded retries.
 
+Archive pruning also retires the translated-key lookup entries below the retained
+floor. Cleanup covers unique block hashes and collisions without changing journal
+formats or adding I/O. Retained values sharing a translated key survive, including
+backfilled records inserted out of order.
+
 Boundary verification retries a pending epoch-info response every 100 ms while
 the local DKG actor catches up. It still requires independently derived matching
 epoch information before accepting a boundary. Follower responses remain pending,

@@ -790,3 +790,19 @@ idle time nor syscall elapsed time isolates physical disk latency. Tracing and
 ptrace perturb scheduling; neither the uninstrumented comparator nor the traced
 run establishes capacity, and their difference does not qualify a production
 optimization.
+
+
+## Archive lookup retention
+
+The `Performance` workflow's `archive_retention` input runs 6,000 updates at an
+offered 50 operations per second against 128 fixed objects on each history
+backend. It collects numeric snapshots from all four validators and writes
+`archive-retention.json`. Each member must cover at least 512 finalized heights
+and four snapshots. The gate compares lookup entries with primary retained
+archive entries; it tolerates 64 entries of skew because the gauges are read
+separately. That tolerance is one sync cadence in this fixture.
+
+This checks the lookup index after multiple pruning windows. It does not establish
+a whole-process memory bound, maximum throughput, or a WAN latency guarantee.
+Diagnostic collection is enabled for this run; use runs without that collection
+for capacity comparisons.
