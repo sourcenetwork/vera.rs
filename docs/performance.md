@@ -147,6 +147,21 @@ baselines and 60-minute job limit.
 The workflow uploads only the named measurement, provenance and report artifacts;
 raw runtime logs, configuration, keys and state directories are excluded.
 
+Memory attribution retains each member's private logs until extraction. The
+collector reads multiline resource snapshots from the four node stdout logs;
+the workload runner's stderr does not contain these events. Every member must
+supply at least 60 snapshots for a 30-minute run. Missing members, empty logs,
+incomplete snapshots and insufficient coverage fail the job.
+An eight-operation diagnostic smoke run checks the actual node output before
+the sustained workload starts; its fixture and raw output remain private.
+
+`diagnostics.jsonl` identifies the member and records the node's UTC timestamp.
+`recording_elapsed_seconds` starts at the recorder's manifest timestamp and
+includes fixture setup, verification and restart; it is separate from workload
+latency. Labelled runtime metric series retain distinct identities through
+label hashes, while raw labels and logs stay private. The collector does not
+invent timestamps from the nominal 30-second sampling interval.
+
 ## ACP lifecycle components
 
 `component_baseline` includes policy edits and deletions with 32, 256 and 2,048

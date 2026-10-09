@@ -120,6 +120,23 @@ jobs:
           mkdir -p performance-results
           target/release/examples/component_baseline > performance-results/components.jsonl
 
+      - name: Check per-member diagnostic extraction
+        if: env.SUSTAINED_MEMORY_ATTRIBUTION == 'true'
+        env:
+          VERA_E2E_KEEP: '1'
+          VERA_E2E_DIR: ${{ runner.temp }}/vera-diagnostic-smoke-nodes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p -m 700 "$VERA_E2E_DIR"
+          directory="$RUNNER_TEMP/vera-diagnostic-smoke-results"
+          python3 tools/performance/record.py \
+            --node target/release/verad --runner target/release/examples/operation_baseline \
+            --history "$HISTORY_BACKEND" --output "$directory" --timeout-seconds 180 \
+            --rust-log 'warn,vera_storage=info,vera_diagnostics=debug' \
+            8 5 8 1 normal 100 192 0 0 256 1
+          python3 tools/performance/snapshot_metrics.py "$directory" --node-logs "$VERA_E2E_DIR"
+
       - name: Measure growing and fixed state
         if: env.STORAGE_ATTRIBUTION != 'true'
         env:
@@ -146,12 +163,19 @@ jobs:
           fi
           for objects in "${object_counts[@]}"; do
             directory="performance-results/objects-$objects"
-            "${recorder[@]}" \
+            node_environment=()
+            if [[ "$SUSTAINED_MEMORY_ATTRIBUTION" == true ]]; then
+              node_logs="$VERA_E2E_DIR/objects-$objects"
+              mkdir -p -m 700 "$node_logs"
+              node_environment=(VERA_E2E_KEEP=1 VERA_E2E_DIR="$node_logs")
+            fi
+            env "${node_environment[@]}" "${recorder[@]}" \
               --node target/release/verad --runner target/release/examples/operation_baseline \
               --history "$HISTORY_BACKEND" --output "$directory" \
               "$count" 50 128 1 normal 100 192 0 "$objects" 256 1 || result=1
             if [[ "$SUSTAINED_MEMORY_ATTRIBUTION" == true ]]; then
-              python3 tools/performance/snapshot_metrics.py "$directory" || result=1
+              python3 tools/performance/snapshot_metrics.py "$directory" \
+                --node-logs "$node_logs" --minimum-samples "$((count / 50 / 30))" || result=1
             fi
             "$RUNNER_TEMP/performance-python/bin/python" tools/performance/report.py "$directory" || result=1
             if [[ -f "$directory/report.md" ]]; then sed '/^!\[/d' "$directory/report.md" >> "$GITHUB_STEP_SUMMARY"; fi
