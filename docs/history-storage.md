@@ -55,6 +55,26 @@ It requires non-interactive `sudo` mount access; unavailable access fails the
 test. This checks filesystem exhaustion and durable-anchor recovery, not
 power-loss persistence, failed-device fsync or storage capacity.
 
+The Linux `sync_failure_recovers_acknowledged_operations` case first confirms
+one native operation and its independently verified revision on all four
+validators. It then attaches `strace` to that validator alone and injects `EIO`
+into its first matching `fsync`/`fdatasync` calls per thread. Injection is filtered
+to files already open beneath that validator’s `history` directory, leaving
+Commonware journals and DKG secrets outside the fault. The private trace must
+show an injected synchronization error on a finalized-history descriptor. The validator must stop, the remaining three must keep committing,
+and restart must preserve all acknowledged receipts, policy state and actor
+sequences. A later write with another voter stopped checks restored quorum
+participation. Linux recovery CI selects each history backend separately.
+
+This fixture requires Linux `strace` and non-interactive `sudo` attachment;
+unavailable prerequisites fail the case. It changes the syscall result without
+simulating lost device writes or volatile-cache loss. Passing results must be
+bound to the tested source and backend. See the [strace fault-injection
+contract](https://github.com/strace/strace/blob/master/doc/strace.1.in) for the
+per-thread injection semantics. This checks handling of a reported sync error,
+not physical failed-device or power-loss durability. Trace files and attachment
+logs stay in a private temporary directory and are removed after the tracer exits.
+
 To exercise authenticated snapshot import from pruned peers with Regolith,
 build the feature above, then point the harness at that binary:
 

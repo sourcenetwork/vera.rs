@@ -428,6 +428,16 @@ jobs:
             test-features: ""
             tests: --test disk_full disk_full_validator_recovers_acknowledged_operations
             exact: --exact
+          - suite: sync-failure
+            binary-features: ""
+            test-features: ""
+            tests: --test sync_failure sync_failure_recovers_acknowledged_operations
+            exact: --exact
+          - suite: regolith-sync-failure
+            binary-features: "--features regolith-history"
+            test-features: ""
+            tests: --test sync_failure sync_failure_recovers_acknowledged_operations
+            exact: --exact
           - suite: regolith-interrupted
             binary-features: "--features regolith-history,fault-injection"
             test-features: "--features fault-injection"
@@ -460,7 +470,7 @@ jobs:
       - name: Install native build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
+          sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler strace
 
       - name: Install pinned toolchain
         run: |
@@ -482,6 +492,10 @@ jobs:
 
       - name: Build test binary
         run: cargo build --frozen -p verad ${{ matrix.binary-features }}
+
+      - name: Lint persistence fault fixtures
+        if: matrix.suite == 'sync-failure'
+        run: cargo clippy --frozen -p vera-e2e --test sync_failure --test disk_full -- -D warnings
 
       - name: Run suite
         env:
