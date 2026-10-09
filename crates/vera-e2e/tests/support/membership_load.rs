@@ -160,6 +160,38 @@ impl Load {
             })
             .await
             .unwrap();
+            for (checkpoint, age, timeout) in [
+                (0, Duration::from_secs(30), deadline()),
+                (last, Duration::ZERO, deadline()),
+                (last, Duration::from_secs(30), Duration::ZERO),
+            ] {
+                assert!(matches!(
+                    client
+                        .verify_readiness(&self.trusted, checkpoint, age, timeout)
+                        .await,
+                    Err(vera_client::ReadinessError::InvalidOptions)
+                ));
+            }
+            let wrong = vera_e2e::cluster::KeySet::builder()
+                .seed(8873)
+                .build()
+                .unwrap();
+            let wrong_key = *wrong.epoch_info().output.public().public();
+            assert!(matches!(
+                client
+                    .verify_readiness(&wrong_key, last, Duration::from_secs(30), deadline())
+                    .await,
+                Err(vera_client::ReadinessError::Client(
+                    vera_client::ClientError::Finalization(
+                        vera_domain::LightBlockError::UntrustedConsensusKey
+                    )
+                ))
+            ));
+            let progress = client
+                .verify_readiness(&self.trusted, last, Duration::from_secs(30), deadline())
+                .await
+                .unwrap();
+            assert!(progress.height > progress.initial_height);
             let (_, allowed) = client
                 .verify_current_access(
                     &self.policy,
