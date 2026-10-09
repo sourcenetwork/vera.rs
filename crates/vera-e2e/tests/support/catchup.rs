@@ -179,10 +179,26 @@ async fn recover_replica_from(
     let from_backup = source == ReplicaSource::StoppedBackup;
     assert!(!from_backup || !(snapshot || interrupt || pruning || stale_floor));
     let epoch_length = if from_backup { 192 } else { 20 };
-    let mut genesis = GenesisBuilder::devnet().blocks_per_epoch(epoch_length);
-    if from_backup {
-        genesis = genesis.simplex(vera_domain::SimplexParameters::default());
-    }
+    let simplex = if from_backup {
+        vera_domain::SimplexParameters::default()
+    } else {
+        // Short epochs still need a leader opportunity for all four dealers.
+        vera_domain::SimplexParameters {
+            term_length: 2,
+            optimistic_views: 1,
+            ..vera_domain::SimplexParameters::default()
+        }
+    };
+    simplex.validate().unwrap();
+    assert!(
+        vera_domain::max_epoch_participants(
+            std::num::NonZeroU64::new(epoch_length).unwrap(),
+            std::num::NonZeroU64::new(simplex.term_length).unwrap(),
+        ) >= 4
+    );
+    let genesis = GenesisBuilder::devnet()
+        .blocks_per_epoch(epoch_length)
+        .simplex(simplex);
     let deployment = 9041;
     let keys = KeySet::builder().seed(deployment).build().unwrap();
     let trusted_key = *keys.epoch_info().output.public().public();

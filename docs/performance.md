@@ -73,6 +73,39 @@ restart checks are outside throughput timing. Receipt latency includes
 scheduled-arrival delay and 50 ms polling, not just consensus finality. This
 simple ACP workload does not replace mixed-policy, WAN or power-loss gates.
 
+## Sustained fixed-object qualification on October 9, 2026
+
+[Performance run 37911830367](https://github.com/sourcenetwork/vera.rs/actions/runs/37911830367)
+passed on clean source
+[`7779a601`](https://github.com/sourcenetwork/vera.rs/commit/7779a6016487d7828646b37b981f357a518a8cbd).
+Each backend completed 90,000 certified archive/unarchive operations over 128
+objects, offered at 50/s for 30 minutes, with one verified permission read per
+operation. All four replicas agreed on receipts and final state, including
+after a hard restart. There were no rejected, reverted, unknown or incomplete
+workflows, verification failures, or restart receipt/state mismatches.
+
+| History backend | Completed workflows/s | Scheduled arrival to certified receipt p95 | Permission read p95 | Restart to observed probe |
+| --- | ---: | ---: | ---: | ---: |
+| RocksDB | 49.9975 | 265.11 ms | 4.10 ms | 7.10 s |
+| Regolith | 49.9965 | 294.08 ms | 13.05 ms | 13.09 s |
+
+Each backend ran four validators and the client on a separate hosted Linux
+machine, using normal release builds and pipelined Simplex. Receipt latency
+includes arrival scheduling and client polling; it is not pure consensus
+finality. Different host CPUs prevent a controlled backend comparison. These
+results qualify this offered workload, not maximum capacity, WAN deployment,
+complex-policy load or power-loss durability.
+
+All members supplied 1,801 one-second RSS samples and at least 68 actual node
+diagnostic snapshots. Per-member RSS started at 228–233 MiB and ended at
+508–542 MiB for RocksDB and 537–568 MiB for Regolith. Anonymous RSS accounts
+for nearly all growth; file-backed RSS stayed within about 0.32 MiB of its
+initial value. RSS continued growing late in both runs, so a sustained memory
+bound remains unproven even with a fixed live object set. Increasing absolute
+journal offsets alone do not indicate retained memory: pruning boundaries
+advanced with them. Numeric reports, resource series, charts and the interactive
+replay are in the linked run's artifacts; raw node logs and keys are excluded.
+
 ## Local mixed-policy qualification
 
 The [current-schema mixed-policy run](mixed-policy-workload.md#current-schema-local-qualification)
@@ -146,6 +179,21 @@ manual and successful main CI runs retain the existing two 3,000-operation
 baselines and 60-minute job limit.
 The workflow uploads only the named measurement, provenance and report artifacts;
 raw runtime logs, configuration, keys and state directories are excluded.
+
+Memory attribution retains each member's private logs until extraction. The
+collector reads multiline resource snapshots from the four node stdout logs;
+the workload runner's stderr does not contain these events. Every member must
+supply at least 60 snapshots for a 30-minute run. Missing members, empty logs,
+incomplete snapshots and insufficient coverage fail the job.
+An eight-operation diagnostic smoke run checks the actual node output before
+the sustained workload starts; its fixture and raw output remain private.
+
+`diagnostics.jsonl` identifies the member and records the node's UTC timestamp.
+`recording_elapsed_seconds` starts at the recorder's manifest timestamp and
+includes fixture setup, verification and restart; it is separate from workload
+latency. Labelled runtime metric series retain distinct identities through
+label hashes, while raw labels and logs stay private. The collector does not
+invent timestamps from the nominal 30-second sampling interval.
 
 ## ACP lifecycle components
 
