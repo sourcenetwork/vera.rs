@@ -87,9 +87,9 @@ pub(crate) struct DevnetArgs {
     #[arg(long)]
     pub genesis: Option<PathBuf>,
 
-    /// JSON-RPC listen port.
-    #[arg(long, default_value = "8545")]
-    pub rpc_port: u16,
+    /// Override the configured JSON-RPC listen port (default: 8545).
+    #[arg(long)]
+    pub rpc_port: Option<u16>,
 
     /// Inherit a listening TCP descriptor matching the configured RPC address (Unix).
     #[cfg(unix)]
@@ -156,7 +156,11 @@ impl Cli {
             .iter()
             .position(|pk| *pk == local)
             .ok_or_else(|| eyre::eyre!("validator key is not listed in peers.json"))?;
-        let rpc_port = args.rpc_port.unwrap_or(8545 + validator_index as u16);
+        let rpc_port = crate::rpc_address::validator_port(
+            self.config.is_some(),
+            args.rpc_port,
+            validator_index,
+        )?;
         let settings = node_settings(
             config,
             genesis,
@@ -309,18 +313,11 @@ fn node_settings(
     config: NodeConfig,
     genesis: VeraGenesis,
     peers: PeerSet,
-    rpc_port: u16,
+    rpc_port: Option<u16>,
     timeouts: ConsensusTimeouts,
-) -> eyre::Result<NodeSettings> {
+) -> Result<NodeSettings, crate::rpc_address::RpcAddressError> {
     let secrets_path = config.data_dir.join("secrets.json");
-    // The CLI port (already defaulted per validator index) wins over the
-    // config address; the config value binds only when it names a port the
-    // caller did not override.
-    let derived: std::net::SocketAddr = format!("0.0.0.0:{rpc_port}").parse()?;
-    let rpc_addr = match config.rpc.http_addr.parse::<std::net::SocketAddr>() {
-        Ok(configured) if configured.port() == rpc_port => configured,
-        _ => derived,
-    };
+    let rpc_addr = crate::rpc_address::resolve(&config.rpc.http_addr, rpc_port)?;
     Ok(NodeSettings {
         config,
         genesis,
@@ -371,6 +368,61 @@ mod tests {
             assert_eq!(descriptor(parsed), None);
             arguments.extend(["--rpc-listener-fd", "9"]);
             assert_eq!(descriptor(Cli::try_parse_from(arguments).unwrap()), Some(9));
+        }
+    }
+
+    #[test]
+    fn devnet_rpc_port_is_an_explicit_override() {
+        let port =
+            |arguments: Vec<&str>| match Cli::try_parse_from(arguments).unwrap().command.unwrap() {
+                Commands::Devnet(args) => args.rpc_port,
+                _ => unreachable!(),
+            };
+        assert_eq!(port(vec!["verad", "devnet"]), None);
+        assert_eq!(
+            port(vec!["verad", "devnet", "--rpc-port", "8545"]),
+            Some(8545)
+        );
+    }
+
+    #[test]
+    fn node_settings_preserve_configured_rpc_interface_and_port_overrides() {
+        for address in [
+            "127.0.0.1:9000",
+            "192.0.2.1:9000",
+            "[::1]:9000",
+            "[::]:9000",
+        ] {
+            let configured: std::net::SocketAddr = address.parse().unwrap();
+            for override_port in [None, Some(8545), Some(0)] {
+                let config = NodeConfig {
+                    rpc: vera_config::RpcConfig {
+                        http_addr: address.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                let settings = node_settings(
+                    config,
+                    VeraGenesis::devnet(),
+                    PeerSet {
+                        participants: vec![],
+                        bootstrappers: vec![],
+                    },
+                    override_port,
+                    ConsensusTimeouts {
+                        leader_timeout_ms: None,
+                        notarization_timeout_ms: None,
+                        nullify_retry_ms: None,
+                    },
+                )
+                .unwrap();
+                assert_eq!(settings.rpc_addr.ip(), configured.ip());
+                assert_eq!(
+                    settings.rpc_addr.port(),
+                    override_port.unwrap_or(configured.port())
+                );
+            }
         }
     }
 

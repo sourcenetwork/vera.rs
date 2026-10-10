@@ -7,12 +7,44 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from heap_profile import demangle_stacks, heap_timeline, profile_settings, retained_sites, rust_demangler, source_location
+from heap_profile import demangle_stacks, heap_timeline, profile_settings, profile_workload, qualify_outcomes, retained_sites, rust_demangler, source_location
 
 LAUNCHER = Path(__file__).resolve().parents[2] / '.github/scripts/profiled-verad.sh'
 
 
 class HeapEvidence(unittest.TestCase):
+    def test_sustained_profile_covers_the_measured_late_window(self):
+        count, rate, deadline, arena = profile_workload('sustained')
+        self.assertEqual((count, rate, arena), (90000, 50, '2'))
+        self.assertEqual(count / rate, 1800)
+        self.assertGreater(deadline, count / rate)
+        self.assertEqual(profile_workload('startup'), (6000, 20, 1200, None))
+        with self.assertRaises(ValueError):
+            profile_workload('unbounded')
+
+    def test_qualification_uses_the_selected_operation_count(self):
+        for selection in ('startup', 'sustained'):
+            count = profile_workload(selection)[0]
+            records = {
+                'summary': {'offered': count, 'completed_workflows': count},
+                'verification': {'verified': count, 'replicas': 4, 'unresolved': 0},
+                'recovery': {'inspected_operations': count, 'receipt_mismatches': 0, 'state_mismatches': 0},
+            }
+            qualify_outcomes(records, count)
+            for section, key, value in [
+                    ('summary', 'completed_workflows', count - 1),
+                    ('verification', 'verified', count - 1),
+                    ('verification', 'replicas', 3),
+                    ('verification', 'unresolved', 1),
+                    ('recovery', 'inspected_operations', count - 1),
+                    ('recovery', 'receipt_mismatches', 1),
+                    ('recovery', 'state_mismatches', 1)]:
+                incomplete = {name: dict(record) for name, record in records.items()}
+                incomplete[section][key] = value
+                with self.subTest(selection=selection, section=section, key=key):
+                    with self.assertRaisesRegex(ValueError, 'incomplete certified workload'):
+                        qualify_outcomes(incomplete, count)
+
     def test_profile_build_flags_are_explicit_and_not_overridden(self):
         environment = {'CARGO_PROFILE_RELEASE_DEBUG': 'full',
                        'CARGO_PROFILE_RELEASE_STRIP': 'none',
@@ -160,6 +192,29 @@ class HeapEvidence(unittest.TestCase):
                                      'unresolved': 8})
             self.assertNotIn('/secret', json.dumps(after))
 
+    def test_trace_scans_do_not_consume_other_decode_phase_deadlines(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raw, decoded = (Path(directory) / name for name in ('raw', 'decoded'))
+            raw.write_text('_RNvC6_123foo3bar; 64\n')
+            response = subprocess.CompletedProcess([], 0, stdout='commonware_storage::cache::Entry\n')
+            with patch('heap_profile.time.monotonic', side_effect=[0, 119, 119, 121, 238, 240]), \
+                    patch('heap_profile.subprocess.run', return_value=response) as run:
+                demangle_stacks(raw, decoded, ['fixture-decoder'])
+            self.assertEqual(run.call_args.kwargs['timeout'], 118)
+            self.assertEqual(retained_sites(decoded), {'commonware_storage::cache::Entry': 64})
+
+    def test_every_decode_phase_still_rejects_its_exhausted_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raw, decoded = (Path(directory) / name for name in ('raw', 'decoded'))
+            raw.write_text('_RNvC6_123foo3bar; 64\n')
+            response = subprocess.CompletedProcess([], 0, stdout='commonware_storage::cache::Entry\n')
+            for clock in ([0, 120], [0, 0, 0, 120], [0, 0, 0, 0, 0, 120]):
+                with self.subTest(clock=clock), \
+                        patch('heap_profile.time.monotonic', side_effect=clock), \
+                        patch('heap_profile.subprocess.run', return_value=response):
+                    with self.assertRaisesRegex(ValueError, 'decoding exceeded its deadline'):
+                        demangle_stacks(raw, decoded, ['fixture-decoder'])
+
     def test_repeated_symbols_are_decoded_once_without_changing_frames_or_weights(self):
         with tempfile.TemporaryDirectory() as directory:
             raw, decoded = (Path(directory) / name for name in ('raw', 'decoded'))
@@ -236,7 +291,7 @@ class HeapEvidence(unittest.TestCase):
                     demangle_stacks(raw, decoded, ['fixture-decoder'])
                 run.assert_not_called()
             raw.write_text('_RNvC6_123foo3bar; 64\n')
-            with patch('heap_profile.time.monotonic', side_effect=[0, 0, 121]), \
+            with patch('heap_profile.time.monotonic', side_effect=[0, 0, 0, 121]), \
                     patch('heap_profile.subprocess.run') as run:
                 with self.assertRaisesRegex(ValueError, 'deadline'):
                     demangle_stacks(raw, decoded, ['fixture-decoder'])

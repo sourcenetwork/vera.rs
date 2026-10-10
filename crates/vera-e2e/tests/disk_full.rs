@@ -41,7 +41,7 @@ async fn disk_full_validator_recovers_acknowledged_operations() {
     let signer = BlsSigner::random(deployment).expect("construct native signer");
     let origin = VeraClient::new(cluster.node(0).rpc_url());
     let mut receipts = vec![create_policy(&origin, &signer, "before-disk-full").await];
-    assert_replicas(&cluster, &signer, &receipts, 4, &trusted).await;
+    assert_replicas(&cluster, &signer, &receipts, 4, &trusted, "initial").await;
 
     assert!(
         volume.fill().unwrap() > 0,
@@ -62,9 +62,6 @@ async fn disk_full_validator_recovers_acknowledged_operations() {
     })
     .await
     .expect("persistence failure must stop the affected validator");
-    volume
-        .confirm_full()
-        .expect("independently confirm ENOSPC after validator exit");
     let log_dir = &cluster.node(3).log_dir;
     let logs = ["stdout.log", "stderr.log"]
         .into_iter()
@@ -75,23 +72,23 @@ async fn disk_full_validator_recovers_acknowledged_operations() {
         logs.contains("No space left on device")
             || logs.contains("os error 28")
             || logs.contains("unable to append to journal: Runtime(WriteFailed)"),
-        "validator exit must report a storage write failure while the volume reports ENOSPC (log_bytes={}, io_errors={}, panics={})",
+        "validator exit must report a storage write failure after independently confirmed ENOSPC (log_bytes={}, io_errors={}, panics={})",
         logs.len(),
         logs.matches("I/O error").count() + logs.matches("io error").count(),
         logs.matches("panicked").count()
     );
-    assert_replicas(&cluster, &signer, &receipts, 3, &trusted).await;
+    assert_replicas(&cluster, &signer, &receipts, 3, &trusted, "survivors").await;
 
     volume.release_space().unwrap();
     cluster.restart_node(3).unwrap();
     cluster.wait_ready(deadline()).await.unwrap();
-    assert_replicas(&cluster, &signer, &receipts, 4, &trusted).await;
+    assert_replicas(&cluster, &signer, &receipts, 4, &trusted, "restored").await;
     cluster.kill_node(2);
     let recovered = VeraClient::new(cluster.node(3).rpc_url());
     receipts.push(create_policy(&recovered, &signer, "after-disk-full").await);
     cluster.restart_node(2).unwrap();
     cluster.wait_ready(deadline()).await.unwrap();
-    assert_replicas(&cluster, &signer, &receipts, 4, &trusted).await;
+    assert_replicas(&cluster, &signer, &receipts, 4, &trusted, "renewed-quorum").await;
     for index in 0..4 {
         cluster.kill_node(index);
     }

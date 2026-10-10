@@ -119,6 +119,37 @@ whole run includes those final checks. This is a separate workload and host from
 the hosted Linux baseline, with detailed latency, resource and timing limits in
 the linked report.
 
+## Allocator retention comparison
+
+`allocator_comparison=true` runs two fresh four-validator fixed-state workloads
+on the same hosted runner: the default glibc arena setting, then
+`MALLOC_ARENA_MAX=2`. Each case offers 90,000 operations at 50/s over 30 minutes
+against 128 objects, using the same prebuilt release binaries. Both history
+backends run this comparison independently. The ordinary performance workflow
+and production configuration retain their existing allocator settings.
+
+```bash
+gh workflow run performance.yml --ref <branch> -f allocator_comparison=true
+```
+
+The recorder changes only the workload process and its descendants, records the
+selected arena setting and libc version, and rejects conflicting allocator
+or loader overrides for these controlled cases. Cases retain distinct manifests,
+resource snapshots, certified permission checks, all-replica reconciliation,
+restart verification, latency reports and interactive replays. Results are under
+`objects-128-allocator-default` and `objects-128-allocator-2` in each backend's
+artifact. Private node directories are removed after extraction between cases.
+The comparison cannot combine with growing-state, archive-retention or
+storage-attribution modes.
+
+[Glibc arenas](https://sourceware.org/glibc/manual/latest/html_node/Memory-Allocation-Tunables.html)
+provide an allocation-concurrency limit, not a heap or RSS cap. Reducing their
+number may trade allocation contention for lower retained memory. Compare the
+whole RSS timeline, late-run growth, useful-operation latency and correctness;
+a smaller final RSS alone does not establish a memory bound or identify a leak.
+The fixed case order and single hosted machine make this an exploratory result,
+not a production allocator recommendation or maximum-capacity measurement.
+
 ## Manual sustained fixed-state run
 
 The same workflow accepts `sustained_fixed_state=true` only through manual
@@ -841,3 +872,28 @@ including logs and consensus journals. They do not establish physical-device
 write amplification, backend-specific writes or fsync latency. Sample intervals
 may omit workload boundaries; reports do not divide these deltas by all offered
 operations. See the [kernel accounting contract](https://docs.kernel.org/filesystems/proc.html#proc-pid-io-display-the-io-accounting-fields).
+
+## Sustained heap attribution
+
+The native heap-profile workflow offers two bounded diagnostic profiles.
+`startup` retains the existing 6,000-update case at 20 offered operations/s.
+`sustained` runs 90,000 updates at 50 offered operations/s against 128 objects,
+covering a thirty-minute workload, with the controlled glibc arena limit set to
+two. It uses the current node and workload sources, full release debug symbols,
+frame pointers and the existing source-filtered allocation decoder. Competing
+allocator or loader settings are rejected for the controlled case.
+
+Only member 3's first process is instrumented. The wrapper preserves its PID and
+inherited RPC descriptor; its restarted process is uninstrumented. Certified
+receipts, all-operation replica verification and restart checks remain required.
+The recording preserves source/binary hashes, profile selection, allocator
+settings, numeric heap timeline and allocation-site weights. Raw traces, stack
+paths, keys, node state and process logs remain private and are removed afterward.
+
+The sustained case tests the remaining growth observed in the two-arena resource
+experiment. Its tracing and symbol settings differ from normal deployment, so it
+does not establish production latency or capacity. Timeline values are interval
+peaks; end-of-process allocated bytes are not necessarily leaks, and allocation
+callers do not by themselves identify the retaining owner. Follow any increasing
+allocation population through its actual ownership and lifetime before changing
+storage, queues or caches.

@@ -50,6 +50,7 @@ pub(super) async fn assert_replicas(
     receipts: &[TransactionReceipt],
     replicas: usize,
     trusted: &vera_domain::ConsensusPublicKey,
+    phase: &str,
 ) {
     tokio::time::timeout(deadline(), async {
         let origin = VeraClient::new(cluster.node(0).rpc_url());
@@ -80,7 +81,10 @@ pub(super) async fn assert_replicas(
                         Err(ClientError::Rpc { code: -32603, message }) if message == pending => {
                             tokio::time::sleep(POLL).await;
                         }
-                        Err(error) => panic!("replica {index} finality proof failed: {error}"),
+                        Err(error) => panic!(
+                            "recovery_rpc_failure phase={phase} kind={} replica={index}",
+                            rpc_failure_kind(&error)
+                        ),
                     }
                 };
                 assert_eq!(light.height, receipt.block_number);
@@ -103,4 +107,65 @@ pub(super) async fn assert_replicas(
     })
     .await
     .expect("replica convergence deadline");
+}
+
+fn rpc_failure_kind(error: &ClientError) -> &'static str {
+    match error {
+        ClientError::ClientCapacityExhausted => "client-capacity",
+        ClientError::ResourceBusy(_) => "server-capacity",
+        ClientError::Rpc {
+            code: -32603,
+            message,
+        } if message
+            .strip_prefix("internal error: ")
+            .unwrap_or(message)
+            .starts_with("finalization certificate not found for height ") =>
+        {
+            "finality-unavailable"
+        }
+        ClientError::Rpc { code: -32603, .. } => "rpc-internal",
+        ClientError::Rpc { .. } => "rpc-rejected",
+        ClientError::Transport(error) if error.is_timeout() => "transport-timeout",
+        ClientError::Transport(_) => "transport",
+        ClientError::Json(_) => "json",
+        ClientError::MissingResult | ClientError::InvalidResponse(_) => "response",
+        ClientError::ResponseTooLarge(_) => "response-limit",
+        _ => "other",
+    }
+}
+
+#[test]
+fn recovery_rpc_failure_classes_do_not_export_remote_messages() {
+    assert_eq!(
+        rpc_failure_kind(&ClientError::ResourceBusy("private".into())),
+        "server-capacity"
+    );
+    assert_eq!(
+        rpc_failure_kind(&ClientError::Rpc {
+            code: -32603,
+            message: "finalization certificate not found for height 42".into(),
+        }),
+        "finality-unavailable"
+    );
+    assert_eq!(
+        rpc_failure_kind(&ClientError::Rpc {
+            code: -32603,
+            message: "internal error: finalization certificate not found for height 42 within retained proof limits".into(),
+        }),
+        "finality-unavailable"
+    );
+    assert_eq!(
+        rpc_failure_kind(&ClientError::Rpc {
+            code: -32603,
+            message: "private storage error".into(),
+        }),
+        "rpc-internal"
+    );
+    assert_eq!(
+        rpc_failure_kind(&ClientError::Rpc {
+            code: -32000,
+            message: "private request".into(),
+        }),
+        "rpc-rejected"
+    );
 }

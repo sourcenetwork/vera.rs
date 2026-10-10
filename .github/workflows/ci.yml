@@ -51,8 +51,10 @@ jobs:
           GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: cargo fetch --locked
 
-      - name: CI cleanup checks
-        run: PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/test_stop_test_nodes.py
+      - name: CI cleanup and evidence checks
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/test_stop_test_nodes.py
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_summarize_test_results.py
 
       - name: Format
         run: cargo fmt -- --check
@@ -227,25 +229,27 @@ jobs:
       - name: Run e2e tests
         shell: bash
         run: >-
+          python3 .github/scripts/capture-tests.py --logs "$TMPDIR"
           cargo test --frozen -p vera-e2e
-          --test core_chain
-          --test contract_deploy
-          --test light_client
-          --test gossip_headers
-          --test validator_bootstrap
-          --test validator_epoch_transition
-          --test cross_object_acp
-          -- --nocapture 2>&1 | tee "$TMPDIR/test-output.log"
+          --test core_chain --test contract_deploy --test light_client
+          --test gossip_headers --test validator_bootstrap
+          --test validator_epoch_transition --test cross_object_acp
+          -- --nocapture
         timeout-minutes: 15
 
-      - name: Upload failed extended test logs
-        if: failure()
+      - name: Collect bounded extended test evidence
+        if: always()
+        run: >-
+          python3 .github/scripts/summarize-test-results.py
+          --logs "$RUNNER_TEMP/vera-e2e-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-extended"
+          --output "$RUNNER_TEMP/extended-test-evidence.json"
+
+      - name: Upload extended test evidence
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: extended-e2e-logs-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/vera-e2e-${{ github.run_id }}-${{ github.run_attempt }}-extended/test-output.log
-            ${{ runner.temp }}/vera-e2e-${{ github.run_id }}-${{ github.run_attempt }}-extended/clusters/**/logs/*.log
+          name: extended-e2e-evidence-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/extended-test-evidence.json
           if-no-files-found: ignore
 
       - name: Cleanup
@@ -301,7 +305,7 @@ jobs:
 
   linux-checks:
     name: Linux checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read
@@ -321,7 +325,7 @@ jobs:
       - name: Install native build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
+          sudo apt-get install -y binutils clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
 
       - name: Install pinned toolchain
         run: |
@@ -362,7 +366,8 @@ jobs:
           cargo build --frozen -p verad --features regolith-history
           cargo build --frozen -p verad --features fault-injection
           cargo build --frozen -p verad --features regolith-history,fault-injection
-          cargo build --frozen --release -p verad
+          cargo build --frozen --release --no-default-features -p verad
+          cargo build --frozen --release -p vera-e2e --example mixed_policy_workload
 
       - name: Native ring lifecycle with release daemon
         env:
@@ -372,16 +377,79 @@ jobs:
           VERA_E2E_KEEP: "1"
           RUST_LOG: warn,vera_storage=info,vera_node=debug,vera_node::tx_gossip=trace,vera_diagnostics=debug
         run: >-
+          python3 .github/scripts/capture-tests.py --logs "$VERA_E2E_DIR"
           cargo test --release --frozen -p vera-e2e --test native_rings
           -- --test-threads=1 --nocapture
 
-      - name: Upload failed native ring logs
-        if: failure()
+      - name: Mixed policy lifecycle with release daemon
+        env:
+          VERA_E2E_DIR: ${{ runner.temp }}/mixed-policy-release/clusters
+          VERA_E2E_KEEP: "1"
+          VERA_E2E_DEADLINE_SCALE: "8"
+          VERA_TRACE_SPANS: "0"
+        run: |
+          install -d -m 700 "$RUNNER_TEMP/mixed-policy-release"
+          python3 tools/performance/record.py \
+            --node target/release/verad --runner target/release/examples/mixed_policy_workload \
+            --history rocksdb --rust-log warn --timeout-seconds 960 \
+            --output "$RUNNER_TEMP/mixed-policy-release/measurement" 16 2 8 900
+
+      - name: Qualify bounded mixed policy evidence
+        if: always()
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_qualify_mixed_policy.py
+          python3 .github/scripts/qualify-mixed-policy.py \
+            --directory "$RUNNER_TEMP/mixed-policy-release/measurement" \
+            --node target/release/verad --runner target/release/examples/mixed_policy_workload \
+            --output "$RUNNER_TEMP/mixed-policy-evidence.json"
+
+      - name: Upload mixed policy evidence
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: linux-native-rings-release-logs
-          path: ${{ runner.temp }}/native-rings-release
+          name: linux-mixed-policy-release-evidence
+          path: ${{ runner.temp }}/mixed-policy-evidence.json
           if-no-files-found: ignore
+
+      - name: Cleanup private mixed policy files
+        if: always()
+        run: |
+          python3 .github/scripts/stop-test-nodes.py "$GITHUB_WORKSPACE/target/release/verad"
+          rm -rf "$RUNNER_TEMP/mixed-policy-release"
+
+      - name: Package the exercised Linux release daemon
+        run: |
+          python3 -m unittest discover -s .github/scripts -p test_package_linux_release.py
+          python3 .github/scripts/package-linux-release.py --output "$RUNNER_TEMP/verad-linux-release"
+
+      - name: Upload Linux release bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verad-x86_64-unknown-linux-gnu-rocksdb
+          path: ${{ runner.temp }}/verad-linux-release/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Collect bounded native ring evidence
+        if: always()
+        run: >-
+          python3 .github/scripts/summarize-test-results.py
+          --logs "$RUNNER_TEMP/native-rings-release"
+          --output "$RUNNER_TEMP/native-ring-evidence.json"
+
+      - name: Upload native ring evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-native-rings-release-evidence
+          path: ${{ runner.temp }}/native-ring-evidence.json
+          if-no-files-found: ignore
+
+      - name: Cleanup private native ring files
+        if: always()
+        run: |
+          python3 .github/scripts/stop-test-nodes.py "$GITHUB_WORKSPACE/target/release/verad"
+          rm -rf "$RUNNER_TEMP/native-rings-release"
 
   linux-recovery:
     name: Linux recovery (${{ matrix.suite }})
@@ -424,13 +492,13 @@ jobs:
           - suite: disk-full
             binary-features: ""
             test-features: ""
-            tests: --test disk_full disk_full_validator_recovers_acknowledged_operations
-            exact: --exact
+            tests: --test disk_full
+            exact: ""
           - suite: regolith-disk-full
             binary-features: "--features regolith-history"
             test-features: ""
-            tests: --test disk_full disk_full_validator_recovers_acknowledged_operations
-            exact: --exact
+            tests: --test disk_full
+            exact: ""
           - suite: sync-failure
             binary-features: ""
             test-features: ""
@@ -506,14 +574,28 @@ jobs:
           VERA_E2E_DIR: ${{ runner.temp }}/e2e-logs
           VERA_E2E_KEEP: "1"
         run: >-
+          python3 .github/scripts/capture-tests.py --logs "$VERA_E2E_DIR"
           cargo test --frozen -p vera-e2e ${{ matrix.test-features }}
           ${{ matrix.tests }}
           -- --test-threads=1 --nocapture ${{ matrix.exact }}
 
-      - name: Upload failed cluster logs
-        if: failure()
+      - name: Collect bounded recovery evidence
+        if: always()
+        run: >-
+          python3 .github/scripts/summarize-test-results.py
+          --logs "$RUNNER_TEMP/e2e-logs"
+          --output "$RUNNER_TEMP/recovery-evidence.json"
+
+      - name: Upload recovery evidence
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: linux-${{ matrix.suite }}-cluster-logs
-          path: ${{ runner.temp }}/e2e-logs
+          name: linux-${{ matrix.suite }}-evidence
+          path: ${{ runner.temp }}/recovery-evidence.json
           if-no-files-found: ignore
+
+      - name: Cleanup private recovery files
+        if: always()
+        run: |
+          python3 .github/scripts/stop-test-nodes.py "$VERAD_BINARY"
+          rm -rf "$RUNNER_TEMP/e2e-logs"

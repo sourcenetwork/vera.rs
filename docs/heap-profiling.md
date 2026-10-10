@@ -1,9 +1,12 @@
 # Native allocation attribution
 
 The **Native heap profile** workflow runs the existing four-validator fixed-state
-workload against 128 objects, offering 6,000 updates at 20 per second. It preserves
-certified permission reads, all-replica verification and full restart checks.
-Select RocksDB or Regolith for the history backend when dispatching it.
+workload against 128 objects. Select `startup` for 6,000 updates at 20 offered
+operations/s, or `sustained` for 90,000 updates at 50 offered operations/s with two
+glibc arenas. Both preserve certified permission reads, all-replica verification
+and full restart checks. Select RocksDB or Regolith for the history backend.
+The sustained profile investigates late growth; its instrumented results do not
+replace normal-release resource measurements.
 
 The diagnostic release build keeps its optimization settings, adds full debug
 information without stripping symbols, and forces Rust frame pointers. These
@@ -62,6 +65,8 @@ after decoding. The existing source-name filter still governs public callers. Un
 also retain weighted counts by fixed format categories: missing stack, missing
 symbols, residual mangled symbols, and unrecognized symbols. No raw symbol names or
 private paths are included in those categories.
+Symbol inventory, batch decoding and trace rewriting each have a separate
+two-minute deadline; work in one phase cannot consume the next phase's budget.
 Decoding and classification preserve allocation accounting. The diagnostic build
 settings affect the profiled binary, so comparisons must retain its manifest;
 the production allocator remains unchanged.
@@ -93,6 +98,16 @@ verified four replicas and checked every operation after restart with zero
 mismatches. It recorded 256,278,302 retained bytes, with only 91,528 bytes of
 unresolved symbols. However, 234,045,093 bytes (91.32%) were attributed to
 `std::alloc::System`, which still does not identify their component owner.
-That run used source line tables and the default frame-pointer setting. The
-full-debug/frame-pointer build needs fresh qualification; no improved component
-coverage or memory reduction is claimed from the build-setting change alone.
+That run used source line tables and the default frame-pointer setting, unlike
+the full-debug/frame-pointer profile below.
+
+The [full-debug profile](https://github.com/sourcenetwork/vera.rs/actions/runs/38004786626)
+at `e2b83331` completed and independently verified all 6,000 operations on four
+replicas, including restart verification with zero receipt or state mismatches.
+It recorded 256,181,630 retained bytes: unreliable-mailbox allocation callers
+accounted for 141,124,320 bytes, three buffer-pool callers for 90,814,948 bytes,
+and unresolved stacks for 91,424 bytes. These allocation callers explain much
+of this short profile's retained heap; they do not identify the cause of late
+RSS growth in the thirty-minute normal-release measurements. Preallocated
+queues and reusable pools are ordinary live allocations, and the process-end
+weights do not prove a leak. Sustained heap qualification remains separate.

@@ -185,19 +185,23 @@ impl NodeConfig {
     }
 
     /// Get the validator private key from `{data_dir}/validator.key`.
+    /// Existing material must contain exactly 32 bytes; reads stop after 33 bytes.
     pub fn validator_key(
         &self,
     ) -> Result<commonware_cryptography::ed25519::PrivateKey, ConfigError> {
         let key_path = self.data_dir.join("validator.key");
 
         // Try to load existing key
-        match vera_cli::open_private(&key_path).and_then(|mut file| {
+        match vera_cli::open_private(&key_path).and_then(|file| {
             use std::io::Read as _;
             let mut bytes = Vec::new();
-            file.read_to_end(&mut bytes)?;
+            file.take(33).read_to_end(&mut bytes)?;
             Ok(bytes)
         }) {
             Ok(key_bytes) => {
+                if key_bytes.len() > 32 {
+                    return Err(ConfigError::ValidatorKeyTooLarge);
+                }
                 if key_bytes.len() != 32 {
                     return Err(ConfigError::InvalidKeyLength(key_bytes.len()));
                 }
@@ -463,6 +467,57 @@ mod tests {
         assert!(config.validator_key().is_err());
         assert_eq!(std::fs::read_link(path).unwrap(), target);
         assert!(!target.exists());
+    }
+
+    #[test]
+    fn oversized_validator_key_is_rejected_without_truncation() {
+        use std::io::Read as _;
+
+        for size in [33, 64 << 20] {
+            let directory = tempfile::tempdir().unwrap();
+            let config = NodeConfig {
+                data_dir: directory.path().to_path_buf(),
+                ..Default::default()
+            };
+            let path = config.data_dir.join("validator.key");
+            vera_cli::write_private(&path, &[0x2a; 32]).unwrap();
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_len(size)
+                .unwrap();
+            assert!(matches!(
+                config.validator_key(),
+                Err(ConfigError::ValidatorKeyTooLarge)
+            ));
+            assert_eq!(path.metadata().unwrap().len(), size);
+            let mut prefix = [0; 32];
+            std::fs::File::open(path)
+                .unwrap()
+                .read_exact(&mut prefix)
+                .unwrap();
+            assert_eq!(prefix, [0x2a; 32]);
+        }
+    }
+
+    #[test]
+    fn short_validator_key_is_rejected_without_regeneration() {
+        for length in [0, 1, 31] {
+            let directory = tempfile::tempdir().unwrap();
+            let config = NodeConfig {
+                data_dir: directory.path().to_path_buf(),
+                ..Default::default()
+            };
+            let path = config.data_dir.join("validator.key");
+            let bytes = vec![0x2a; length];
+            vera_cli::write_private(&path, &bytes).unwrap();
+            assert!(matches!(
+                config.validator_key(),
+                Err(ConfigError::InvalidKeyLength(actual)) if actual == length
+            ));
+            assert_eq!(std::fs::read(path).unwrap(), bytes);
+        }
     }
 
     #[test]
