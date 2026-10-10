@@ -250,6 +250,31 @@ counts and minimum, maximum and last allocator byte counters; paths, labels and
 raw logs are excluded. These checks qualify collection, not a sustained memory
 bound or a workload capacity result.
 
+### Completed allocator accounting on October 10, 2026
+
+[Run 38041684110](https://github.com/sourcenetwork/vera.rs/actions/runs/38041684110)
+measured source `5afe4fa4` with the default glibc arena settings, a normal release
+build and opt-in resource diagnostics. Each history backend completed 90,000
+operations against 128 fixed objects at 50 offered operations/s. All four replicas
+verified every outcome; restart checks inspected every operation with zero receipt
+or state mismatches. RocksDB completed the workload in 1,800.107 seconds and
+Regolith in 1,800.152 seconds. These offered-load timings are not capacity results.
+
+The retained artifacts contain 295 allocator samples for RocksDB and 296 for
+Regolith. Every sample has supported counters and consistent arena accounting.
+The following ranges cover all four nodes:
+
+| History backend | RSS increase, workload minutes 20–30 | Free arena increase, recording minutes 20–30 | In-use arena change, recording minutes 20–30 |
+| --- | ---: | ---: | ---: |
+| RocksDB | 38.67–65.30 MiB | 54.85–79.65 MiB | −29.48 to −17.36 MiB |
+| Regolith | 45.06–68.30 MiB | 23.47–32.86 MiB | +28.20 to +31.32 MiB |
+
+Diagnostic recording includes startup and post-workload verification; its time
+axis differs from the workload RSS samples. Counters are non-atomic and do not
+provide an exact RSS decomposition. Free arena growth supports investigating
+allocator retention, while the different in-use trends require examining allocation
+lifetimes. Neither dataset establishes a leak or a sustained memory bound.
+
 ## ACP lifecycle components
 
 `component_baseline` includes policy edits and deletions with 32, 256 and 2,048
