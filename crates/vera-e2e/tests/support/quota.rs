@@ -72,14 +72,17 @@ impl Quota {
             match filler.write_all(&chunk) {
                 Ok(()) => {}
                 Err(error) if error.raw_os_error() == Some(28) => {
-                    return Ok(filler.metadata()?.len());
+                    // Journal cleanup can reclaim space while the validator is still running.
+                    if self.is_full()? {
+                        return Ok(filler.metadata()?.len());
+                    }
                 }
                 Err(error) => return Err(error),
             }
         }
     }
 
-    pub(super) fn confirm_full(&self) -> io::Result<()> {
+    fn is_full(&self) -> io::Result<bool> {
         let path = self.volume.join("enospc-probe");
         let result = File::options()
             .write(true)
@@ -90,11 +93,9 @@ impl Quota {
             fs::remove_file(path)?;
         }
         match result {
-            Err(error) if error.raw_os_error() == Some(28) => Ok(()),
+            Err(error) if error.raw_os_error() == Some(28) => Ok(true),
             Err(error) => Err(error),
-            Ok(()) => Err(io::Error::other(
-                "validator volume no longer reports ENOSPC",
-            )),
+            Ok(()) => Ok(false),
         }
     }
 
