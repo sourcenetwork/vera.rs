@@ -755,13 +755,3 @@ async fn pruned_roster_selection_survives_history_and_module_reopen() {
             .is_err()
     );
 }
-
-#[cfg(not(feature = "regolith-history"))]
-#[test]
-fn regolith_directory_is_rejected_before_rocksdb_initialization() {
-    let directory = tempfile::tempdir().unwrap();
-    std::fs::create_dir(directory.path().join("regolith")).unwrap();
-    let genesis = block(0, BlockId(B256::ZERO));
-    assert!(FinalizedHistory::open(directory.path(), &genesis).is_err());
-    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
-}

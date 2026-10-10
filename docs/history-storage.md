@@ -5,12 +5,15 @@ archives. Finalized execution history is a separate database containing records,
 certificates, query indexes and snapshot-import progress. Its backend does not
 change the revision commitments or proof format.
 
-Normal builds use RocksDB in the node's `history` directory. The opt-in
-`regolith-history` build uses Regolith in `history/regolith`:
+All builds use Regolith in the node's `history/regolith` directory:
 
 ```sh
-cargo build --frozen -p verad --features regolith-history
+cargo build --frozen -p verad
 ```
+
+`regolith-history` remains an accepted build marker for existing deployment
+manifests; omitting it selects the same Regolith implementation. The history
+implementation no longer depends on RocksDB.
 
 Regolith is pinned to the revision used by DefraDB. History writes explicitly
 request synchronous WAL persistence; they do not use Regolith's default eventual
@@ -24,27 +27,25 @@ A history-write error stops finalization before updating the in-memory head or
 acknowledging execution. An error does not establish that the batch is absent:
 if a complete batch is visible, its stored head can be ahead of memory. Startup
 reconciles stored history before serving requests. The focused write-failure
-regression checks both absent and visible batches for each backend using injected
+regression checks both absent and visible batches using injected
 errors; it does not qualify device-level write or synchronization failures.
 
 Archived receipt polling returns pending while the receipt's revision is ahead
 of the live published index. This prevents a receipt from becoming available in
 the interval between its durable history write and publication of query state.
 
-Each build rejects the other backend's history layout before initializing its
-own store. There is no automatic on-disk conversion. Keep an existing node on its
-original backend, or use a separate node directory and authenticated snapshot
-recovery to obtain history with the selected backend. Copying storage files
-between the two layouts is not a migration.
+Startup rejects foreign history layouts before creating storage files. There is
+no automatic conversion from RocksDB history. Use a separate node directory and
+authenticated snapshot recovery to populate Regolith history. Copying files
+between storage layouts is not a migration.
 
-The Regolith feature is for qualification. Backend selection does not establish
-throughput, memory bounds, or power-loss durability. Its `memtables` diagnostic
-reports the engine's current memtable-size counter; it is not directly comparable
-to RocksDB's allocation accounting. Unsupported `table_readers` accounting remains
-absent, and block-cache usage is reported separately.
+Backend selection does not establish throughput, memory bounds, or power-loss
+durability. Numeric diagnostics report used and reserved memtable bytes, retired
+arena-pool bytes, block-cache usage and pinned table metadata separately. These
+counters are non-atomic and do not account for all validator allocations.
 
 Linux recovery CI runs `disk_full_validator_recovers_acknowledged_operations`
-with each history backend. Before startup, the fixture places one validator's
+with Regolith history. Before startup, the fixture places one validator's
 data on a private 256 MiB tmpfs and keeps its logs on separate storage. Filling
 that filesystem must produce a real `ENOSPC` write failure and stop that
 validator; the remaining three must continue committing native policies. After
@@ -64,7 +65,7 @@ Commonware journals and DKG secrets outside the fault. The private trace must
 show an injected synchronization error on a finalized-history descriptor. The validator must stop, the remaining three must keep committing,
 and restart must preserve all acknowledged receipts, policy state and actor
 sequences. A later write with another voter stopped checks restored quorum
-participation. Linux recovery CI selects each history backend separately.
+participation. Linux recovery CI runs this case against Regolith.
 
 This fixture requires Linux `strace` and non-interactive `sudo` attachment;
 unavailable prerequisites fail the case. It changes the syscall result without
@@ -76,7 +77,7 @@ not physical failed-device or power-loss durability. Trace files and attachment
 logs stay in a private temporary directory and are removed after the tracer exits.
 
 To exercise authenticated snapshot import from pruned peers with Regolith,
-build the feature above, then point the harness at that binary:
+build the daemon above, then point the harness at that binary:
 
 ```sh
 VERAD_BINARY="$PWD/target/debug/verad" RUST_LOG=warn,vera_storage=info \
@@ -92,7 +93,7 @@ The `snapshot_interrupt` case `interrupted_snapshot_resumes_from_pruned_peers`
 combines pruning with a process abort after a durable history-import record.
 It removes the explicit snapshot request before restarting, exercising automatic
 import resumption. Run it with both the node and test built with
-`fault-injection`, and the node additionally built with `regolith-history`.
+`fault-injection`.
 Keep `vera_storage=info` enabled. This checks process-crash recovery, not power-loss
 or failed-write behavior.
 
@@ -128,12 +129,10 @@ a subsequent append.
 
 ```sh
 cargo test --frozen -p vera-node --lib history::tests::physical_tests::
-cargo test --frozen -p vera-node --lib --features regolith-history \
-  history::tests::physical_tests::
 ```
 
-The `History file corruption` workflow selects those two cases independently
-for RocksDB and Regolith and lints the affected node tests. The compacting hook
+The `History file corruption` workflow runs both cases against Regolith and
+lints the affected node tests. The compacting hook
 exists only in test builds; production history behavior and dependencies are
 unchanged. Hosted execution must pass before these cases count as qualification.
 

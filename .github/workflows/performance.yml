@@ -52,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        history: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.storage_attribution && '["rocksdb"]' || '["rocksdb", "regolith"]') }}
+        history: [regolith]
     env:
       CARGO_TERM_COLOR: always
       HISTORY_BACKEND: ${{ matrix.history }}
@@ -117,9 +117,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          features=()
-          if [[ "$HISTORY_BACKEND" == regolith ]]; then features=(--features regolith-history); fi
-          cargo +1.98.0 build --frozen --release -p verad "${features[@]}"
+          cargo +1.98.0 build --frozen --release -p verad
           if [[ "$STORAGE_ATTRIBUTION" == true ]]; then
             cargo +1.98.0 build --frozen --release -p vera-e2e --example mixed_policy_workload
           else
@@ -244,7 +242,7 @@ jobs:
             fi
             python3 tools/performance/record.py "${trace[@]}" \
               --node target/release/verad --runner target/release/examples/mixed_policy_workload \
-              --history rocksdb --output "$private/$mode/measurement" --rust-log "$filter" \
+              --history regolith --output "$private/$mode/measurement" --rust-log "$filter" \
               32 4 16 300 || result=1
             output="performance-results/storage-attribution/$mode"
             mkdir -p "$output"

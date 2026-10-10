@@ -33,7 +33,7 @@ def provenance(root):
         'toolchain_file_sha256': hashlib.sha256((root / 'rust-toolchain.toml').read_bytes()).hexdigest(),
         'rustc': compiler,
         'target': 'x86_64-unknown-linux-gnu',
-        'history_backend': 'rocksdb',
+        'history_backend': 'regolith',
         'features': [],
         'profile': 'release',
         'build_command': BUILD_COMMAND,
@@ -58,7 +58,7 @@ def package(binary, output, metadata):
         raise ValueError('release input is not a Linux x86-64 executable')
     metadata = dict(metadata, binary_sha256=hashlib.sha256(executable).hexdigest())
     manifest = (json.dumps(metadata, sort_keys=True, indent=2) + '\n').encode()
-    name = 'verad-x86_64-unknown-linux-gnu-rocksdb.tar.gz'
+    name = 'verad-x86_64-unknown-linux-gnu-regolith.tar.gz'
     output.mkdir(parents=True, exist_ok=True)
     archive = output / name
     with archive.open('xb') as destination:
