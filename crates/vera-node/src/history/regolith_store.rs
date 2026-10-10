@@ -73,6 +73,13 @@ impl HistoryDb {
     }
 
     #[cfg(test)]
+    pub(super) fn compact_for_test(&self) -> std::io::Result<()> {
+        self.0
+            .compact_range(None, None)
+            .map_err(std::io::Error::other)
+    }
+
+    #[cfg(test)]
     pub(super) fn put(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<()> {
         let mut batch = WriteBatch::default();
         batch.put(key, value);
