@@ -105,6 +105,7 @@ fn cloned_writers_serialize_updates_without_losing_private_material() {
 fn corrupt_private_material_fails_loading_without_changing_the_file() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("secrets.json");
+    vera_cli::write_private(&path, &[]).unwrap();
     for section in ["shares", "seeds", "dealings"] {
         for value in [
             "not-hex".to_owned(),
@@ -236,4 +237,32 @@ fn sync_failures_do_not_publish_unacknowledged_secret_updates() {
             failing_sync + 1
         );
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn exposed_or_linked_secret_material_is_rejected_without_changes() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("secrets.json");
+    let store = FileSecretStore::load(&path).unwrap();
+    store
+        .update(|data| {
+            data.seeds.insert(1, hex::encode([7; 32]));
+        })
+        .unwrap();
+    let original = fs::read(&path).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(FileSecretStore::load(&path).is_err());
+    assert_eq!(fs::read(&path).unwrap(), original);
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o644
+    );
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let link = directory.path().join("linked.json");
+    std::os::unix::fs::symlink(&path, &link).unwrap();
+    assert!(FileSecretStore::load(&link).is_err());
+    assert_eq!(fs::read(&path).unwrap(), original);
+    assert!(FileSecretStore::load(&path).is_ok());
 }

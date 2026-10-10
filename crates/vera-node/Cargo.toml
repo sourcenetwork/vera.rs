@@ -16,6 +16,7 @@ workspace = true
 vera-app.workspace = true
 vera-backend.workspace = true
 vera-config.workspace = true
+vera-cli.workspace = true
 vera-consensus.workspace = true
 vera-crypto.workspace = true
 vera-domain.workspace = true

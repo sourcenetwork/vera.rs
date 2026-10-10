@@ -208,7 +208,7 @@ async fn admit_member(interrupt: bool, crash_share: bool, pipelined: bool) {
         directory.join("genesis.json"),
     )
     .unwrap();
-    fs::write(directory.join("validator.key"), key.encode()).unwrap();
+    vera_cli::write_private(directory.join("validator.key"), key.encode().as_ref()).unwrap();
     fs::write(
         directory.join("config.toml"),
         NodeConfigBuilder::new()

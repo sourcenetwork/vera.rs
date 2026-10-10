@@ -242,9 +242,9 @@ async fn recover_replica_from(
         for filename in ["config.toml", "genesis.json", "validator.key"] {
             fs::copy(archived.join(filename), directory.join(filename)).unwrap();
         }
-        fs::write(
+        vera_cli::write_private(
             directory.join("secrets.json"),
-            serde_json::to_vec(&json!({
+            &serde_json::to_vec(&json!({
                 "shares": {"0": hex::encode(keys.share(3).unwrap().encode())},
                 "seeds": {},
                 "dealings": {},
