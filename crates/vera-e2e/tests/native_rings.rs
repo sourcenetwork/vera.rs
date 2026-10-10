@@ -532,12 +532,24 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
         .wait_ready(vera_e2e::readiness_deadline())
         .await
         .unwrap();
-    let recovered = reader
-        .read_threshold_ring(&ring, announced.block_number, &trusted)
-        .await
-        .unwrap()
-        .record
-        .unwrap();
+    let recovered = tokio::time::timeout(vera_e2e::readiness_deadline(), async {
+        loop {
+            match reader
+                .read_threshold_ring(&ring, announced.block_number, &trusted)
+                .await
+            {
+                Ok(read) => break read,
+                Err(cause) if cause.is_throttled() => {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                Err(cause) => panic!("recovered ring proof failed: {cause}"),
+            }
+        }
+    })
+    .await
+    .expect("recovered ring proof did not become available before the readiness deadline")
+    .record
+    .unwrap();
     let report_receipt = reader
         .read_receipt(announced.transaction_hash, &trusted)
         .await
