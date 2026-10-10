@@ -242,6 +242,35 @@ workloads and measurement boundaries.
   them receives retryable `-32002` errors and must back off, not reconnect
   harder.
 
+## Certified read check
+
+Use an independently provisioned consensus key, a known existing policy and a
+positive finalized checkpoint to check the native read path:
+
+```sh
+verad client --url https://<rpc-host> --compact check-read \
+  --policy-id <policy-id> --trusted-key <consensus-key-hex> \
+  --minimum-revision <checkpoint> --max-age-seconds 30
+```
+
+The command verifies the finalization certificate, policy membership proof and
+policy identity through the shared native client. It rejects certified absence,
+revisions below the selected checkpoint, timestamps older than the configured age
+and timestamps more than five seconds ahead of the local clock. Override the
+future allowance with `--max-future-seconds`; keep the monitoring clock accurate.
+Age is checked after the response has been verified, so request time counts.
+Success prints only policy ID, verified revision, execution timestamp and check
+time as JSON; failures exit unsuccessfully. The request uses the client's bounded
+transport and ten-second HTTP deadline and does not retry.
+
+Obtain the key, policy and checkpoint independently of the endpoint being checked.
+Retain the highest accepted checkpoint in the monitoring system and advance the
+configured minimum; the command does not persist it. This checks one certified
+policy read. It does not prove permission for an actor, current voting membership,
+connected peers, renewed quorum contribution, write availability or the latest
+possible revision. Continue using the backup/rejoin quorum checks above for a
+restored validator.
+
 ## CI test evidence
 
 Extended, native-ring and recovery jobs keep command output and node directories
