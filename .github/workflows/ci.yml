@@ -364,6 +364,7 @@ jobs:
           cargo build --frozen -p verad --features fault-injection
           cargo build --frozen -p verad --features regolith-history,fault-injection
           cargo build --frozen --release --no-default-features -p verad
+          cargo build --frozen --release -p vera-e2e --example mixed_policy_workload
 
       - name: Native ring lifecycle with release daemon
         env:
@@ -376,6 +377,42 @@ jobs:
           python3 .github/scripts/capture-tests.py --logs "$VERA_E2E_DIR"
           cargo test --release --frozen -p vera-e2e --test native_rings
           -- --test-threads=1 --nocapture
+
+      - name: Mixed policy lifecycle with release daemon
+        env:
+          VERA_E2E_DIR: ${{ runner.temp }}/mixed-policy-release/clusters
+          VERA_E2E_KEEP: "1"
+          VERA_E2E_DEADLINE_SCALE: "8"
+          VERA_TRACE_SPANS: "0"
+        run: |
+          install -d -m 700 "$RUNNER_TEMP/mixed-policy-release"
+          python3 tools/performance/record.py \
+            --node target/release/verad --runner target/release/examples/mixed_policy_workload \
+            --history rocksdb --rust-log warn --timeout-seconds 960 \
+            --output "$RUNNER_TEMP/mixed-policy-release/measurement" 16 2 8 900
+
+      - name: Qualify bounded mixed policy evidence
+        if: always()
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_qualify_mixed_policy.py
+          python3 .github/scripts/qualify-mixed-policy.py \
+            --directory "$RUNNER_TEMP/mixed-policy-release/measurement" \
+            --node target/release/verad --runner target/release/examples/mixed_policy_workload \
+            --output "$RUNNER_TEMP/mixed-policy-evidence.json"
+
+      - name: Upload mixed policy evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-mixed-policy-release-evidence
+          path: ${{ runner.temp }}/mixed-policy-evidence.json
+          if-no-files-found: ignore
+
+      - name: Cleanup private mixed policy files
+        if: always()
+        run: |
+          python3 .github/scripts/stop-test-nodes.py "$GITHUB_WORKSPACE/target/release/verad"
+          rm -rf "$RUNNER_TEMP/mixed-policy-release"
 
       - name: Package the exercised Linux release daemon
         run: |
