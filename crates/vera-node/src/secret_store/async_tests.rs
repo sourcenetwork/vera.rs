@@ -128,11 +128,7 @@ async fn asynchronous_material_updates_and_pruning_survive_reopening() {
         );
         assert_eq!(reopened.get_seed(epoch).await, Some(seed(7)));
         assert_eq!(
-            reopened
-                .get_dealing(epoch, dealer.clone())
-                .await
-                .unwrap()
-                .encode(),
+            reopened.get_dealing(epoch, &dealer).await.unwrap().encode(),
             expected_dealing
         );
     }
@@ -140,12 +136,7 @@ async fn asynchronous_material_updates_and_pruning_survive_reopening() {
     let mut reopened = FileSecretStore::load(&path).unwrap();
     assert!(reopened.get_share(Epoch::new(1)).await.is_none());
     assert!(reopened.get_seed(Epoch::new(1)).await.is_none());
-    assert!(
-        reopened
-            .get_dealing(Epoch::new(1), dealer.clone())
-            .await
-            .is_none()
-    );
+    assert!(reopened.get_dealing(Epoch::new(1), &dealer).await.is_none());
     assert_eq!(
         reopened.get_share(Epoch::new(2)).await.unwrap().encode(),
         expected_share
@@ -153,7 +144,7 @@ async fn asynchronous_material_updates_and_pruning_survive_reopening() {
     assert_eq!(reopened.get_seed(Epoch::new(2)).await, Some(seed(7)));
     assert_eq!(
         reopened
-            .get_dealing(Epoch::new(2), dealer)
+            .get_dealing(Epoch::new(2), &dealer)
             .await
             .unwrap()
             .encode(),
