@@ -242,6 +242,14 @@ allocator arenas, so it remains an opt-in diagnostic rather than a capacity run.
 These counters cover glibc; a replacement allocator can hold memory outside them.
 See [glibc allocation accounting](https://sourceware.org/glibc/manual/latest/html_node/Statistics-of-Malloc.html).
 
+The Linux lifecycle job checks numbered `nodeN` directories in retained harness
+clusters before deleting its private node logs. Each must provide supported
+allocator counters with consistent arena accounting, including a cluster with
+at least four numbered nodes. The `linux-lifecycle-allocator-evidence` artifact contains only sample
+counts and minimum, maximum and last allocator byte counters; paths, labels and
+raw logs are excluded. These checks qualify collection, not a sustained memory
+bound or a workload capacity result.
+
 ## ACP lifecycle components
 
 `component_baseline` includes policy edits and deletions with 32, 256 and 2,048
