@@ -56,6 +56,7 @@ impl HistoryDb {
         let property = match name {
             "rocksdb.size-all-mem-tables" => "regolith.cur-size-all-mem-tables",
             "rocksdb.block-cache-usage" => "regolith.block-cache-usage",
+            "regolith.pinned-metadata-bytes" => "regolith.pinned-metadata-bytes",
             _ => return Ok(None),
         };
         Ok(self.0.get_int_property(property))
@@ -152,6 +153,22 @@ impl WriteBatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pinned_metadata_is_separate_from_table_reader_estimates() {
+        let directory = tempfile::tempdir().unwrap();
+        let db = HistoryDb::open_default(directory.path()).unwrap();
+        assert_eq!(
+            db.property_int_value("regolith.pinned-metadata-bytes")
+                .unwrap(),
+            Some(0)
+        );
+        assert_eq!(
+            db.property_int_value("rocksdb.estimate-table-readers-mem")
+                .unwrap(),
+            None
+        );
+    }
 
     #[test]
     fn existing_rocksdb_history_is_rejected_without_changes() {

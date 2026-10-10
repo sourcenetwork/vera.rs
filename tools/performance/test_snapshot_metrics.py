@@ -50,6 +50,14 @@ class SnapshotParser(unittest.TestCase):
         self.assertEqual(len([key for key in record if key.startswith('runtime_metrics.buffer_bytes.')]), 2)
         self.assertNotIn('private-partition', json.dumps(record))
 
+    def test_backend_metadata_bytes_preserve_supported_and_missing_values(self):
+        for value, expected in (('Some(8192)', 8192), ('None', None)):
+            event = snapshot().replace('"table_readers": None}',
+                                       '"table_readers": None, "pinned_table_metadata": %s}' % value)
+            record = metrics.parse_snapshot(event)
+            self.assertEqual(record['history_memory_bytes.pinned_table_metadata'], expected)
+            self.assertIsNone(record['history_memory_bytes.table_readers'])
+
     def test_missing_fields_invalid_metrics_and_non_finite_values_fail(self):
         for event in (snapshot().replace('durable_height=42 ', ''),
                       snapshot().replace('elapsed_seconds 1.25e-3', 'elapsed_seconds NaN'),
@@ -60,6 +68,46 @@ class SnapshotParser(unittest.TestCase):
 
     def test_unrelated_lines_are_ignored(self):
         self.assertIsNone(metrics.parse_snapshot('INFO unrelated: durable_height=5'))
+
+    def test_allocator_counters_are_separate_from_backend_memory(self):
+        event = snapshot().rstrip() + (
+            ' allocator_memory_bytes={"arena_reserved": Some(1024), '
+            '"arena_in_use": Some(768), "arena_free": Some(256), '
+            '"direct_mapped": Some(4096)}\n')
+        record = metrics.parse_snapshot(event)
+        self.assertEqual(record['allocator_memory_bytes.arena_reserved'], 1024)
+        self.assertEqual(record['allocator_memory_bytes.arena_in_use'], 768)
+        self.assertEqual(record['allocator_memory_bytes.arena_free'], 256)
+        self.assertEqual(record['allocator_memory_bytes.direct_mapped'], 4096)
+        self.assertEqual(record['history_memory_bytes.block_cache'], 2048)
+
+    def test_process_ids_are_preserved_and_invalid_ids_fail(self):
+        self.assertNotIn('process_id', metrics.parse_snapshot(snapshot()))
+        for pid in (1, 1234, 0xffffffff):
+            record = metrics.parse_snapshot(snapshot().rstrip() + ' process_id=%d\n' % pid)
+            self.assertEqual(record['process_id'], pid)
+        for pid in ('0', '-1', '4294967296', 'true', '1.5', '12 trailing'):
+            with self.subTest(pid=pid), self.assertRaises(ValueError):
+                metrics.parse_snapshot(snapshot().rstrip() + ' process_id=' + pid + '\n')
+
+    def test_unsupported_allocator_counters_remain_absent_values(self):
+        event = snapshot().rstrip() + (
+            ' allocator_memory_bytes={"arena_reserved": None, "arena_in_use": None, '
+            '"arena_free": None, "direct_mapped": None}\n')
+        record = metrics.parse_snapshot(event)
+        counters = {key: value for key, value in record.items() if key.startswith('allocator_memory_bytes.')}
+        self.assertEqual(len(counters), 4)
+        self.assertTrue(all(value is None for value in counters.values()))
+
+    def test_incomplete_or_partial_allocator_counters_fail(self):
+        for counters in (
+                '{"arena_reserved": Some(1024)}',
+                '{"arena_reserved": None, "arena_in_use": Some(768), '
+                '"arena_free": Some(256), "direct_mapped": Some(4096)}',
+                '{"arena_reserved": Some(1024), "arena_in_use": Some(-1), '
+                '"arena_free": Some(256), "direct_mapped": Some(4096)}'):
+            with self.subTest(counters=counters), self.assertRaises(ValueError):
+                metrics.parse_snapshot(snapshot().rstrip() + ' allocator_memory_bytes=' + counters + '\n')
 
 
 class RetainedCluster(unittest.TestCase):
@@ -87,6 +135,15 @@ class RetainedCluster(unittest.TestCase):
         self.assertEqual(records[1]['recording_elapsed_seconds'], 30)
         self.assertEqual(records[1]['sample_index'], 1)
         self.assertEqual(records[1]['recorded_at'], '2026-10-09T10:00:30.000Z')
+
+    def test_restart_keeps_distinct_process_ids_in_the_same_member_log(self):
+        log = self.logs / 'run-one/node0/logs/stdout.log'
+        log.write_text(snapshot().rstrip() + ' process_id=11\n' +
+                       snapshot(30).rstrip() + ' process_id=29\n')
+        records = metrics.collect(self.logs, START, 4, 2)
+        node = [row for row in records if row['member'] == 'node0']
+        self.assertEqual([row['process_id'] for row in node], [11, 29])
+        self.assertEqual([row['recording_elapsed_seconds'] for row in node], [0, 30])
 
     def test_cli_reads_nodes_and_exports_only_numeric_evidence(self):
         with contextlib.redirect_stdout(io.StringIO()):

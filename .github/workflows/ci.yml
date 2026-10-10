@@ -55,6 +55,7 @@ jobs:
         run: |
           PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/test_stop_test_nodes.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_summarize_test_results.py
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_qualify_snapshots.py
 
       - name: Format
         run: cargo fmt -- --check
@@ -585,6 +586,22 @@ jobs:
           python3 .github/scripts/summarize-test-results.py
           --logs "$RUNNER_TEMP/e2e-logs"
           --output "$RUNNER_TEMP/recovery-evidence.json"
+
+      - name: Qualify actual allocator snapshots
+        if: always() && matrix.suite == 'lifecycle'
+        run: >-
+          python3 tools/performance/qualify_snapshots.py
+          --logs "$RUNNER_TEMP/e2e-logs"
+          --output "$RUNNER_TEMP/allocator-evidence.json"
+          --require-process-id
+
+      - name: Upload allocator evidence
+        if: always() && matrix.suite == 'lifecycle'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-lifecycle-allocator-evidence
+          path: ${{ runner.temp }}/allocator-evidence.json
+          if-no-files-found: ignore
 
       - name: Upload recovery evidence
         if: always()

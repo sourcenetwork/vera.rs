@@ -226,6 +226,70 @@ latency. Labelled runtime metric series retain distinct identities through
 label hashes, while raw labels and logs stay private. The collector does not
 invent timestamps from the nominal 30-second sampling interval.
 
+On GNU/Linux, opt-in resource snapshots also report glibc `mallinfo2` accounting:
+reserved arena bytes, bytes treated as in use, free arena bytes, and directly
+mapped allocation bytes. GNU/Linux builds require glibc 2.33 or later for this
+API; the hosted release build uses Ubuntu 24.04. Other targets report unsupported
+values as `null`.
+The statistics are sampled on the blocking pool and do not trim memory or change
+allocator settings. Older snapshots without these fields remain readable.
+
+These counters distinguish allocator-held free space from allocator-accounted
+usage; they are not RSS or requested application payload sizes. Thread-cache
+blocks may count as in use. Compare their timelines with the backend, index and
+buffer-pool counters before attributing growth. Sampling is non-atomic and locks
+allocator arenas, so it remains an opt-in diagnostic rather than a capacity run.
+These counters cover glibc; a replacement allocator can hold memory outside them.
+See [glibc allocation accounting](https://sourceware.org/glibc/manual/latest/html_node/Statistics-of-Malloc.html).
+
+The Linux lifecycle job checks numbered `nodeN` directories in retained harness
+clusters before deleting its private node logs. Each must provide supported
+allocator counters with consistent arena accounting, including a cluster with
+at least four numbered nodes. The `linux-lifecycle-allocator-evidence` artifact contains only sample
+counts and minimum, maximum and last allocator byte counters; paths, labels and
+raw logs are excluded. These checks qualify collection, not a sustained memory
+bound or a workload capacity result.
+
+Snapshots preserve the node process ID during extraction. The bounded lifecycle
+artifact reports the number of observed process IDs only when every sample has
+one; older recordings retain an unknown count. Lifecycle CI requires IDs on every
+sample. Compare allocation trends within
+one process, using known restart boundaries as well as its ID because operating
+systems can reuse IDs. Older datasets without process IDs cannot provide that
+identity from these counters alone.
+
+Regolith snapshots separately expose `history_memory_bytes.pinned_table_metadata`
+from its [pinned metadata property](https://github.com/sourcenetwork/regolith/blob/e7cf2732d0178defb02d9306cd8d1dae6406e4d8/src/engine/mod.rs#L3354). This measures metadata held
+outside the block-cache budget by SST readers in the current version; it does not
+cover every allocation or metadata held through older versions. RocksDB retains
+an unsupported value for this backend-specific counter. The allocator recordings
+below predate this field and cannot attribute their growth to that metadata.
+
+### Completed allocator accounting on October 10, 2026
+
+[Run 38041684110](https://github.com/sourcenetwork/vera.rs/actions/runs/38041684110)
+measured source `5afe4fa4` with the default glibc arena settings, a normal release
+build and opt-in resource diagnostics. Each history backend completed 90,000
+operations against 128 fixed objects at 50 offered operations/s. All four replicas
+verified every outcome; restart checks inspected every operation with zero receipt
+or state mismatches. RocksDB completed the workload in 1,800.107 seconds and
+Regolith in 1,800.152 seconds. These offered-load timings are not capacity results.
+
+The retained artifacts contain 295 allocator samples for RocksDB and 296 for
+Regolith. Every sample has supported counters and consistent arena accounting.
+The following ranges cover all four nodes:
+
+| History backend | RSS increase, workload minutes 20–30 | Free arena increase, recording minutes 20–30 | In-use arena change, recording minutes 20–30 |
+| --- | ---: | ---: | ---: |
+| RocksDB | 38.67–65.30 MiB | 54.85–79.65 MiB | −29.48 to −17.36 MiB |
+| Regolith | 45.06–68.30 MiB | 23.47–32.86 MiB | +28.20 to +31.32 MiB |
+
+Diagnostic recording includes startup and post-workload verification; its time
+axis differs from the workload RSS samples. Counters are non-atomic and do not
+provide an exact RSS decomposition. Free arena growth supports investigating
+allocator retention, while the different in-use trends require examining allocation
+lifetimes. Neither dataset establishes a leak or a sustained memory bound.
+
 ## ACP lifecycle components
 
 `component_baseline` includes policy edits and deletions with 32, 256 and 2,048
@@ -890,6 +954,10 @@ The recording preserves source/binary hashes, profile selection, allocator
 settings, numeric heap timeline and allocation-site weights. Raw traces, stack
 paths, keys, node state and process logs remain private and are removed afterward.
 
+Console markers report workload, trace interpretation, analysis and symbol-decoding
+start/completion, with the workload exit code. Overall qualification still requires
+the certified outcome and allocation-accounting checks below.
+
 The sustained case tests the remaining growth observed in the two-arena resource
 experiment. Its tracing and symbol settings differ from normal deployment, so it
 does not establish production latency or capacity. Timeline values are interval
@@ -897,3 +965,38 @@ peaks; end-of-process allocated bytes are not necessarily leaks, and allocation
 callers do not by themselves identify the retaining owner. Follow any increasing
 allocation population through its actual ownership and lifetime before changing
 storage, queues or caches.
+
+### Completed sustained heap profile on October 10, 2026
+
+[Heap profile run 38027499805](https://github.com/sourcenetwork/vera.rs/actions/runs/38027499805)
+used clean source `1775eb3c`, whose tree is identical to merged `main` commit
+`8493a3d7`. The instrumented workload completed all 90,000 operations in
+1,800.170 seconds. All four replicas verified all outcomes, and the hard-restart
+check inspected all 90,000 operations with zero receipt or state mismatches.
+There were no unsent, unknown, rejected, reverted, incomplete or
+verification-failed operations. Two receipt-read throttles were recorded.
+These instrumented timings do not establish production throughput or latency.
+
+At the end of member 3's first process, the decoder accounted for 303,662,771
+allocated bytes (289.60 MiB). Symbol decoding reduced unattributed bytes from
+255,808,398 to 91,424; the attribution classes sum to the allocated-byte total.
+The largest allocation callers were:
+
+| Allocation caller | Allocated bytes at process end |
+| --- | ---: |
+| Commonware unreliable mailbox construction | 141,862,264 |
+| Commonware buffer-pool inner allocation | 76,888,064 |
+| Finalized history queries | 33,429,824 |
+| Commonware buffer-pool allocation | 16,606,130 |
+| Finalized history writes | 13,707,742 |
+| Commonware size-class handles | 4,323,328 |
+| Recent execution index | 2,951,168 |
+
+The 208,024 numeric timeline snapshots cover 2,166.54 seconds of that process,
+including setup and post-workload verification. Interval-peak heap values
+reached 320.22 MiB between minutes 25 and 30, then fell to 253.48 MiB within
+that window. The final snapshot was 289.60 MiB. These are heap values, not RSS;
+the observed drop does not establish a sustained memory bound or its cause.
+The report groups allocations by caller and does not contain per-owner lifetime
+histories, so it cannot assign late growth to a specific queue, cache or storage
+component. Raw traces and runtime data remain excluded from the public artifact.

@@ -17,6 +17,14 @@ import time
 
 from record import allocator_environment, digest
 
+
+def progress(phase, state, exit_code=None):
+    record = {'heap_profile_phase': phase, 'state': state}
+    if exit_code is not None:
+        record['exit_code'] = exit_code
+    print(json.dumps(record), flush=True)
+
+
 def profile_workload(selection):
     if selection == 'startup':
         return 6000, 20, 1200, None
@@ -236,12 +244,14 @@ def main():
         environment.pop('LD_PRELOAD', None)
         environment.pop('DUMP_HEAPTRACK_OUTPUT', None)
         record = private / 'workload'
+        progress('workload', 'started')
         with (private / 'runner.log').open('w') as log:
             result = subprocess.run(['python3', 'tools/performance/record.py', '--node', str(launcher),
                                      '--runner', 'target/release/examples/operation_baseline', '--history', args.history,
                                      '--output', str(record), '--timeout-seconds', str(timeout), *arena_arguments,
                                      str(count), str(rate), '128', '1', 'normal', '100', '192', '0', '128', '256', '1'],
                                     env=environment, stdout=subprocess.DEVNULL, stderr=log)
+        progress('workload', 'completed', result.returncode)
         records = {}
         with (record / 'workload.jsonl').open() as stream:
             for line in stream:
@@ -266,25 +276,31 @@ def main():
         if records['first_resources'][3]['pid'] != pid:
             raise ValueError('profile did not preserve the selected validator PID')
         interpreted = private / 'heap.gz'
+        progress('interpretation', 'started')
         with (private / 'heap.raw').open('rb') as source, gzip.open(interpreted, 'wb') as destination, \
                 (private / 'interpret.log').open('w') as log:
             with subprocess.Popen([str(interpreter)], stdin=source, stdout=subprocess.PIPE, stderr=log) as process:
                 shutil.copyfileobj(process.stdout, destination, length=1024 * 1024)
                 if process.wait():
                     raise ValueError('allocation trace interpretation failed')
+        progress('interpretation', 'completed')
         massif, stacks = private / 'heap.massif', private / 'retained.stacks'
+        progress('analysis', 'started')
         with (private / 'analysis.log').open('w') as log:
             subprocess.run(['heaptrack_print', str(interpreted), '--print-massif', str(massif),
                             '--print-flamegraph', str(stacks), '--flamegraph-cost-type', 'leaked',
                             '--disable-builtin-suppressions', '--disable-embedded-suppressions',
                             '--merge-backtraces', 'false', '--print-peaks', 'false', '--print-allocators', 'false',
                             '--print-temporary', 'false'], stdout=log, stderr=log, check=True)
+        progress('analysis', 'completed')
         timeline = heap_timeline(massif)
         if timeline[-1]['milliseconds'] < count / rate * 1000:
             raise ValueError('profile ended before the required workload duration')
         original_sites = retained_sites(stacks)
         decoded = private / 'retained.rust.stacks'
+        progress('symbolization', 'started')
         demangle_stacks(stacks, decoded, demangler)
+        progress('symbolization', 'completed')
         unresolved = collections.Counter()
         attribution = collections.Counter()
         sites = retained_sites(decoded, unresolved, attribution)

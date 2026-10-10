@@ -124,13 +124,25 @@ async fn light_client_proof_verification() {
         .expect("should reach height 3");
 
     let client = VeraClient::new(cluster.node(0).rpc_url());
-    let latest: serde_json::Value = client
-        .rpc_call_typed("eth_getBlockByNumber", serde_json::json!(["latest", false]))
-        .await
-        .expect("latest block should be readable");
-    let mix_hash = latest["mixHash"]
+    // The first view of each epoch has a zero seed; check a fixed later block.
+    let block = tokio::time::timeout(vera_e2e::readiness_deadline(), async {
+        loop {
+            let block: Option<serde_json::Value> = client
+                .rpc_call_typed("eth_getBlockByNumber", serde_json::json!(["0x3", false]))
+                .await
+                .expect("block 3 should be readable");
+            if let Some(block) = block {
+                return block;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("block 3 should become indexed");
+    assert_eq!(block["number"].as_str(), Some("0x3"));
+    let mix_hash = block["mixHash"]
         .as_str()
-        .expect("latest block should expose prevrandao");
+        .expect("block 3 should expose prevrandao");
     assert_ne!(
         mix_hash,
         format!("0x{}", "00".repeat(32)),

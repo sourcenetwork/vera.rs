@@ -11,6 +11,7 @@ use super::{BackendError, InMemoryKvStore, NativeDb, NativeStateSet, combine_mod
 
 /// Capture permission evidence at the selected current-state root.
 ///
+/// Acquisition releases partial guards before waiting on a busy partition.
 /// All namespace read locks remain held through generation. The snapshot selects
 /// candidate reads only; authenticated replay must succeed before returning them.
 /// Historical roots unavailable in the live databases return an error.
@@ -22,7 +23,7 @@ pub async fn permission_proof(
     request: &AccessRequest,
     limits: PermissionLimits,
 ) -> Result<PermissionProof, BackendError> {
-    let (a, b, h, n) = futures::join!(set.0.read(), set.1.read(), set.2.read(), set.3.read());
+    let [a, b, h, n] = super::read_partitions([&set.0, &set.1, &set.2, &set.3]).await;
     permission_proof_at(
         [&a, &b, &h, &n],
         expected,

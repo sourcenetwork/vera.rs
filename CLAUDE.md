@@ -1,20 +1,23 @@
 # vera.rs
 
-Native Rust implementation of Vera's access control, bulletin, identity and transparency services, using Commonware consensus and storage. Native requests use BLS12-381 signing; optional EVM execution reaches the same module logic.
+Native Rust implementation of Vera's access control, bulletin, identity and transparency services, using Commonware consensus and storage. Native requests use BLS12-381 signing. Pipelined deployments disable legacy EVM transactions; rotating deployments retain optional compatibility execution.
 
 See [architecture and request flows](docs/architecture.md) for service boundaries,
 operator-managed membership, ACP, storage, threshold services, and recovery limits.
 
 ## Related Repos
 
-All repos follow gopath convention at `/Users/johnzampolin/go/src/github.com/{org}/{repo}`:
+Related repositories are independent checkouts; discover their paths rather than assuming a developer-specific directory layout:
 
 | Repo | Org | Purpose |
 |------|-----|---------|
 | **vera.rs** | sourcenetwork | This repo — SourceHub rewrite on Commonware |
-| **sourcehub** | sourcenetwork | Go implementation (Cosmos SDK) — the upstream being replaced |
-| **orbis-rs** | sourcenetwork | Threshold key management — primary consumer of vera.rs (BLS native txs) |
-| **defradb.rs** | sourcenetwork | CRDT storage — queries ACP via vera.rs (EVM precompile calls) |
+| **vera** | sourcenetwork | Existing Go service implementation used for behavior comparisons |
+| **orbis-rs** | sourcenetwork | Application threshold signing and encryption, using native authorization, bulletin and ring records |
+| **defradb.rs** | sourcenetwork | Document storage with native signed submissions and verified ACP evidence |
+| **trust-api** | sourcenetwork | Separate Go gateway for authentication, relay workers and native APIs |
+| **backbone** | sourcenetwork | Shared Rust clients and verification used by native consumers |
+| **regolith** | sourcenetwork | Defra document storage and optional Vera finalized-history backend |
 | **bankd-commonware** | mizufinance | Reference: Commonware + REVM chain (infrastructure source for Phase 1) |
 | **monorepo** | commonwarexyz | Commonware primitives (consensus, crypto, p2p, storage) |
 
@@ -48,8 +51,9 @@ stops:
   times burst size, so the burst also controls startup queue allocation.
 - **Consensus:** the Commonware `marshal` actor (block archive + finalization
   storage) driven by the glue `orchestrator` running Simplex with a
-  `FixedEpocher` over genesis `blocks_per_epoch` and a VRF elector that feeds
-  each round's threshold seed to the application.
+  `FixedEpocher` over genesis `blocks_per_epoch`. The elector uses bounded leader
+  terms when genesis selects pipelining; rotating deployments alone populate
+  per-view VRF seeds for compatibility execution.
 - **Execution:** the glue `Stateful` actor wrapping `vera-app`'s
   `StatefulVeraApp` (below).
 - **DKG/resharing:** the glue `probe` actor discovers the latest epoch when a
@@ -295,10 +299,10 @@ time out after ten seconds, and socket closure after one second.
 
 | Surface | Methods | Consumer |
 |----------|---------|----------|
-| `eth_*` | `eth_sendRawTransaction`, `eth_call`, `eth_getStorageAt`, `eth_getTransactionReceipt`, … | defradb.rs, MetaMask, wallets |
+| `eth_*` | `eth_sendRawTransaction`, `eth_call`, `eth_getStorageAt`, `eth_getTransactionReceipt`, … | Optional compatibility clients; legacy submissions are disabled in pipelined mode |
 | `eth_subscribe` | `newHeads`, `logs` | Indexers, light clients |
 | `vera_subscribeHeaders` | `vera_header` notifications; `vera_unsubscribeHeaders` cancellation | Native verified consumers |
-| `hub_*` | `vera_nodeStatus`, `vera_sendNativeTx`, `vera_getTransactionReceipt`, `vera_getNativeNonce`, `vera_getStateProof`, `vera_getLightBlock` | orbis-rs, BLS identities, light clients |
+| `vera_*` | `vera_nodeStatus`, `vera_sendNativeTx`, `vera_getTransactionReceipt`, `vera_getNativeNonce`, current permission/record proofs and light blocks | Native Defra, Orbis, Trust and verification clients |
 
 ### Light-client material
 
@@ -319,7 +323,7 @@ fixed epoch length. These cache limits do not bound total node history.
 A `LightBlock` carries the canonical block, the BLS threshold finalization
 certificate, and the epoch's group public key; `vera_domain::verify_light_block`
 verifies it with one aggregate signature. `ModuleStateProof`s verify module
-state against the header's `module_state_root`. Both are served over the `hub_*`
+state against the header's `module_state_root`. Both are served over the native `vera_*`
 RPC methods above, and signed `GossipHeader`s stream through `vera_subscribeHeaders` as blocks finalize.
 The native stream is available with only the header broadcaster configured.
 Consumers authenticate headers against their configured finality trust; receiving a
@@ -346,7 +350,7 @@ vera.rs/
         vera-genesis/           # Extended genesis configuration (validators, native mint)
         vera-harness/           # Node manager, cluster builder, observability (test-only)
         vera-indexer/           # Block/tx/light-block indexes backing RPC queries
-        vera-jsonrpc/           # eth_* + hub_* JSON-RPC server and subscriptions
+        vera-jsonrpc/           # Native vera_* RPC, subscriptions and compatibility methods
         vera-modules/           # ACP, Bulletin, Vera, ValidatorRegistry module logic
         vera-node/              # Validator assembly: p2p, marshal, DKG, stateful glue, RPC
         vera-overlay/           # Overlay state for unpersisted QMDB changes

@@ -22,11 +22,14 @@ use serde::{Deserialize, Serialize};
 /// JSON-file-backed [`dkg::SecretStore`] holding shares, dealer seeds, and dealings.
 ///
 /// Updates replace the file atomically after syncing its contents. On Unix, new
-/// files are readable and writable only by the owner.
+/// files are readable and writable only by the owner. The async DKG interface
+/// awaits persistence on Tokio's blocking pool; cached reads retain the previous
+/// durable view until file and directory synchronization complete.
 #[derive(Clone)]
 pub struct FileSecretStore {
     path: PathBuf,
-    inner: Arc<Mutex<SecretData>>,
+    inner: Arc<Mutex<Arc<SecretData>>>,
+    writes: Arc<Mutex<()>>,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -83,7 +86,8 @@ impl FileSecretStore {
         }
         Ok(Self {
             path,
-            inner: Arc::new(Mutex::new(inner)),
+            inner: Arc::new(Mutex::new(Arc::new(inner))),
+            writes: Arc::new(Mutex::new(())),
         })
     }
 
@@ -98,13 +102,23 @@ impl FileSecretStore {
         self.update_with_sync(change, fs::File::sync_all)
     }
 
+    async fn persist(&self, change: impl FnOnce(&mut SecretData) + Send + 'static) {
+        let store = self.clone();
+        tokio::task::spawn_blocking(move || store.update(change))
+            .await
+            .expect("DKG persistence task failed")
+            .expect("failed to persist DKG material");
+    }
+
     fn update_with_sync(
         &self,
         change: impl FnOnce(&mut SecretData),
         mut sync: impl FnMut(&fs::File) -> std::io::Result<()>,
     ) -> anyhow::Result<()> {
-        let mut inner = self.inner.lock();
-        let mut next = inner.clone();
+        // Serialize writers while cached readers retain the last durable view.
+        let _write = self.writes.lock();
+        let current = self.inner.lock().clone();
+        let mut next = (*current).clone();
         change(&mut next);
         let parent = self
             .path
@@ -117,7 +131,7 @@ impl FileSecretStore {
         sync(file.as_file())?;
         file.persist(&self.path)?;
         sync(&fs::File::open(parent)?)?;
-        *inner = next;
+        *self.inner.lock() = Arc::new(next);
         Ok(())
     }
 
@@ -134,8 +148,10 @@ fn decode_secret<T: Decode<Cfg = ()>>(raw: &str) -> anyhow::Result<T> {
 
 impl dkg::SecretStore for FileSecretStore {
     async fn put_share(&mut self, epoch: Epoch, share: Share) {
-        self.put_initial_share(epoch, share)
-            .expect("failed to persist share");
+        self.persist(move |data| {
+            data.shares.insert(epoch.get(), hex::encode(share.encode()));
+        })
+        .await;
         #[cfg(feature = "fault-injection")]
         {
             let marker = self.path.with_extension("share-crash");
@@ -159,10 +175,10 @@ impl dkg::SecretStore for FileSecretStore {
     }
 
     async fn put_seed(&mut self, epoch: Epoch, seed: Summary) {
-        self.update(|data| {
+        self.persist(move |data| {
             data.seeds.insert(epoch.get(), hex::encode(seed.encode()));
         })
-        .expect("failed to persist seed");
+        .await;
     }
 
     async fn get_seed(&mut self, epoch: Epoch) -> Option<Summary> {
@@ -172,10 +188,10 @@ impl dkg::SecretStore for FileSecretStore {
 
     async fn put_dealing<P: PublicKey>(&mut self, epoch: Epoch, dealer: P, private: DealerPrivMsg) {
         let key = Self::dealing_key(epoch, &dealer);
-        self.update(|data| {
+        self.persist(move |data| {
             data.dealings.insert(key, hex::encode(private.encode()));
         })
-        .expect("failed to persist dealing");
+        .await;
     }
 
     async fn get_dealing<P: PublicKey>(
@@ -189,7 +205,7 @@ impl dkg::SecretStore for FileSecretStore {
     }
 
     async fn prune(&mut self, min: Epoch) {
-        self.update(|inner| {
+        self.persist(move |inner| {
             inner.shares.retain(|epoch, _| *epoch >= min.get());
             inner.seeds.retain(|epoch, _| *epoch >= min.get());
             inner.dealings.retain(|key, _| {
@@ -198,9 +214,12 @@ impl dkg::SecretStore for FileSecretStore {
                     .is_some_and(|epoch| epoch >= min.get())
             });
         })
-        .expect("failed to persist prune");
+        .await;
     }
 }
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod async_tests;

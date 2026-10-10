@@ -47,9 +47,13 @@ flowchart TB
 
 The consensus links are illustrative; they do not prescribe a ring topology.
 Trust is optional for clients that authenticate and sign native requests directly.
-It is a separate service, never part of consensus. Its native gateway currently
-exposes identity and ACP operations; native bulletin and Orbis routes are not
-integrated there. Direct Rust clients use those services independently.
+It is a separate service, never part of consensus. The compatible native gateway
+candidate exposes identity, ACP and ring creation/read operations. When configured
+with an Orbis control endpoint, it also exposes DKG initiation and local node
+status. It has no general native bulletin API; Orbis uses Vera's bulletin directly.
+Application signing and encryption remain Orbis services used by their own clients.
+The gateway remains under standalone recovery qualification; the completed ring
+contracts do not qualify every gateway route or deployment condition.
 
 ## Inside one member
 

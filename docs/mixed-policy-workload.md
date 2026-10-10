@@ -121,6 +121,35 @@ This is a short functional gate for the four-validator Linux RocksDB deployment.
 It does not establish sustainable capacity, steady-state memory, WAN behavior,
 other storage backends or equivalence to the historical local measurement below.
 
+## Hosted Linux result on October 10, 2026
+
+[CI run 38027720672](https://github.com/sourcenetwork/vera.rs/actions/runs/38027720672)
+qualified the gate above from source
+[`59d916eb6f6109db5fb9d04b3ef0f8322a0651f8`](https://github.com/sourcenetwork/vera.rs/commit/59d916eb6f6109db5fb9d04b3ef0f8322a0651f8),
+using Rust 1.98.0 and the normal RocksDB release daemon. The retained mixed-policy
+evidence identifies the same daemon hash as the Linux release bundle.
+
+| Measurement | Result |
+| --- | ---: |
+| Timed workflows completed | 16 / 16 |
+| Offered arrival rate | 2 workflows/s |
+| Timed interval, including drain | 8.469 s |
+| Completed workflows / timed interval | 1.889/s |
+| Workflow p95 | 1,291.740 ms |
+| Certified submission p50 / p95 / p99 | 110.477 / 216.160 / 614.960 ms |
+| Hard restart to verified state | 3,235.423 ms |
+
+Across setup, timed work and later checks, all 99 submissions certified 275
+mutations. The five verification phases checked 4,800 permissions and 1,280
+ownership proofs, with no throttled requests. Submission percentiles include
+setup and later edits; workflow percentiles cover only the timed workflows.
+The nine resource samples recorded per-member RSS peaks of 220.60–223.73 MiB.
+
+This low offered load and short sample establish the functional gate's behavior;
+they do not measure maximum throughput, consensus finality latency or a sustained
+memory bound. The historical local run below uses a different workload size and
+host, so these timings do not establish a speedup over it or over Go Vera.
+
 ## Current-schema local qualification
 
 On October 6, 2026, clean source

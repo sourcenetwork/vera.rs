@@ -7635,6 +7635,7 @@ dependencies = [
  "commonware-utils",
  "futures",
  "hex",
+ "libc",
  "parking_lot",
  "regolith",
  "rocksdb",

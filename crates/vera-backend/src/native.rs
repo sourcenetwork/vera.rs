@@ -294,6 +294,9 @@ async fn load(db: &Shared<NativeDb>) -> Result<InMemoryKvStore, BackendError> {
 }
 
 #[cfg(test)]
+mod proof_read_tests;
+
+#[cfg(test)]
 mod read_tests {
     use super::*;
     use std::time::Duration;
