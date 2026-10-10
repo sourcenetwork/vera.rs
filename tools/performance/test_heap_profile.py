@@ -7,12 +7,21 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from heap_profile import demangle_stacks, heap_timeline, profile_settings, retained_sites, rust_demangler, source_location
+from heap_profile import demangle_stacks, heap_timeline, profile_settings, profile_workload, retained_sites, rust_demangler, source_location
 
 LAUNCHER = Path(__file__).resolve().parents[2] / '.github/scripts/profiled-verad.sh'
 
 
 class HeapEvidence(unittest.TestCase):
+    def test_sustained_profile_covers_the_measured_late_window(self):
+        count, rate, deadline, arena = profile_workload('sustained')
+        self.assertEqual((count, rate, arena), (90000, 50, '2'))
+        self.assertEqual(count / rate, 1800)
+        self.assertGreater(deadline, count / rate)
+        self.assertEqual(profile_workload('startup'), (6000, 20, 1200, None))
+        with self.assertRaises(ValueError):
+            profile_workload('unbounded')
+
     def test_profile_build_flags_are_explicit_and_not_overridden(self):
         environment = {'CARGO_PROFILE_RELEASE_DEBUG': 'full',
                        'CARGO_PROFILE_RELEASE_STRIP': 'none',

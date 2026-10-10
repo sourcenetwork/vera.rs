@@ -37,6 +37,38 @@ is missing alongside retained `secrets.json`, `native-genesis.bin` or `history/`
 including dangling links. Restore the original identity with its retained state;
 the node does not generate a replacement key for that directory.
 
+Existing validator keys must contain exactly 32 bytes. The reader consumes at
+most 33 bytes and rejects oversized or truncated material without resizing or
+regenerating the retained key.
+
+## Linux build artifacts
+
+The Linux checks job bundles its normal release daemon after the native ring
+lifecycle tests pass. Download `verad-x86_64-unknown-linux-gnu-rocksdb` from the
+workflow run for the intended source. It contains a tarball and `SHA256SUMS`:
+
+```sh
+sha256sum --check SHA256SUMS
+tar -xzf verad-x86_64-unknown-linux-gnu-rocksdb.tar.gz
+```
+
+The archive contains only `verad` and `build.json`. The manifest records the
+actual checked-out source commit and tree (a merge commit on pull-request runs),
+lockfile and toolchain-file hashes, compiler, target, release build command,
+empty feature selection, RocksDB history backend, binary hash and required shared
+library names. Builds use the locked dependency graph and explicitly disable
+default features; fault injection is excluded. Confirm the source against the independently selected revision.
+Checksums detect corruption; they do not authenticate the publisher.
+
+This artifact targets Linux x86-64 GNU on Ubuntu 24.04. It is dynamically linked;
+use a compatible runtime with the required system libraries. It does not include
+configuration, genesis, keys or validator state. Regolith builds require a
+separate explicitly selected build; this bundle cannot open Regolith history.
+Archive timestamps, owners and member ordering are fixed, so packaging the same
+binary and provenance produces the same bytes. This does not establish
+reproducible compilation or qualify an older runtime environment. A successful
+Linux job does not replace the other release gates.
+
 ## Filesystem layout
 
 | Path | Contents |
@@ -140,8 +172,12 @@ rejected and require an explicit migration decision, not silent reset.
   selects Regolith with synchronous writes. The two backends reject each
   other's directory layouts — pick one per deployment.
 - **RPC exposure**: bind `http_addr` to an internal interface for validator
-  operation; expose only through the intended client path. The JSON-RPC
-  server enforces its own batch, subscription and body-size limits (see
+  operation; expose only through the intended client path. With `--config`,
+  startup uses that address and port; `--rpc-port` changes only its port, preserving
+  the interface. Without a config file, validators retain the indexed default
+  port (`8545 + validator_index`); devnet defaults to 8545. Malformed listen
+  addresses fail startup instead of falling back to a wildcard interface.
+  The JSON-RPC server enforces its own batch, subscription and body-size limits (see
   [permission-proofs.md](permission-proofs.md) for proof-path budgets).
 
 ## Monitoring
@@ -207,3 +243,46 @@ workloads and measurement boundaries.
 - Certificate and proof endpoints apply fixed budgets; a client exceeding
   them receives retryable `-32002` errors and must back off, not reconnect
   harder.
+
+## Certified read check
+
+Use an independently provisioned consensus key, a known existing policy and a
+positive finalized checkpoint to check the native read path:
+
+```sh
+verad client --url https://<rpc-host> --compact check-read \
+  --policy-id <policy-id> --trusted-key <consensus-key-hex> \
+  --minimum-revision <checkpoint> --max-age-seconds 30
+```
+
+The command verifies the finalization certificate, policy membership proof and
+policy identity through the shared native client. It rejects certified absence,
+revisions below the selected checkpoint, timestamps older than the configured age
+and timestamps more than five seconds ahead of the local clock. Override the
+future allowance with `--max-future-seconds`; keep the monitoring clock accurate.
+Age is checked after the response has been verified, so request time counts.
+Success prints only policy ID, verified revision, execution timestamp and check
+time as JSON; failures exit unsuccessfully. The request uses the client's bounded
+transport and ten-second HTTP deadline and does not retry.
+
+Obtain the key, policy and checkpoint independently of the endpoint being checked.
+Retain the highest accepted checkpoint in the monitoring system and advance the
+configured minimum; the command does not persist it. This checks one certified
+policy read. It does not prove permission for an actor, current voting membership,
+connected peers, renewed quorum contribution, write availability or the latest
+possible revision. Continue using the backup/rejoin quorum checks above for a
+restored validator.
+
+## CI test evidence
+
+Extended, native-ring and recovery jobs keep command output and node directories
+on the runner. Their artifacts contain a bounded JSON summary: checked source
+revision, command exit code, reported test counts and locations in tracked Rust
+source files. Keys, state, raw logs, panic messages and endpoint addresses are not
+uploaded. Disk-full RPC failures additionally record an allowlisted recovery
+phase, error class and replica index, with deduplication and a sixteen-entry limit;
+remote error text and numeric request identities are not exported. The summary
+records skipped unreadable inputs and truncation or item
+limits; missing evidence is not a successful test result. Raw files are removed
+in job cleanup. These summaries help locate a failure but do not explain its
+runtime cause; investigate a reproducible failure with private diagnostics.

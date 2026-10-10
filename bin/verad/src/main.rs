@@ -8,6 +8,7 @@ use tracing_subscriber::{fmt::writer::BoxMakeWriter, prelude::*};
 mod cli;
 mod client;
 mod probe;
+mod rpc_address;
 mod testnet;
 
 fn main() -> eyre::Result<()> {

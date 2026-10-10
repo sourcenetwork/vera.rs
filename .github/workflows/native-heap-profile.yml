@@ -8,8 +8,13 @@ on:
         type: choice
         options: [rocksdb, regolith]
         default: rocksdb
+      profile:
+        description: Allocation window to inspect
+        type: choice
+        options: [startup, sustained]
+        default: startup
   push:
-    branches: ['iverc/native-heap-attribution']
+    branches: ['iverc/native-late-heap-attribution']
     paths:
       - .github/workflows/native-heap-profile.yml
       - .github/scripts/profiled-verad.sh
@@ -20,13 +25,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-heap-profile-${{ github.ref }}-${{ inputs.history || 'rocksdb' }}
+  group: native-heap-profile-${{ github.ref }}-${{ inputs.history || 'rocksdb' }}-${{ inputs.profile || 'sustained' }}
   cancel-in-progress: false
 
 jobs:
   allocations:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: ${{ inputs.profile == 'startup' && 120 || 180 }}
     env:
       CARGO_BUILD_JOBS: '2'
       PROTOC: /usr/bin/protoc
@@ -34,6 +39,7 @@ jobs:
       CARGO_PROFILE_RELEASE_STRIP: none
       RUSTFLAGS: '-C force-frame-pointers=yes'
       HISTORY_BACKEND: ${{ inputs.history || 'rocksdb' }}
+      PROFILE_SELECTION: ${{ inputs.profile || 'sustained' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -66,7 +72,7 @@ jobs:
       - name: Check profile selection and result extraction
         run: python3 -m unittest discover -s tools/performance -p test_heap_profile.py
       - name: Profile one validator during certified fixed-state updates
-        run: python3 tools/performance/heap_profile.py --history "$HISTORY_BACKEND" --output heap-results
+        run: python3 tools/performance/heap_profile.py --history "$HISTORY_BACKEND" --profile "$PROFILE_SELECTION" --output heap-results
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

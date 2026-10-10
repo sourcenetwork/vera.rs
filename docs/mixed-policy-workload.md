@@ -94,6 +94,33 @@ dataset. It is not a capacity result, a WAN or adversarial-network test, or comp
 production qualification. It does not qualify other replica counts, threshold
 changes, or every failure point during recovery.
 
+## Linux CI gate
+
+The Linux checks job builds the existing mixed-policy driver in the normal
+release profile and runs sixteen workflows at two offered workflows per second,
+with at most eight outstanding workflows. It uses the same RocksDB release
+daemon as the native-ring check and release bundle. The driver retains its
+900-second whole-run deadline; the recorder allows 960 seconds for termination.
+
+The gate requires all five timed grant, revocation and exclusion phases and all
+five later verification phases on every validator, including definition removal,
+reintroduction without resurrecting old grants, explicit regrant and hard restart.
+The complete run must certify 99 distinct submissions containing 275 mutations,
+verify 4,800 permission decisions and 1,280 ownership proofs, and preserve every
+workflow. Missing or duplicate workflow/replica checks, mixed checkpoint values,
+incomplete resource sampling and uncertified submissions fail qualification.
+
+Only `mixed-policy-evidence.json` is uploaded. It contains source and executable
+hashes, bounded counters, latency percentiles, restart time and sampled RSS peaks.
+Workflow timings cover the timed phase; submission timings include setup, edits
+and later regrants. Node directories, keys, policy/request identifiers, paths,
+raw JSONL and error messages remain private and are removed after collection.
+Failed qualification exports a fixed failure stage rather than private output.
+
+This is a short functional gate for the four-validator Linux RocksDB deployment.
+It does not establish sustainable capacity, steady-state memory, WAN behavior,
+other storage backends or equivalence to the historical local measurement below.
+
 ## Current-schema local qualification
 
 On October 6, 2026, clean source

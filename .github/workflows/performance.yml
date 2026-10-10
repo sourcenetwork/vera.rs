@@ -19,6 +19,10 @@ on:
         description: Record numeric vera_diagnostics snapshots during a sustained run
         type: boolean
         default: false
+      allocator_comparison:
+        description: Compare default and two glibc arenas in two 30-minute fixed-state runs
+        type: boolean
+        default: false
       storage_attribution:
         description: Run the bounded RocksDB storage diagnostic instead of performance baselines
         type: boolean
@@ -44,7 +48,7 @@ jobs:
   workload:
     if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && (inputs.sustained_fixed_state || inputs.sustained_growing_state) && 180 || 60 }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && (inputs.sustained_fixed_state || inputs.sustained_growing_state || inputs.allocator_comparison) && 180 || 60 }}
     strategy:
       fail-fast: false
       matrix:
@@ -56,9 +60,10 @@ jobs:
       STORAGE_ATTRIBUTION: ${{ github.event_name == 'workflow_dispatch' && inputs.storage_attribution }}
       STORAGE_ATTRIBUTION_MODE: ${{ inputs.storage_attribution_mode || 'full' }}
       ARCHIVE_RETENTION: ${{ github.event_name == 'workflow_dispatch' && inputs.archive_retention }}
-      SUSTAINED_FIXED_STATE: ${{ github.event_name == 'workflow_dispatch' && inputs.sustained_fixed_state }}
+      SUSTAINED_FIXED_STATE: ${{ github.event_name == 'workflow_dispatch' && (inputs.sustained_fixed_state || inputs.allocator_comparison) }}
+      ALLOCATOR_COMPARISON: ${{ github.event_name == 'workflow_dispatch' && inputs.allocator_comparison }}
       SUSTAINED_GROWING_STATE: ${{ github.event_name == 'workflow_dispatch' && inputs.sustained_growing_state }}
-      SUSTAINED_MEMORY_ATTRIBUTION: ${{ github.event_name == 'workflow_dispatch' && (inputs.sustained_memory_attribution || inputs.archive_retention) }}
+      SUSTAINED_MEMORY_ATTRIBUTION: ${{ github.event_name == 'workflow_dispatch' && (inputs.sustained_memory_attribution || inputs.archive_retention || inputs.allocator_comparison) }}
     steps:
       - name: Validate measurement selection
         shell: bash
@@ -174,27 +179,40 @@ jobs:
           if [[ "$SUSTAINED_MEMORY_ATTRIBUTION" == true ]]; then
             recorder+=(--rust-log 'warn,vera_storage=info,vera_diagnostics=debug')
           fi
-          for objects in "${object_counts[@]}"; do
-            directory="performance-results/objects-$objects"
-            node_environment=()
-            if [[ "$SUSTAINED_MEMORY_ATTRIBUTION" == true ]]; then
-              node_logs="$VERA_E2E_DIR/objects-$objects"
-              mkdir -p -m 700 "$node_logs"
-              node_environment=(VERA_E2E_KEEP=1 VERA_E2E_DIR="$node_logs")
-            fi
-            env "${node_environment[@]}" "${recorder[@]}" \
-              --node target/release/verad --runner target/release/examples/operation_baseline \
-              --history "$HISTORY_BACKEND" --output "$directory" \
-              "$count" 50 128 1 normal 100 192 0 "$objects" 256 1 || result=1
-            if [[ "$SUSTAINED_MEMORY_ATTRIBUTION" == true ]]; then
-              python3 tools/performance/snapshot_metrics.py "$directory" \
-                --node-logs "$node_logs" --minimum-samples "$((count / 50 / 30))" || result=1
-            fi
-            if [[ "$ARCHIVE_RETENTION" == true ]]; then
-              python3 tools/performance/archive_retention.py "$directory" || result=1
-            fi
-            "$RUNNER_TEMP/performance-python/bin/python" tools/performance/report.py "$directory" || result=1
-            if [[ -f "$directory/report.md" ]]; then sed '/^!\[/d' "$directory/report.md" >> "$GITHUB_STEP_SUMMARY"; fi
+          arena_cases=(default)
+          if [[ "$ALLOCATOR_COMPARISON" == true ]]; then arena_cases+=(2); fi
+          for arena in "${arena_cases[@]}"; do
+            for objects in "${object_counts[@]}"; do
+              directory="performance-results/objects-$objects"
+              arena_options=()
+              if [[ "$ALLOCATOR_COMPARISON" == true ]]; then
+                directory+="-allocator-$arena"
+                arena_options=(--glibc-arena-max "$arena")
+              fi
+              node_environment=()
+              if [[ "$SUSTAINED_MEMORY_ATTRIBUTION" == true ]]; then
+                node_logs="$VERA_E2E_DIR/${directory##*/}"
+                mkdir -p -m 700 "$node_logs"
+                node_environment=(VERA_E2E_KEEP=1 VERA_E2E_DIR="$node_logs")
+              fi
+              env "${node_environment[@]}" "${recorder[@]}" \
+                --node target/release/verad --runner target/release/examples/operation_baseline \
+                --history "$HISTORY_BACKEND" --output "$directory" "${arena_options[@]}" \
+                "$count" 50 128 1 normal 100 192 0 "$objects" 256 1 || result=1
+              if [[ "$SUSTAINED_MEMORY_ATTRIBUTION" == true ]]; then
+                python3 tools/performance/snapshot_metrics.py "$directory" \
+                  --node-logs "$node_logs" --minimum-samples "$((count / 50 / 30))" || result=1
+              fi
+              if [[ "$ARCHIVE_RETENTION" == true ]]; then
+                python3 tools/performance/archive_retention.py "$directory" || result=1
+              fi
+              "$RUNNER_TEMP/performance-python/bin/python" tools/performance/report.py "$directory" || result=1
+              if [[ "$ALLOCATOR_COMPARISON" == true ]]; then
+                echo "### Glibc arena selection: $arena" >> "$GITHUB_STEP_SUMMARY"
+              fi
+              if [[ -f "$directory/report.md" ]]; then sed '/^!\[/d' "$directory/report.md" >> "$GITHUB_STEP_SUMMARY"; fi
+              if [[ "$ALLOCATOR_COMPARISON" == true ]]; then rm -rf -- "$node_logs"; fi
+            done
           done
           exit "$result"
 

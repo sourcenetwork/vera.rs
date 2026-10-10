@@ -15,10 +15,14 @@ import subprocess
 import tempfile
 import time
 
-from record import digest
+from record import allocator_environment, digest
 
-COUNT = 6000
-RATE = 20
+def profile_workload(selection):
+    if selection == 'startup':
+        return 6000, 20, 1200, None
+    if selection == 'sustained':
+        return 90000, 50, 7200, '2'
+    raise ValueError('unsupported allocation profile selection')
 
 
 def profile_settings(environment):
@@ -202,8 +206,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--history', required=True, choices=('rocksdb', 'regolith'))
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--profile', choices=('startup', 'sustained'), default='startup')
     args = parser.parse_args()
     build = profile_settings(os.environ)
+    count, rate, timeout, arena = profile_workload(args.profile)
+    environment, allocator = allocator_environment(os.environ, arena)
+    arena_arguments = [] if arena is None else ['--glibc-arena-max', arena]
     args.output.mkdir(parents=True, exist_ok=False)
     node = Path('target/release/verad').resolve(strict=True)
     launcher = Path('.github/scripts/profiled-verad.sh').resolve(strict=True)
@@ -212,7 +220,7 @@ def main():
     demangler, demangler_version = rust_demangler()
     with tempfile.TemporaryDirectory(prefix='vera-heap-', dir=os.environ['RUNNER_TEMP']) as directory:
         private = Path(directory)
-        environment = dict(os.environ, VERA_PROFILE_BINARY=str(node), VERA_PROFILE_ROOT=str(private),
+        environment.update(VERA_PROFILE_BINARY=str(node), VERA_PROFILE_ROOT=str(private),
                            VERA_PROFILE_LIBRARY=str(library), VERA_E2E_DIR=str(private / 'nodes'), VERA_E2E_KEEP='0')
         environment.pop('LD_PRELOAD', None)
         environment.pop('DUMP_HEAPTRACK_OUTPUT', None)
@@ -220,8 +228,8 @@ def main():
         with (private / 'runner.log').open('w') as log:
             result = subprocess.run(['python3', 'tools/performance/record.py', '--node', str(launcher),
                                      '--runner', 'target/release/examples/operation_baseline', '--history', args.history,
-                                     '--output', str(record), '--timeout-seconds', '1200',
-                                     str(COUNT), str(RATE), '128', '1', 'normal', '100', '192', '0', '128', '256', '1'],
+                                     '--output', str(record), '--timeout-seconds', str(timeout), *arena_arguments,
+                                     str(count), str(rate), '128', '1', 'normal', '100', '192', '0', '128', '256', '1'],
                                     env=environment, stdout=subprocess.DEVNULL, stderr=log)
         records = {}
         with (record / 'workload.jsonl').open() as stream:
@@ -236,7 +244,9 @@ def main():
         manifest['node_sha256'] = digest(node)
         manifest['heap_profile'] = {'member': 3, 'tool': subprocess.check_output(['heaptrack', '--version'], text=True).strip(),
                                     'library_sha256': digest(library), **build,
-                                    'instrumented': True, 'capacity_measurement': False, 'profiled_first_boot_only': True, 'rust_demangler': demangler_version}
+                                    'instrumented': True, 'capacity_measurement': False, 'profiled_first_boot_only': True, 'rust_demangler': demangler_version,
+                                    'selection': args.profile, 'operations': count, 'offered_per_second': rate,
+                                    'controlled_allocator_environment': allocator}
         manifest['source_binding'] += ' The launcher execs the hashed node; allocation instrumentation is restricted to member3 first boot.'
         workload_evidence = {'manifest': manifest, 'workload_exit_code': result.returncode,
                              'outcomes': {key: value for key, value in records.items() if key != 'first_resources'}}
@@ -259,7 +269,7 @@ def main():
                             '--merge-backtraces', 'false', '--print-peaks', 'false', '--print-allocators', 'false',
                             '--print-temporary', 'false'], stdout=log, stderr=log, check=True)
         timeline = heap_timeline(massif)
-        if timeline[-1]['milliseconds'] < COUNT / RATE * 1000:
+        if timeline[-1]['milliseconds'] < count / rate * 1000:
             raise ValueError('profile ended before the required workload duration')
         original_sites = retained_sites(stacks)
         decoded = private / 'retained.rust.stacks'

@@ -32,7 +32,7 @@ async fn sync_failure_recovers_acknowledged_operations() {
     let signer = BlsSigner::random(deployment).unwrap();
     let origin = VeraClient::new(cluster.node(0).rpc_url());
     let mut receipts = vec![create_policy(&origin, &signer, "before-sync-failure").await];
-    assert_replicas(&cluster, &signer, &receipts, 4, &trusted).await;
+    assert_replicas(&cluster, &signer, &receipts, 4, &trusted, "initial").await;
 
     let fault = sync_fault::SyncFault::attach(
         cluster.node(3).process.id().unwrap(),
@@ -51,17 +51,17 @@ async fn sync_failure_recovers_acknowledged_operations() {
         .await
         .expect("confirm EIO synchronization witness");
     receipts.push(create_policy(&origin, &signer, "during-sync-failure").await);
-    assert_replicas(&cluster, &signer, &receipts, 3, &trusted).await;
+    assert_replicas(&cluster, &signer, &receipts, 3, &trusted, "survivors").await;
 
     cluster.restart_node(3).unwrap();
     cluster.wait_ready(deadline()).await.unwrap();
-    assert_replicas(&cluster, &signer, &receipts, 4, &trusted).await;
+    assert_replicas(&cluster, &signer, &receipts, 4, &trusted, "restored").await;
     cluster.kill_node(2);
     let recovered = VeraClient::new(cluster.node(3).rpc_url());
     receipts.push(create_policy(&recovered, &signer, "after-sync-failure").await);
     cluster.restart_node(2).unwrap();
     cluster.wait_ready(deadline()).await.unwrap();
-    assert_replicas(&cluster, &signer, &receipts, 4, &trusted).await;
+    assert_replicas(&cluster, &signer, &receipts, 4, &trusted, "renewed-quorum").await;
     eprintln!(
         "sync failure injected_calls={injected} acknowledged_operations={} verified_replicas=4",
         receipts.len()

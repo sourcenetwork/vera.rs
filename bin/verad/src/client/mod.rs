@@ -4,6 +4,7 @@ mod acp;
 mod bulletin;
 mod context;
 mod keys;
+mod read_check;
 mod status;
 mod tx;
 mod vera_mod;
@@ -45,6 +46,8 @@ pub(crate) struct ClientArgs {
 
 #[derive(Subcommand, Debug)]
 enum ClientCommand {
+    /// Verify a native policy read against independently selected trust, checkpoint and age.
+    CheckRead(read_check::ReadCheckArgs),
     /// Query node status (vera_nodeStatus).
     Status,
     /// Query chain ID (eth_chainId).
@@ -94,6 +97,10 @@ impl ClientArgs {
         )?;
 
         match self.command {
+            ClientCommand::CheckRead(args) => {
+                let report = args.run(&ctx.client).await?;
+                ctx.print_json(&report)
+            }
             ClientCommand::Status => status::StatusCommand::Status.run(&ctx).await,
             ClientCommand::ChainId => status::StatusCommand::ChainId.run(&ctx).await,
             ClientCommand::BlockNumber => status::StatusCommand::BlockNumber.run(&ctx).await,
