@@ -107,6 +107,11 @@ journals are lost, use operator-authorized member replacement with a fresh
 identity rather than assuming a stale backup is safe. The validator must remain
 stopped between capture and restore for the qualification scenario below.
 
+DKG material updates run on the blocking pool and are awaited before success.
+Writers serialize through file and parent-directory synchronization; cached
+readers keep the previous durable view until the replacement completes. A write
+failure stops the caller before it can acknowledge the update.
+
 After startup, independently verify a certified revision and the expected policy
 and revocation state at the current checkpoint. RPC availability alone does not
 prove that the member has caught up or holds the current voting share. Exercise
