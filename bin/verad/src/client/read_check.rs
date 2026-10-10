@@ -85,7 +85,7 @@ impl ReadCheckArgs {
     }
 }
 
-fn check_age(
+const fn check_age(
     timestamp: u64,
     now: u64,
     maximum_age: u64,
