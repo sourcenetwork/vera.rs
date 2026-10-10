@@ -205,3 +205,14 @@ workloads and measurement boundaries.
 - Certificate and proof endpoints apply fixed budgets; a client exceeding
   them receives retryable `-32002` errors and must back off, not reconnect
   harder.
+
+## CI test evidence
+
+Extended, native-ring and recovery jobs keep command output and node directories
+on the runner. Their artifacts contain a bounded JSON summary: checked source
+revision, command exit code, reported test counts and locations in tracked Rust
+source files. Keys, state, raw logs, panic messages and endpoint addresses are not
+uploaded. The summary records skipped unreadable inputs and truncation or item
+limits; missing evidence is not a successful test result. Raw files are removed
+in job cleanup. These summaries help locate a failure but do not explain its
+runtime cause; investigate a reproducible failure with private diagnostics.
