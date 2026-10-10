@@ -226,6 +226,22 @@ latency. Labelled runtime metric series retain distinct identities through
 label hashes, while raw labels and logs stay private. The collector does not
 invent timestamps from the nominal 30-second sampling interval.
 
+On GNU/Linux, opt-in resource snapshots also report glibc `mallinfo2` accounting:
+reserved arena bytes, bytes treated as in use, free arena bytes, and directly
+mapped allocation bytes. GNU/Linux builds require glibc 2.33 or later for this
+API; the hosted release build uses Ubuntu 24.04. Other targets report unsupported
+values as `null`.
+The statistics are sampled on the blocking pool and do not trim memory or change
+allocator settings. Older snapshots without these fields remain readable.
+
+These counters distinguish allocator-held free space from allocator-accounted
+usage; they are not RSS or requested application payload sizes. Thread-cache
+blocks may count as in use. Compare their timelines with the backend, index and
+buffer-pool counters before attributing growth. Sampling is non-atomic and locks
+allocator arenas, so it remains an opt-in diagnostic rather than a capacity run.
+These counters cover glibc; a replacement allocator can hold memory outside them.
+See [glibc allocation accounting](https://sourceware.org/glibc/manual/latest/html_node/Statistics-of-Malloc.html).
+
 ## ACP lifecycle components
 
 `component_baseline` includes policy edits and deletions with 32, 256 and 2,048

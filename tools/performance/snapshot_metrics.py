@@ -12,7 +12,7 @@ from pathlib import Path
 SNAPSHOT_MARK = 'node resource snapshot'
 TIMESTAMP = re.compile(r'^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s+')
 ANSI = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
-FIELD_START = re.compile(r'\s+(runtime_metrics|history_memory_bytes|durable_height|index|proofs)=')
+FIELD_START = re.compile(r'\s+(runtime_metrics|history_memory_bytes|durable_height|index|proofs|allocator_memory_bytes)=')
 LEAF_STRUCT = re.compile(r'([a-z_0-9]+): (\d+)')
 LEAF_OPTION = re.compile(r'"([a-z_0-9]+)": (?:Some\((\d+)\)|(None))')
 METRIC = re.compile(r'^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{.*\})?\s+([^\s]+)(?:\s+#.*)?$')
@@ -63,13 +63,22 @@ def parse_snapshot(event):
     if SNAPSHOT_MARK not in event:
         return None
     fields = sections(event)
-    if set(fields) != {'runtime_metrics', 'history_memory_bytes', 'durable_height', 'index', 'proofs'}:
+    required = {'runtime_metrics', 'history_memory_bytes', 'durable_height', 'index', 'proofs'}
+    if set(fields) not in (required, required | {'allocator_memory_bytes'}):
         raise ValueError('incomplete node resource snapshot')
     record = {'durable_height': int(fields['durable_height'].strip())}
     for section in ('runtime_metrics', 'history_memory_bytes', 'index', 'proofs'):
         parser = runtime_metrics if section == 'runtime_metrics' else leaves
         for name, value in parser(fields[section]).items():
             record[section + '.' + name] = value
+    if 'allocator_memory_bytes' in fields:
+        values = leaves(fields['allocator_memory_bytes'])
+        if set(values) != {'arena_reserved', 'arena_in_use', 'arena_free', 'direct_mapped'}:
+            raise ValueError('incomplete allocator memory snapshot')
+        if any(value is None for value in values.values()) and any(value is not None for value in values.values()):
+            raise ValueError('partially supported allocator memory snapshot')
+        for name, value in values.items():
+            record['allocator_memory_bytes.' + name] = value
     return record
 
 

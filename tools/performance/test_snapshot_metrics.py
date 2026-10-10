@@ -61,6 +61,37 @@ class SnapshotParser(unittest.TestCase):
     def test_unrelated_lines_are_ignored(self):
         self.assertIsNone(metrics.parse_snapshot('INFO unrelated: durable_height=5'))
 
+    def test_allocator_counters_are_separate_from_backend_memory(self):
+        event = snapshot().rstrip() + (
+            ' allocator_memory_bytes={"arena_reserved": Some(1024), '
+            '"arena_in_use": Some(768), "arena_free": Some(256), '
+            '"direct_mapped": Some(4096)}\n')
+        record = metrics.parse_snapshot(event)
+        self.assertEqual(record['allocator_memory_bytes.arena_reserved'], 1024)
+        self.assertEqual(record['allocator_memory_bytes.arena_in_use'], 768)
+        self.assertEqual(record['allocator_memory_bytes.arena_free'], 256)
+        self.assertEqual(record['allocator_memory_bytes.direct_mapped'], 4096)
+        self.assertEqual(record['history_memory_bytes.block_cache'], 2048)
+
+    def test_unsupported_allocator_counters_remain_absent_values(self):
+        event = snapshot().rstrip() + (
+            ' allocator_memory_bytes={"arena_reserved": None, "arena_in_use": None, '
+            '"arena_free": None, "direct_mapped": None}\n')
+        record = metrics.parse_snapshot(event)
+        counters = {key: value for key, value in record.items() if key.startswith('allocator_memory_bytes.')}
+        self.assertEqual(len(counters), 4)
+        self.assertTrue(all(value is None for value in counters.values()))
+
+    def test_incomplete_or_partial_allocator_counters_fail(self):
+        for counters in (
+                '{"arena_reserved": Some(1024)}',
+                '{"arena_reserved": None, "arena_in_use": Some(768), '
+                '"arena_free": Some(256), "direct_mapped": Some(4096)}',
+                '{"arena_reserved": Some(1024), "arena_in_use": Some(-1), '
+                '"arena_free": Some(256), "direct_mapped": Some(4096)}'):
+            with self.subTest(counters=counters), self.assertRaises(ValueError):
+                metrics.parse_snapshot(snapshot().rstrip() + ' allocator_memory_bytes=' + counters + '\n')
+
 
 class RetainedCluster(unittest.TestCase):
     def setUp(self):
