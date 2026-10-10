@@ -1,0 +1,82 @@
+name: Native heap profile
+
+on:
+  workflow_dispatch:
+    inputs:
+      history:
+        description: History backend to profile
+        type: choice
+        options: [rocksdb, regolith]
+        default: rocksdb
+      profile:
+        description: Allocation window to inspect
+        type: choice
+        options: [startup, sustained]
+        default: startup
+  push:
+    branches: ['iverc/native-late-heap-attribution']
+    paths:
+      - .github/workflows/native-heap-profile.yml
+      - .github/scripts/profiled-verad.sh
+      - tools/performance/heap_profile.py
+      - tools/performance/test_heap_profile.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-heap-profile-${{ github.ref }}-${{ inputs.history || 'rocksdb' }}-${{ inputs.profile || 'sustained' }}
+  cancel-in-progress: false
+
+jobs:
+  allocations:
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.profile == 'startup' && 120 || 180 }}
+    env:
+      CARGO_BUILD_JOBS: '2'
+      PROTOC: /usr/bin/protoc
+      CARGO_PROFILE_RELEASE_DEBUG: full
+      CARGO_PROFILE_RELEASE_STRIP: none
+      RUSTFLAGS: '-C force-frame-pointers=yes'
+      HISTORY_BACKEND: ${{ inputs.history || 'rocksdb' }}
+      PROFILE_SELECTION: ${{ inputs.profile || 'sustained' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@62ae3a85dbdd2bedbb5819da8ce45635129289a1 # 1.98.0
+        with:
+          toolchain: 1.98.0
+      - name: Install build and allocation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler heaptrack binutils
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: heap-profile-${{ env.HISTORY_BACKEND }}
+          cache-on-failure: true
+      - name: Fetch locked dependencies
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
+        run: cargo fetch --locked
+      - name: Build the existing release workload with allocation symbols
+        shell: bash
+        run: |
+          features=()
+          if [[ "$HISTORY_BACKEND" == regolith ]]; then features=(--features regolith-history); fi
+          cargo build --frozen --release -p verad "${features[@]}"
+          cargo build --frozen --release -p vera-e2e --example operation_baseline
+      - name: Check profile selection and result extraction
+        run: python3 -m unittest discover -s tools/performance -p test_heap_profile.py
+      - name: Profile one validator during certified fixed-state updates
+        run: python3 tools/performance/heap_profile.py --history "$HISTORY_BACKEND" --profile "$PROFILE_SELECTION" --output heap-results
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: heap-profile-${{ env.HISTORY_BACKEND }}-${{ github.sha }}
+          path: heap-results/*.json
+          if-no-files-found: error
+          retention-days: 14
