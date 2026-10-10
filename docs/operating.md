@@ -142,8 +142,12 @@ rejected and require an explicit migration decision, not silent reset.
   selects Regolith with synchronous writes. The two backends reject each
   other's directory layouts — pick one per deployment.
 - **RPC exposure**: bind `http_addr` to an internal interface for validator
-  operation; expose only through the intended client path. The JSON-RPC
-  server enforces its own batch, subscription and body-size limits (see
+  operation; expose only through the intended client path. With `--config`,
+  startup uses that address and port; `--rpc-port` changes only its port, preserving
+  the interface. Without a config file, validators retain the indexed default
+  port (`8545 + validator_index`); devnet defaults to 8545. Malformed listen
+  addresses fail startup instead of falling back to a wildcard interface.
+  The JSON-RPC server enforces its own batch, subscription and body-size limits (see
   [permission-proofs.md](permission-proofs.md) for proof-path budgets).
 
 ## Monitoring

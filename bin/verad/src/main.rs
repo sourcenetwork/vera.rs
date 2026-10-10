@@ -7,6 +7,7 @@ use tracing_subscriber::prelude::*;
 
 mod cli;
 mod client;
+mod rpc_address;
 mod testnet;
 
 fn main() -> eyre::Result<()> {
