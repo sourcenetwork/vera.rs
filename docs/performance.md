@@ -901,3 +901,38 @@ peaks; end-of-process allocated bytes are not necessarily leaks, and allocation
 callers do not by themselves identify the retaining owner. Follow any increasing
 allocation population through its actual ownership and lifetime before changing
 storage, queues or caches.
+
+### Completed sustained heap profile on October 10, 2026
+
+[Heap profile run 38027499805](https://github.com/sourcenetwork/vera.rs/actions/runs/38027499805)
+used clean source `1775eb3c`, whose tree is identical to merged `main` commit
+`8493a3d7`. The instrumented workload completed all 90,000 operations in
+1,800.170 seconds. All four replicas verified all outcomes, and the hard-restart
+check inspected all 90,000 operations with zero receipt or state mismatches.
+There were no unsent, unknown, rejected, reverted, incomplete or
+verification-failed operations. Two receipt-read throttles were recorded.
+These instrumented timings do not establish production throughput or latency.
+
+At the end of member 3's first process, the decoder accounted for 303,662,771
+allocated bytes (289.60 MiB). Symbol decoding reduced unattributed bytes from
+255,808,398 to 91,424; the attribution classes sum to the allocated-byte total.
+The largest allocation callers were:
+
+| Allocation caller | Allocated bytes at process end |
+| --- | ---: |
+| Commonware unreliable mailbox construction | 141,862,264 |
+| Commonware buffer-pool inner allocation | 76,888,064 |
+| Finalized history queries | 33,429,824 |
+| Commonware buffer-pool allocation | 16,606,130 |
+| Finalized history writes | 13,707,742 |
+| Commonware size-class handles | 4,323,328 |
+| Recent execution index | 2,951,168 |
+
+The 208,024 numeric timeline snapshots cover 2,166.54 seconds of that process,
+including setup and post-workload verification. Interval-peak heap values
+reached 320.22 MiB between minutes 25 and 30, then fell to 253.48 MiB within
+that window. The final snapshot was 289.60 MiB. These are heap values, not RSS;
+the observed drop does not establish a sustained memory bound or its cause.
+The report groups allocations by caller and does not contain per-owner lifetime
+histories, so it cannot assign late growth to a specific queue, cache or storage
+component. Raw traces and runtime data remain excluded from the public artifact.
