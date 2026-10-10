@@ -856,3 +856,28 @@ These diagnostic runs demonstrate retention correctness under continued
 finalization. Their duration, instrumentation and host scheduling differ from
 the earlier sustained measurements, so they do not establish a throughput,
 latency or whole-process memory improvement.
+
+## Sustained heap attribution
+
+The native heap-profile workflow offers two bounded diagnostic profiles.
+`startup` retains the existing 6,000-update case at 20 offered operations/s.
+`sustained` runs 90,000 updates at 50 offered operations/s against 128 objects,
+covering a thirty-minute workload, with the controlled glibc arena limit set to
+two. It uses the current node and workload sources, full release debug symbols,
+frame pointers and the existing source-filtered allocation decoder. Competing
+allocator or loader settings are rejected for the controlled case.
+
+Only member 3's first process is instrumented. The wrapper preserves its PID and
+inherited RPC descriptor; its restarted process is uninstrumented. Certified
+receipts, all-operation replica verification and restart checks remain required.
+The recording preserves source/binary hashes, profile selection, allocator
+settings, numeric heap timeline and allocation-site weights. Raw traces, stack
+paths, keys, node state and process logs remain private and are removed afterward.
+
+The sustained case tests the remaining growth observed in the two-arena resource
+experiment. Its tracing and symbol settings differ from normal deployment, so it
+does not establish production latency or capacity. Timeline values are interval
+peaks; end-of-process allocated bytes are not necessarily leaks, and allocation
+callers do not by themselves identify the retaining owner. Follow any increasing
+allocation population through its actual ownership and lifetime before changing
+storage, queues or caches.
