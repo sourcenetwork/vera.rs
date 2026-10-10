@@ -4,6 +4,9 @@ use serde_json::json;
 use tokio::{process::Command, sync::oneshot, task::JoinHandle, time::Instant};
 use vera_e2e::cluster::TestCluster;
 
+#[path = "process_io.rs"]
+mod process_io;
+
 pub(super) async fn storage(cluster: &TestCluster, phase: &str) {
     for index in 0..4 {
         let path = cluster.node(index).data_dir.clone();
@@ -251,6 +254,7 @@ pub(super) fn start(cluster: &TestCluster) -> (oneshot::Sender<()>, JoinHandle<(
         "{}",
         json!({"kind": "resource_configuration", "node_pids": pids,
         "sample_interval_ms": 1000, "rss_unit": "KiB", "cpu_time": "cumulative ps time",
+        "process_io_source": if cfg!(target_os = "linux") { "linux_proc_io" } else { "unsupported" },
         "rss_breakdown_source": if cfg!(target_os = "linux") { "linux_proc_status" } else { "unsupported" }})
     );
     let selection = pids
@@ -268,7 +272,7 @@ pub(super) fn start(cluster: &TestCluster) -> (oneshot::Sender<()>, JoinHandle<(
                 _ = &mut stopped => break,
                 _ = interval.tick() => {}
             }
-            let (output, rss_breakdown) = tokio::join!(
+            let (output, rss_breakdown, process_io) = tokio::join!(
                 async {
                     tokio::time::timeout(
                         Duration::from_secs(2),
@@ -280,6 +284,7 @@ pub(super) fn start(cluster: &TestCluster) -> (oneshot::Sender<()>, JoinHandle<(
                     .await
                 },
                 futures::future::join_all(pids.iter().copied().map(rss_sample)),
+                futures::future::join_all(pids.iter().copied().map(process_io::sample)),
             );
             let mut sample = match output {
                 Ok(Ok(output)) if output.status.success() => match String::from_utf8(output.stdout)
@@ -292,6 +297,7 @@ pub(super) fn start(cluster: &TestCluster) -> (oneshot::Sender<()>, JoinHandle<(
                 Err(_) => json!({"error": "process sampling timed out"}),
             };
             sample["rss_breakdown"] = json!(rss_breakdown);
+            sample["process_io"] = json!(process_io);
             println!(
                 "{}",
                 json!({"kind": "resources", "elapsed_seconds": started.elapsed().as_secs_f64(), "sample": sample})

@@ -825,3 +825,19 @@ These diagnostic runs demonstrate retention correctness under continued
 finalization. Their duration, instrumentation and host scheduling differ from
 the earlier sustained measurements, so they do not establish a throughput,
 latency or whole-process memory improvement.
+
+## Process I/O accounting
+
+The operation driver samples each member's Linux `/proc/<pid>/io` counters once
+per second alongside RSS, with bounded reads and a two-second read deadline.
+Unavailable, partial and unsupported samples remain explicit; they are not zero.
+`report.json` records each member's complete-sample count, missing/unavailable
+samples and first-to-last observed interval. Counter regressions reject reporting.
+
+Read bytes, write bytes and cancelled write bytes remain separate. Linux charges
+write bytes at page-dirtying time; truncation can cancel writes charged to another
+process. These non-atomic counters include all I/O attributed to the validator,
+including logs and consensus journals. They do not establish physical-device
+write amplification, backend-specific writes or fsync latency. Sample intervals
+may omit workload boundaries; reports do not divide these deltas by all offered
+operations. See the [kernel accounting contract](https://docs.kernel.org/filesystems/proc.html#proc-pid-io-display-the-io-accounting-fields).

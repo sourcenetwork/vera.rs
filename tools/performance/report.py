@@ -5,6 +5,8 @@ import json
 import math
 from pathlib import Path
 
+from process_io import summarize_io
+
 
 def load_run(directory):
     manifest = json.loads((directory / 'manifest.json').read_text())
@@ -95,6 +97,7 @@ def main():
         'status': 'passed' if passed else 'failed', 'manifest': manifest,
         'configuration': {key: value for key, value in config.items() if key != 'node_data_dirs'},
         'summary': summary, 'missing_member_samples': missing,
+        'process_io': summarize_io(args.directory / 'workload.jsonl'),
         'verification': verification or None, 'recovery': recovery or None,
         'scope': 'Four members on one host; receipt latency is not consensus finality latency. No maximum capacity or WAN claim.',
     }
