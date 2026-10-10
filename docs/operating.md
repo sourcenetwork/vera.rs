@@ -277,7 +277,10 @@ Extended, native-ring and recovery jobs keep command output and node directories
 on the runner. Their artifacts contain a bounded JSON summary: checked source
 revision, command exit code, reported test counts and locations in tracked Rust
 source files. Keys, state, raw logs, panic messages and endpoint addresses are not
-uploaded. The summary records skipped unreadable inputs and truncation or item
+uploaded. Disk-full RPC failures additionally record an allowlisted recovery
+phase, error class and replica index, with deduplication and a sixteen-entry limit;
+remote error text and numeric request identities are not exported. The summary
+records skipped unreadable inputs and truncation or item
 limits; missing evidence is not a successful test result. Raw files are removed
 in job cleanup. These summaries help locate a failure but do not explain its
 runtime cause; investigate a reproducible failure with private diagnostics.

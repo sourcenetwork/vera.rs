@@ -13,6 +13,13 @@ MAX_FILES = 128
 TAIL_BYTES = 256 * 1024
 MAX_LOCATIONS = 16
 MAX_RESULTS = 32
+MAX_RPC_FAILURES = 16
+RPC_PHASES = {"initial", "survivors", "restored", "renewed-quorum"}
+RPC_KINDS = {"client-capacity", "server-capacity", "finality-unavailable",
+             "rpc-internal", "rpc-rejected", "transport-timeout", "transport",
+             "json", "response", "response-limit", "other"}
+RPC_FAILURE = re.compile(r"recovery_rpc_failure phase=([a-z-]{1,32}) "
+                         r"kind=([a-z-]{1,32}) replica=([0-3])(?=\s|$)")
 LOCATION = re.compile(r'((?:crates|bin)/[A-Za-z0-9_./-]+\.rs):(\d{1,7}):(\d{1,4})')
 RESULT = re.compile(r'test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored;')
 ANSI = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
@@ -51,7 +58,8 @@ def summarize(root, inventory):
     evidence = {'format_version': 1, 'files_read': 0, 'files_unreadable': 0,
                 'tails_truncated': 0, 'file_limit_reached': False,
                 'location_limit_reached': False, 'result_limit_reached': False,
-                'runner_exit_code': None, 'source_locations': [], 'test_results': []}
+                'runner_exit_code': None, 'source_locations': [], 'test_results': [],
+                'recovery_rpc_failures': [], 'recovery_rpc_failure_limit_reached': False}
     exit_path = root / 'test-exit-code'
     if exit_path.exists() or exit_path.is_symlink():
         try:
@@ -92,6 +100,17 @@ def summarize(root, inventory):
                     evidence['location_limit_reached'] = True
                 else:
                     evidence['source_locations'].append(location)
+            for match in RPC_FAILURE.finditer(line):
+                phase, kind, replica = match.groups()
+                if phase not in RPC_PHASES or kind not in RPC_KINDS:
+                    continue
+                failure = {'phase': phase, 'kind': kind, 'replica': int(replica)}
+                if failure in evidence['recovery_rpc_failures']:
+                    continue
+                if len(evidence['recovery_rpc_failures']) == MAX_RPC_FAILURES:
+                    evidence['recovery_rpc_failure_limit_reached'] = True
+                else:
+                    evidence['recovery_rpc_failures'].append(failure)
             for match in RESULT.finditer(line):
                 outcome, passed, failed, ignored = match.groups()
                 counts = [int(passed), int(failed), int(ignored)]

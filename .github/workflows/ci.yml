@@ -452,13 +452,13 @@ jobs:
           - suite: disk-full
             binary-features: ""
             test-features: ""
-            tests: --test disk_full disk_full_validator_recovers_acknowledged_operations
-            exact: --exact
+            tests: --test disk_full
+            exact: ""
           - suite: regolith-disk-full
             binary-features: "--features regolith-history"
             test-features: ""
-            tests: --test disk_full disk_full_validator_recovers_acknowledged_operations
-            exact: --exact
+            tests: --test disk_full
+            exact: ""
           - suite: regolith-interrupted
             binary-features: "--features regolith-history,fault-injection"
             test-features: "--features fault-injection"
