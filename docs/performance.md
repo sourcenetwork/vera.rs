@@ -890,6 +890,10 @@ The recording preserves source/binary hashes, profile selection, allocator
 settings, numeric heap timeline and allocation-site weights. Raw traces, stack
 paths, keys, node state and process logs remain private and are removed afterward.
 
+Console markers report workload, trace interpretation, analysis and symbol-decoding
+start/completion, with the workload exit code. Overall qualification still requires
+the certified outcome and allocation-accounting checks below.
+
 The sustained case tests the remaining growth observed in the two-arena resource
 experiment. Its tracing and symbol settings differ from normal deployment, so it
 does not establish production latency or capacity. Timeline values are interval
