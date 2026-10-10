@@ -55,6 +55,26 @@ It requires non-interactive `sudo` mount access; unavailable access fails the
 test. This checks filesystem exhaustion and durable-anchor recovery, not
 power-loss persistence, failed-device fsync or storage capacity.
 
+The Linux `sync_failure_recovers_acknowledged_operations` case first confirms
+one native operation and its independently verified revision on all four
+validators. It then attaches `strace` to that validator alone and injects `EIO`
+into its first matching `fsync`/`fdatasync` calls per thread. Injection is filtered
+to files already open beneath that validator’s `history` directory, leaving
+Commonware journals and DKG secrets outside the fault. The private trace must
+show an injected synchronization error on a finalized-history descriptor. The validator must stop, the remaining three must keep committing,
+and restart must preserve all acknowledged receipts, policy state and actor
+sequences. A later write with another voter stopped checks restored quorum
+participation. Linux recovery CI selects each history backend separately.
+
+This fixture requires Linux `strace` and non-interactive `sudo` attachment;
+unavailable prerequisites fail the case. It changes the syscall result without
+simulating lost device writes or volatile-cache loss. Passing results must be
+bound to the tested source and backend. See the [strace fault-injection
+contract](https://github.com/strace/strace/blob/master/doc/strace.1.in) for the
+per-thread injection semantics. This checks handling of a reported sync error,
+not physical failed-device or power-loss durability. Trace files and attachment
+logs stay in a private temporary directory and are removed after the tracer exits.
+
 To exercise authenticated snapshot import from pruned peers with Regolith,
 build the feature above, then point the harness at that binary:
 
@@ -95,3 +115,30 @@ pauses the joining node after discovery while peers advance beyond retention,
 then requires convergence into durable history import, where an injected crash
 exercises recovery, certified state, receipts, restart persistence and quorum
 participation.
+
+## Physical history-table damage
+
+Two focused storage cases materialize and close a compacted history table, then
+change its actual bytes: one flips a trailing footer bit and one removes the
+eight-byte table magic. The fixture synchronizes and rereads the damaged file
+before reopening history. Opening or recovery must report physical table damage
+without publishing a block or stored finalization. Restoring the pristine table
+must recover the exact durable records and stored finalization bytes and permit
+a subsequent append.
+
+```sh
+cargo test --frozen -p vera-node --lib history::tests::physical_tests::
+cargo test --frozen -p vera-node --lib --features regolith-history \
+  history::tests::physical_tests::
+```
+
+The `History file corruption` workflow selects those two cases independently
+for RocksDB and Regolith and lints the affected node tests. The compacting hook
+exists only in test builds; production history behavior and dependencies are
+unchanged. Hosted execution must pass before these cases count as qualification.
+
+This is physical file-corruption coverage at the history boundary, using small
+synthetic finalized records. It does not qualify device power loss, writes during
+compaction, Commonware journal corruption or restoration of a complete running
+validator. Those require separate checks; replacing individual files is not an
+operator recovery procedure.

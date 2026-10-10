@@ -8,8 +8,8 @@
 
 use std::{sync::Arc, time::Duration};
 
-use alloy_primitives::FixedBytes;
 use alloy_sol_types::SolCall;
+use commonware_codec::DecodeExt as _;
 use futures::{StreamExt as _, stream};
 use tokio::{sync::Semaphore, task::JoinSet, time::Instant};
 use vera_client::{ACP_ADDRESS, BlsSigner, VeraClient};
@@ -21,12 +21,20 @@ use vera_modules::acp::abi::IAcp;
 #[path = "operation_baseline/driver.rs"]
 #[allow(dead_code)]
 mod driver;
+#[path = "wan_baseline/qualification.rs"]
+mod qualification;
+#[path = "operation_baseline/replica_barrier.rs"]
+#[allow(dead_code)]
+mod replica_barrier;
 
 const DEFAULT_CHAIN_ID: u64 = 9001;
 
 #[tokio::main]
 async fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    run(std::env::args().skip(1).collect()).await;
+}
+
+async fn run(args: Vec<String>) {
     assert!(
         args.len() >= 2 && args.len() <= 8,
         "usage: wan_baseline <rpc url> <genesis.json | trusted group key hex> [count] [arrivals/sec] [max outstanding] [permission reads 0/1] [chain id] [extra rpc urls comma-separated]"
@@ -36,18 +44,19 @@ async fn main() {
             value.parse::<usize>().expect("positive integer")
         })
     };
-    let count = parse(2, 5_000).clamp(1, 100_000);
-    let rate = parse(3, 20).clamp(1, 10_000);
-    let outstanding = parse(4, 128).clamp(1, 1024);
+    let count = parse(2, 5_000);
+    let rate = parse(3, 20);
+    let outstanding = parse(4, 128);
+    assert!((1..=100_000).contains(&count));
+    assert!((1..=10_000).contains(&rate));
+    assert!((1..=1024).contains(&outstanding));
     let permission_reads = parse(5, 1);
     assert!(permission_reads <= 1);
     let chain_id = parse(6, DEFAULT_CHAIN_ID as usize) as u64;
     let trusted: vera_domain::ConsensusPublicKey = std::fs::read(&args[1]).map_or_else(
         |_| {
             let bytes = hex::decode(args[1].trim_start_matches("0x")).expect("trusted key hex");
-            bytes
-                .as_slice()
-                .try_into()
+            vera_domain::ConsensusPublicKey::decode(commonware_codec::Copying(bytes.as_slice()))
                 .expect("trusted group key bytes")
         },
         |bytes| {
@@ -87,17 +96,25 @@ async fn main() {
         .send_native_tx(&raw)
         .await
         .expect("submit setup policy");
-    client
-        .wait_for_receipt(hash, driver::POLL_INTERVAL, 600)
+    assert_eq!(hash, NativeTx::decode_wire(&raw).unwrap().tx_id().0);
+    let receipt = qualification::receipt(&client, hash, &trusted).await;
+    let policies = client
+        .read_policy_page(None, 2, receipt.revision.height, &trusted)
         .await
-        .expect("setup policy receipt");
-    let ids = client.get_policy_ids().await.expect("policy ids");
-    assert_eq!(ids.len(), 1, "network must accept the setup policy");
-    let policy_id = FixedBytes::<32>::from_slice(&hex::decode(&ids[0]).unwrap());
+        .expect("certified setup policy");
+    assert!(
+        policies.continuation.is_none(),
+        "use an isolated test deployment"
+    );
+    assert_eq!(policies.records.len(), 1, "use an isolated test deployment");
+    let policy = &policies.records[0];
+    assert_eq!(policy.metadata.tx_hash.as_slice(), hash.as_slice());
+    assert_eq!(policy.metadata.owner_did, setup.did());
+    let policy_id = vera_client::parse_policy_id(&policy.policy.id).unwrap();
 
     let reads = Arc::new(driver::ReadContext {
         trusted,
-        policy: ids[0].clone(),
+        policy: policy.policy.id.clone(),
         permissions: permission_reads == 1,
     });
     let requests: Vec<_> = (0..count)
@@ -169,23 +186,23 @@ async fn main() {
         println!("{}", observation.json());
     }
     println!("{}", driver::summary(&observations, elapsed));
+    driver::assert_no_verification_failures(&observations);
+    assert!(observations.iter().all(driver::Observation::completed));
 
-    if !extra.is_empty() {
+    {
         let replicas: Vec<_> = extra
             .iter()
             .map(VeraClient::new)
             .chain([VeraClient::new(&args[0])])
             .collect();
         let mut checks = stream::iter(observations.iter())
-            .map(|observation| driver::verify(&replicas, policy_id, observation))
+            .map(|observation| qualification::verify(&replicas, observation, &reads))
             .buffer_unordered(8);
         let mut verified = 0;
         let mut unresolved = 0;
         while let Some(resolution) = checks.next().await {
-            match resolution {
-                driver::Resolution::Verified => verified += 1,
-                driver::Resolution::Unresolved => unresolved += 1,
-            }
+            verified += usize::from(resolution);
+            unresolved += usize::from(!resolution);
         }
         println!(
             "{}",
@@ -196,5 +213,45 @@ async fn main() {
                 "unresolved": unresolved,
             })
         );
+        assert_eq!(unresolved, 0, "cross-region verification failed");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use commonware_codec::Encode as _;
+    use vera_e2e::cluster::{GenesisBuilder, KeySet, TestCluster};
+
+    #[tokio::test]
+    async fn certified_remote_workload_checks_all_replicas() {
+        let keys = KeySet::builder().seed(42).build().unwrap();
+        let trusted = hex::encode(keys.epoch_info().output.public().public().encode());
+        let cluster = TestCluster::builder()
+            .nodes(4)
+            .seed(42)
+            .chain_id(DEFAULT_CHAIN_ID)
+            .genesis(
+                GenesisBuilder::devnet()
+                    .blocks_per_epoch(192)
+                    .simplex(Default::default()),
+            )
+            .build()
+            .await
+            .unwrap();
+        run(vec![
+            cluster.node(0).rpc_url(),
+            trusted,
+            "16".into(),
+            "8".into(),
+            "16".into(),
+            "1".into(),
+            DEFAULT_CHAIN_ID.to_string(),
+            (1..4)
+                .map(|index| cluster.node(index).rpc_url())
+                .collect::<Vec<_>>()
+                .join(","),
+        ])
+        .await;
     }
 }

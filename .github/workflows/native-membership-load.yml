@@ -1,0 +1,66 @@
+name: Native membership under load
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['iverc/native-membership-load', 'iverc/certified-readiness']
+    paths:
+      - crates/vera-e2e/tests/native_membership.rs
+      - crates/vera-e2e/tests/support/membership_load.rs
+      - crates/vera-client/src/readiness.rs
+      - crates/vera-client/src/lib.rs
+      - bin/verad/src/probe.rs
+      - bin/verad/src/cli.rs
+      - bin/verad/src/main.rs
+      - bin/verad/Cargo.toml
+      - Cargo.lock
+      - .github/scripts/test-membership-load.sh
+      - .github/workflows/native-membership-load.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-membership-load-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native-membership-load:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: '2'
+      PROTOC: /usr/bin/protoc
+      VERAD_BINARY: ${{ github.workspace }}/target/release/verad
+      VERA_E2E_KEEP: '0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@62ae3a85dbdd2bedbb5819da8ce45635129289a1 # 1.98.0
+        with:
+          components: clippy
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: hosted-linux-checks
+          cache-on-failure: true
+      - name: Fetch locked dependencies
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
+        run: cargo fetch --locked
+      - name: Lint the membership qualification
+        run: |
+          cargo clippy --frozen -p vera-e2e --test native_membership -- -D warnings
+          cargo clippy --frozen -p verad --bin verad -- -D warnings
+          cargo test --frozen -p vera-client readiness::tests:: --lib
+      - name: Build the normal validator
+        run: cargo build --frozen --release -p verad
+      - name: Exercise admission, restart and removal during certified access updates
+        run: bash .github/scripts/test-membership-load.sh

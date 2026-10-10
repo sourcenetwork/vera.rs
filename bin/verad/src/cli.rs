@@ -32,6 +32,8 @@ pub(crate) struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum Commands {
+    /// Verify fresh certified progress using independently provisioned trust.
+    Probe(crate::probe::ProbeArgs),
     /// Run validator node.
     Validator(ValidatorArgs),
     /// Run single-node devnet (no DKG required).
@@ -114,6 +116,7 @@ impl Cli {
             return args.run();
         }
         match &self.command {
+            Some(Commands::Probe(args)) => Ok(args.run()?),
             Some(Commands::Validator(args)) => self.run_validator(args),
             Some(Commands::Devnet(args)) => self.run_devnet(args),
             Some(Commands::Testnet(args)) => {

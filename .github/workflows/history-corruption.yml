@@ -1,0 +1,59 @@
+name: History file corruption
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/history-corruption.yml
+      - crates/vera-node/src/history/physical_tests.rs
+      - crates/vera-node/src/history/regolith_store.rs
+      - crates/vera-node/src/history/tests.rs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: history-corruption-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  corruption:
+    name: Physical history damage (${{ matrix.backend }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: rocksdb
+            features: ''
+          - backend: regolith
+            features: '--features regolith-history'
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_TERM_COLOR: always
+      PROTOC: /usr/bin/protoc
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@62ae3a85dbdd2bedbb5819da8ce45635129289a1 # 1.98.0
+        with:
+          components: clippy
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: hosted-linux-checks
+      - name: Fetch locked dependencies
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
+        run: cargo fetch --locked
+      - name: Check physical damage rejection and restoration
+        run: >-
+          cargo test --frozen -p vera-node --lib ${{ matrix.features }} history::tests::physical_tests::
+      - name: Lint affected node tests
+        run: cargo clippy --frozen -p vera-node --lib --tests ${{ matrix.features }} -- -D warnings
