@@ -12,7 +12,7 @@ from pathlib import Path
 SNAPSHOT_MARK = 'node resource snapshot'
 TIMESTAMP = re.compile(r'^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s+')
 ANSI = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
-FIELD_START = re.compile(r'\s+(runtime_metrics|history_memory_bytes|durable_height|index|proofs|allocator_memory_bytes)=')
+FIELD_START = re.compile(r'\s+(runtime_metrics|history_memory_bytes|durable_height|index|proofs|allocator_memory_bytes|process_id)=')
 LEAF_STRUCT = re.compile(r'([a-z_0-9]+): (\d+)')
 LEAF_OPTION = re.compile(r'"([a-z_0-9]+)": (?:Some\((\d+)\)|(None))')
 METRIC = re.compile(r'^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{.*\})?\s+([^\s]+)(?:\s+#.*)?$')
@@ -64,9 +64,14 @@ def parse_snapshot(event):
         return None
     fields = sections(event)
     required = {'runtime_metrics', 'history_memory_bytes', 'durable_height', 'index', 'proofs'}
-    if set(fields) not in (required, required | {'allocator_memory_bytes'}):
+    if not required <= set(fields) <= required | {'allocator_memory_bytes', 'process_id'}:
         raise ValueError('incomplete node resource snapshot')
     record = {'durable_height': int(fields['durable_height'].strip())}
+    if 'process_id' in fields:
+        process = fields['process_id'].strip()
+        if not re.fullmatch(r'[1-9][0-9]{0,9}', process) or int(process) > 0xffffffff:
+            raise ValueError('invalid snapshot process ID')
+        record['process_id'] = int(process)
     for section in ('runtime_metrics', 'history_memory_bytes', 'index', 'proofs'):
         parser = runtime_metrics if section == 'runtime_metrics' else leaves
         for name, value in parser(fields[section]).items():

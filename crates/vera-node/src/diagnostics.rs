@@ -35,7 +35,8 @@ pub(crate) async fn run(
             Ok(Ok((metrics, memory, durable_height, index, proofs, allocator))) => {
                 tracing::debug!(target: "vera_diagnostics", runtime_metrics = %metrics,
                     history_memory_bytes = ?memory, durable_height, index = ?index, proofs = ?proofs,
-                    allocator_memory_bytes = ?allocator, "node resource snapshot");
+                    allocator_memory_bytes = ?allocator, process_id = std::process::id(),
+                    "node resource snapshot");
             }
             Ok(Err(error)) => {
                 tracing::warn!(target: "vera_diagnostics", %error, "resource snapshot failed")

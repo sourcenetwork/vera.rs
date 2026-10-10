@@ -47,6 +47,37 @@ class Qualification(unittest.TestCase):
         for private in ('private-test-name', 'do-not-export', 'runtime_metrics', str(self.root)):
             self.assertNotIn(private, encoded)
 
+    def test_restart_process_count_requires_identity_on_every_sample(self):
+        first = allocator_snapshot().rstrip() + ' process_id=11\n'
+        second = allocator_snapshot(30).rstrip() + ' process_id=29\n'
+        self.log().write_text(first + second)
+        members = qualification.qualify(self.logs)['clusters'][0]['members']
+        self.assertEqual(members[0]['processes'], 2)
+        self.assertIsNone(members[1]['processes'])
+        self.log().write_text(first + allocator_snapshot(30))
+        members = qualification.qualify(self.logs)['clusters'][0]['members']
+        self.assertIsNone(members[0]['processes'])
+
+    def test_required_process_identity_rejects_old_and_mixed_samples(self):
+        with self.assertRaisesRegex(ValueError, 'process ID'):
+            qualification.qualify(self.logs, require_process_id=True)
+        for index in range(4):
+            content = allocator_snapshot().rstrip() + ' process_id=%d\n' % (index + 1)
+            self.log(index).write_text(content)
+        members = qualification.qualify(self.logs, require_process_id=True)['clusters'][0]['members']
+        self.assertEqual([member['processes'] for member in members], [1] * 4)
+        output = self.root / 'identified-evidence.json'
+        args = ['--logs', str(self.logs), '--output', str(output), '--require-process-id']
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(qualification.main(args), 0)
+        with self.log().open('a') as output:
+            output.write(allocator_snapshot(30))
+        with self.assertRaisesRegex(ValueError, 'process ID'):
+            qualification.qualify(self.logs, require_process_id=True)
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(qualification.main(args), 1)
+        self.assertFalse((self.root / 'identified-evidence.json').exists())
+
     def test_missing_unsupported_malformed_and_inconsistent_snapshots_fail(self):
         for content in ('ordinary private log\n', snapshot(), allocator_snapshot(supported=False),
                         allocator_snapshot().replace('Some(256)', 'Some(257)'),

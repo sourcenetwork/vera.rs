@@ -73,6 +73,15 @@ class SnapshotParser(unittest.TestCase):
         self.assertEqual(record['allocator_memory_bytes.direct_mapped'], 4096)
         self.assertEqual(record['history_memory_bytes.block_cache'], 2048)
 
+    def test_process_ids_are_preserved_and_invalid_ids_fail(self):
+        self.assertNotIn('process_id', metrics.parse_snapshot(snapshot()))
+        for pid in (1, 1234, 0xffffffff):
+            record = metrics.parse_snapshot(snapshot().rstrip() + ' process_id=%d\n' % pid)
+            self.assertEqual(record['process_id'], pid)
+        for pid in ('0', '-1', '4294967296', 'true', '1.5', '12 trailing'):
+            with self.subTest(pid=pid), self.assertRaises(ValueError):
+                metrics.parse_snapshot(snapshot().rstrip() + ' process_id=' + pid + '\n')
+
     def test_unsupported_allocator_counters_remain_absent_values(self):
         event = snapshot().rstrip() + (
             ' allocator_memory_bytes={"arena_reserved": None, "arena_in_use": None, '
@@ -118,6 +127,15 @@ class RetainedCluster(unittest.TestCase):
         self.assertEqual(records[1]['recording_elapsed_seconds'], 30)
         self.assertEqual(records[1]['sample_index'], 1)
         self.assertEqual(records[1]['recorded_at'], '2026-10-09T10:00:30.000Z')
+
+    def test_restart_keeps_distinct_process_ids_in_the_same_member_log(self):
+        log = self.logs / 'run-one/node0/logs/stdout.log'
+        log.write_text(snapshot().rstrip() + ' process_id=11\n' +
+                       snapshot(30).rstrip() + ' process_id=29\n')
+        records = metrics.collect(self.logs, START, 4, 2)
+        node = [row for row in records if row['member'] == 'node0']
+        self.assertEqual([row['process_id'] for row in node], [11, 29])
+        self.assertEqual([row['recording_elapsed_seconds'] for row in node], [0, 30])
 
     def test_cli_reads_nodes_and_exports_only_numeric_evidence(self):
         with contextlib.redirect_stdout(io.StringIO()):

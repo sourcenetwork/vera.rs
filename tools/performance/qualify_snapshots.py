@@ -22,7 +22,7 @@ def directory(path):
         raise ValueError('snapshot directory must be a real directory')
 
 
-def member_summary(node):
+def member_summary(node, require_process_id=False):
     directory(node)
     directory(node / 'logs')
     log = node / 'logs/stdout.log'
@@ -30,8 +30,15 @@ def member_summary(node):
     if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_LOG_BYTES:
         raise ValueError('snapshot log is not a bounded regular file')
     values = {name: [] for name in COUNTERS}
+    processes = set()
+    identified = 0
     for event in snapshots(log):
         record = parse_snapshot(event)
+        if require_process_id and 'process_id' not in record:
+            raise ValueError('snapshot process ID must be present')
+        if 'process_id' in record:
+            processes.add(record['process_id'])
+            identified += 1
         current = {name: record.get('allocator_memory_bytes.' + name) for name in COUNTERS}
         if any(type(value) is not int or value < 0 for value in current.values()):
             raise ValueError('GNU/Linux allocator counters must be present')
@@ -44,12 +51,12 @@ def member_summary(node):
     count = len(values[COUNTERS[0]])
     if count == 0:
         raise ValueError('member has no allocator snapshots')
-    return {'samples': count, 'bytes': {
+    return {'samples': count, 'processes': len(processes) if identified == count else None, 'bytes': {
         name: {'minimum': min(series), 'maximum': max(series), 'last': series[-1]}
         for name, series in values.items()}}
 
 
-def qualify(logs):
+def qualify(logs, require_process_id=False):
     directory(logs)
     clusters = []
     for run in sorted(logs.iterdir()):
@@ -62,7 +69,7 @@ def qualify(logs):
             continue
         if not 1 <= len(members) <= MAX_MEMBERS or set(members) != set(range(len(members))):
             raise ValueError('retained member set is incomplete or oversized')
-        clusters.append({'members': [member_summary(members[index])
+        clusters.append({'members': [member_summary(members[index], require_process_id)
                                      for index in range(len(members))]})
         if len(clusters) > MAX_CLUSTERS:
             raise ValueError('snapshot cluster limit exceeded')
@@ -75,10 +82,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--logs', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--require-process-id', action='store_true')
     args = parser.parse_args(argv)
     args.output.unlink(missing_ok=True)
     try:
-        result = qualify(args.logs)
+        result = qualify(args.logs, args.require_process_id)
     except (OSError, KeyError, TypeError, ValueError):
         print('allocator snapshot qualification failed', file=sys.stderr)
         return 1

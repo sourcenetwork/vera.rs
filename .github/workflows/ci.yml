@@ -593,6 +593,7 @@ jobs:
           python3 tools/performance/qualify_snapshots.py
           --logs "$RUNNER_TEMP/e2e-logs"
           --output "$RUNNER_TEMP/allocator-evidence.json"
+          --require-process-id
 
       - name: Upload allocator evidence
         if: always() && matrix.suite == 'lifecycle'

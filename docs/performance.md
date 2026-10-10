@@ -250,6 +250,14 @@ counts and minimum, maximum and last allocator byte counters; paths, labels and
 raw logs are excluded. These checks qualify collection, not a sustained memory
 bound or a workload capacity result.
 
+Snapshots preserve the node process ID during extraction. The bounded lifecycle
+artifact reports the number of observed process IDs only when every sample has
+one; older recordings retain an unknown count. Lifecycle CI requires IDs on every
+sample. Compare allocation trends within
+one process, using known restart boundaries as well as its ID because operating
+systems can reuse IDs. Older datasets without process IDs cannot provide that
+identity from these counters alone.
+
 ### Completed allocator accounting on October 10, 2026
 
 [Run 38041684110](https://github.com/sourcenetwork/vera.rs/actions/runs/38041684110)
