@@ -258,6 +258,13 @@ one process, using known restart boundaries as well as its ID because operating
 systems can reuse IDs. Older datasets without process IDs cannot provide that
 identity from these counters alone.
 
+Regolith snapshots separately expose `history_memory_bytes.pinned_table_metadata`
+from its [pinned metadata property](https://github.com/sourcenetwork/regolith/blob/e7cf2732d0178defb02d9306cd8d1dae6406e4d8/src/engine/mod.rs#L3354). This measures metadata held
+outside the block-cache budget by SST readers in the current version; it does not
+cover every allocation or metadata held through older versions. RocksDB retains
+an unsupported value for this backend-specific counter. The allocator recordings
+below predate this field and cannot attribute their growth to that metadata.
+
 ### Completed allocator accounting on October 10, 2026
 
 [Run 38041684110](https://github.com/sourcenetwork/vera.rs/actions/runs/38041684110)

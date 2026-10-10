@@ -125,6 +125,7 @@ impl FinalizedHistory {
             ("memtables", "rocksdb.size-all-mem-tables"),
             ("table_readers", "rocksdb.estimate-table-readers-mem"),
             ("block_cache", "rocksdb.block-cache-usage"),
+            ("pinned_table_metadata", "regolith.pinned-metadata-bytes"),
         ]
         .into_iter()
         .map(|(label, property)| Ok((label, self.db.property_int_value(property)?)))

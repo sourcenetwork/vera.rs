@@ -50,6 +50,14 @@ class SnapshotParser(unittest.TestCase):
         self.assertEqual(len([key for key in record if key.startswith('runtime_metrics.buffer_bytes.')]), 2)
         self.assertNotIn('private-partition', json.dumps(record))
 
+    def test_backend_metadata_bytes_preserve_supported_and_missing_values(self):
+        for value, expected in (('Some(8192)', 8192), ('None', None)):
+            event = snapshot().replace('"table_readers": None}',
+                                       '"table_readers": None, "pinned_table_metadata": %s}' % value)
+            record = metrics.parse_snapshot(event)
+            self.assertEqual(record['history_memory_bytes.pinned_table_metadata'], expected)
+            self.assertIsNone(record['history_memory_bytes.table_readers'])
+
     def test_missing_fields_invalid_metrics_and_non_finite_values_fail(self):
         for event in (snapshot().replace('durable_height=42 ', ''),
                       snapshot().replace('elapsed_seconds 1.25e-3', 'elapsed_seconds NaN'),
