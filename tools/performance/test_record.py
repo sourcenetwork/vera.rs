@@ -118,7 +118,7 @@ class RecorderTests(unittest.TestCase):
             self.assertEqual(json.loads((output / 'manifest.json').read_text()), metadata)
 
 
-    def record_with_mocked_process(self, timeout, waits):
+    def record_with_mocked_process(self, timeout, waits, arena=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             runner = root / 'runner'
@@ -128,6 +128,8 @@ class RecorderTests(unittest.TestCase):
                        '--history', 'rocksdb', '--output', str(output)]
             if timeout is not None:
                 command += ['--timeout-seconds', str(timeout)]
+            if arena is not None:
+                command += ['--glibc-arena-max', arena]
             command += ['fixture-argument']
             process = Mock(pid=12345)
             process.wait.side_effect = waits
@@ -135,15 +137,84 @@ class RecorderTests(unittest.TestCase):
                     patch('record.subprocess.check_output', side_effect=['revision', b'', 'revision', b'']), \
                     patch('record.cpu_model', return_value='fixture'), \
                     patch('record.platform.platform', return_value='fixture'), \
+                    patch('record.platform.system', return_value='Linux'), \
+                    patch('record.platform.libc_ver', return_value=('glibc', '2.39')), \
                     patch('record.subprocess.Popen', return_value=process) as spawn, \
                     patch('record.os.killpg') as killpg:
                 with self.assertRaises(SystemExit) as result:
                     record.main()
             manifest = json.loads((output / 'manifest.json').read_text())
             self.assertEqual(manifest['exit_code'], result.exception.code)
+            child = spawn.call_args.kwargs['env']
+            effective = child.get('MALLOC_ARENA_MAX')
+            self.assertEqual(manifest['allocator_environment']['glibc_arena_max'],
+                             None if effective is None else int(effective))
             self.assertTrue(spawn.call_args.kwargs['start_new_session'])
             self.assertEqual(spawn.call_args.args[0], [str(runner.resolve()), 'fixture-argument'])
             return manifest, process.wait.call_args_list, killpg.call_args_list
+
+    def test_controlled_arena_selection_reaches_only_the_child(self):
+        with patch.dict(os.environ, {'MALLOC_ARENA_MAX': '32'}, clear=True):
+            for selected, effective in (('default', None), ('2', 2)):
+                with self.subTest(selected=selected):
+                    manifest, _, _ = self.record_with_mocked_process(None, [0, 0], selected)
+                    self.assertEqual(manifest['allocator_environment'], {
+                        'controlled': True, 'glibc_arena_max': effective,
+                        'libc_name': 'glibc', 'libc_version': '2.39'})
+                    self.assertEqual(os.environ['MALLOC_ARENA_MAX'], '32')
+
+    def test_unselected_arena_environment_is_preserved_without_private_values(self):
+        environment = {'MALLOC_ARENA_MAX': '8', 'PRIVATE_SETTING': 'private-secret'}
+        with patch('record.platform.libc_ver', return_value=('glibc', '2.39')):
+            child, metadata = record.allocator_environment(environment)
+        self.assertEqual(child, environment)
+        self.assertEqual(metadata['glibc_arena_max'], 8)
+        self.assertFalse(metadata['controlled'])
+        self.assertNotIn('private-secret', json.dumps(metadata))
+
+    def test_controlled_selection_rejects_allocator_overrides(self):
+        with patch('record.platform.system', return_value='Linux'), \
+                patch('record.platform.libc_ver', return_value=('glibc', '2.39')):
+            for key in ('GLIBC_TUNABLES', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'MALLOC_TRIM_THRESHOLD_'):
+                for selected in ('default', '2'):
+                    with self.subTest(key=key, selected=selected), self.assertRaises(ValueError) as error:
+                        record.allocator_environment({key: 'private-secret'}, selected)
+                    self.assertNotIn('private-secret', str(error.exception))
+
+    def test_controlled_selection_rejects_other_libc_and_platforms(self):
+        for system, libc in (('Darwin', ('', '')), ('Linux', ('musl', '1.2'))):
+            with patch('record.platform.system', return_value=system), \
+                    patch('record.platform.libc_ver', return_value=libc):
+                with self.assertRaises(ValueError):
+                    record.allocator_environment({}, '2')
+                _, metadata = record.allocator_environment({})
+                self.assertIsNone(metadata['glibc_arena_max'])
+                self.assertFalse(metadata['controlled'])
+
+    def test_unsupported_arena_values_are_not_exported(self):
+        for raw in ('', '-1', '2.0', '01', '4294967296', 'private-secret'):
+            with self.subTest(raw=raw), self.assertRaises(ValueError) as error:
+                record.allocator_environment({'MALLOC_ARENA_MAX': raw})
+            self.assertEqual(str(error.exception), 'unsupported arena limit')
+
+    def test_invalid_controlled_environment_creates_no_artifacts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'output'
+            command = ['record.py', '--node', 'missing-node', '--runner', 'missing-runner',
+                       '--history', 'rocksdb', '--output', str(output),
+                       '--glibc-arena-max', '2', 'fixture-argument']
+            with patch.object(sys, 'argv', command), \
+                    patch.dict(os.environ, {'GLIBC_TUNABLES': 'private-secret'}, clear=True), \
+                    patch('record.platform.system', return_value='Linux'), \
+                    patch('record.platform.libc_ver', return_value=('glibc', '2.39')), \
+                    patch('record.subprocess.Popen') as spawn, \
+                    contextlib.redirect_stderr(io.StringIO()) as error:
+                with self.assertRaises(SystemExit) as result:
+                    record.main()
+            self.assertEqual(result.exception.code, 2)
+            spawn.assert_not_called()
+            self.assertFalse(output.exists())
+            self.assertNotIn('private-secret', error.getvalue())
 
     def test_default_and_configured_timeout_reach_child_wait(self):
         for configured, expected in ((None, 900), (1, 1), (1800, 1800), (86400, 86400)):

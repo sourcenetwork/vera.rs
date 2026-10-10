@@ -119,6 +119,37 @@ whole run includes those final checks. This is a separate workload and host from
 the hosted Linux baseline, with detailed latency, resource and timing limits in
 the linked report.
 
+## Allocator retention comparison
+
+`allocator_comparison=true` runs two fresh four-validator fixed-state workloads
+on the same hosted runner: the default glibc arena setting, then
+`MALLOC_ARENA_MAX=2`. Each case offers 90,000 operations at 50/s over 30 minutes
+against 128 objects, using the same prebuilt release binaries. Both history
+backends run this comparison independently. The ordinary performance workflow
+and production configuration retain their existing allocator settings.
+
+```bash
+gh workflow run performance.yml --ref <branch> -f allocator_comparison=true
+```
+
+The recorder changes only the workload process and its descendants, records the
+selected arena setting and libc version, and rejects conflicting allocator
+or loader overrides for these controlled cases. Cases retain distinct manifests,
+resource snapshots, certified permission checks, all-replica reconciliation,
+restart verification, latency reports and interactive replays. Results are under
+`objects-128-allocator-default` and `objects-128-allocator-2` in each backend's
+artifact. Private node directories are removed after extraction between cases.
+The comparison cannot combine with growing-state, archive-retention or
+storage-attribution modes.
+
+[Glibc arenas](https://sourceware.org/glibc/manual/latest/html_node/Memory-Allocation-Tunables.html)
+provide an allocation-concurrency limit, not a heap or RSS cap. Reducing their
+number may trade allocation contention for lower retained memory. Compare the
+whole RSS timeline, late-run growth, useful-operation latency and correctness;
+a smaller final RSS alone does not establish a memory bound or identify a leak.
+The fixed case order and single hosted machine make this an exploratory result,
+not a production allocator recommendation or maximum-capacity measurement.
+
 ## Manual sustained fixed-state run
 
 The same workflow accepts `sustained_fixed_state=true` only through manual
