@@ -3,6 +3,9 @@
 #[path = "native_permission/policy_edits.rs"]
 mod policy_edits;
 
+#[path = "native_permission/read_check.rs"]
+mod read_check;
+
 use std::time::Duration;
 
 use alloy_sol_types::SolCall;
@@ -246,6 +249,16 @@ async fn permission_lifecycle(pipelined: bool) {
         .await
         .unwrap();
     assert!(policy_record.record.value.is_some());
+    if pipelined {
+        read_check::exercise(
+            &cluster.node(0).rpc_url(),
+            &policy,
+            granted,
+            &trusted,
+            &unrelated_trust,
+        )
+        .await;
+    }
     let missing = client
         .read_current_record(
             ModuleId::Acp,
