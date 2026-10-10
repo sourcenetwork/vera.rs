@@ -6,8 +6,8 @@ on:
       history:
         description: History backend to profile
         type: choice
-        options: [rocksdb, regolith]
-        default: rocksdb
+        options: [regolith]
+        default: regolith
       profile:
         description: Allocation window to inspect
         type: choice
@@ -25,7 +25,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-heap-profile-${{ github.ref }}-${{ inputs.history || 'rocksdb' }}-${{ inputs.profile || 'sustained' }}
+  group: native-heap-profile-${{ github.ref }}-${{ inputs.history || 'regolith' }}-${{ inputs.profile || 'sustained' }}
   cancel-in-progress: false
 
 jobs:
@@ -38,7 +38,7 @@ jobs:
       CARGO_PROFILE_RELEASE_DEBUG: full
       CARGO_PROFILE_RELEASE_STRIP: none
       RUSTFLAGS: '-C force-frame-pointers=yes'
-      HISTORY_BACKEND: ${{ inputs.history || 'rocksdb' }}
+      HISTORY_BACKEND: ${{ inputs.history || 'regolith' }}
       PROFILE_SELECTION: ${{ inputs.profile || 'sustained' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -65,9 +65,7 @@ jobs:
       - name: Build the existing release workload with allocation symbols
         shell: bash
         run: |
-          features=()
-          if [[ "$HISTORY_BACKEND" == regolith ]]; then features=(--features regolith-history); fi
-          cargo build --frozen --release -p verad "${features[@]}"
+          cargo build --frozen --release -p verad
           cargo build --frozen --release -p vera-e2e --example operation_baseline
       - name: Check profile selection and result extraction
         run: python3 -m unittest discover -s tools/performance -p test_heap_profile.py

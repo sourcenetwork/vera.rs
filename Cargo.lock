@@ -7638,7 +7638,6 @@ dependencies = [
  "libc",
  "parking_lot",
  "regolith",
- "rocksdb",
  "serde",
  "serde_json",
  "tempfile",

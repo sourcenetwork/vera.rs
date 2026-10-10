@@ -359,14 +359,12 @@ jobs:
           cargo test --frozen -p vera-e2e --example operation_baseline process_io_
           cargo clippy --frozen -p vera-e2e --example operation_baseline -- -D warnings
           cargo test --frozen -p vera-e2e --example wan_baseline replica_barrier
-          cargo test --frozen -p vera-node --lib --features regolith-history "history::"
+          cargo test --frozen -p vera-node --lib "history::"
 
       - name: Build feature variants
         run: |
           cargo build --frozen -p verad
-          cargo build --frozen -p verad --features regolith-history
           cargo build --frozen -p verad --features fault-injection
-          cargo build --frozen -p verad --features regolith-history,fault-injection
           cargo build --frozen --release --no-default-features -p verad
           cargo build --frozen --release -p vera-e2e --example mixed_policy_workload
 
@@ -392,7 +390,7 @@ jobs:
           install -d -m 700 "$RUNNER_TEMP/mixed-policy-release"
           python3 tools/performance/record.py \
             --node target/release/verad --runner target/release/examples/mixed_policy_workload \
-            --history rocksdb --rust-log warn --timeout-seconds 960 \
+            --history regolith --rust-log warn --timeout-seconds 960 \
             --output "$RUNNER_TEMP/mixed-policy-release/measurement" 16 2 8 900
 
       - name: Qualify bounded mixed policy evidence
@@ -426,7 +424,7 @@ jobs:
       - name: Upload Linux release bundle
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: verad-x86_64-unknown-linux-gnu-rocksdb
+          name: verad-x86_64-unknown-linux-gnu-regolith
           path: ${{ runner.temp }}/verad-linux-release/
           if-no-files-found: error
           retention-days: 30
@@ -480,23 +478,8 @@ jobs:
             binary-features: ""
             test-features: ""
             tests: --test snapshot_catchup
-          - suite: regolith-recovery
-            binary-features: "--features regolith-history"
-            test-features: ""
-            tests: --test snapshot_catchup snapshot_replica_recovers_from_pruned_peers
-            exact: --exact
-          - suite: regolith-backup
-            binary-features: "--features regolith-history"
-            test-features: ""
-            tests: --test cold_replay stopped_backup_restores_revocations_and_rejoins_pipelined_consensus
-            exact: --exact
           - suite: disk-full
             binary-features: ""
-            test-features: ""
-            tests: --test disk_full
-            exact: ""
-          - suite: regolith-disk-full
-            binary-features: "--features regolith-history"
             test-features: ""
             tests: --test disk_full
             exact: ""
@@ -504,16 +487,6 @@ jobs:
             binary-features: ""
             test-features: ""
             tests: --test sync_failure sync_failure_recovers_acknowledged_operations
-            exact: --exact
-          - suite: regolith-sync-failure
-            binary-features: "--features regolith-history"
-            test-features: ""
-            tests: --test sync_failure sync_failure_recovers_acknowledged_operations
-            exact: --exact
-          - suite: regolith-interrupted
-            binary-features: "--features regolith-history,fault-injection"
-            test-features: "--features fault-injection"
-            tests: --test snapshot_interrupt interrupted_snapshot_resumes_from_pruned_peers
             exact: --exact
           - suite: commit-crash
             exact: ""

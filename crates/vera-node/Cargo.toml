@@ -7,7 +7,8 @@ description = "Vera validator node assembly on commonware glue"
 
 [features]
 fault-injection = ["vera-app/fault-injection"]
-regolith-history = ["dep:regolith"]
+# Kept as an explicit build marker for native deployment manifests.
+regolith-history = []
 
 [lints]
 workspace = true
@@ -53,8 +54,7 @@ bytes.workspace = true
 futures.workspace = true
 hex.workspace = true
 parking_lot.workspace = true
-rocksdb = "0.22"
-regolith = { git = "https://github.com/sourcenetwork/regolith", rev = "e7cf2732d0178defb02d9306cd8d1dae6406e4d8", optional = true }
+regolith = { git = "https://github.com/sourcenetwork/regolith", rev = "e7cf2732d0178defb02d9306cd8d1dae6406e4d8" }
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

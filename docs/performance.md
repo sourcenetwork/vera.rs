@@ -14,7 +14,7 @@ Vera provides these workload drivers:
 
 The [Performance workflow](../.github/workflows/performance.yml) runs after a
 successful main-branch CI push, or through manual dispatch. It builds release
-binaries before measurement and runs RocksDB and Regolith history on separate
+binaries before measurement and runs Regolith history on a
 hosted runners. Each backend measures 3,000 operations at 50 offered arrivals/s,
 first with growing registrations and then with 128 repeatedly updated objects.
 These are fixed-load baselines, not searches for maximum throughput. They are
@@ -580,7 +580,7 @@ cargo +1.98.0 build --frozen --release -p vera-e2e --example operation_baseline
 python3 tools/performance/record.py \
   --node target/release/verad \
   --runner target/release/examples/operation_baseline \
-  --history rocksdb --output /tmp/vera-performance-run --timeout-seconds 900 \
+  --history regolith --output /tmp/vera-performance-run --timeout-seconds 900 \
   3000 50 128 1 normal 100 20 0 128 32
 python3 -m venv /tmp/vera-performance-python
 /tmp/vera-performance-python/bin/pip install -r tools/performance/requirements.txt
@@ -588,7 +588,7 @@ python3 -m venv /tmp/vera-performance-python
 ```
 
 The output directory must not already exist. For Regolith, build `verad` with
-`--features regolith-history` and label that exact executable `--history regolith`.
+a normal build and label that exact executable `--history regolith`.
 The recorder hashes binaries but cannot infer their source revision or features;
 its source field describes the checkout. The workflow binds that checkout to its
 own build steps. Do not label an older prebuilt executable with a new checkout.
@@ -792,7 +792,7 @@ VERA_TRACE_SPANS=0 VERA_E2E_KEEP=1 VERA_E2E_DIR="$evidence/clusters" \
   python3 tools/performance/record.py \
   --node target/release/verad \
   --runner target/release/examples/mixed_policy_workload \
-  --history rocksdb --output "$evidence/measurement" \
+  --history regolith --output "$evidence/measurement" \
   --rust-log warn,vera_publication_diagnostics=debug 32 4 16 300
 python3 tools/performance/storage_attribution.py --publication-only \
   --run-root "$evidence" --output "$evidence/publication-summary.json"
@@ -819,7 +819,7 @@ to both modes; neither reports isolated disk latency.
 ### Manual Linux storage attribution
 
 The existing Performance workflow accepts a manual `storage_attribution` option.
-It selects RocksDB only and builds the node and `mixed_policy_workload` in release
+It uses Regolith and builds the node and `mixed_policy_workload` in release
 mode before running `32 4 16 300` twice: first as an uninstrumented comparator,
 then with storage
 spans and `strace` restricted to `fsync` and `fdatasync` in the workload executable
@@ -1000,3 +1000,69 @@ the observed drop does not establish a sustained memory bound or its cause.
 The report groups allocations by caller and does not contain per-owner lifetime
 histories, so it cannot assign late growth to a specific queue, cache or storage
 component. Raw traces and runtime data remain excluded from the public artifact.
+
+
+## Sustained process-aware measurements on October 10, 2026
+
+[Run 38048663025](https://github.com/sourcenetwork/vera.rs/actions/runs/38048663025)
+used frozen source `84d8460f993a220a9e19110bf2d08b5876492586`. Each backend
+completed 90,000 fixed-state updates over thirty minutes at 50 offered
+operations/s against 128 objects. All four replicas verified all outcomes;
+restart checks inspected all 90,000 operations with zero receipt or state
+mismatches. There were no unsent, unknown, rejected, reverted, incomplete or
+verification-failed operations, and no missing RSS samples.
+
+These were normal release builds on one host per backend, using default glibc
+2.39 allocator settings and default backend settings. Numeric resource snapshots
+were enabled at thirty-second intervals; Heaptrack was not enabled. Each backend
+ran once on a separate hosted runner. This is an offered-load checkpoint, not a
+capacity measurement, a statistical backend comparison or a WAN result. It
+predates the asynchronous DKG persistence change.
+
+| History backend | Confirmed operations/s | Certified receipt p95 | Permission read p95 |
+| --- | ---: | ---: | ---: |
+| RocksDB | 49.996 | 284.721 ms | 10.853 ms |
+| Regolith | 49.997 | 263.961 ms | 3.951 ms |
+
+The diagnostic artifacts contain 300 RocksDB and 272 Regolith process-identified
+snapshots. Members 0–2 have one observed lifetime; member 3 has a second lifetime
+after the intentional restart. The first process IDs match the workload's RSS
+samples. Allocator counters satisfy `arena_reserved = arena_in_use + arena_free`.
+Between workload minutes 20 and 30, RSS grew by 17.56–77.07 MiB per member with
+RocksDB and 50.48–71.30 MiB with Regolith. This window does not show a memory
+plateau or establish a leak.
+
+The recording and workload clocks have different origins. The following allocator
+and database deltas pair counters within the same diagnostic record and use only
+each member's original process; they are not a decomposition of workload RSS.
+Over recording minutes 20–29.5:
+
+| Counter change per member | RocksDB | Regolith |
+| --- | ---: | ---: |
+| Allocator arena bytes in use | −27.14 to −25.41 MiB | +25.68 to +31.24 MiB |
+| Reported memtable bytes | −41.00 MiB | −39.72 MiB |
+| History block-cache bytes | +0.007 to +3.996 MiB | +0.032 to +1.194 MiB |
+
+Each member also recorded one adjacent-sample memtable reduction larger than
+20 MiB. RocksDB's reported memtables fell by 63 MiB between recording minutes
+27.01 and 27.51, while allocator arena bytes in use fell by 58.67–61.30 MiB.
+Regolith's reported memtables fell by about 62.73 MiB between minutes 25.5 and
+26.0, while arena bytes in use rose by 0.72–2.61 MiB. Current-version Regolith
+table metadata peaked at 386,407 bytes (0.37 MiB); it excludes older referenced
+versions. The measured query-cache and proof-byte changes were much smaller
+than the live-allocator increase.
+
+Regolith's reported memtable size counts used bytes in the current active and
+frozen tables. It excludes unused reserved arena tails and retired chunks parked
+in the recycling pool. The pinned engine exposes these separately as
+`regolith.memtable-reserved-bytes` and `regolith.arena-pool-bytes`; this dataset
+does not record them. The default pool has a 128 MiB byte budget per database
+(64 MiB write buffer × two write buffers). Returned chunks over the pool's byte
+or size-class bounds are freed. See the pinned [arena implementation](https://github.com/sourcenetwork/regolith/blob/e7cf2732d0178defb02d9306cd8d1dae6406e4d8/src/engine/arena.rs)
+and [options](https://github.com/sourcenetwork/regolith/blob/e7cf2732d0178defb02d9306cd8d1dae6406e4d8/src/options.rs).
+
+Recycling is therefore a plausible source of live allocations across table
+retirement. Actual pool occupancy and retaining ownership remain unmeasured;
+these observations do not prove that recycling accounts for the whole increase.
+The pool's source bound is not a bound on validator memory. Do not infer a leak,
+a whole-process memory bound or a backend default change from this checkpoint.

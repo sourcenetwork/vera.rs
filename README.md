@@ -17,7 +17,7 @@ services, write and read flows, membership changes, storage, and recovery.
 
 The native stack uses Commonware DKG for consensus shares, local Rust ACP crates
 for permission evaluation, and Commonware QMDB for authenticated state. History
-uses RocksDB by default, with an optional Regolith backend. Application threshold
+uses Regolith with synchronous durable writes. Application threshold
 protocols and secrets remain separate from consensus.
 
 ## Guides

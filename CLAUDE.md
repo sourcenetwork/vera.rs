@@ -72,8 +72,8 @@ The finalization callback persists execution and certificate history together
 in one durable batch before returning to Commonware's acknowledgement path. Disk writes run
 on the blocking pool; a failed write stops the actor before acknowledgement.
 Marshal serves the certificate lookup independently of the stateful callback.
-History defaults to RocksDB; the opt-in `regolith-history` build selects Regolith
-with explicit synchronous writes and rejects the other backend's directory layout.
+History uses Regolith with explicit synchronous writes and rejects foreign
+directory layouts before opening the database.
 See [history storage](docs/history-storage.md) for the format and qualification limits.
 Proposal transaction exclusion stops at the published finalized revision, including
 the recovered index head, so it does not fetch pruned finalized ancestors.

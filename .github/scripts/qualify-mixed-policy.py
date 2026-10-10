@@ -196,7 +196,7 @@ def main():
         manifest = json.loads(read_bounded(args.directory / 'manifest.json'))
         require(manifest['source'] == manifest['runner_source'] == revision
                 and manifest['dirty'] is False and manifest['runner_dirty'] is False
-                and manifest['exit_code'] == 0 and manifest['history'] == 'rocksdb'
+                and manifest['exit_code'] == 0 and manifest['history'] == 'regolith'
                 and manifest['arguments'] == ['16', '2', '8', '900']
                 and manifest['trace_span_close'] is False and manifest['rust_log'] == 'warn', 'provenance')
         require(manifest['node_sha256'] == digest(args.node)
