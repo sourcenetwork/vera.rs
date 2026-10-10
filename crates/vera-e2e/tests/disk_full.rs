@@ -4,7 +4,7 @@
 use std::{collections::BTreeSet, fs, sync::Arc, time::Duration};
 
 use alloy_sol_types::SolCall as _;
-use vera_client::{ACP_ADDRESS, BlsSigner, TransactionReceipt, VeraClient};
+use vera_client::{ACP_ADDRESS, BlsSigner, ClientError, TransactionReceipt, VeraClient};
 use vera_domain::{SimplexParameters, verify_light_block};
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, TestCluster};
 use vera_modules::acp::abi::IAcp;
@@ -47,12 +47,34 @@ async fn create_policy(client: &VeraClient, signer: &BlsSigner, name: &str) -> T
     .expect("policy confirmation deadline")
 }
 
+fn rpc_failure_kind(error: &ClientError) -> &'static str {
+    match error {
+        ClientError::ClientCapacityExhausted => "client-capacity",
+        ClientError::ResourceBusy(_) => "server-capacity",
+        ClientError::Rpc {
+            code: -32603,
+            message,
+        } if message.starts_with("finalization certificate not found for height ") => {
+            "finality-unavailable"
+        }
+        ClientError::Rpc { code: -32603, .. } => "rpc-internal",
+        ClientError::Rpc { .. } => "rpc-rejected",
+        ClientError::Transport(error) if error.is_timeout() => "transport-timeout",
+        ClientError::Transport(_) => "transport",
+        ClientError::Json(_) => "json",
+        ClientError::MissingResult | ClientError::InvalidResponse(_) => "response",
+        ClientError::ResponseTooLarge(_) => "response-limit",
+        _ => "other",
+    }
+}
+
 async fn assert_replicas(
     cluster: &TestCluster,
     signer: &BlsSigner,
     receipts: &[TransactionReceipt],
     replicas: usize,
     trusted: &vera_domain::ConsensusPublicKey,
+    phase: &str,
 ) {
     tokio::time::timeout(deadline(), async {
         let origin = VeraClient::new(cluster.node(0).rpc_url());
@@ -75,7 +97,12 @@ async fn assert_replicas(
                         serde_json::json!([format!("0x{:x}", receipt.block_number)]),
                     )
                     .await
-                    .unwrap();
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "recovery_rpc_failure phase={phase} kind={} replica={index}",
+                            rpc_failure_kind(&error)
+                        );
+                    });
                 verify_light_block(&light, trusted).unwrap();
                 assert_eq!(light.height, receipt.block_number);
                 assert_eq!(
@@ -126,7 +153,7 @@ async fn disk_full_validator_recovers_acknowledged_operations() {
     let signer = BlsSigner::random(deployment).expect("construct native signer");
     let origin = VeraClient::new(cluster.node(0).rpc_url());
     let mut receipts = vec![create_policy(&origin, &signer, "before-disk-full").await];
-    assert_replicas(&cluster, &signer, &receipts, 4, &trusted).await;
+    assert_replicas(&cluster, &signer, &receipts, 4, &trusted, "initial").await;
 
     assert!(
         volume.fill().unwrap() > 0,
@@ -162,22 +189,51 @@ async fn disk_full_validator_recovers_acknowledged_operations() {
         logs.matches("I/O error").count() + logs.matches("io error").count(),
         logs.matches("panicked").count()
     );
-    assert_replicas(&cluster, &signer, &receipts, 3, &trusted).await;
+    assert_replicas(&cluster, &signer, &receipts, 3, &trusted, "survivors").await;
 
     volume.release_space().unwrap();
     cluster.restart_node(3).unwrap();
     cluster.wait_ready(deadline()).await.unwrap();
-    assert_replicas(&cluster, &signer, &receipts, 4, &trusted).await;
+    assert_replicas(&cluster, &signer, &receipts, 4, &trusted, "restored").await;
     cluster.kill_node(2);
     let recovered = VeraClient::new(cluster.node(3).rpc_url());
     receipts.push(create_policy(&recovered, &signer, "after-disk-full").await);
     cluster.restart_node(2).unwrap();
     cluster.wait_ready(deadline()).await.unwrap();
-    assert_replicas(&cluster, &signer, &receipts, 4, &trusted).await;
+    assert_replicas(&cluster, &signer, &receipts, 4, &trusted, "renewed-quorum").await;
     for index in 0..4 {
         cluster.kill_node(index);
     }
     volume
         .close()
         .expect("unmount fixture volumes after reaping validators");
+}
+
+#[test]
+fn recovery_rpc_failure_classes_do_not_export_remote_messages() {
+    assert_eq!(
+        rpc_failure_kind(&ClientError::ResourceBusy("private".into())),
+        "server-capacity"
+    );
+    assert_eq!(
+        rpc_failure_kind(&ClientError::Rpc {
+            code: -32603,
+            message: "finalization certificate not found for height 42".into(),
+        }),
+        "finality-unavailable"
+    );
+    assert_eq!(
+        rpc_failure_kind(&ClientError::Rpc {
+            code: -32603,
+            message: "private storage error".into(),
+        }),
+        "rpc-internal"
+    );
+    assert_eq!(
+        rpc_failure_kind(&ClientError::Rpc {
+            code: -32000,
+            message: "private request".into(),
+        }),
+        "rpc-rejected"
+    );
 }

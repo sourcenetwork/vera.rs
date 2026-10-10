@@ -140,5 +140,25 @@ class SafeTestEvidence(unittest.TestCase):
         self.assertNotIn('/private', json.dumps(evidence))
 
 
+    def test_recovery_rpc_failure_evidence_is_closed_and_does_not_export_messages(self):
+        evidence = self.collect('recovery_rpc_failure phase=restored kind=finality-unavailable replica=3\n'
+                                'private key and endpoint information\n'
+                                'recovery_rpc_failure phase=private kind=rpc-internal replica=0\n'
+                                'recovery_rpc_failure phase=initial kind=private replica=0\n'
+                                'recovery_rpc_failure phase=initial kind=rpc-internal replica=4\n'
+                                'recovery_rpc_failure phase=initial kind=rpc-internal replica=30\n')
+        self.assertEqual(evidence['recovery_rpc_failures'], [
+            {'phase': 'restored', 'kind': 'finality-unavailable', 'replica': 3}])
+        self.assertNotIn('private', json.dumps(evidence))
+
+    def test_recovery_rpc_failure_evidence_deduplicates_and_bounds_records(self):
+        with patch.object(summary, 'MAX_RPC_FAILURES', 1):
+            evidence = self.collect('recovery_rpc_failure phase=initial kind=rpc-internal replica=0\n' * 2 +
+                                    'recovery_rpc_failure phase=restored kind=rpc-internal replica=3\n')
+            self.assertEqual(len(evidence['recovery_rpc_failures']), 1)
+            self.assertTrue(evidence['recovery_rpc_failure_limit_reached'])
+
+
+
 if __name__ == '__main__':
     unittest.main()
