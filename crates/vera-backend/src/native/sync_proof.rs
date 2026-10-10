@@ -22,9 +22,10 @@ struct PartitionProof {
 
 impl SyncProof {
     /// Capture the selected state while holding read locks over all four partitions.
+    /// Acquisition releases partial guards before waiting on a busy partition.
     /// A stale selection fails instead of returning evidence for a different revision.
     pub async fn capture(set: &NativeStateSet, expected: B256) -> Result<Self, BackendError> {
-        let (a, b, h, n) = futures::join!(set.0.read(), set.1.read(), set.2.read(), set.3.read());
+        let [a, b, h, n] = super::read_partitions([&set.0, &set.1, &set.2, &set.3]).await;
         if combine_module_roots(&[a.root().0, b.root().0, h.root().0, n.root().0]) != expected {
             return Err(BackendError::InvalidSyncProof(
                 "selected module root changed",
