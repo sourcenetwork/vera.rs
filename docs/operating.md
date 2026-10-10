@@ -41,6 +41,34 @@ Existing validator keys must contain exactly 32 bytes. The reader consumes at
 most 33 bytes and rejects oversized or truncated material without resizing or
 regenerating the retained key.
 
+## Linux build artifacts
+
+The Linux checks job bundles its normal release daemon after the native ring
+lifecycle tests pass. Download `verad-x86_64-unknown-linux-gnu-rocksdb` from the
+workflow run for the intended source. It contains a tarball and `SHA256SUMS`:
+
+```sh
+sha256sum --check SHA256SUMS
+tar -xzf verad-x86_64-unknown-linux-gnu-rocksdb.tar.gz
+```
+
+The archive contains only `verad` and `build.json`. The manifest records the
+actual checked-out source commit and tree (a merge commit on pull-request runs),
+lockfile and toolchain-file hashes, compiler, target, release build command,
+empty feature selection, RocksDB history backend, binary hash and required shared
+library names. Builds use the locked dependency graph and explicitly disable
+default features; fault injection is excluded. Confirm the source against the independently selected revision.
+Checksums detect corruption; they do not authenticate the publisher.
+
+This artifact targets Linux x86-64 GNU on Ubuntu 24.04. It is dynamically linked;
+use a compatible runtime with the required system libraries. It does not include
+configuration, genesis, keys or validator state. Regolith builds require a
+separate explicitly selected build; this bundle cannot open Regolith history.
+Archive timestamps, owners and member ordering are fixed, so packaging the same
+binary and provenance produces the same bytes. This does not establish
+reproducible compilation or qualify an older runtime environment. A successful
+Linux job does not replace the other release gates.
+
 ## Filesystem layout
 
 | Path | Contents |
