@@ -25,6 +25,14 @@ def profile_workload(selection):
     raise ValueError('unsupported allocation profile selection')
 
 
+def qualify_outcomes(records, count):
+    summary, verification, recovery = (records[name] for name in ('summary', 'verification', 'recovery'))
+    if (summary['offered'] != count or summary['completed_workflows'] != count or
+            verification['verified'] != count or verification['replicas'] != 4 or verification['unresolved'] != 0 or
+            recovery['inspected_operations'] != count or recovery['receipt_mismatches'] or recovery['state_mismatches']):
+        raise ValueError('incomplete certified workload qualification')
+
+
 def profile_settings(environment):
     expected = {'CARGO_PROFILE_RELEASE_DEBUG': 'full',
                 'CARGO_PROFILE_RELEASE_STRIP': 'none',
@@ -161,6 +169,8 @@ def demangle_stacks(source, destination, command):
                         raise ValueError('allocation symbol inventory exceeds decoding budget')
                     symbols[symbol] = None
 
+    # Give each bounded phase its own budget; scans must not consume decoder time.
+    deadline = time.monotonic() + 120
     # Shared frames recur across many allocation stacks; decode each symbol once.
     pending = iter(symbols)
     while batch := list(itertools.islice(pending, 256)):
@@ -184,6 +194,7 @@ def demangle_stacks(source, destination, command):
         value = symbols.get(symbol)
         return value + frame[len(symbol):] if value is not None else frame
 
+    deadline = time.monotonic() + 120
     with source.open() as raw, destination.open('w') as decoded:
         for line in raw:
             if time.monotonic() >= deadline:
@@ -293,11 +304,7 @@ def main():
         (args.output / 'allocations.json').write_text(json.dumps(evidence, indent=2) + '\n')
         if result.returncode:
             raise SystemExit(result.returncode)
-        summary, verification, recovery = (records[name] for name in ('summary', 'verification', 'recovery'))
-        if (summary['offered'] != COUNT or summary['completed_workflows'] != COUNT or
-                verification['verified'] != COUNT or verification['replicas'] != 4 or verification['unresolved'] != 0 or
-                recovery['inspected_operations'] != COUNT or recovery['receipt_mismatches'] or recovery['state_mismatches']):
-            raise ValueError('incomplete certified workload qualification')
+        qualify_outcomes(records, count)
 
 
 if __name__ == '__main__':
