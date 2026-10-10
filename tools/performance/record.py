@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import signal
 import subprocess
 
@@ -30,6 +31,28 @@ def cpu_model():
     return platform.processor() or None
 
 
+def allocator_environment(environment, selection=None):
+    child = dict(environment)
+    name, version = platform.libc_ver()
+    if selection is not None:
+        if selection not in ('default', '2') or platform.system() != 'Linux' or name != 'glibc':
+            raise ValueError('controlled arena selection requires Linux glibc')
+        competing = ('GLIBC_TUNABLES', 'LD_PRELOAD', 'LD_LIBRARY_PATH',
+                     'MALLOC_ARENA_TEST', 'MALLOC_MMAP_MAX_', 'MALLOC_MMAP_THRESHOLD_',
+                     'MALLOC_TOP_PAD_', 'MALLOC_TRIM_THRESHOLD_', 'MALLOC_PERTURB_', 'MALLOC_CHECK_')
+        if any(child.get(key) for key in competing):
+            raise ValueError('controlled arena selection requires an untuned allocator environment')
+        child.pop('MALLOC_ARENA_MAX', None)
+        if selection == '2':
+            child['MALLOC_ARENA_MAX'] = '2'
+    raw = child.get('MALLOC_ARENA_MAX')
+    if raw is not None and (not re.fullmatch(r'0|[1-9][0-9]{0,9}', raw) or int(raw) > 2**32 - 1):
+        raise ValueError('unsupported arena limit')
+    return child, {'controlled': selection is not None,
+                   'glibc_arena_max': None if raw is None else int(raw),
+                   'libc_name': name, 'libc_version': version}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--node', required=True, type=Path)
@@ -39,6 +62,8 @@ def main():
                         help='Checkout used to build the workload runner; defaults to the node checkout.')
     parser.add_argument('--history', required=True, choices=['rocksdb', 'regolith'])
     parser.add_argument('--rust-log', default='warn,vera_storage=info')
+    parser.add_argument('--glibc-arena-max', choices=['default', '2'],
+                        help='Controlled Linux comparison; unset the arena override or limit it to two.')
     parser.add_argument('--timeout-seconds', type=int, default=900,
                         help='Runner process deadline in seconds, from 1 to 86400 (default: 900).')
     parser.add_argument('--sync-trace', type=Path,
@@ -47,6 +72,10 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.timeout_seconds <= 86400:
         parser.error('--timeout-seconds must be between 1 and 86400')
+    try:
+        environment, allocator = allocator_environment(os.environ, args.glibc_arena_max)
+    except ValueError as error:
+        parser.error(str(error))
     node, runner = args.node.resolve(strict=True), args.runner.resolve(strict=True)
     runner_source = args.runner_source.resolve(strict=True)
     command = [str(runner), *args.workload_args]
@@ -71,6 +100,7 @@ def main():
         'history': args.history, 'arguments': args.workload_args,
         'rust_log': args.rust_log,
         'timeout_seconds': args.timeout_seconds,
+        'allocator_environment': allocator,
         'trace_span_close': os.environ.get('VERA_TRACE_SPANS') == '1',
         'platform': platform.platform(), 'architecture': platform.machine(),
         'logical_cpus': os.cpu_count(), 'cpu_model': cpu_model(), 'load_before': os.getloadavg(),
@@ -87,7 +117,7 @@ def main():
                                   'scope': 'workload executable and descendants only'}
     path = args.output / 'manifest.json'
     path.write_text(json.dumps(manifest, indent=2) + '\n')
-    environment = dict(os.environ, VERAD_BINARY=str(node), RUST_LOG=args.rust_log)
+    environment.update(VERAD_BINARY=str(node), RUST_LOG=args.rust_log)
     with (args.output / 'workload.jsonl').open('w') as output, (args.output / 'stderr.log').open('w') as error:
         process = subprocess.Popen(command, env=environment,
                                    stdout=output, stderr=error, start_new_session=True)
