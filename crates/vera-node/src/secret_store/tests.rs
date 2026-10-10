@@ -1,5 +1,4 @@
 use super::*;
-use std::io::Read as _;
 
 #[test]
 fn updates_replace_complete_files_and_publish_only_after_success() {
