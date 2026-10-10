@@ -107,9 +107,11 @@ media failure or power-loss behavior. Those require deployment-specific validati
 - **Pruned peers** — a node joining late fetches a recent authenticated
   snapshot plus retained history; it does not need genesis-era data when
   pruning is configured (see [snapshot-recovery.md](snapshot-recovery.md)).
-- **Disk write failures** — a failed or torn write during finalization stops
-  the node before it acknowledges the revision; restart recovers to the last
-  durable anchor. This is deliberate fail-stop, not a retry loop.
+- **Reported persistence failures** — a write or synchronization error during
+  finalization stops the node before acknowledgement. An error can leave a
+  complete batch visible; startup reconciles stored history with the durable
+  anchor. The [history storage qualification](history-storage.md) distinguishes
+  reported errors from silent corruption, failed-device and power-loss behavior.
 
 Do not delete `history/` or the genesis record to "reset" a node: existing
 JMT directories or a missing genesis record alongside finalized history are
