@@ -539,7 +539,7 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
                 .await
             {
                 Ok(read) => break read,
-                Err(cause) if cause.is_retryable() => {
+                Err(cause) if cause.is_throttled() => {
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
                 Err(cause) => panic!("recovered ring proof failed: {cause}"),
