@@ -37,6 +37,10 @@ is missing alongside retained `secrets.json`, `native-genesis.bin` or `history/`
 including dangling links. Restore the original identity with its retained state;
 the node does not generate a replacement key for that directory.
 
+Existing validator keys must contain exactly 32 bytes. The reader consumes at
+most 33 bytes and rejects oversized or truncated material without resizing or
+regenerating the retained key.
+
 ## Filesystem layout
 
 | Path | Contents |

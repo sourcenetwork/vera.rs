@@ -34,6 +34,10 @@ pub enum ConfigError {
     #[error("invalid validator key format: expected 32 bytes, got {0}")]
     InvalidKeyLength(usize),
 
+    /// Validator key exceeds the fixed seed size.
+    #[error("validator key exceeds 32 bytes")]
+    ValidatorKeyTooLarge,
+
     /// Failed to write file.
     #[error("failed to write {path}: {source}")]
     Write {
