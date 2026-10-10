@@ -305,7 +305,7 @@ jobs:
 
   linux-checks:
     name: Linux checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read
@@ -325,7 +325,7 @@ jobs:
       - name: Install native build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
+          sudo apt-get install -y binutils clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
 
       - name: Install pinned toolchain
         run: |
@@ -363,7 +363,7 @@ jobs:
           cargo build --frozen -p verad --features regolith-history
           cargo build --frozen -p verad --features fault-injection
           cargo build --frozen -p verad --features regolith-history,fault-injection
-          cargo build --frozen --release -p verad
+          cargo build --frozen --release --no-default-features -p verad
 
       - name: Native ring lifecycle with release daemon
         env:
@@ -376,6 +376,19 @@ jobs:
           python3 .github/scripts/capture-tests.py --logs "$VERA_E2E_DIR"
           cargo test --release --frozen -p vera-e2e --test native_rings
           -- --test-threads=1 --nocapture
+
+      - name: Package the exercised Linux release daemon
+        run: |
+          python3 -m unittest discover -s .github/scripts -p test_package_linux_release.py
+          python3 .github/scripts/package-linux-release.py --output "$RUNNER_TEMP/verad-linux-release"
+
+      - name: Upload Linux release bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verad-x86_64-unknown-linux-gnu-rocksdb
+          path: ${{ runner.temp }}/verad-linux-release/
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Collect bounded native ring evidence
         if: always()
