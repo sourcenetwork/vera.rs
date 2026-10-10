@@ -442,6 +442,24 @@ async fn admit_member(interrupt: bool, crash_share: bool, pipelined: bool) {
             ],
         )
         .await;
+        let probe = tokio::process::Command::new(vera_e2e::resolve_binary().unwrap())
+            .env("RUST_LOG", "debug")
+            .arg("probe")
+            .arg("--url")
+            .arg(cluster.node(0).rpc_url())
+            .arg("--genesis")
+            .arg(cluster.node(0).data_dir.join("genesis.json"))
+            .arg("--minimum-height")
+            .arg(final_write.to_string())
+            .output()
+            .await
+            .unwrap();
+        assert!(probe.status.success(), "certified readiness CLI failed");
+        let progress: serde_json::Value = serde_json::from_slice(&probe.stdout).unwrap();
+        assert!(progress["initial_height"].as_u64().unwrap() >= final_write);
+        assert!(
+            progress["height"].as_u64().unwrap() > progress["initial_height"].as_u64().unwrap()
+        );
     }
     incoming.kill().await.unwrap();
     incoming.wait().await.unwrap();

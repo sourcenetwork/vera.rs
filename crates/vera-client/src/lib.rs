@@ -27,6 +27,7 @@ mod permission;
 pub mod policies;
 mod policy_records;
 mod query;
+mod readiness;
 mod receipt;
 mod record;
 /// Certified registration commitment discovery.
@@ -65,6 +66,7 @@ pub use client::{
 };
 pub use document_acp::VeraDocumentACP;
 pub use error::ClientError;
+pub use readiness::{ReadinessError, VerifiedReadiness};
 pub use signer::EvmSigner;
 pub use subject::RelationshipSubject;
 pub use types::{Log, NativeReceipt, NodeStatus, TransactionReceipt};
