@@ -154,7 +154,8 @@ def qualify(records, workflows=16, rate=2, deadline=900, minimum_seconds=0):
     require({(row['phase'], row['workflow'], row['id']) for row in started}
             == {(row['phase'], row['workflow'], row['id']) for row in submissions}, 'submissions')
     mutations = {'initial_grants': 9, 'restore_current_grants': 4}
-    require(all(row['embedded_mutations'] == mutations.get(row['phase'], 1)
+    require(all(type(row['embedded_mutations']) is int
+                and row['embedded_mutations'] == mutations.get(row['phase'], 1)
                 and row['failure_kind'] is None and row['error'] is None
                 and integer(row['revision'], 1) for row in submissions), 'submissions')
     verified = rows('replica_verification')
@@ -172,15 +173,37 @@ def qualify(records, workflows=16, rate=2, deadline=900, minimum_seconds=0):
     require(restart['replica'] == 3 and restart['verified_workflows'] == workflows
             and restart['minimum_revision'] == targets['after_hard_restart'], 'restart')
     maximum_ms = deadline * 1000
-    return {'format_version': 1, 'qualified': True, 'workflows': workflows,
+    require(all(timing(row['accepted_ms'], maximum_ms) <= timing(row['elapsed_ms'], maximum_ms)
+                for row in submissions), 'timing')
+    return {'format_version': 2, 'qualified': True, 'workflows': workflows,
             'timed_seconds': summary['elapsed_seconds'], 'completed_workflows_per_second': workflows / summary['elapsed_seconds'],
             'counts': {field: counts[field] for field in COUNT_FIELDS}, 'replica_phases': list(REPLICA_PHASES),
             'workflow_ms': distribution([row['elapsed_ms'] for row in completed], maximum_ms),
             'scheduled_workflow_ms': distribution([row['scheduled_to_complete_ms'] for row in completed], maximum_ms),
             'schedule_lag_ms': distribution([row['schedule_lag_ms'] for row in completed], maximum_ms),
             'certified_submission_ms': distribution([row['elapsed_ms'] for row in submissions], maximum_ms),
+            'workflow_observations': [
+                {field: row[field] for field in ('workflow', 'elapsed_ms', 'scheduled_to_complete_ms', 'schedule_lag_ms')}
+                for row in sorted(completed, key=lambda row: row['workflow'])],
+            'submission_observations': [
+                {field: row[field] for field in ('phase', 'workflow', 'revision', 'embedded_mutations', 'elapsed_ms', 'accepted_ms')}
+                for row in submissions],
             'restart_ms': timing(restart['elapsed_ms'], maximum_ms),
             'resources': resource_summary(records, summary['elapsed_seconds'], minimum_seconds > 0)}
+
+
+
+def hardware_manifest(manifest):
+    fields = ('platform', 'architecture', 'logical_cpus', 'cpu_model')
+    require(all(field in manifest for field in fields), 'provenance')
+    result = {field: manifest[field] for field in fields}
+    require(integer(result['logical_cpus'], 1) and result['logical_cpus'] <= 4096, 'provenance')
+    for field in ('platform', 'architecture', 'cpu_model'):
+        value = result[field]
+        require(type(value) is str and 1 <= len(value) <= 256
+                and all(32 <= ord(character) <= 126 for character in value), 'provenance')
+    require(re.fullmatch(r'[A-Za-z0-9_+-]{1,64}', result['architecture']), 'provenance')
+    return result
 
 
 def read_bounded(path, maximum=16 * 1024 * 1024):
@@ -231,9 +254,11 @@ def main():
         require(all(type(row) is dict for row in records), 'input')
         configurations = [row for row in records if row.get('kind') == 'configuration']
         require(len(configurations) == 1 and configurations[0]['daemon'] == str(args.node.resolve()), 'provenance')
+        hardware = hardware_manifest(manifest)
         evidence = qualify(records, workflows, rate, deadline, minimum_seconds)
         evidence.update(profile=args.profile, source_revision=revision,
-                        node_sha256=manifest['node_sha256'], runner_sha256=manifest['runner_sha256'])
+                        node_sha256=manifest['node_sha256'], runner_sha256=manifest['runner_sha256'],
+                        hardware=hardware)
     except InvalidEvidence as error:
         evidence['failure_stage'] = str(error)
     except (OSError, KeyError, TypeError, ValueError, subprocess.SubprocessError):

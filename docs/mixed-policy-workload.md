@@ -271,3 +271,19 @@ Executable SHA-256 values for reproduction:
 
 - Driver: `e0104fd88f180f0a5cc85b5093f64c2794a157a1b6d7896dafc70a5342ed12d5`
 - Daemon: `94b520010684a1692f99a4a6e5dd9055a3c790139d6939f04fa4598e96a1ed03`
+
+## Retained timing observations
+
+The version-2 qualification artifact exports each completed workflow's numeric
+timings and each certified submission's phase, workflow index, revision, mutation
+count, admission time and confirmation time. Together these permit independent
+recomputation of the reported workflow and submission percentiles. The artifact
+also retains a bounded host description: platform, architecture, logical CPU count
+and CPU model. The source and executable hashes remain part of its provenance.
+
+These fields use explicit allowlists. Submission identities, request bodies, paths,
+keys, process IDs and raw error text are excluded. Admission timings must be finite
+and bounded, and incomplete or invalid observations fail qualification. Older
+version-1 artifacts retain aggregate timings; the missing observations cannot be
+recovered from those published files. The October 11 sustained result retains that
+limitation.

@@ -108,6 +108,9 @@ class RecorderTests(unittest.TestCase):
             self.assertEqual(result.returncode, 7, result.stderr)
             metadata = json.loads((output / 'manifest.json').read_text())
             self.assertEqual(metadata['exit_code'], 7)
+            self.assertEqual(metadata['failure'], {
+                'kind': 'process_exit', 'panic_locations': [],
+                'stderr_scan_truncated': False, 'location_limit_reached': False})
             self.assertEqual(metadata['runner_source'], metadata['source'])
             self.assertEqual(metadata['runner_dirty'], metadata['dirty'])
             self.assertEqual(metadata['rust_log'], 'warn,vera_diagnostics=debug')
@@ -117,6 +120,39 @@ class RecorderTests(unittest.TestCase):
             self.assertNotEqual(repeated.returncode, 0)
             self.assertEqual(json.loads((output / 'manifest.json').read_text()), metadata)
 
+
+    def test_failure_exports_only_allowlisted_panic_locations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / 'stderr.log'
+            stderr.write_text(
+                "thread 'private-thread' (123) panicked at crates/vera-e2e/examples/operation_baseline/updates.rs:173:14:\n"
+                'private panic payload, signed operation and credentials\n'
+                "thread 'main' panicked at crates/vera-e2e/examples/operation_baseline.rs:376:10:\n"
+                "thread 'main' panicked at /private/secret.rs:10:20:\n"
+                "thread 'main' panicked at crates/vera-e2e/examples/../secret.rs:10:20:\n"
+                "thread 'main' panicked at crates/vera-e2e/examples/operation_baseline.rs:0:20:\n"
+                "thread 'main' panicked at crates/vera-e2e/examples/operation_baseline.rs:376:10:\n"
+            )
+            summary = record.failure_summary(stderr, False)
+            self.assertEqual(summary, {
+                'kind': 'process_exit', 'panic_locations': [
+                    {'source': 'crates/vera-e2e/examples/operation_baseline/updates.rs', 'line': 173, 'column': 14},
+                    {'source': 'crates/vera-e2e/examples/operation_baseline.rs', 'line': 376, 'column': 10}],
+                'stderr_scan_truncated': False, 'location_limit_reached': False})
+            self.assertNotIn('private', json.dumps(summary))
+            self.assertNotIn('credentials', json.dumps(summary))
+
+    def test_failure_scan_and_location_count_are_bounded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / 'stderr.log'
+            stderr.write_bytes(b'x' * (record.FAILURE_SCAN_BYTES + 1) + b'\n' + b''.join(
+                ("thread 'main' panicked at crates/vera-e2e/examples/operation_baseline.rs:%d:1:\n" % line).encode()
+                for line in range(1, 30)))
+            summary = record.failure_summary(stderr, True)
+            self.assertEqual(summary['kind'], 'timeout')
+            self.assertTrue(summary['stderr_scan_truncated'])
+            self.assertTrue(summary['location_limit_reached'])
+            self.assertEqual(len(summary['panic_locations']), record.FAILURE_LOCATIONS)
 
     def record_with_mocked_process(self, timeout, waits, arena=None):
         with tempfile.TemporaryDirectory() as directory:

@@ -51,17 +51,18 @@ def summarize_worker_progress(path, qualified):
                 raise ValueError('duplicate worker progress summary')
             summary = row
         elif kind == 'observation':
-            if len(observations) == 100_000:
+            if len(observations) == 360_000:
                 raise ValueError('worker progress observation limit exceeded')
             observations.append(row)
     if config is None or summary is None:
         raise ValueError('missing worker progress configuration or summary')
     objects = _integer(config.get('fixed_update_objects', 0), 'workers', 0, 1024)
+    maximum_count = 360_000 if objects else 100_000
+    count = _integer(config.get('count'), 'count', max(1, objects), maximum_count)
     if objects == 0:
         return {'status': 'not_applicable', 'reason': 'one_operation_per_signer'}
     if config.get('arrival_model') != 'scheduled_wait_for_previous_per_object':
         raise ValueError('unsupported worker progress arrival model')
-    count = _integer(config.get('count'), 'count', objects, 100_000)
     rate = _integer(config.get('arrivals_per_second'), 'rate', 1, 10_000)
     elapsed = _number(summary.get('elapsed_seconds'), 'elapsed', 86_400)
     if elapsed == 0 or len(observations) != count:

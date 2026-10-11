@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from worker_progress import summarize_worker_progress
 
@@ -104,6 +105,31 @@ class WorkerProgressTests(unittest.TestCase):
                 self.rows[0][field] = value
                 with self.assertRaises(ValueError):
                     self.summarize()
+
+    def test_long_fixed_run_reports_every_completed_worker(self):
+        count = 100_001
+        configuration = dict(self.rows[0], count=count, arrivals_per_second=50)
+        summary = dict(self.rows[1], offered=count, confirmed=count,
+                       completed_workflows=count, elapsed_seconds=2001)
+
+        def records():
+            yield configuration
+            yield summary
+            for index in range(count):
+                yield dict(self.rows[2], index=index, object_id=str(index % 2),
+                           scheduled_to_workflow_ms=12, schedule_lag_ms=1)
+
+        with patch('worker_progress._records', side_effect=lambda _: records()):
+            result = summarize_worker_progress(self.path, True)
+        self.assertEqual([worker['completed'] for worker in result['workers']], [50_001, 50_000])
+        self.assertEqual(result['maximum_worker_workflow_p95_ms'], 12)
+        self.assertEqual(result['peak_scheduled_incomplete'], 1)
+        self.assertNotIn('private submission', json.dumps(result))
+
+    def test_growing_runs_keep_the_registration_count_bound(self):
+        self.rows[0].update(fixed_update_objects=0, count=100_001)
+        with self.assertRaisesRegex(ValueError, 'count'):
+            self.summarize()
 
     def test_oversized_raw_record_is_rejected(self):
         self.path.write_bytes(b' ' * (1024 * 1024 + 1))
