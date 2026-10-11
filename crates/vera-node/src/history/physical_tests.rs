@@ -5,6 +5,7 @@ use std::{fs, io::Write as _, path::PathBuf};
 enum Damage {
     FooterBitFlip,
     TruncatedFooter,
+    DataBlockBitFlip,
 }
 
 fn table_path(directory: &Path) -> PathBuf {
@@ -77,6 +78,16 @@ async fn physical_damage_is_rejected(damage: Damage) {
     match damage {
         Damage::FooterBitFlip => *damaged.last_mut().unwrap() ^= 1,
         Damage::TruncatedFooter => damaged.truncate(damaged.len() - 8),
+        Damage::DataBlockBitFlip => {
+            // The first frame is [compression byte][payload][checksum].
+            damaged[1] ^= 1;
+            assert_eq!(damaged[0], pristine[0]);
+            assert_eq!(
+                &damaged[damaged.len() - 72..],
+                &pristine[pristine.len() - 72..],
+                "data damage must leave the footer intact"
+            );
+        }
     }
     assert_ne!(damaged, pristine);
     replace_table(&path, &damaged);
@@ -93,10 +104,16 @@ async fn physical_damage_is_rejected(damage: Damage) {
         Err(error) => error,
     };
     let message = format!("{error:#}").to_ascii_lowercase();
-    assert!(
-        message.contains("corrupt") || message.contains("sstable") || message.contains("magic"),
-        "recovery failure must identify physical table damage"
-    );
+    match damage {
+        Damage::DataBlockBitFlip => assert!(
+            message.contains("block checksum mismatch"),
+            "recovery must reject the damaged data block through checksum validation"
+        ),
+        Damage::FooterBitFlip | Damage::TruncatedFooter => assert!(
+            message.contains("corrupt") || message.contains("sstable") || message.contains("magic"),
+            "recovery failure must identify physical table damage"
+        ),
+    }
     assert_eq!(index.head_block_number(), 0);
     for block in [&first, &second] {
         assert!(index.get_block_by_number(block.height).is_none());
@@ -140,4 +157,9 @@ async fn physical_table_bit_flip_is_rejected_before_history_publication() {
 #[tokio::test]
 async fn physical_table_truncation_is_rejected_before_history_publication() {
     physical_damage_is_rejected(Damage::TruncatedFooter).await;
+}
+
+#[tokio::test]
+async fn physical_data_block_bit_flip_is_rejected_before_history_publication() {
+    physical_damage_is_rejected(Damage::DataBlockBitFlip).await;
 }
