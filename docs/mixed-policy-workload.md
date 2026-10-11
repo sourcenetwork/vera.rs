@@ -121,6 +121,41 @@ This is a short functional gate for the four-validator Linux Regolith deployment
 It does not establish sustainable capacity, steady-state memory, WAN behavior,
 other storage backends or equivalence to the historical local measurement below.
 
+## Regolith release result on October 11, 2026
+
+[CI run 38124358657](https://github.com/sourcenetwork/vera.rs/actions/runs/38124358657)
+qualified the sixteen-workflow gate on four local validators with Rust 1.98.0,
+normal release features and Regolith history. The actual checkout
+[`e688ae9`](https://github.com/sourcenetwork/vera.rs/commit/e688ae9afbde56dc66f9aec05dead6e6e3972fe6)
+has the same source tree as candidate
+[`9d5c2b9`](https://github.com/sourcenetwork/vera.rs/commit/9d5c2b9ea7cb971a7871028b7b0b22d488a7ecbf).
+The checksum-verified mixed-policy artifact identifies the same daemon SHA-256
+as the exercised Linux release bundle.
+
+| Measurement | Result |
+| --- | ---: |
+| Timed workflows completed | 16 / 16 |
+| Offered arrival rate | 2 workflows/s |
+| Timed interval, including drain | 8.455 s |
+| Completed workflows / timed interval | 1.892/s |
+| Workflow p95 | 1,401.694 ms |
+| Certified submission p50 / p95 / p99 | 108.786 / 221.064 / 2,341.623 ms |
+| Hard restart to verified state | 3,834.464 ms |
+| Sampled per-member peak RSS | 213.70–217.11 MiB |
+
+All 99 distinct submissions certified 275 embedded mutations, with 4,800
+permission decisions and 1,280 ownership proofs verified and no throttled
+requests. Every replica passed the checks after workload completion, definition
+removal, reintroduction, explicit regrant and hard restart. Submission percentiles
+include setup and later policy edits; workflow percentiles cover the timed phase.
+Nine resource samples cover this short run.
+
+The artifact preserves bounded counters, timings and source/binary identities.
+Raw workload records and node state remain private; the driver hash is reported
+rather than independently rehashed from the artifact. This functional gate does
+not establish sustainable capacity, memory bounds, WAN behavior or a controlled
+performance improvement over the historical result below.
+
 ## Hosted Linux result on October 10, 2026
 
 This historical result predates the Regolith-only deployment.

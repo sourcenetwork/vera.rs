@@ -17,11 +17,54 @@ spec.loader.exec_module(capture)
 
 
 class SafeTestEvidence(unittest.TestCase):
-    def collect(self, content):
+    def collect(self, content, function_names=frozenset()):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'test-output.log').write_text(content)
-            return summary.summarize(root, {'crates/vera-e2e/tests/case.rs': 100})
+            return summary.summarize(root, {'crates/vera-e2e/tests/case.rs': 100}, function_names)
+
+    def test_cases_export_only_source_names_without_private_prefixes_or_reasons(self):
+        evidence = self.collect('test private_actor::restores_revocations ... ok\n'
+                                'test rejected_proof ... FAILED\n'
+                                'test excluded_case ... ignored, private endpoint and key\n'
+                                'test secret_value ... ok\n',
+                                {'restores_revocations', 'rejected_proof', 'excluded_case'})
+        self.assertEqual(evidence['test_cases'], [
+            {'name': 'restores_revocations', 'status': 'ok'},
+            {'name': 'rejected_proof', 'status': 'FAILED'},
+            {'name': 'excluded_case', 'status': 'ignored'}])
+        public = json.dumps(evidence)
+        for private in ('private_actor', 'private endpoint', 'secret_value'):
+            self.assertNotIn(private, public)
+
+    def test_case_records_are_bounded_and_do_not_guess_interleaved_outcomes(self):
+        with patch.object(summary, 'MAX_CASES', 2):
+            evidence = self.collect('test known_case ... ok\n' * 3 +
+                                    'test known_case ... private tracing output\nok\n', {'known_case'})
+        self.assertEqual(len(evidence['test_cases']), 2)
+        self.assertTrue(evidence['case_limit_reached'])
+        evidence = self.collect('test known_case ... private tracing output\nok\n', {'known_case'})
+        self.assertEqual(evidence['test_cases'], [])
+        self.assertFalse(evidence['case_limit_reached'])
+
+    def test_application_logs_cannot_add_runner_case_records(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'test-output.log').write_text('test first_case ... ok\n')
+            logs = root / 'node0/logs'
+            logs.mkdir(parents=True)
+            (logs / 'stdout.log').write_text('test other_case ... FAILED\n')
+            evidence = summary.summarize(root, {}, {'first_case', 'other_case'})
+            self.assertEqual(evidence['test_cases'], [{'name': 'first_case', 'status': 'ok'}])
+
+    def test_source_name_inventory_does_not_read_untracked_private_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'case.rs'
+            source.write_text('async fn actual_case() {}\nfn generic_case<T>() {}\n')
+            (root / 'validator.key').write_text('fn private_secret() {}')
+            names = summary.source_function_names(root, {'case.rs': 2})
+            self.assertEqual(names, {'actual_case', 'generic_case'})
 
     def test_capture_preserves_argv_exit_code_and_private_output(self):
         with tempfile.TemporaryDirectory() as directory:

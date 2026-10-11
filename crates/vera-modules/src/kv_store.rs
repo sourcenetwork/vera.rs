@@ -88,7 +88,7 @@ impl InMemoryKvStore {
             .map(|(key, value)| (key.as_slice(), value.as_ref()))
     }
 
-    /// Construct a store from raw key-value pairs (e.g. loaded from RocksDB raw_kv CF).
+    /// Construct a store from owned key-value pairs without marking them dirty.
     pub fn from_pairs(pairs: Vec<(Vec<u8>, Vec<u8>)>) -> Self {
         Self {
             data: pairs

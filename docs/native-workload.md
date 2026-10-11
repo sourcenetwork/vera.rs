@@ -116,6 +116,19 @@ allocated size. Process sampling runs during the workload and can perturb result
 
 Arrivals follow their schedule even under overload. When the outstanding limit
 is reached, the operation is recorded as unsent rather than delaying its arrival.
+
+For a validated fixed-object update run, `report.json` also records
+`worker_progress`: completed counts and workflow/scheduling-lag percentiles for
+each object worker, plus peak and time-weighted counts of scheduled workflows
+that have not started or completed. The reporter derives these counts from the
+arrival schedule and recorded latencies; it adds no validator instrumentation.
+Each worker has one signer and processes that object's updates sequentially.
+These counts include runner scheduling and per-object waits. They are not internal
+validator queue measurements or consensus fairness statistics. A finite successful
+drain does not establish sustainable capacity. Registration runs use a distinct
+signer per operation, so repeated-worker progress does not apply. Failed runs
+report worker progress as unavailable.
+
 Throughput uses the entire interval through completion of the last task, including
 drain time. The 50 ms polling interval contributes to observed confirmation
 latency. Version 1 used unverified receipt responses and is not directly comparable.

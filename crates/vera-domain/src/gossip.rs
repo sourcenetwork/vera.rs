@@ -17,7 +17,7 @@ pub const GOSSIP_HEADER_SIZE: usize = 160 + SIGNATURE_LEN;
 ///
 /// Validators publish one of these for each finalized block. Subscribers use
 /// `chain_id` + sequential `height` + `parent_hash` to build a verified header
-/// chain. The `module_state_root` is what Phase 3 Merkle proofs verify against.
+/// chain. Native module proofs verify against `module_state_root`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GossipHeader {
     /// Chain ID (for replay protection).
@@ -32,7 +32,7 @@ pub struct GossipHeader {
     pub timestamp: u64,
     /// EVM state root (QMDB).
     pub state_root: B256,
-    /// Combined module state root (ACP + Bulletin + Vera + Nonces JMT roots).
+    /// Combined current-QMDB root for ACP, bulletin, Vera and native sequences.
     pub module_state_root: B256,
     /// Number of transactions in the block.
     pub tx_count: u32,

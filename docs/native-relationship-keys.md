@@ -51,8 +51,9 @@ contain obsolete grants and does not establish current access.
 
 This format targets fresh state. Restoration rejects relationships outside
 `relationship/v5/`, missing incarnation fields, mismatched keys and invalid state
-or indexes. The optional JMT cardinality index uses format 4. There is no legacy
-dual reader, automatic migration or index backfill. Validators and consumers need
+or indexes. Native record and complete-prefix proofs use Commonware QMDB; the
+separate JMT store and proof path have been removed. There is no legacy dual
+reader, automatic migration or index backfill. Validators and consumers need
 matching keys and proof verification; updating key builders alone is insufficient.
 
 Native genesis fingerprints use `vera/native-genesis/v3` followed by one zero

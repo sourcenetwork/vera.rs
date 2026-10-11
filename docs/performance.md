@@ -133,6 +133,29 @@ in memory. Continued RSS growth does not identify a leak or establish a sustaine
 memory bound. These records predate the additional Regolith reserved-memtable and
 arena-pool counters; retaining allocation owners still need attribution.
 
+## Native-only cleanup comparison on October 11, 2026
+
+[PR performance run 38124358684](https://github.com/sourcenetwork/vera.rs/actions/runs/38124358684)
+compared source `9d5c2b9ea7cb971a7871028b7b0b22d488a7ecbf` against
+`88ffe0faf1e46ace8dcdeda423669f199aae91c9`. Both normal release binaries ran
+on the same four-CPU hosted Linux machine using Regolith and the same head
+workload runner, in head/base/base/head order. Each pass ran 600 growing
+registrations and 600 updates over 32 fixed objects, offered at 20 workflows/s.
+All eight runs completed every operation, verified four replicas and passed
+hard-restart inspection with no receipt or state mismatches.
+
+| Candidate workload | Completed workflows/s | Scheduled arrival to certified receipt p95 | Permission read p95 |
+| --- | ---: | ---: | ---: |
+| Growing registrations | 19.85–19.95 | 225.29–227.75 ms | 6.11–6.19 ms |
+| Fixed 32-object updates | 19.89–19.92 | 223.74–227.58 ms | 6.12–6.30 ms |
+
+Peak member RSS was about 1.8% lower than the base. All measured component and
+full-stack changes remained within the 5% advisory threshold. These thirty-second
+runs show no material regression for this offered load; they do not demonstrate
+a storage-stall reduction, maximum capacity, steady-state memory bound or WAN
+performance. The artifact includes the raw outcomes, source/binary provenance,
+comparison, plots and interactive workload replays.
+
 ## Local mixed-policy qualification
 
 The [current-schema mixed-policy run](mixed-policy-workload.md#current-schema-local-qualification)
@@ -996,6 +1019,42 @@ peaks; end-of-process allocated bytes are not necessarily leaks, and allocation
 callers do not by themselves identify the retaining owner. Follow any increasing
 allocation population through its actual ownership and lifetime before changing
 storage, queues or caches.
+
+### Completed Regolith fixed-state heap profile on October 11, 2026
+
+[Run 38129388183](https://github.com/sourcenetwork/vera.rs/actions/runs/38129388183)
+used clean source `9d5c2b9ea7cb971a7871028b7b0b22d488a7ecbf`, Regolith history,
+normal pipelined consensus and 128 fixed objects. All 90,000 scheduled updates
+completed over 1,800.113 seconds. Four replicas verified every operation, and a
+hard restart checked all 90,000 with no receipt or state mismatches. No writes
+were unsent, unknown, rejected, reverted or incomplete; thirteen receipt-read
+throttles were recorded. One validator's first process was instrumented with
+heaptrack, full release symbols, frame pointers and two glibc arenas. These
+instrumented timings are diagnostic data, not production throughput or latency.
+
+The downloaded artifact's SHA-256 is
+`4dddf7759a56716c568ee5ec7e7859690c6ac107a6f2d17f0ea5e05b262e29d5`.
+Its workload outcomes, source, profile settings, four-replica/restart checks and
+allocation accounting were verified. The decoder accounted for 388,076,558
+retained bytes at process end, with 73,728 bytes unresolved. The full process
+trace contains 207,360 snapshots over 2,160.690 seconds, including setup and
+post-workload verification. Peak tracked allocation was 390,899,514 bytes.
+
+| Process-time window | Interval-peak tracked heap range |
+| --- | ---: |
+| Minutes 9–10 | 282,347,862–286,919,456 bytes |
+| Minutes 19–20 | 311,180,988–316,144,898 bytes |
+| Minutes 29–30 | 333,512,473–336,373,176 bytes |
+
+The fixed-object trace still grows during this interval, so it does not establish
+a memory plateau. Largest retained callers include Commonware runtime context
+(81,935,601 bytes), buffer-pool inner allocation (78,784,512), history writes
+(67,655,660), history snapshot reads (61,998,680) and unreliable mailbox
+construction (60,012,720). Caller attribution does not identify unique owners or
+prove a leak. Tracked heap is not RSS, and the final snapshot includes allocations
+after timed load. The raw executables are not included in this artifact for
+independent binary rehashing. Longer memory qualification and storage-stall
+improvement remain open.
 
 ### Completed sustained heap profile on October 10, 2026
 

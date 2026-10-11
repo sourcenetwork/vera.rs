@@ -380,10 +380,10 @@ cargo fmt                    # format
 
 Use Regolith for finalized history and Commonware QMDB for authenticated state.
 Do not add RocksDB profiling, optimization or backend-selection work. Qualify the
-native core and one compatible Defra, Backbone, Orbis and separate Go Trust set
-first. Then remove remaining RocksDB/JMT compatibility code and its callers,
-preserving native commitments and recovery behavior. Historical measurements
-retain their original backend labels.
+native core and one compatible Defra, Backbone, Orbis and separate Go Trust set.
+The separate RocksDB/JMT module store and its proof path are removed. Preserve
+native commitments and recovery behavior. Historical measurements retain their
+original backend labels.
 
 Borrowed from [defradb.rs](https://github.com/sourcenetwork/defradb.rs):
 

@@ -66,9 +66,19 @@ configuration, genesis, keys or validator state. Every node build uses Regolith
 history. Existing RocksDB history requires a separate data directory and
 authenticated synchronization; copying storage files does not convert it.
 Archive timestamps, owners and member ordering are fixed, so packaging the same
-binary and provenance produces the same bytes. This does not establish
-reproducible compilation or qualify an older runtime environment. A successful
-Linux job does not replace the other release gates.
+binary and provenance produces the same bytes. Packaging alone does not establish
+reproducible compilation or qualify an older runtime environment.
+
+[Reproducibility run 38134444674](https://github.com/sourcenetwork/vera.rs/actions/runs/38134444674)
+compiled candidate `9d5c2b9` on two separate Ubuntu 24.04 hosted runners with
+Rust 1.98.0, absent target directories and no restored build caches. Both normal
+Regolith release compilations produced identical daemon bytes, matching the
+executable already exercised by core CI 38124358657. Downloaded artifact,
+archive and inner-binary checksums and build provenance were verified. The two
+archives also match; their source, compiler, lockfile, features, source path and
+recorded OS/package environment agree. This qualifies the recorded environment
+and source path, not compilation across different toolchains or environments.
+A successful Linux job does not replace the other release gates.
 
 ## Filesystem layout
 

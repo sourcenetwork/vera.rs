@@ -25,8 +25,32 @@ The sustained Regolith diagnostic in
 certified all 90,000 operations, checked four replicas and passed restart with
 zero receipt or state mismatches. Reporting then exceeded the previous
 two-minute deadline while rewriting decoded stacks. Its retained workload
-evidence does not include qualified allocation attribution. The larger scan
-budget needs a completed hosted profile before closing that gate.
+evidence does not include qualified allocation attribution. The growing profile below qualifies its allocation attribution. Fixed-state
+sustained attribution remains a separate gate.
+
+## Growing-state allocation attribution
+
+A source-bound heaptrack run on October 11, 2026 completed 90,000 distinct native ACP registrations at an offered 50 operations/s. All operations verified across four replicas; restart inspection found no receipt or state mismatches. The profile instruments member 3 on its first boot, uses two glibc arenas and a release build with debug symbols. It is an allocation study, not a capacity benchmark or the native-only cleanup candidate qualification.
+
+Peak tracked allocations were 654.34 MiB. The first process ended with 651.55 MiB still allocated. Interval peaks rose from 364.51 MiB around ten minutes to 494.26 MiB around twenty minutes and 590.11 MiB around thirty minutes. Growing live data prevents treating this as a fixed-state plateau test. These quantities exclude allocator overhead and do not equal RSS.
+
+| Innermost recorded caller | Retained MiB |
+| --- | ---: |
+| `commonware_actor::mailbox::new_unreliable (mailbox.rs)` | 135.12 |
+| `commonware_storage::index::ordered::Index (ordered.rs)` | 111.44 |
+| `vera_modules::kv_store::InMemoryKvStore (kv_store.rs)` | 78.80 |
+| `commonware_runtime::iobuf::pool::BufferPoolInner (mod.rs)` | 72.91 |
+| `vera_node::history::write (function.rs)` | 64.54 |
+| `vera_modules::acp::policy_edit_budget::BudgetedEncoding (policy_edit_budget.rs)` | 63.67 |
+| `vera_node::history::regolith_store::Snapshot (regolith_store.rs)` | 61.19 |
+| `vera_modules::acp::policy_edit_budget::BudgetedEncoding (mod.rs)` | 24.23 |
+| `commonware_runtime::iobuf::pool::BufferPool (mod.rs)` | 15.84 |
+
+Each allocation is charged once to its innermost recognized project caller. This attributes an allocation path, not necessarily a unique owning component. Buffers returned by an encoder may remain in records or journals; a storage wrapper may appear above allocator internals. Retention at process exit alone does not establish a leak. Only 91,424 bytes remain unresolved after Rust symbol decoding.
+
+The evidence identifies actor queues, ordered QMDB indexes, live ACP maps and encoded records, buffer pools and history as the next memory-review targets. It does not justify allocator replacement, weakened synchronous durability or a throughput claim. A fixed-state steady-load result and matched uninstrumented measurements are still needed to distinguish growing data, bounded caches and unwanted retention.
+
+[Allocation workflow and numeric artifact](https://github.com/sourcenetwork/vera.rs/actions/runs/38116457453) at source `68287c9016672908f17e3a664cfc40716e56f252`.
 
 The sustained profile investigates growth while live object count remains fixed.
 The growing profile adds live state and helps distinguish dataset costs from
