@@ -1,0 +1,93 @@
+name: Go comparison fixture
+
+on:
+  workflow_call:
+    inputs:
+      count:
+        type: string
+        default: '20'
+      rate:
+        type: string
+        default: '2'
+  workflow_dispatch:
+    inputs:
+      count:
+        description: Small fixture qualification or registration baseline
+        type: choice
+        options: ['20', '600']
+        default: '20'
+      rate:
+        description: Offered registrations per second
+        type: choice
+        options: ['2', '20']
+        default: '2'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-comparison-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  fixture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      GO_SOURCE: ce83826bfeb4ce0fdc1751fc6a28cd4b9c7e7933
+      COUNT: ${{ inputs.count }}
+      RATE: ${{ inputs.rate }}
+      GOMAXPROCS: '2'
+      GOPRIVATE: github.com/sourcenetwork/*
+      GOWORK: 'off'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Check portable fixture configuration
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/go-comparison -p test_run.py
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: sourcenetwork/vera
+          ref: ${{ env.GO_SOURCE }}
+          path: go-reference
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go-reference/go.mod
+          cache-dependency-path: go-reference/go.sum
+      - name: Build reference node and receipt-verifying driver
+        working-directory: go-reference
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
+        run: |
+          go build -mod=readonly -p 2 -trimpath -o "$RUNNER_TEMP/go-verad" ./cmd/verad
+          mkdir comparison-driver
+          cp ../tools/go-comparison/*.go comparison-driver/
+          go build -mod=readonly -p 2 -trimpath -o "$RUNNER_TEMP/go-driver" ./comparison-driver
+      - name: Verify fresh registrations, all replicas and hard restart
+        run: >-
+          python3 tools/go-comparison/run.py
+          --source-root "$GITHUB_WORKSPACE/go-reference" --source "$GO_SOURCE"
+          --node "$RUNNER_TEMP/go-verad" --driver "$RUNNER_TEMP/go-driver"
+          --output "$RUNNER_TEMP/go-measurements" --count "$COUNT" --workers "$COUNT" --rate "$RATE"
+      - name: Reject forged execution evidence
+        working-directory: go-reference
+        env:
+          VERA_GO_EVIDENCE: ${{ runner.temp }}/go-measurements
+          VERA_GO_GENESIS: ${{ runner.temp }}/go-measurements/genesis.public.json
+        run: go test -mod=readonly -p 2 ./comparison-driver -run '^TestCertifiedExecution$' -count=1 -v
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: go-registration-fixture
+          path: |
+            ${{ runner.temp }}/go-measurements/manifest.json
+            ${{ runner.temp }}/go-measurements/observations.jsonl
+            ${{ runner.temp }}/go-measurements/resources.jsonl
+            ${{ runner.temp }}/go-measurements/genesis.public.json
+            ${{ runner.temp }}/go-measurements/evidence.json
+          if-no-files-found: error
+          retention-days: 14
