@@ -80,6 +80,13 @@ fn pending_branches_do_not_replace_query_state() {
         )
         .await;
         let genesis = support::genesis(&set, &GenesisState::default()).await;
+        drop(set);
+        let set = OrderedState::init(
+            context.child("anchored_genesis"),
+            support::state_config(&context, "modules", executor.clone()).recover_from_marshal(),
+            Some(StatefulVeraApp::<NoopSink>::sync_targets(&genesis)),
+        )
+        .await;
         let mut app = StatefulVeraApp::new(
             executor.clone(),
             genesis.clone(),

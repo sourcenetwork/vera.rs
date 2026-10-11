@@ -44,6 +44,13 @@ fn competing_proposals_preserve_receipts() {
             ..Default::default()
         };
         let genesis = support::genesis(&set, &genesis_state).await;
+        drop(set);
+        let set = OrderedState::init(
+            context.child("anchored_genesis"),
+            support::state_config(&context, "app", executor.clone()).recover_from_marshal(),
+            Some(StatefulVeraApp::<NoopSink>::sync_targets(&genesis)),
+        )
+        .await;
 
         let mempool = InMemoryMempool::new();
         let to = Address::repeat_byte(0x42);
