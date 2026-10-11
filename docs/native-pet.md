@@ -82,9 +82,11 @@ PET evidence fallback; the outer report envelope and non-PET domains are unchang
 
 ## Qualification boundary
 
-These changes provide native state and report formats. They do not establish
-completed PET lifecycle qualification. The existing Orbis protocol still needs
-native BLS and Jubjub tests covering stored and inline documents, authorization
-and revocation, independent PET refresh, membership replacement and restart.
-Fault attribution across share generations also needs adversarial qualification;
+The [current native source set](native-qualification-20261011.md) has passed
+focused BLS and Jubjub checks for stored/inline documents, authorization and
+revocation, scheduled PET refresh, member replacement and restart. Its fixed-member
+soak also exercises signing and decryption across three restarts. These are bounded
+functional checks, not prolonged natural-refresh or membership qualification.
+
+Fault attribution across share generations requires adversarial qualification;
 matching a polynomial's constant term alone does not authenticate its generation.

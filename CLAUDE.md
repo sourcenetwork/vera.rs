@@ -422,7 +422,9 @@ The creation event also retains the submitted artifact label.
 Token invalidation events identify the token issuer even when an authorized
 account performs the revocation; the record retains that account in invalidated_by.
 
-Resource diagnostics are opt-in with `RUST_LOG=warn,vera_diagnostics=debug`.
+Resource snapshots are opt-in with `RUST_LOG=warn,vera_resource_diagnostics=debug`.
+This target leaves per-revision tracing disabled. `vera_diagnostics=debug` selects
+resource snapshots together with per-revision diagnostics.
 Every 30 seconds the node logs existing Commonware metrics, resident execution
 index counts and accounted revision bytes, finalization/epoch cache entries and
 buffer capacity, and Regolith memtable used/reserved, arena-pool, pinned-metadata

@@ -16,7 +16,7 @@ on:
         type: boolean
         default: false
       sustained_memory_attribution:
-        description: Record numeric vera_diagnostics snapshots during a sustained run
+        description: Record numeric resource snapshots during a sustained run
         type: boolean
         default: false
       allocator_comparison:
@@ -145,7 +145,7 @@ jobs:
           python3 tools/performance/record.py \
             --node target/release/verad --runner target/release/examples/operation_baseline \
             --history "$HISTORY_BACKEND" --output "$directory" --timeout-seconds 180 \
-            --rust-log 'warn,vera_storage=info,vera_diagnostics=debug' \
+            --rust-log 'warn,vera_storage=info,vera_resource_diagnostics=debug' \
             8 5 8 1 normal 100 192 0 0 256 1
           python3 tools/performance/snapshot_metrics.py "$directory" --node-logs "$VERA_E2E_DIR"
 
@@ -175,7 +175,7 @@ jobs:
             recorder+=(--timeout-seconds 7200)
           fi
           if [[ "$SUSTAINED_MEMORY_ATTRIBUTION" == true ]]; then
-            recorder+=(--rust-log 'warn,vera_storage=info,vera_diagnostics=debug')
+            recorder+=(--rust-log 'warn,vera_storage=info,vera_resource_diagnostics=debug')
           fi
           arena_cases=(default)
           if [[ "$ALLOCATOR_COMPARISON" == true ]]; then arena_cases+=(2); fi

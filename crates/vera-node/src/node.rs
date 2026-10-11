@@ -903,7 +903,7 @@ pub async fn run_node_with_rpc_listener(
         modules.clone(),
     )
     .with_archive(archive.clone());
-    if tracing::enabled!(target: "vera_diagnostics", tracing::Level::DEBUG) {
+    if crate::diagnostics::enabled() {
         let history = history.clone();
         let index = block_index.clone();
         let proofs = light_block_index.clone();

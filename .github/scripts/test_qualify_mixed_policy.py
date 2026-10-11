@@ -88,6 +88,55 @@ class QualificationTests(unittest.TestCase):
         for private in ('/private', 'private fixture material', 'node_pids'):
             self.assertNotIn(private, json.dumps(result))
 
+    def test_observations_allow_recomputation_without_private_fields(self):
+        records = complete_run()
+        completed = [row for row in records if row['kind'] == 'workflow_completed']
+        completed[0].update(elapsed_ms=300, scheduled_to_complete_ms=350, schedule_lag_ms=50,
+                            request='private fixture material')
+        completed[1].update(elapsed_ms=700, scheduled_to_complete_ms=800, schedule_lag_ms=100)
+        submissions = [row for row in records if row['kind'] == 'submission']
+        for index, row in enumerate(submissions):
+            row.update(elapsed_ms=index + 1, accepted_ms=0.5, request='private fixture material')
+        result = mixed.qualify(records, 2)
+        self.assertEqual(result['format_version'], 2)
+        observations = result['workflow_observations']
+        self.assertEqual([row['workflow'] for row in observations], [0, 1])
+        for field, metric in (('elapsed_ms', 'workflow_ms'),
+                              ('scheduled_to_complete_ms', 'scheduled_workflow_ms'),
+                              ('schedule_lag_ms', 'schedule_lag_ms')):
+            values = sorted(row[field] for row in observations)
+            self.assertEqual(result[metric], {'p50': values[0], 'p95': values[1], 'p99': values[1]})
+        observed = result['submission_observations']
+        self.assertEqual(len(observed), 15)
+        self.assertEqual(sorted(row['elapsed_ms'] for row in observed), list(range(1, 16)))
+        self.assertEqual(result['certified_submission_ms'], {'p50': 8, 'p95': 15, 'p99': 15})
+        self.assertTrue(all(set(row) == {'phase', 'workflow', 'revision', 'embedded_mutations',
+                                        'elapsed_ms', 'accepted_ms'} for row in observed))
+        for private in ('private fixture material', '0x', '/private', 'node_pids'):
+            self.assertNotIn(private, json.dumps(result))
+
+    def test_raw_observations_reject_invalid_admission_timing_and_counts(self):
+        for field, value in (('accepted_ms', True), ('accepted_ms', -1),
+                             ('accepted_ms', float('nan')), ('accepted_ms', 900_001), ('accepted_ms', 100.1),
+                             ('embedded_mutations', True)):
+            records = complete_run()
+            row = next(row for row in records if row['kind'] == 'submission' and row['embedded_mutations'] == 1)
+            row[field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(mixed.InvalidEvidence):
+                mixed.qualify(records, 2)
+
+    def test_hardware_export_is_closed_and_bounded(self):
+        manifest = {'platform': 'Linux-6.11-x86_64-with-glibc2.39', 'architecture': 'x86_64',
+                    'logical_cpus': 4, 'cpu_model': 'Intel(R) Xeon(R)',
+                    'private_field': 'private fixture material'}
+        expected = {key: manifest[key] for key in ('platform', 'architecture', 'logical_cpus', 'cpu_model')}
+        self.assertEqual(mixed.hardware_manifest(manifest), expected)
+        for field, value in (('logical_cpus', True), ('logical_cpus', 0), ('logical_cpus', 4097),
+                             ('cpu_model', 'x' * 257), ('cpu_model', 'private\nlog'),
+                             ('architecture', '/private/host'), ('platform', None)):
+            with self.subTest(field=field), self.assertRaises(mixed.InvalidEvidence):
+                mixed.hardware_manifest({**manifest, field: value})
+
     def test_short_load_cannot_be_promoted_to_sustained_qualification(self):
         records = self.sustained_run()
         next(row for row in records if row['kind'] == 'workload_summary')['elapsed_seconds'] = 1799

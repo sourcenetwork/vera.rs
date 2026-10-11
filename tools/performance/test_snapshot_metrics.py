@@ -41,6 +41,10 @@ class SnapshotParser(unittest.TestCase):
         self.assertEqual(record['index.cached_bytes'], 8192)
         self.assertEqual(record['proofs.finalizations'], 21)
 
+    def test_resource_only_target_preserves_snapshot_fields(self):
+        event = snapshot().replace('vera_diagnostics:', 'vera_resource_diagnostics:')
+        self.assertEqual(metrics.parse_snapshot(event), metrics.parse_snapshot(snapshot()))
+
     def test_distinct_labelled_series_do_not_export_label_values(self):
         labels = '{partition="private-partition"}'
         event = snapshot(labels=labels).replace('counter_total ', 'buffer_bytes{partition="other"} 1024\ncounter_total ')

@@ -12,6 +12,45 @@ import signal
 import subprocess
 
 
+PANIC_SOURCES = frozenset(
+    'crates/vera-e2e/examples/' + source
+    for source in (
+        'operation_baseline.rs', 'operation_baseline/driver.rs',
+        'operation_baseline/updates.rs', 'operation_baseline/replica_barrier.rs',
+        'operation_baseline/resources.rs', 'operation_baseline/process_io.rs',
+        'operation_baseline/retention.rs', 'mixed_policy_workload.rs',
+        'mixed_policy_workload/workflow.rs', 'mixed_policy_workload/fixture.rs',
+        'mixed_policy_workload/io.rs',
+    )
+)
+PANIC_LOCATION = re.compile(
+    r"^thread '[^\r\n]{1,256}'(?: \([0-9]{1,20}\))? panicked at "
+    r'([^\s:]{1,256}):([1-9][0-9]{0,6}):([1-9][0-9]{0,5}):$'
+)
+FAILURE_SCAN_BYTES = 1024 * 1024
+FAILURE_LOCATIONS = 16
+
+
+def failure_summary(stderr, timed_out):
+    """Retain known source locations without exporting panic payloads or logs."""
+    locations = []
+    with stderr.open('rb') as stream:
+        size = stream.seek(0, os.SEEK_END)
+        stream.seek(max(0, size - FAILURE_SCAN_BYTES))
+        tail = stream.read(FAILURE_SCAN_BYTES)
+    for line in tail.decode('utf-8', errors='replace').splitlines():
+        match = PANIC_LOCATION.fullmatch(line)
+        if match and match[1] in PANIC_SOURCES:
+            location = {'source': match[1], 'line': int(match[2]), 'column': int(match[3])}
+            if location not in locations:
+                locations.append(location)
+                if len(locations) == FAILURE_LOCATIONS:
+                    break
+    return {'kind': 'timeout' if timed_out else 'process_exit',
+            'panic_locations': locations, 'stderr_scan_truncated': size > FAILURE_SCAN_BYTES,
+            'location_limit_reached': len(locations) == FAILURE_LOCATIONS}
+
+
 def digest(path):
     value = hashlib.sha256()
     with path.open('rb') as stream:
@@ -121,12 +160,14 @@ def main():
     path = args.output / 'manifest.json'
     path.write_text(json.dumps(manifest, indent=2) + '\n')
     environment.update(VERAD_BINARY=str(node), RUST_LOG=args.rust_log)
+    timed_out = False
     with (args.output / 'workload.jsonl').open('w') as output, (args.output / 'stderr.log').open('w') as error:
         process = subprocess.Popen(command, env=environment,
                                    stdout=output, stderr=error, start_new_session=True)
         try:
             exit_code = process.wait(timeout=args.timeout_seconds)
         except subprocess.TimeoutExpired:
+            timed_out = True
             os.killpg(process.pid, signal.SIGTERM)
             try:
                 process.wait(timeout=10)
@@ -140,6 +181,8 @@ def main():
                 pass
             process.wait()
     manifest.update(exit_code=exit_code, load_after=os.getloadavg())
+    if exit_code != 0:
+        manifest['failure'] = failure_summary(args.output / 'stderr.log', timed_out)
     if args.sync_trace is not None:
         manifest['sync_trace']['sha256'] = digest(args.sync_trace)
     path.write_text(json.dumps(manifest, indent=2) + '\n')

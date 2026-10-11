@@ -103,9 +103,14 @@ async fn main() {
     let timing = preset.params();
     let keys = KeySet::builder().seed(42).build().unwrap();
     let trusted = *keys.epoch_info().output.public().public();
+    let maximum_count = if update_objects == 0 {
+        100_000
+    } else {
+        360_000
+    };
     assert!(
-        (1..=100_000).contains(&count),
-        "count must be within 1..=100000"
+        (1..=maximum_count).contains(&count),
+        "count must be within 1..={maximum_count} for the selected workload"
     );
     assert!(
         (1..=10_000).contains(&rate),

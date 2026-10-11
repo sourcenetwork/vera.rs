@@ -274,12 +274,21 @@ gh workflow run performance.yml --repo sourcenetwork/vera.rs --ref <branch-or-ta
 ```
 
 `sustained_memory_attribution=true` combines with either sustained mode. The
-recorder enables the opt-in `vera_diagnostics` target and, after the run,
+recorder enables the opt-in `vera_resource_diagnostics` target and, after the run,
 `tools/performance/snapshot_metrics.py` flattens each 30-second node snapshot
 into numeric records (`diagnostics.jsonl`: history memtable used/reserved,
 arena-pool, pinned-metadata and block-cache bytes, execution index bytes and counts, light
 block cache entries and bytes, durable height). Raw node logs remain excluded
 from artifacts; only the numeric extraction is uploaded.
+The [resource-control runtime check](https://github.com/sourcenetwork/vera.rs/actions/runs/38164867967)
+completed 2,000 fixed-object updates, four-replica receipt reconciliation and
+restart checks with zero receipt or state mismatches. All four members supplied
+numeric snapshots and their logs contained no per-revision diagnostic events.
+This bounded check validates logging selection, not sustained memory or capacity.
+
+This resource target leaves per-revision tracing disabled. Earlier measurements
+using `vera_diagnostics=debug` enabled resource snapshots and per-revision events;
+they remain instrumented measurements.
 
 ```sh
 gh workflow run performance.yml --repo sourcenetwork/vera.rs --ref <branch-or-tag> \
@@ -307,6 +316,11 @@ manual and successful main CI runs retain the existing two 3,000-operation
 baselines and 60-minute job limit.
 The workflow uploads only the named measurement, provenance and report artifacts;
 raw runtime logs, configuration, keys and state directories are excluded.
+For a failed runner, the manifest includes its exit status and up to 16 panic
+locations from known workload source files. The recorder scans only the last
+1 MiB of stderr and records whether that scan was truncated. Panic messages,
+thread names, arbitrary paths and raw stderr remain private. An empty location
+list does not identify the failure cause.
 
 Memory attribution retains each member's private logs until extraction. The
 collector reads multiline resource snapshots from the four node stdout logs;

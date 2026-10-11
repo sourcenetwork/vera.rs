@@ -9,6 +9,10 @@ relationship between consensus, operator-managed membership, and ACP.
 
 ## Deployment
 
+Use the [qualified native source set](native-qualification-20261011.md) when
+reproducing the current consumer checks. Its evidence and outstanding gates are
+explicit; green integration checks alone do not establish production readiness.
+
 A network needs one `genesis.json` shared by all nodes, one validator key and
 epoch-0 BLS share per node, and a `peers.json` listing every participant's
 dialable address. Two paths produce that material:
@@ -221,10 +225,11 @@ rejected and require an explicit migration decision, not silent reset.
   finalized height for `currentBlock`. Its `highestBlock` is only the maximum of
   that height and the recovered snapshot floor, not an estimate of the network
   tip. Consensus views and process counters are never used as heights.
-- `RUST_LOG=warn,vera_diagnostics=debug` emits a resource snapshot every 30
+- `RUST_LOG=warn,vera_resource_diagnostics=debug` emits a resource snapshot every 30
   seconds (runtime metrics, resident execution index, cache occupancy,
-  history-backend memory counters) plus per-revision apply and publication
-  times. Collection runs off the async executor and is opt-in.
+  history-backend memory counters). Collection runs off the async executor and
+  is opt-in. `vera_publication_diagnostics=debug` enables per-revision apply and
+  publication times; `vera_diagnostics=debug` enables both kinds of diagnostics.
 - Consensus warnings (`floor not updated`, view skips) at `warn` are normal
   during epoch transitions; sustained notarization timeouts are not.
 

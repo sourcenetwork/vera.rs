@@ -55,6 +55,9 @@ Each pass offered 90,000 archive/unarchive updates over 128 objects at 50/s for
 completed; four-replica reconciliation and hard-restart inspection passed with
 zero receipt or state mismatches. Heap and syscall tracing were disabled;
 one-second resource sampling and periodic numeric diagnostics were enabled.
+The recorded `vera_diagnostics=debug` setting also enabled per-revision diagnostic
+logging. This is an instrumented allocator comparison; it does not qualify the
+same improvement without that logging overhead.
 
 | Measurement | Default arenas | Two arenas |
 | --- | ---: | ---: |
@@ -76,3 +79,76 @@ setup and final checks; its clock differs from the timed workload clock. Reports
 raw observations, memory plots and interactive replays are retained in the run's
 artifact. Maximum throughput and physical-device write amplification were not
 measured.
+
+## Sustained mixed policies
+
+[Run 38146872656](https://github.com/sourcenetwork/vera.rs/actions/runs/38146872656)
+completed 2,048 graph workflows at one offered workflow/s over 2,048.285 seconds
+(34.14 minutes). Each workflow registers four objects and exercises recursive
+groups, intersections, exclusions, revocation and regrant. Four validators ran on
+one hosted Linux machine with the normal release daemon and no heap or syscall
+tracing. The measured completion rate was 0.999861 workflows/s.
+
+| Measurement | Observed value |
+| --- | ---: |
+| Timed workflow p50 / p95 / p99 (ms) | 974.918 / 1335.613 / 1409.189 |
+| Scheduled arrival to workflow completion p95 (ms) | 1337.343 |
+| Certified submission p50 / p95 / p99 across the full fixture (ms) | 109.846 / 220.429 / 314.244 |
+| Certified native submissions across the full fixture | 12,291 |
+| Certified embedded mutations across the full fixture | 34,819 |
+| Verified permission / owner checks across the full fixture | 614,400 / 163,840 |
+| Throttled requests | 0 |
+| Final timed-workload RSS per validator (MiB) | 502.44–518.61 |
+| Peak timed-workload RSS per validator (MiB) | 504.34–520.36 |
+
+All four replicas passed reconciliation after the timed load, relation removal,
+relation reintroduction, explicit regrant and hard restart. Definition edits occur
+after the timed load. Native submission and mutation totals include setup and
+these later phases; they are not timed throughput counts. The reported restart
+interval is 436.105 seconds and includes readiness plus complete reconciliation
+of every workflow on all four replicas. It does not measure service startup alone.
+
+The artifact retains 2,049 complete four-member RSS samples and all 12 storage
+phase/member records. RSS increased by 44.39–62.42 MiB per validator during the
+last ten measured minutes while graph state was growing. This run does not
+establish a fixed-state memory plateau, maximum capacity, overload behavior,
+continuous policy-definition changes, validator membership churn or WAN behavior.
+
+Source is `8e5c0dee06d920259122125cd49dc1ffbe97e4d8`; the reported normal daemon
+and workload hashes match the qualified release and smaller mixed-policy case.
+The retained artifact is `sustained-mixed-policy-evidence`, ZIP SHA-256
+`4bf2d857a535cbb6a77dd9ae1df743c2c4495a9fc500d0d2205433f35e6f132b`.
+It contains validated aggregates and the RSS series. Individual operation timings
+and machine manifests were not exported, so the percentiles cannot be independently
+recomputed from this artifact. The bounded source verifier checked every operation
+before exporting the aggregates.
+
+## Two-hour fixed-object run with an unresolved final check
+
+[Run 38152181596](https://github.com/sourcenetwork/vera.rs/actions/runs/38152181596)
+offered 360,000 archive/unarchive updates over 128 objects at 50/s, with one
+certified permission check per update. All workflows completed over 7,200.243
+seconds; subsequent receipt reconciliation verified all 360,000 outcomes across
+four replicas with zero unresolved results. The runner then exited with status
+101 before emitting its recovery result. Its artifact excluded stderr, so the
+exact failing state or recovery check is unknown. This run is a failed
+qualification, despite the completed workload and receipt reconciliation.
+
+| Measurement during the timed workload | Observed value |
+| --- | ---: |
+| Completed workflows/s | 49.998 |
+| Scheduled arrival to certified receipt p50 / p95 / p99 (ms) | 168.986 / 287.876 / 321.578 |
+| Scheduled arrival to completed workflow p50 / p95 / p99 (ms) | 172.743 / 294.805 / 329.600 |
+| Certified permission read p95 (ms) | 11.382 |
+| Final validator RSS (MiB) | 769.98–774.07 |
+| Per-validator RSS growth during the final ten minutes (MiB) | 0.09–3.06 |
+
+Each validator supplied 7,201 complete one-second workload RSS samples. Numeric
+node snapshots continue through the later checks and use a different clock.
+The normal daemon SHA-256 is
+`05c6aa09252762130d135fbdc187ccdc71e186e8095362cd5688ac5e913da7e1`;
+the runner source is `e161dd3b4702de41207e64c43baa0a13bb0b6e45`.
+The run used glibc 2.39 with two arenas on a four-CPU AMD EPYC host.
+`vera_diagnostics=debug` enabled per-revision events as well as resource snapshots.
+The measurements therefore do not establish behavior without that logging,
+successful restart, a stable memory bound, maximum capacity or WAN performance.
