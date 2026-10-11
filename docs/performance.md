@@ -967,11 +967,14 @@ operations. See the [kernel accounting contract](https://docs.kernel.org/filesys
 
 ## Sustained heap attribution
 
-The native heap-profile workflow offers two bounded diagnostic profiles.
+The native heap-profile workflow offers three bounded diagnostic profiles.
 `startup` retains the existing 6,000-update case at 20 offered operations/s.
 `sustained` runs 90,000 updates at 50 offered operations/s against 128 objects,
 covering a thirty-minute workload, with the controlled glibc arena limit set to
-two. It uses the current node and workload sources, full release debug symbols,
+two. `growing` uses the same count, rate and arena limit for distinct registrations,
+so live object count increases instead of updating a fixed set. The profile
+manifest records the fixed-update object count; zero selects registrations.
+These profiles use the current node and workload sources, full release debug symbols,
 frame pointers and the existing source-filtered allocation decoder. Competing
 allocator or loader settings are rejected for the controlled case.
 

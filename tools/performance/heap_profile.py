@@ -27,13 +27,21 @@ def progress(phase, state, exit_code=None):
 
 def profile_workload(selection):
     if selection == 'startup':
-        return 6000, 20, 1200, None
+        return 6000, 20, 1200, None, 128
     if selection == 'sustained':
-        return 90000, 50, 7200, '2'
+        return 90000, 50, 7200, '2', 128
+    if selection == 'growing':
+        return 90000, 50, 7200, '2', 0
     raise ValueError('unsupported allocation profile selection')
 
 
-def qualify_outcomes(records, count):
+def qualify_outcomes(records, count, fixed_objects):
+    configuration = records.get('configuration')
+    workload = 'certified_native_registrations' if fixed_objects == 0 else 'certified_native_object_updates'
+    if (not isinstance(configuration, dict) or configuration.get('workload') != workload or
+            type(configuration.get('fixed_update_objects')) is not int or
+            configuration['fixed_update_objects'] != fixed_objects or configuration.get('count') != count):
+        raise ValueError('profile workload differs from recorded configuration')
     summary, verification, recovery = (records[name] for name in ('summary', 'verification', 'recovery'))
     if (summary['offered'] != count or summary['completed_workflows'] != count or
             verification['verified'] != count or verification['replicas'] != 4 or verification['unresolved'] != 0 or
@@ -225,10 +233,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--history', required=True, choices=('rocksdb', 'regolith'))
     parser.add_argument('--output', required=True, type=Path)
-    parser.add_argument('--profile', choices=('startup', 'sustained'), default='startup')
+    parser.add_argument('--profile', choices=('startup', 'sustained', 'growing'), default='startup')
     args = parser.parse_args()
     build = profile_settings(os.environ)
-    count, rate, timeout, arena = profile_workload(args.profile)
+    count, rate, timeout, arena, fixed_objects = profile_workload(args.profile)
     environment, allocator = allocator_environment(os.environ, arena)
     arena_arguments = [] if arena is None else ['--glibc-arena-max', arena]
     args.output.mkdir(parents=True, exist_ok=False)
@@ -249,31 +257,37 @@ def main():
             result = subprocess.run(['python3', 'tools/performance/record.py', '--node', str(launcher),
                                      '--runner', 'target/release/examples/operation_baseline', '--history', args.history,
                                      '--output', str(record), '--timeout-seconds', str(timeout), *arena_arguments,
-                                     str(count), str(rate), '128', '1', 'normal', '100', '192', '0', '128', '256', '1'],
+                                     str(count), str(rate), '128', '1', 'normal', '100', '192', '0', str(fixed_objects), '256', '1'],
                                     env=environment, stdout=subprocess.DEVNULL, stderr=log)
         progress('workload', 'completed', result.returncode)
         records = {}
         with (record / 'workload.jsonl').open() as stream:
             for line in stream:
                 row = json.loads(line)
-                if row.get('kind') in ('summary', 'verification', 'recovery'):
+                if row.get('kind') == 'configuration':
+                    records['configuration'] = {key: row[key] for key in ('workload', 'count', 'fixed_update_objects') if key in row}
+                elif row.get('kind') in ('summary', 'verification', 'recovery'):
                     records[row['kind']] = row
                 if row.get('kind') == 'resources' and 'first_resources' not in records:
                     records['first_resources'] = row['sample']['rss_breakdown']
         manifest = json.loads((record / 'manifest.json').read_text())
         manifest['node_launcher_sha256'] = manifest.pop('node_sha256')
         manifest['node_sha256'] = digest(node)
-        scan_timeout_seconds = 600 if args.profile == 'sustained' else 120
+        scan_timeout_seconds = 120 if args.profile == 'startup' else 600
         manifest['heap_profile'] = {'member': 3, 'tool': subprocess.check_output(['heaptrack', '--version'], text=True).strip(),
                                     'library_sha256': digest(library), **build,
                                     'instrumented': True, 'capacity_measurement': False, 'profiled_first_boot_only': True, 'rust_demangler': demangler_version,
                                     'selection': args.profile, 'operations': count, 'offered_per_second': rate,
+                                    'fixed_update_objects': fixed_objects,
                                     'trace_scan_timeout_seconds': scan_timeout_seconds,
                                     'controlled_allocator_environment': allocator}
         manifest['source_binding'] += ' The launcher execs the hashed node; allocation instrumentation is restricted to member3 first boot.'
         workload_evidence = {'manifest': manifest, 'workload_exit_code': result.returncode,
                              'outcomes': {key: value for key, value in records.items() if key != 'first_resources'}}
         (args.output / 'workload.json').write_text(json.dumps(workload_evidence, indent=2) + '\n')
+        if result.returncode:
+            raise SystemExit(result.returncode)
+        qualify_outcomes(records, count, fixed_objects)
         pid = int((private / 'pid').read_text())
         if records['first_resources'][3]['pid'] != pid:
             raise ValueError('profile did not preserve the selected validator PID')
@@ -320,9 +334,6 @@ def main():
                                       'unresolved_stack_formats': dict(unresolved)},
                     'retained_interpretation': 'Bytes still allocated when the first process ended; these are not necessarily leaks.'}
         (args.output / 'allocations.json').write_text(json.dumps(evidence, indent=2) + '\n')
-        if result.returncode:
-            raise SystemExit(result.returncode)
-        qualify_outcomes(records, count)
 
 
 if __name__ == '__main__':

@@ -1,14 +1,20 @@
 # Native allocation attribution
 
-The **Native heap profile** workflow runs the existing four-validator fixed-state
-workload against 128 objects. Select `startup` for 6,000 updates at 20 offered
-operations/s, or `sustained` for 90,000 updates at 50 offered operations/s with two
-glibc arenas. Both preserve certified permission reads, all-replica verification
-and full restart checks. Current profiles use Regolith history. Earlier RocksDB
-profiles below remain historical measurements.
+The **Native heap profile** workflow runs the existing four-validator workload.
+Select `startup` for 6,000 updates at 20 offered operations/s, or `sustained` for
+90,000 updates at 50 offered operations/s against 128 fixed objects. Select
+`growing` for 90,000 distinct registrations at 50 offered operations/s. Both
+thirty-minute profiles use two glibc arenas. Every profile preserves certified
+permission reads, all-replica verification and full restart checks. The manifest
+records the selection and fixed-update object count; zero selects registrations.
+Qualification checks that the workload's reported mode, object count and operation
+count match that selection before analyzing the trace. Successful fixed-state
+updates cannot qualify a growing-data profile.
+Current profiles use Regolith history. Earlier RocksDB profiles below remain
+historical measurements.
 
-Startup profiles allow two minutes for each trace scan; sustained profiles allow
-ten minutes per scan for their larger folded trace. Symbol decoding retains its
+Startup profiles allow two minutes for each trace scan; sustained and growing
+profiles allow ten minutes per scan for their larger folded trace. Symbol decoding retains its
 separate two-minute deadline and bounded inventory. These reporting budgets do
 not change workload or production request deadlines. The selected scan budget is
 recorded in the profile manifest. A successful workload alone does not qualify
@@ -22,8 +28,10 @@ two-minute deadline while rewriting decoded stacks. Its retained workload
 evidence does not include qualified allocation attribution. The larger scan
 budget needs a completed hosted profile before closing that gate.
 
-The sustained profile investigates late growth; its instrumented results do not
-replace normal-release resource measurements.
+The sustained profile investigates growth while live object count remains fixed.
+The growing profile adds live state and helps distinguish dataset costs from
+fixed-workload retention. Their instrumented results do not replace normal-release
+resource measurements or by themselves prove a leak or bounded memory.
 
 The diagnostic release build keeps its optimization settings, adds full debug
 information without stripping symbols, and forces Rust frame pointers. These
