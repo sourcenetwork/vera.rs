@@ -154,8 +154,8 @@ def rust_demangler():
     return command, version
 
 
-def demangle_stacks(source, destination, command):
-    deadline = time.monotonic() + 120
+def demangle_stacks(source, destination, command, *, scan_timeout_seconds=120):
+    deadline = time.monotonic() + scan_timeout_seconds
     symbols = {}
     symbol_bytes = 0
     mangled = re.compile(r'(?:_R|_ZN)[a-zA-Z_0-9]+(?:\.[a-zA-Z_0-9]+)*')
@@ -202,7 +202,7 @@ def demangle_stacks(source, destination, command):
         value = symbols.get(symbol)
         return value + frame[len(symbol):] if value is not None else frame
 
-    deadline = time.monotonic() + 120
+    deadline = time.monotonic() + scan_timeout_seconds
     with source.open() as raw, destination.open('w') as decoded:
         for line in raw:
             if time.monotonic() >= deadline:
@@ -263,10 +263,12 @@ def main():
         manifest = json.loads((record / 'manifest.json').read_text())
         manifest['node_launcher_sha256'] = manifest.pop('node_sha256')
         manifest['node_sha256'] = digest(node)
+        scan_timeout_seconds = 600 if args.profile == 'sustained' else 120
         manifest['heap_profile'] = {'member': 3, 'tool': subprocess.check_output(['heaptrack', '--version'], text=True).strip(),
                                     'library_sha256': digest(library), **build,
                                     'instrumented': True, 'capacity_measurement': False, 'profiled_first_boot_only': True, 'rust_demangler': demangler_version,
                                     'selection': args.profile, 'operations': count, 'offered_per_second': rate,
+                                    'trace_scan_timeout_seconds': scan_timeout_seconds,
                                     'controlled_allocator_environment': allocator}
         manifest['source_binding'] += ' The launcher execs the hashed node; allocation instrumentation is restricted to member3 first boot.'
         workload_evidence = {'manifest': manifest, 'workload_exit_code': result.returncode,
@@ -299,7 +301,7 @@ def main():
         original_sites = retained_sites(stacks)
         decoded = private / 'retained.rust.stacks'
         progress('symbolization', 'started')
-        demangle_stacks(stacks, decoded, demangler)
+        demangle_stacks(stacks, decoded, demangler, scan_timeout_seconds=scan_timeout_seconds)
         progress('symbolization', 'completed')
         unresolved = collections.Counter()
         attribution = collections.Counter()

@@ -44,26 +44,27 @@ regenerating the retained key.
 ## Linux build artifacts
 
 The Linux checks job bundles its normal release daemon after the native ring
-lifecycle tests pass. Download `verad-x86_64-unknown-linux-gnu-rocksdb` from the
+lifecycle tests pass. Download `verad-x86_64-unknown-linux-gnu-regolith` from the
 workflow run for the intended source. It contains a tarball and `SHA256SUMS`:
 
 ```sh
 sha256sum --check SHA256SUMS
-tar -xzf verad-x86_64-unknown-linux-gnu-rocksdb.tar.gz
+tar -xzf verad-x86_64-unknown-linux-gnu-regolith.tar.gz
 ```
 
 The archive contains only `verad` and `build.json`. The manifest records the
 actual checked-out source commit and tree (a merge commit on pull-request runs),
 lockfile and toolchain-file hashes, compiler, target, release build command,
-empty feature selection, RocksDB history backend, binary hash and required shared
+empty feature selection, Regolith history backend, binary hash and required shared
 library names. Builds use the locked dependency graph and explicitly disable
 default features; fault injection is excluded. Confirm the source against the independently selected revision.
 Checksums detect corruption; they do not authenticate the publisher.
 
 This artifact targets Linux x86-64 GNU on Ubuntu 24.04. It is dynamically linked;
 use a compatible runtime with the required system libraries. It does not include
-configuration, genesis, keys or validator state. Regolith builds require a
-separate explicitly selected build; this bundle cannot open Regolith history.
+configuration, genesis, keys or validator state. Every node build uses Regolith
+history. Existing RocksDB history requires a separate data directory and
+authenticated synchronization; copying storage files does not convert it.
 Archive timestamps, owners and member ordering are fixed, so packaging the same
 binary and provenance produces the same bytes. This does not establish
 reproducible compilation or qualify an older runtime environment. A successful
@@ -126,8 +127,8 @@ remaining replicas, discards the original directory and restores the backup.
 The existing recovery assertions check historical receipts, policy and nonce
 state, certified revocation denial, a current epoch share and a subsequent write
 after stopping another voter. It uses four validators, normal timing, pipelined
-Simplex and 192-revision epochs. Linux CI selects RocksDB through the lifecycle
-job and Regolith through its dedicated backup job.
+Simplex and 192-revision epochs. Linux CI exercises the Regolith deployment
+through the lifecycle job.
 
 This is a prepared process-level filesystem-copy qualification. Passing results
 must be tied to the tested source; it does not establish live filesystem snapshot
@@ -173,9 +174,9 @@ rejected and require an explicit migration decision, not silent reset.
   not currently trigger supervised recovery. A watchdog that accounts for the
   active voting quorum still requires implementation and qualification. Snapshot
   initialization has its separate deadline; supervised restart does not guarantee recovery.
-- **History backend**: default RocksDB; the `regolith-history` build feature
-  selects Regolith with synchronous writes. The two backends reject each
-  other's directory layouts — pick one per deployment.
+- **History backend**: Regolith with synchronous writes in every build. The
+  `regolith-history` feature remains an accepted deployment marker. Foreign
+  directory layouts are rejected before opening the store.
 - **RPC exposure**: bind `http_addr` to an internal interface for validator
   operation; expose only through the intended client path. With `--config`,
   startup uses that address and port; `--rpc-port` changes only its port, preserving

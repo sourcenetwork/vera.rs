@@ -203,6 +203,23 @@ class HeapEvidence(unittest.TestCase):
             self.assertEqual(run.call_args.kwargs['timeout'], 118)
             self.assertEqual(retained_sites(decoded), {'commonware_storage::cache::Entry': 64})
 
+    def test_sustained_trace_scan_budget_preserves_the_decoder_deadline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raw, decoded = (Path(directory) / name for name in ('raw', 'decoded'))
+            raw.write_text('_RNvC6_123foo3bar; 64\n')
+            response = subprocess.CompletedProcess([], 0, stdout='commonware_storage::cache::Entry\n')
+            with patch('heap_profile.time.monotonic', side_effect=[0, 599, 599, 600, 900, 1499]), \
+                    patch('heap_profile.subprocess.run', return_value=response) as run:
+                demangle_stacks(raw, decoded, ['fixture-decoder'], scan_timeout_seconds=600)
+            self.assertEqual(run.call_args.kwargs['timeout'], 119)
+            self.assertEqual(retained_sites(decoded), {'commonware_storage::cache::Entry': 64})
+            for clock in ([0, 600], [0, 0, 0, 120], [0, 0, 0, 0, 0, 600]):
+                with self.subTest(clock=clock), \
+                        patch('heap_profile.time.monotonic', side_effect=clock), \
+                        patch('heap_profile.subprocess.run', return_value=response):
+                    with self.assertRaisesRegex(ValueError, 'decoding exceeded its deadline'):
+                        demangle_stacks(raw, decoded, ['fixture-decoder'], scan_timeout_seconds=600)
+
     def test_every_decode_phase_still_rejects_its_exhausted_budget(self):
         with tempfile.TemporaryDirectory() as directory:
             raw, decoded = (Path(directory) / name for name in ('raw', 'decoded'))

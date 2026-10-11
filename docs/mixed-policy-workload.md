@@ -98,7 +98,7 @@ changes, or every failure point during recovery.
 
 The Linux checks job builds the existing mixed-policy driver in the normal
 release profile and runs sixteen workflows at two offered workflows per second,
-with at most eight outstanding workflows. It uses the same RocksDB release
+with at most eight outstanding workflows. It uses the same Regolith release
 daemon as the native-ring check and release bundle. The driver retains its
 900-second whole-run deadline; the recorder allows 960 seconds for termination.
 
@@ -117,11 +117,13 @@ and later regrants. Node directories, keys, policy/request identifiers, paths,
 raw JSONL and error messages remain private and are removed after collection.
 Failed qualification exports a fixed failure stage rather than private output.
 
-This is a short functional gate for the four-validator Linux RocksDB deployment.
+This is a short functional gate for the four-validator Linux Regolith deployment.
 It does not establish sustainable capacity, steady-state memory, WAN behavior,
 other storage backends or equivalence to the historical local measurement below.
 
 ## Hosted Linux result on October 10, 2026
+
+This historical result predates the Regolith-only deployment.
 
 [CI run 38027720672](https://github.com/sourcenetwork/vera.rs/actions/runs/38027720672)
 qualified the gate above from source

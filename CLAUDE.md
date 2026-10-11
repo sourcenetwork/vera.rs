@@ -17,7 +17,7 @@ Related repositories are independent checkouts; discover their paths rather than
 | **defradb.rs** | sourcenetwork | Document storage with native signed submissions and verified ACP evidence |
 | **trust-api** | sourcenetwork | Separate Go gateway for authentication, relay workers and native APIs |
 | **backbone** | sourcenetwork | Shared Rust clients and verification used by native consumers |
-| **regolith** | sourcenetwork | Defra document storage and optional Vera finalized-history backend |
+| **regolith** | sourcenetwork | Defra document storage and Vera finalized-history backend |
 | **bankd-commonware** | mizufinance | Reference: Commonware + REVM chain (infrastructure source for Phase 1) |
 | **monorepo** | commonwarexyz | Commonware primitives (consensus, crypto, p2p, storage) |
 
@@ -379,6 +379,13 @@ cargo fmt                    # format
 
 ## Development Principles
 
+Use Regolith for finalized history and Commonware QMDB for authenticated state.
+Do not add RocksDB profiling, optimization or backend-selection work. Qualify the
+native core and one compatible Defra, Backbone, Orbis and separate Go Trust set
+first. Then remove remaining RocksDB/JMT compatibility code and its callers,
+preserving native commitments and recovery behavior. Historical measurements
+retain their original backend labels.
+
 Borrowed from [defradb.rs](https://github.com/sourcenetwork/defradb.rs):
 
 **No commented-out code. No TODO comments (create issues instead). No speculative docs.**
@@ -419,7 +426,8 @@ account performs the revocation; the record retains that account in invalidated_
 Resource diagnostics are opt-in with `RUST_LOG=warn,vera_diagnostics=debug`.
 Every 30 seconds the node logs existing Commonware metrics, resident execution
 index counts and accounted revision bytes, finalization/epoch cache entries and
-buffer capacity, and history backend memtable/table-reader/block-cache byte counters.
+buffer capacity, and Regolith memtable used/reserved, arena-pool, pinned-metadata
+and block-cache byte counters.
 Collection runs off the async executor; disabled diagnostics start no sampler.
 Counters are non-atomic and exclude other allocations. Unsupported properties
 remain absent, and collection failures are logged rather than reported as zero.

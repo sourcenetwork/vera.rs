@@ -44,12 +44,12 @@ before accepting requests; see `snapshot-recovery.md`.
 
 ## Staging retained history
 
-`FinalizedHistory::record_chunk` copies at most 64 KiB from a pinned RocksDB
+`FinalizedHistory::record_chunk` copies at most 64 KiB from a pinned Regolith
 snapshot into a response and reports the full record length and offset. The
 caller must bound record assembly before allocating for the advertised length.
 The native node serves these chunks on authenticated peer channel 16 using
 Commonware's resolver. Pinned reads avoid copying the
-entire stored value into a Rust buffer; RocksDB's own resource use still applies.
+entire stored value into a Rust buffer; Regolith's own resource use still applies.
 
 `begin_import` verifies the selected revision against the caller's independent
 consensus key and persists that selection. Records arrive in descending height

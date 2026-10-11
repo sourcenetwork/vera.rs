@@ -15,7 +15,7 @@ Vera provides these workload drivers:
 The [Performance workflow](../.github/workflows/performance.yml) runs after a
 successful main-branch CI push, or through manual dispatch. It builds release
 binaries before measurement and runs Regolith history on a
-hosted runners. Each backend measures 3,000 operations at 50 offered arrivals/s,
+hosted runner. It measures 3,000 operations at 50 offered arrivals/s,
 first with growing registrations and then with 128 repeatedly updated objects.
 These are fixed-load baselines, not searches for maximum throughput. They are
 not part of every pull request's test loop.
@@ -106,6 +106,33 @@ journal offsets alone do not indicate retained memory: pruning boundaries
 advanced with them. Numeric reports, resource series, charts and the interactive
 replay are in the linked run's artifacts; raw node logs and keys are excluded.
 
+## Regolith growing-state qualification on October 10, 2026
+
+[Run 38056052301](https://github.com/sourcenetwork/vera.rs/actions/runs/38056052301)
+measured source `b3131f408078107f59254cfe9e107e510b3139c2`, using the normal
+release build, default glibc 2.39 allocator and periodic numeric diagnostics.
+Four local validators certified all 90,000 distinct ACP object registrations
+offered at 50 operations/s over 30 minutes. Permission checks, reconciliation on
+all four replicas and a hard restart passed with zero unresolved operations,
+receipt mismatches or state mismatches. The workload recorded no throttling or
+missing member resource samples.
+
+| Measurement | Result |
+| --- | ---: |
+| Completed workflows/s | 49.994 |
+| Scheduled arrival to certified receipt p95 | 265.348 ms |
+| Verified permission read p95 | 3.929 ms |
+| Scheduled arrival to complete workflow p95 | 267.409 ms |
+| Restart to observed certified probe | 12.915 s |
+| Peak sampled RSS per validator, including final checks | 899.03–924.86 MiB |
+| RSS growth per validator during minutes 20–30 | 148.28–177.16 MiB |
+
+This establishes the offered load on one hosted machine, not maximum capacity or
+WAN performance. The dataset grows throughout the run; live query state remains
+in memory. Continued RSS growth does not identify a leak or establish a sustained
+memory bound. These records predate the additional Regolith reserved-memtable and
+arena-pool counters; retaining allocation owners still need attribution.
+
 ## Local mixed-policy qualification
 
 The [current-schema mixed-policy run](mixed-policy-workload.md#current-schema-local-qualification)
@@ -124,8 +151,8 @@ the linked report.
 `allocator_comparison=true` runs two fresh four-validator fixed-state workloads
 on the same hosted runner: the default glibc arena setting, then
 `MALLOC_ARENA_MAX=2`. Each case offers 90,000 operations at 50/s over 30 minutes
-against 128 objects, using the same prebuilt release binaries. Both history
-backends run this comparison independently. The ordinary performance workflow
+against 128 objects, using the same prebuilt Regolith release binaries.
+The ordinary performance workflow
 and production configuration retain their existing allocator settings.
 
 ```bash
@@ -137,7 +164,7 @@ selected arena setting and libc version, and rejects conflicting allocator
 or loader overrides for these controlled cases. Cases retain distinct manifests,
 resource snapshots, certified permission checks, all-replica reconciliation,
 restart verification, latency reports and interactive replays. Results are under
-`objects-128-allocator-default` and `objects-128-allocator-2` in each backend's
+`objects-128-allocator-default` and `objects-128-allocator-2` in the Regolith
 artifact. Private node directories are removed after extraction between cases.
 The comparison cannot combine with growing-state, archive-retention or
 storage-attribution modes.
@@ -153,7 +180,7 @@ not a production allocator recommendation or maximum-capacity measurement.
 ## Manual sustained fixed-state run
 
 The same workflow accepts `sustained_fixed_state=true` only through manual
-dispatch. It selects one fixed-state run per history backend: 90,000 offered
+dispatch. It selects one Regolith fixed-state run: 90,000 offered
 operations at 50/s against 128 objects, a 30-minute arrival schedule within the
 driver's 100,000-operation bound. It retains the normal release profile, normal
 deadlines, 128 outstanding workflows, one verified permission read per write,
@@ -179,8 +206,8 @@ gh workflow run performance.yml --repo sourcenetwork/vera.rs --ref <branch-or-ta
 `sustained_memory_attribution=true` combines with either sustained mode. The
 recorder enables the opt-in `vera_diagnostics` target and, after the run,
 `tools/performance/snapshot_metrics.py` flattens each 30-second node snapshot
-into numeric records (`diagnostics.jsonl`: history backend memtable,
-table-reader and block-cache bytes, execution index bytes and counts, light
+into numeric records (`diagnostics.jsonl`: history memtable used/reserved,
+arena-pool, pinned-metadata and block-cache bytes, execution index bytes and counts, light
 block cache entries and bytes, durable height). Raw node logs remain excluded
 from artifacts; only the numeric extraction is uploaded.
 
@@ -189,7 +216,7 @@ gh workflow run performance.yml --repo sourcenetwork/vera.rs --ref <branch-or-ta
   -f sustained_growing_state=true -f sustained_memory_attribution=true
 ```
 
-Each backend's recorder receives these arguments:
+The Regolith recorder receives these arguments:
 
 ```text
 --timeout-seconds 7200 90000 50 128 1 normal 100 192 0 128 256 1
@@ -261,8 +288,8 @@ identity from these counters alone.
 Regolith snapshots separately expose `history_memory_bytes.pinned_table_metadata`
 from its [pinned metadata property](https://github.com/sourcenetwork/regolith/blob/e7cf2732d0178defb02d9306cd8d1dae6406e4d8/src/engine/mod.rs#L3354). This measures metadata held
 outside the block-cache budget by SST readers in the current version; it does not
-cover every allocation or metadata held through older versions. RocksDB retains
-an unsupported value for this backend-specific counter. The allocator recordings
+cover every allocation or metadata held through older versions. Historical
+RocksDB recordings have no value for this backend-specific counter. The allocator recordings
 below predate this field and cannot attribute their growth to that metadata.
 
 ### Completed allocator accounting on October 10, 2026
@@ -350,7 +377,8 @@ change.
 The [PR performance workflow](../.github/workflows/performance-pr.yml) measures
 code-changing same-repository PRs on one hosted Linux runner. It checks out the
 exact PR head and base-tip revisions and builds both node binaries with Rust
-1.98.0 in the release profile. One head-built `operation_baseline` drives both
+1.98.0 in the release profile with `regolith-history` enabled on both sides.
+One head-built `operation_baseline` drives both
 revisions, giving them identical workload generation and correctness checks.
 Before measurement, each node's `validator --help` is checked for
 `--rpc-listener-fd`. Listener inheritance is enabled for both sides only when both
@@ -420,7 +448,7 @@ python tools/performance/run_pr.py --head /path/to/head --base /path/to/base \
 
 Use an environment with `tools/performance/requirements.txt` installed. Both
 checkouts must be clean and match their binaries. The main/manual Performance
-workflow also retains the component samples alongside its RocksDB and Regolith
+workflow also retains the component samples alongside its Regolith
 full-stack runs.
 
 Each artifact includes:

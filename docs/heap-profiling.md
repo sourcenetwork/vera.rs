@@ -4,7 +4,24 @@ The **Native heap profile** workflow runs the existing four-validator fixed-stat
 workload against 128 objects. Select `startup` for 6,000 updates at 20 offered
 operations/s, or `sustained` for 90,000 updates at 50 offered operations/s with two
 glibc arenas. Both preserve certified permission reads, all-replica verification
-and full restart checks. Select RocksDB or Regolith for the history backend.
+and full restart checks. Current profiles use Regolith history. Earlier RocksDB
+profiles below remain historical measurements.
+
+Startup profiles allow two minutes for each trace scan; sustained profiles allow
+ten minutes per scan for their larger folded trace. Symbol decoding retains its
+separate two-minute deadline and bounded inventory. These reporting budgets do
+not change workload or production request deadlines. The selected scan budget is
+recorded in the profile manifest. A successful workload alone does not qualify
+allocation attribution if later reporting fails.
+
+The sustained Regolith diagnostic in
+[run 38053754819](https://github.com/sourcenetwork/vera.rs/actions/runs/38053754819)
+certified all 90,000 operations, checked four replicas and passed restart with
+zero receipt or state mismatches. Reporting then exceeded the previous
+two-minute deadline while rewriting decoded stacks. Its retained workload
+evidence does not include qualified allocation attribution. The larger scan
+budget needs a completed hosted profile before closing that gate.
+
 The sustained profile investigates late growth; its instrumented results do not
 replace normal-release resource measurements.
 
