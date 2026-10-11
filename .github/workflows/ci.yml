@@ -553,7 +553,7 @@ jobs:
           python3 .github/scripts/capture-tests.py --logs "$VERA_E2E_DIR"
           cargo test --frozen -p vera-e2e ${{ matrix.test-features }}
           ${{ matrix.tests }}
-          -- --test-threads=1 --nocapture ${{ matrix.exact }}
+          -- --test-threads=1 ${{ matrix.exact }}
 
       - name: Collect bounded recovery evidence
         if: always()
