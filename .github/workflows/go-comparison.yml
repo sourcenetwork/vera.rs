@@ -72,6 +72,9 @@ jobs:
           GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
           GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: |
+          # Both module paths share one Git repository; resolve them without overlapping fetches.
+          go mod download github.com/sourcenetwork/raccoondb
+          go mod download github.com/sourcenetwork/raccoondb/v2
           go build -mod=readonly -p 2 -trimpath -o "$RUNNER_TEMP/go-verad" ./cmd/verad
           mkdir comparison-driver
           cp ../tools/go-comparison/*.go comparison-driver/
