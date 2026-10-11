@@ -105,6 +105,9 @@ def main():
         'platform': platform.platform(), 'architecture': platform.machine(),
         'logical_cpus': os.cpu_count(), 'cpu_model': cpu_model(), 'load_before': os.getloadavg(),
         'runner_image': os.environ.get('ImageVersion'),
+        'comparison_id': os.environ.get('VERA_COMPARISON_ID'),
+        'github_run_id': os.environ.get('GITHUB_RUN_ID'),
+        'github_job': os.environ.get('GITHUB_JOB'),
         'run_url': (f"{os.environ.get('GITHUB_SERVER_URL')}/{os.environ.get('GITHUB_REPOSITORY')}"
                     f"/actions/runs/{os.environ.get('GITHUB_RUN_ID')}") if os.environ.get('GITHUB_RUN_ID') else None,
     }

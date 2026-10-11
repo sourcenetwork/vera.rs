@@ -71,6 +71,18 @@ class PortableGoFixture(unittest.TestCase):
                     self.assertRaisesRegex(RuntimeError, '^fixture command failed; inspect private log$'):
                 cluster.cli('start')
             self.assertEqual((root / 'command-error.private.log').read_text(), 'private key material')
+            public = json.loads((root / 'command-error.json').read_text())
+            self.assertEqual(public['stage'], 'other')
+            self.assertEqual(public['kind'], 'unknown')
+            self.assertNotIn('private key material', json.dumps(public))
+
+    def test_owner_expression_failure_is_classified_without_remote_text_or_arguments(self):
+        private = 'private-token=secret localhost:1234; permission cannot reference `owner` relation'
+        public = fixture.cli_failure(('tx', 'acp', 'create-policy', '/private/key'), private, 1)
+        self.assertEqual(public['stage'], 'create-policy')
+        self.assertEqual(public['kind'], 'invalid-owner-expression')
+        for value in ('secret', 'localhost', '/private', 'forbidden'):
+            self.assertNotIn(value, json.dumps(public))
 
     def test_oversized_rpc_body_is_rejected_before_json_decoding(self):
         response = Mock()

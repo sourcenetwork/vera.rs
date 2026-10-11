@@ -8,7 +8,6 @@ import os
 from pathlib import Path
 import platform
 import re
-import signal
 import subprocess
 import threading
 import time
@@ -45,6 +44,25 @@ def configure(text, index, commit_ms, application=False):
     return text
 
 
+def cli_failure(arguments, stderr, code):
+    stage = {('testnet', 'init-files'): 'initialize', ('keys', 'add'): 'worker-key',
+             ('genesis', 'add-genesis-account'): 'fund-worker', ('tx', 'acp'): 'create-policy'}.get(
+                 tuple(arguments[:2]), 'other')
+    kind = 'unknown'
+    lowered = stderr.lower()
+    for label, fragments in (
+            ('invalid-owner-expression', ('permission cannot reference `owner` relation',)),
+            ('rpc-unavailable', ('connection refused', 'code = unavailable')),
+            ('insufficient-funds', ('insufficient funds',)),
+            ('cli-usage', ('unknown flag', 'unknown command')),
+            ('deadline', ('deadline exceeded',))):
+        if any(fragment in lowered for fragment in fragments):
+            kind = label
+            break
+    return {'format_version': 1, 'stage': stage, 'kind': kind, 'exit_code': code,
+            'stderr_bytes': len(stderr.encode())}
+
+
 class Fixture:
     def __init__(self, binary, output):
         self.binary, self.output = binary, output
@@ -56,6 +74,8 @@ class Fixture:
                                 capture_output=True, text=True, timeout=60)
         if result.returncode:
             (self.output / 'command-error.private.log').write_text(result.stderr)
+            (self.output / 'command-error.json').write_text(json.dumps(
+                cli_failure(arguments, result.stderr, result.returncode), indent=2) + '\n')
             raise RuntimeError('fixture command failed; inspect private log')
         return result.stdout
 
@@ -68,7 +88,7 @@ class Fixture:
             self.processes.append(subprocess.Popen(
                 [str(self.binary), 'start', '--home', str(self.network / f'node{index}/verad'),
                  '--log_level', 'warn', '--log_no_color'], stdout=log,
-                stderr=subprocess.STDOUT, start_new_session=True))
+                stderr=subprocess.STDOUT))
 
     def stop(self):
         for process in self.processes:
@@ -155,6 +175,9 @@ def run(args):
                 'commit_timeout_ms': args.commit_ms,
                 'platform': platform.platform(), 'architecture': platform.machine(),
                 'logical_cpus': os.cpu_count(), 'runner_image': os.environ.get('ImageVersion'),
+                'comparison_id': os.environ.get('VERA_COMPARISON_ID'),
+                'github_run_id': os.environ.get('GITHUB_RUN_ID'),
+                'github_job': os.environ.get('GITHUB_JOB'),
                 'go_version': subprocess.check_output(['go', 'version'], text=True).strip(),
                 'driver_source_hashes': {path.name: digest(path) for path in Path(__file__).parent.glob('*.go')},
                 'load_before': os.getloadavg(),
@@ -185,7 +208,7 @@ def run(args):
         fixture.advance()
         policy_path = args.output / 'policy.yaml'
         policy_path.write_text('name: baseline\nresources:\n  - name: file\n    permissions:\n'
-                               '      - name: read\n        expr: owner\n')
+                               '      - name: read\n        expr: ""\n')
         created = json.loads(fixture.cli('tx', 'acp', 'create-policy', 'YAML', policy_path,
                              '--home', fixture.network / 'node0/verad', '--from', 'node0',
                              '--keyring-backend', 'test', '--chain-id', 'vera-comparison',
@@ -227,12 +250,12 @@ def run(args):
         sampler.start()
         with (args.output / 'observations.jsonl').open('w') as output, \
                 (args.output / 'stderr.private.log').open('w') as error:
-            process = subprocess.Popen(command, stdout=output, stderr=error, start_new_session=True)
+            process = subprocess.Popen(command, stdout=output, stderr=error)
             try:
                 code = process.wait(timeout=args.count / args.rate + 180)
             finally:
                 if process.poll() is None:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    process.kill()
                 process.wait()
         stop.set()
         sampler.join()

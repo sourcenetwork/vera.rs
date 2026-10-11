@@ -43,12 +43,24 @@ output directory and `VERA_GO_GENESIS` to its `genesis.public.json`. Its negativ
 cases alter results, transactions, proof roots, signatures, committee and network
 identity using the captured real proof. They require rejection of forged evidence.
 
-The manual `Go comparison fixture` workflow compiles and qualifies this side of
-the comparison. Its small default run is a harness check. A Go/Rust speedup needs
-both implementations measured sequentially on the same host with these matched
-parameters, independently checked raw observations and documented differences in
-consensus timing, signature scheme, storage and result-proof availability. Neither
-this harness nor the historical results establish that comparison by themselves.
+The manual `Go comparison fixture` workflow defaults to a small Go harness check.
+Set `paired=true`, `count=600` and `rate=20` for two fresh passes per implementation
+on the same hosted runner, in Go/Rust/Rust/Go order. Both binaries build before any
+measurement. The Rust node uses normal release settings, pipelined consensus,
+192-revision epochs and 256-revision consensus retention. Each pass reconciles all
+four replicas; Go restarts all validators and Rust recovers one replica after a
+three-voter write. Recovery happens outside the measured interval.
+
+`compare.py` rejects source, binary, host, signer-count and logical-workload drift,
+failed or missing observations, summary contradictions and missing recovery or
+proof-rejection checks. It produces raw percentile tables, observed completed
+registrations per second and a CDF plot. The observed median p95 ratio describes
+these passes, not statistical confidence, maximum capacity or a WAN result.
+Go authenticates successful execution using the next signed header; Rust binds
+the result to its finalized revision. Signing schemes, history storage and
+consensus timing differ. Go resource sampling includes driver preparation, so the
+report does not compare RSS between implementations. Existing measurements from
+different machines cannot substitute for this paired run.
 
 Fixture data, keys, logs and failed-command messages stay in the private output
 directory. Only explicitly selected successful observations, resource samples,

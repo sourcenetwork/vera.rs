@@ -143,13 +143,16 @@ async fn main() {
             .with_request_queue(client_queue_capacity, client_queue_timeout),
     );
     let setup = BlsSigner::new(((count + 1) as u64).into(), CHAIN_ID).unwrap();
+    let policy = if permission_reads == 0 {
+        b"name: baseline\nresources:\n  - name: file\n    permissions:\n      - name: read\n        expr: \"\"\n".as_slice()
+    } else {
+        b"name: baseline\nresources:\n  - name: file\n    permissions:\n      - name: read\n        expr: owner\n".as_slice()
+    };
     let raw = setup
         .sign_native_tx(
             ACP_ADDRESS,
             IAcp::createPolicyCall {
-                policy: b"name: baseline\nresources:\n  - name: file\n    permissions:\n      - name: read\n        expr: owner\n"
-                    .to_vec()
-                    .into(),
+                policy: policy.to_vec().into(),
                 marshalType: 1,
             }
             .abi_encode()
@@ -241,6 +244,7 @@ async fn main() {
         serde_json::json!({
             "kind": "configuration", "workload": if update_objects == 0 { "certified_native_registrations" } else { "certified_native_object_updates" },
             "fixed_update_objects": update_objects,
+            "signer_count": if update_objects == 0 { count } else { update_objects },
             "pruning": (retained_consensus > 0).then(|| serde_json::json!({
                 "maintenance_interval": 64,
                 "retained_consensus_revisions": retained_consensus,

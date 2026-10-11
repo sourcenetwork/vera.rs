@@ -9,6 +9,9 @@ on:
       rate:
         type: string
         default: '2'
+      paired:
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       count:
@@ -21,6 +24,10 @@ on:
         type: choice
         options: ['2', '20']
         default: '2'
+      paired:
+        description: Run matched Go/Rust/Rust/Go passes on this host
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -32,20 +39,20 @@ concurrency:
 jobs:
   fixture:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 180
     env:
       GO_SOURCE: ce83826bfeb4ce0fdc1751fc6a28cd4b9c7e7933
       COUNT: ${{ inputs.count }}
       RATE: ${{ inputs.rate }}
-      GOMAXPROCS: '2'
       GOPRIVATE: github.com/sourcenetwork/*
       GOWORK: 'off'
+      CARGO_BUILD_JOBS: '2'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - name: Check portable fixture configuration
-        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/go-comparison -p test_run.py
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/go-comparison -p 'test_*.py'
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: sourcenetwork/vera
@@ -60,6 +67,7 @@ jobs:
       - name: Build reference node and receipt-verifying driver
         working-directory: go-reference
         env:
+          GOMAXPROCS: '2'
           GIT_CONFIG_COUNT: '1'
           GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
           GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
@@ -68,19 +76,65 @@ jobs:
           mkdir comparison-driver
           cp ../tools/go-comparison/*.go comparison-driver/
           go build -mod=readonly -p 2 -trimpath -o "$RUNNER_TEMP/go-driver" ./comparison-driver
+      - uses: dtolnay/rust-toolchain@62ae3a85dbdd2bedbb5819da8ce45635129289a1 # 1.98.0
+        if: inputs.paired
+        with:
+          toolchain: 1.98.0
+      - name: Install normal Rust build and plotting dependencies
+        if: inputs.paired
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler python3-venv
+          python3 -m venv "$RUNNER_TEMP/comparison-python"
+          "$RUNNER_TEMP/comparison-python/bin/pip" install -r tools/performance/requirements.txt
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: inputs.paired
+        with:
+          shared-key: performance-regolith
+      - name: Build normal Rust node and registration runner
+        if: inputs.paired
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
+        run: |
+          cargo fetch --locked
+          cargo build --frozen --release --no-default-features -p verad
+          cargo build --frozen --release -p vera-e2e --example operation_baseline
       - name: Verify fresh registrations, all replicas and hard restart
+        if: '!inputs.paired'
         run: >-
           python3 tools/go-comparison/run.py
           --source-root "$GITHUB_WORKSPACE/go-reference" --source "$GO_SOURCE"
           --node "$RUNNER_TEMP/go-verad" --driver "$RUNNER_TEMP/go-driver"
           --output "$RUNNER_TEMP/go-measurements" --count "$COUNT" --workers "$COUNT" --rate "$RATE"
       - name: Reject forged execution evidence
+        if: '!inputs.paired'
         working-directory: go-reference
         env:
           VERA_GO_EVIDENCE: ${{ runner.temp }}/go-measurements
           VERA_GO_GENESIS: ${{ runner.temp }}/go-measurements/genesis.public.json
         run: go test -mod=readonly -p 2 ./comparison-driver -run '^TestCertifiedExecution$' -count=1 -v
+      - name: Measure matched interleaved Go and Rust registrations
+        if: inputs.paired
+        run: >-
+          "$RUNNER_TEMP/comparison-python/bin/python" tools/go-comparison/paired.py
+          --go-root "$GITHUB_WORKSPACE/go-reference" --go-source "$GO_SOURCE"
+          --go-node "$RUNNER_TEMP/go-verad" --go-driver "$RUNNER_TEMP/go-driver"
+          --rust-node "$GITHUB_WORKSPACE/target/release/verad"
+          --rust-runner "$GITHUB_WORKSPACE/target/release/examples/operation_baseline"
+          --output "$RUNNER_TEMP/go-rust-private" --public-output "$RUNNER_TEMP/go-rust-results"
+          --count "$COUNT" --rate "$RATE"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: inputs.paired
+        with:
+          name: matched-go-rust-registrations
+          path: ${{ runner.temp }}/go-rust-results/
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: '!inputs.paired'
         with:
           name: go-registration-fixture
           path: |
@@ -90,4 +144,15 @@ jobs:
             ${{ runner.temp }}/go-measurements/genesis.public.json
             ${{ runner.temp }}/go-measurements/evidence.json
           if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: go-fixture-failure-classification
+          path: |
+            ${{ runner.temp }}/go-measurements/command-error.json
+            ${{ runner.temp }}/go-measurements/manifest.json
+            ${{ runner.temp }}/go-rust-private/go*/command-error.json
+            ${{ runner.temp }}/go-rust-private/go*/manifest.json
+          if-no-files-found: ignore
           retention-days: 14
