@@ -133,6 +133,50 @@ in memory. Continued RSS growth does not identify a leak or establish a sustaine
 memory bound. These records predate the additional Regolith reserved-memtable and
 arena-pool counters; retaining allocation owners still need attribution.
 
+## Regolith fixed-state qualification on October 11, 2026
+
+[Run 38138147078](https://github.com/sourcenetwork/vera.rs/actions/runs/38138147078)
+measured clean source `9d5c2b9ea7cb971a7871028b7b0b22d488a7ecbf` with normal
+release binaries and default glibc 2.39 arena settings. Four local validators and
+the client shared one four-CPU hosted Linux machine. The workload offered 90,000
+archive/unarchive updates at 50/s over 128 objects, with one verified permission
+read per update. All 90,000 workflows completed, all four replicas agreed, and
+hard-restart inspection found no receipt or state mismatches. No operation was
+unsent, unknown, rejected, reverted, incomplete or verification-failed.
+
+| Measurement | Result |
+| --- | ---: |
+| Completed workflows/s | 49.995 |
+| Scheduled arrival to certified receipt p50 / p95 / p99 | 158.054 / 265.267 / 275.109 ms |
+| Verified permission read p95 | 4.184 ms |
+| Scheduled arrival to complete workflow p95 | 267.162 ms |
+| Restart to observed certified probe | 6.586 s |
+| First sampled RSS per validator | 220.22–224.05 MiB |
+| Last and peak sampled RSS per validator | 531.03–551.32 MiB |
+| Observed process write bytes per validator | 4.35–4.36 GiB |
+
+Each member supplied 1,801 one-second resource samples and at least 68 numeric
+node snapshots, with no missing workload resource samples. Heap and syscall
+tracing were disabled; opt-in resource logging was enabled. Kernel process write
+counters include all stores and journals in the validator. They do not establish
+physical-device write amplification, per-backend cost or synchronization latency.
+
+RSS continued growing during the final ten workload minutes. Sampled history
+block-cache usage remained zero through the first 1,200 seconds of the recorder's
+clock, while RSS grew; reducing that cache's budget does not explain this early
+interval. Memtable, reusable arena-pool and allocator-reserved/free counters also
+changed. Their byte scopes overlap and do not identify all allocation owners.
+Diagnostic recording includes setup and final reconciliation, so its timestamps
+must not be equated with the timed workload interval.
+
+The tested daemon's SHA-256 is
+`05c6aa09252762130d135fbdc187ccdc71e186e8095362cd5688ac5e913da7e1`, matching
+the independently reproduced Linux release build. The artifact records source,
+runner and binary provenance, raw outcomes, numeric snapshots, plots and an
+interactive replay. This is a verified offered-load result; maximum capacity,
+steady-state memory, complex-policy load, WAN behavior and power-loss durability
+remain separate gates.
+
 ## Native-only cleanup comparison on October 11, 2026
 
 [PR performance run 38124358684](https://github.com/sourcenetwork/vera.rs/actions/runs/38124358684)
