@@ -334,10 +334,7 @@ impl VeraExecutor {
         txs: &[Bytes],
         parent: ModuleSnapshot,
     ) -> Result<(ExecutionOutcome, ModuleSnapshot), ExecutionError> {
-        let ModuleSnapshot {
-            modules: base_modules,
-        } = parent;
-        let mut modules = base_modules.clone();
+        let ModuleSnapshot { mut modules } = parent;
 
         let block_ctx = BlockExecCtx {
             genesis_id: self.config.genesis_id,
