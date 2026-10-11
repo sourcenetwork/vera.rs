@@ -67,7 +67,7 @@ flowchart TB
     Execute --> QMDB[(Commonware QMDB<br/>authenticated state)]
     Consensus --> Finalize[Durable finalization]
     Finalize --> QMDB
-    Finalize --> History[(History and receipts<br/>RocksDB or optional Regolith)]
+    Finalize --> History[(History and receipts<br/>Regolith)]
     Finalize --> Views[Published query state]
     Views --> Evidence[Read proofs and certified receipts]
     QMDB --> Evidence
@@ -89,8 +89,8 @@ them. Durable finalization precedes publication of query results.
 
 QMDB commits seven persistent partitions: accounts, storage, code, ACP, bulletin,
 Vera records, and native signer sequences. A coordinated commitment binds the
-native state root to their selected operation-log targets. Regolith is an optional
-**history** backend; it does not replace QMDB's authenticated state. Query module
+native state root to their selected operation-log targets. Regolith stores finalized
+**history**; it does not replace QMDB's authenticated state. Query module
 views currently materialize live records in memory, so dataset growth still
 affects memory use. See [storage](history-storage.md).
 

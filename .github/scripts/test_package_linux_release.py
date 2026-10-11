@@ -25,6 +25,7 @@ class LinuxReleaseBundle(unittest.TestCase):
             (root / 'validator.key').write_text('private material')
             metadata = {'source_commit': 'a' * 40, 'features': []}
             first = release.package(binary, root / 'first', metadata)
+            self.assertEqual(first.name, 'verad-x86_64-unknown-linux-gnu-regolith.tar.gz')
             binary.touch()
             second = release.package(binary, root / 'second', metadata)
             self.assertEqual(first.read_bytes(), second.read_bytes())
@@ -65,6 +66,21 @@ class LinuxReleaseBundle(unittest.TestCase):
         for invalid in ('', '(NEEDED) Shared library: [/private/build/libc.so.6]'):
             with self.assertRaises(ValueError):
                 release.shared_libraries(invalid)
+
+    def test_release_provenance_identifies_regolith_without_optional_features(self):
+        outputs = ['', 'host: x86_64-unknown-linux-gnu', 'a' * 40, 'b' * 40,
+                   '(NEEDED) Shared library: [libc.so.6]']
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'Cargo.lock').write_text('locked dependencies')
+            (root / 'rust-toolchain.toml').write_text('pinned toolchain')
+            with patch.object(release, 'checked_output', side_effect=outputs):
+                manifest = release.provenance(root)
+        self.assertEqual(manifest['history_backend'], 'regolith')
+        self.assertEqual(manifest['features'], [])
+        self.assertEqual(manifest['build_command'],
+                         ['cargo', 'build', '--frozen', '--release',
+                          '--no-default-features', '-p', 'verad'])
 
     def test_modified_source_or_wrong_host_cannot_supply_provenance(self):
         with patch.object(release, 'checked_output', return_value=' M Cargo.toml') as command:

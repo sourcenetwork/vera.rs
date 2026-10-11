@@ -88,7 +88,7 @@ jobs:
               if (( ${#examples[@]} )); then
                 packages+=(-p vera-e2e)
               fi
-              cargo +1.98.0 build --frozen --release "${packages[@]}" \
+              cargo +1.98.0 build --frozen --release --features regolith-history "${packages[@]}" \
                 --bin verad "${examples[@]}"
               cp "$CARGO_TARGET_DIR/release/verad" "$GITHUB_WORKSPACE/binaries/$side/"
               if [[ "$side" == head ]]; then

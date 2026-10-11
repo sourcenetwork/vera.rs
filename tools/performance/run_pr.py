@@ -76,7 +76,7 @@ def main():
                 print(f'{tag}/objects-{objects}: incompatible ACP proof schema; baseline not run', flush=True)
                 continue
             command = [sys.executable, str(scripts / 'record.py'), '--node', str(binaries / side / 'verad'),
-                       '--runner', str(runner), '--runner-source', str(sources['head']), '--history', 'rocksdb',
+                       '--runner', str(runner), '--runner-source', str(sources['head']), '--history', 'regolith',
                        '--output', str(destination / f'objects-{objects}'), str(args.count), str(args.rate),
                        '128', '1', 'normal', '100', epoch, '0', str(objects), retained,
                        '1' if pipelined else '0', '1' if inherit_rpc_listener else '0']

@@ -133,6 +133,7 @@ print({help_text!r} if sys.argv[1:] == ['validator', '--help'] else {side!r})
                 self.assertFalse(manifest['dirty'])
                 self.assertFalse(manifest['runner_dirty'])
                 self.assertEqual(manifest['exit_code'], 0)
+                self.assertEqual(manifest['history'], 'regolith')
 
     def test_older_node_disables_inheritance_for_both_sides(self):
         self.node('base', supports_listener=False)

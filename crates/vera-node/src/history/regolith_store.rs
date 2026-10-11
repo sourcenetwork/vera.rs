@@ -9,10 +9,6 @@ pub(super) struct HistoryDb(regolith::Db);
 impl HistoryDb {
     pub(super) fn open_default(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
-        ensure!(
-            rocksdb::DB::list_cf(&rocksdb::Options::default(), path).is_err(),
-            "RocksDB history requires explicit migration before selecting Regolith"
-        );
         match std::fs::read_dir(path) {
             Ok(entries) => {
                 for entry in entries {
@@ -53,13 +49,7 @@ impl HistoryDb {
     }
 
     pub(super) fn property_int_value(&self, name: &str) -> Result<Option<u64>> {
-        let property = match name {
-            "rocksdb.size-all-mem-tables" => "regolith.cur-size-all-mem-tables",
-            "rocksdb.block-cache-usage" => "regolith.block-cache-usage",
-            "regolith.pinned-metadata-bytes" => "regolith.pinned-metadata-bytes",
-            _ => return Ok(None),
-        };
-        Ok(self.0.get_int_property(property))
+        Ok(self.0.get_int_property(name))
     }
 
     pub(super) fn write_sync(&self, batch: WriteBatch) -> Result<()> {
@@ -171,23 +161,24 @@ mod tests {
     }
 
     #[test]
-    fn existing_rocksdb_history_is_rejected_without_changes() {
-        let directory = tempfile::tempdir().unwrap();
-        {
-            let db = rocksdb::DB::open_default(directory.path()).unwrap();
-            db.put(b"history", b"retained").unwrap();
+    fn foreign_history_is_rejected_without_changes() {
+        for name in ["CURRENT", "MANIFEST-000001", "000001.sst", "unknown"] {
+            let directory = tempfile::tempdir().unwrap();
+            let foreign = directory.path().join(name);
+            std::fs::write(&foreign, b"retained history").unwrap();
+            assert!(HistoryDb::open_default(directory.path()).is_err());
+            assert_eq!(std::fs::read(foreign).unwrap(), b"retained history");
+            assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
         }
-        let contents = || {
-            std::fs::read_dir(directory.path())
-                .unwrap()
-                .map(|entry| {
-                    let entry = entry.unwrap();
-                    (entry.file_name(), std::fs::read(entry.path()).unwrap())
-                })
-                .collect::<std::collections::BTreeMap<_, _>>()
-        };
-        let before = contents();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn history_subdirectory_cannot_be_a_symlink() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(target.path(), directory.path().join("regolith")).unwrap();
         assert!(HistoryDb::open_default(directory.path()).is_err());
-        assert_eq!(contents(), before);
+        assert_eq!(std::fs::read_dir(target.path()).unwrap().count(), 0);
     }
 }

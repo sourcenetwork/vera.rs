@@ -18,17 +18,9 @@ concurrency:
 
 jobs:
   corruption:
-    name: Physical history damage (${{ matrix.backend }})
+    name: Physical history damage (regolith)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - backend: rocksdb
-            features: ''
-          - backend: regolith
-            features: '--features regolith-history'
     env:
       CARGO_BUILD_JOBS: '2'
       CARGO_TERM_COLOR: always
@@ -54,6 +46,6 @@ jobs:
         run: cargo fetch --locked
       - name: Check physical damage rejection and restoration
         run: >-
-          cargo test --frozen -p vera-node --lib ${{ matrix.features }} history::tests::physical_tests::
+          cargo test --frozen -p vera-node --lib history::tests::physical_tests::
       - name: Lint affected node tests
-        run: cargo clippy --frozen -p vera-node --lib --tests ${{ matrix.features }} -- -D warnings
+        run: cargo clippy --frozen -p vera-node --lib --tests -- -D warnings

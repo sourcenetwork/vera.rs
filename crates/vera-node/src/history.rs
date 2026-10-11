@@ -10,14 +10,10 @@ use commonware_codec::{Decode as _, Encode as _};
 use commonware_cryptography::Digestible as _;
 use commonware_glue::dkg::types::Payload;
 use parking_lot::Mutex;
-#[cfg(not(feature = "regolith-history"))]
-use rocksdb::{DB, IteratorMode, WriteBatch, WriteOptions};
 use vera_domain::{Block, BlockId, EpochMaterial};
 use vera_executor::ExecutionReceipt;
 use vera_indexer::{BlockIndex, LightBlockIndex, StoredEpochMaterial, StoredFinalization};
-#[cfg(feature = "regolith-history")]
 mod regolith_store;
-#[cfg(feature = "regolith-history")]
 use regolith_store::{HistoryDb as DB, WriteBatch};
 
 use crate::{FinalizationArtifacts, FinalizationLookup, index_finalized_block};
@@ -122,9 +118,10 @@ impl FinalizedHistory {
         &self,
     ) -> Result<std::collections::BTreeMap<&'static str, Option<u64>>> {
         [
-            ("memtables", "rocksdb.size-all-mem-tables"),
-            ("table_readers", "rocksdb.estimate-table-readers-mem"),
-            ("block_cache", "rocksdb.block-cache-usage"),
+            ("memtables", "regolith.cur-size-all-mem-tables"),
+            ("memtable_reserved", "regolith.memtable-reserved-bytes"),
+            ("arena_pool", "regolith.arena-pool-bytes"),
+            ("block_cache", "regolith.block-cache-usage"),
             ("pinned_table_metadata", "regolith.pinned-metadata-bytes"),
         ]
         .into_iter()
@@ -135,14 +132,6 @@ impl FinalizedHistory {
     /// Open the history for a specific genesis identity.
     pub fn open(path: impl AsRef<Path>, genesis: &Block) -> Result<Self> {
         let path = path.as_ref();
-        #[cfg(not(feature = "regolith-history"))]
-        match std::fs::symlink_metadata(path.join("regolith")) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
-            Ok(_) => anyhow::bail!(
-                "Regolith history requires a regolith-history build; explicit migration is required"
-            ),
-        }
         let db = DB::open_default(path)?;
         match db.get(FORMAT)? {
             Some(version) => {
@@ -426,30 +415,10 @@ fn key(prefix: u8, height: u64) -> [u8; 9] {
     key
 }
 
-#[cfg(not(feature = "regolith-history"))]
-fn write(db: &DB, batch: WriteBatch) -> Result<()> {
-    let mut options = WriteOptions::default();
-    options.set_sync(true);
-    db.write_opt(batch, &options)
-        .context("persist finalized history")
-}
-
 fn store_is_empty(db: &DB) -> Result<bool> {
-    #[cfg(feature = "regolith-history")]
-    {
-        db.is_empty()
-    }
-    #[cfg(not(feature = "regolith-history"))]
-    {
-        Ok(db
-            .iterator(IteratorMode::Start)
-            .next()
-            .transpose()?
-            .is_none())
-    }
+    db.is_empty()
 }
 
-#[cfg(feature = "regolith-history")]
 fn write(db: &DB, batch: WriteBatch) -> Result<()> {
     db.write_sync(batch).context("persist finalized history")
 }

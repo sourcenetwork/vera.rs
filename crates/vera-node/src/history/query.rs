@@ -180,10 +180,8 @@ mod tests {
         let history = FinalizedHistory::open(dir.path(), &genesis).unwrap();
         let memory = history.memory_usage().unwrap();
         assert!(memory["memtables"].is_some_and(|bytes| bytes > 0));
-        #[cfg(not(feature = "regolith-history"))]
-        assert!(memory["table_readers"].is_some());
-        #[cfg(feature = "regolith-history")]
-        assert!(memory["table_readers"].is_none());
+        assert!(memory["memtable_reserved"].is_some());
+        assert!(memory["arena_pool"].is_some());
         assert!(memory["block_cache"].is_some());
 
         assert_eq!(

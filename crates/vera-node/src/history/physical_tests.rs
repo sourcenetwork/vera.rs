@@ -8,7 +8,6 @@ enum Damage {
 }
 
 fn table_path(directory: &Path) -> PathBuf {
-    #[cfg(feature = "regolith-history")]
     let directory = &directory.join("regolith/sst");
     let mut tables = fs::read_dir(directory)
         .unwrap()
@@ -66,12 +65,6 @@ async fn physical_damage_is_rejected(damage: Damage) {
             .append_finalized(&second, &[], 100, Some(&artifacts(2)))
             .unwrap();
         originals = [1, 2].map(|height| history.db.get(key(RECORD, height)).unwrap().unwrap());
-        #[cfg(not(feature = "regolith-history"))]
-        {
-            history.db.flush().unwrap();
-            history.db.compact_range(None::<&[u8]>, None::<&[u8]>);
-        }
-        #[cfg(feature = "regolith-history")]
         history.db.compact_for_test().unwrap();
     }
     let path = table_path(directory.path());
