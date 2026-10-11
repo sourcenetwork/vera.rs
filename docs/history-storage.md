@@ -13,7 +13,8 @@ cargo build --frozen -p verad
 
 `regolith-history` remains an accepted build marker for existing deployment
 manifests; omitting it selects the same Regolith implementation. The history
-implementation no longer depends on RocksDB.
+implementation and module persistence no longer depend on RocksDB. Authenticated
+module state uses Commonware QMDB; the separate JMT/RocksDB store is removed.
 
 Regolith is pinned to the revision used by DefraDB. History writes explicitly
 request synchronous WAL persistence; they do not use Regolith's default eventual
@@ -119,9 +120,12 @@ participation.
 
 ## Physical history-table damage
 
-Two focused storage cases materialize and close a compacted history table, then
-change its actual bytes: one flips a trailing footer bit and one removes the
-eight-byte table magic. The fixture synchronizes and rereads the damaged file
+Three focused storage cases materialize and close a compacted history table, then
+change its actual bytes: one flips a trailing footer bit, one removes the
+eight-byte table magic, and one flips a byte in the first data-block payload
+while leaving its checksum and the complete footer unchanged. The payload case
+requires a block-checksum failure rather than accepting any recovery error.
+The fixture synchronizes and rereads the damaged file
 before reopening history. Opening or recovery must report physical table damage
 without publishing a block or stored finalization. Restoring the pristine table
 must recover the exact durable records and stored finalization bytes and permit
@@ -131,7 +135,7 @@ a subsequent append.
 cargo test --frozen -p vera-node --lib history::tests::physical_tests::
 ```
 
-The `History file corruption` workflow runs both cases against Regolith and
+The `History file corruption` workflow runs all three cases against Regolith and
 lints the affected node tests. The compacting hook
 exists only in test builds; production history behavior and dependencies are
 unchanged. Hosted execution must pass before these cases count as qualification.

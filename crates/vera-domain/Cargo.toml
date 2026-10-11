@@ -33,11 +33,6 @@ alloy-rlp = { workspace = true }
 # Synchronization
 parking_lot.workspace = true
 
-# JMT proof verification
-jmt = { version = "0.11" }
-sha2 = { workspace = true }
-borsh = { workspace = true }
-
 # Error handling
 thiserror.workspace = true
 
@@ -50,7 +45,6 @@ serde.workspace = true
 [dev-dependencies]
 serde_json.workspace = true
 alloy-eips.workspace = true
-jmt = { version = "0.11", features = ["mocks"] }
 
 [features]
 evm = ["dep:alloy-eips", "dep:k256", "dep:sha3"]

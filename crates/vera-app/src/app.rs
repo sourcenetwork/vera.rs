@@ -6,7 +6,7 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
-use crate::{ApplicationState, VeraStateSet, VrfSeedCache};
+use crate::{ApplicationState, VrfSeedCache, ordered_state::OrderedState};
 use alloy_consensus::Header;
 use alloy_primitives::{Address, B256};
 use commonware_consensus::marshal::ancestry::Ancestry;
@@ -34,7 +34,7 @@ struct PendingExecution {
 
 /// Vera block production and verification on top of glue-managed state.
 #[derive(Clone)]
-pub struct StatefulVeraApp<S: FinalizedSink, D: ApplicationState = VeraStateSet> {
+pub struct StatefulVeraApp<S: FinalizedSink, D: ApplicationState = OrderedState> {
     storage: PhantomData<D>,
     executor: VeraExecutor,
     genesis: Block,

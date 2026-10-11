@@ -60,7 +60,7 @@ def main():
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--runner-source', type=Path, default=Path.cwd(),
                         help='Checkout used to build the workload runner; defaults to the node checkout.')
-    parser.add_argument('--history', required=True, choices=['rocksdb', 'regolith'])
+    parser.add_argument('--history', required=True, choices=['regolith'])
     parser.add_argument('--rust-log', default='warn,vera_storage=info')
     parser.add_argument('--glibc-arena-max', choices=['default', '2'],
                         help='Controlled Linux comparison; unset the arena override or limit it to two.')
@@ -105,6 +105,9 @@ def main():
         'platform': platform.platform(), 'architecture': platform.machine(),
         'logical_cpus': os.cpu_count(), 'cpu_model': cpu_model(), 'load_before': os.getloadavg(),
         'runner_image': os.environ.get('ImageVersion'),
+        'comparison_id': os.environ.get('VERA_COMPARISON_ID'),
+        'github_run_id': os.environ.get('GITHUB_RUN_ID'),
+        'github_job': os.environ.get('GITHUB_JOB'),
         'run_url': (f"{os.environ.get('GITHUB_SERVER_URL')}/{os.environ.get('GITHUB_REPOSITORY')}"
                     f"/actions/runs/{os.environ.get('GITHUB_RUN_ID')}") if os.environ.get('GITHUB_RUN_ID') else None,
     }

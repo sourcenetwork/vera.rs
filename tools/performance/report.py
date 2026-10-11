@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 
 from process_io import summarize_io
+from worker_progress import summarize_worker_progress
 
 
 def load_run(directory):
@@ -66,6 +67,7 @@ def main():
     parser.add_argument('directory', type=Path)
     args = parser.parse_args()
     manifest, config, summary, passed, latencies, series, missing, verification, recovery = load_run(args.directory)
+    worker_progress = summarize_worker_progress(args.directory / 'workload.jsonl', passed)
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -98,6 +100,7 @@ def main():
         'configuration': {key: value for key, value in config.items() if key != 'node_data_dirs'},
         'summary': summary, 'missing_member_samples': missing,
         'process_io': summarize_io(args.directory / 'workload.jsonl'),
+        'worker_progress': worker_progress,
         'verification': verification or None, 'recovery': recovery or None,
         'scope': 'Four members on one host; receipt latency is not consensus finality latency. No maximum capacity or WAN claim.',
     }

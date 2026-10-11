@@ -24,7 +24,7 @@ on:
         type: boolean
         default: false
       storage_attribution:
-        description: Run the bounded RocksDB storage diagnostic instead of performance baselines
+        description: Run the bounded Regolith storage diagnostic instead of performance baselines
         type: boolean
         default: false
       storage_attribution_mode:

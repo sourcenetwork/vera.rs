@@ -11,7 +11,7 @@ on:
       profile:
         description: Allocation window to inspect
         type: choice
-        options: [startup, sustained]
+        options: [startup, sustained, growing]
         default: startup
   push:
     branches: ['iverc/native-late-heap-attribution']
@@ -69,7 +69,7 @@ jobs:
           cargo build --frozen --release -p vera-e2e --example operation_baseline
       - name: Check profile selection and result extraction
         run: python3 -m unittest discover -s tools/performance -p test_heap_profile.py
-      - name: Profile one validator during certified fixed-state updates
+      - name: Profile one validator during the selected certified workload
         run: python3 tools/performance/heap_profile.py --history "$HISTORY_BACKEND" --profile "$PROFILE_SELECTION" --output heap-results
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()

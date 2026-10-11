@@ -42,7 +42,6 @@ vera-jsonrpc.workspace = true
 commonware-parallel.workspace = true
 commonware-p2p.workspace = true
 commonware-codec.workspace = true
-vera-state.workspace = true
 vera-client.workspace = true
 alloy-sol-types.workspace = true
 vera-domain = { workspace = true, features = ["evm"] }

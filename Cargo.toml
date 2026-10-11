@@ -71,7 +71,6 @@ vera-client = { path = "crates/vera-client" }
 vera-permission = { path = "crates/vera-permission" }
 vera-executor = { path = "crates/vera-executor" }
 vera-genesis = { path = "crates/vera-genesis" }
-vera-state = { path = "crates/vera-state" }
 vera-harness = { path = "crates/vera-harness" }
 test-infra = { path = "crates/test-infra" }
 

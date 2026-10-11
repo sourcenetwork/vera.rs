@@ -43,7 +43,7 @@ class RecorderTests(unittest.TestCase):
                 output = root / ('dirty' if dirty else 'clean')
                 command = [sys.executable, str(Path(__file__).resolve().with_name('record.py')),
                            '--node', str(node), '--runner', str(runner), '--runner-source', str(runner_source),
-                           '--history', 'rocksdb', '--output', str(output), '1']
+                           '--history', 'regolith', '--output', str(output), '1']
                 result = subprocess.run(command, cwd=node_source, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 metadata = json.loads((output / 'manifest.json').read_text())
@@ -77,7 +77,7 @@ class RecorderTests(unittest.TestCase):
             trace = root / 'sync.log'
             output = root / 'result'
             command = [sys.executable, str(Path(__file__).resolve().with_name('record.py')),
-                       '--node', str(runner), '--runner', str(runner), '--history', 'rocksdb',
+                       '--node', str(runner), '--runner', str(runner), '--history', 'regolith',
                        '--output', str(output), '--sync-trace', str(trace), 'fixture-argument']
             environment = dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'])
             result = subprocess.run(command, cwd=checkout, env=environment, capture_output=True, text=True)
@@ -102,7 +102,7 @@ class RecorderTests(unittest.TestCase):
             checkout = Path(__file__).resolve().parents[2]
             command = [sys.executable, str(Path(__file__).resolve().with_name('record.py')),
                        '--node', str(runner), '--runner', str(runner),
-                       '--history', 'rocksdb', '--output', str(output),
+                       '--history', 'regolith', '--output', str(output),
                        '--rust-log', 'warn,vera_diagnostics=debug', '1']
             result = subprocess.run(command, cwd=checkout, capture_output=True, text=True)
             self.assertEqual(result.returncode, 7, result.stderr)
@@ -125,7 +125,7 @@ class RecorderTests(unittest.TestCase):
             runner.write_bytes(b'binary fixture')
             output = root / 'result'
             command = ['record.py', '--node', str(runner), '--runner', str(runner),
-                       '--history', 'rocksdb', '--output', str(output)]
+                       '--history', 'regolith', '--output', str(output)]
             if timeout is not None:
                 command += ['--timeout-seconds', str(timeout)]
             if arena is not None:
@@ -201,7 +201,7 @@ class RecorderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'output'
             command = ['record.py', '--node', 'missing-node', '--runner', 'missing-runner',
-                       '--history', 'rocksdb', '--output', str(output),
+                       '--history', 'regolith', '--output', str(output),
                        '--glibc-arena-max', '2', 'fixture-argument']
             with patch.object(sys, 'argv', command), \
                     patch.dict(os.environ, {'GLIBC_TUNABLES': 'private-secret'}, clear=True), \
@@ -241,7 +241,7 @@ class RecorderTests(unittest.TestCase):
                 root = Path(directory)
                 output, trace = root / 'result', root / 'sync.log'
                 command = ['record.py', '--node', str(root / 'missing-node'),
-                           '--runner', str(root / 'missing-runner'), '--history', 'rocksdb',
+                           '--runner', str(root / 'missing-runner'), '--history', 'regolith',
                            '--output', str(output), '--sync-trace', str(trace),
                            '--timeout-seconds', value, 'fixture-argument']
                 with patch.object(sys, 'argv', command), \

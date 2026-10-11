@@ -55,6 +55,8 @@ jobs:
         run: |
           PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/test_stop_test_nodes.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_summarize_test_results.py
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_reproducible_linux_release.py
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_worker_progress.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_qualify_snapshots.py
 
       - name: Format
@@ -551,7 +553,7 @@ jobs:
           python3 .github/scripts/capture-tests.py --logs "$VERA_E2E_DIR"
           cargo test --frozen -p vera-e2e ${{ matrix.test-features }}
           ${{ matrix.tests }}
-          -- --test-threads=1 --nocapture ${{ matrix.exact }}
+          -- --test-threads=1 ${{ matrix.exact }}
 
       - name: Collect bounded recovery evidence
         if: always()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export bounded test counts and tracked source locations, never log contents."""
+"""Export bounded counts, source locations and static test names, never log contents."""
 import argparse
 import itertools
 import json
@@ -13,6 +13,7 @@ MAX_FILES = 128
 TAIL_BYTES = 256 * 1024
 MAX_LOCATIONS = 16
 MAX_RESULTS = 32
+MAX_CASES = 128
 MAX_RPC_FAILURES = 16
 RPC_PHASES = {"initial", "survivors", "restored", "renewed-quorum"}
 RPC_KINDS = {"client-capacity", "server-capacity", "finality-unavailable",
@@ -23,6 +24,9 @@ RPC_FAILURE = re.compile(r"recovery_rpc_failure phase=([a-z-]{1,32}) "
 LOCATION = re.compile(r'((?:crates|bin)/[A-Za-z0-9_./-]+\.rs):(\d{1,7}):(\d{1,4})')
 RESULT = re.compile(r'test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored;')
 ANSI = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+CASE = re.compile(r'^test (?:[A-Za-z_][A-Za-z0-9_]*::)*'
+                  r'([A-Za-z_][A-Za-z0-9_]*) \.\.\. (ok|FAILED|ignored)(?=\s|,|$)')
+FUNCTION = re.compile(r'\bfn\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:<|\()')
 
 
 def source_inventory(root):
@@ -37,6 +41,11 @@ def source_inventory(root):
         if name.startswith(('crates/', 'bin/')):
             inventory[name] = len((root / name).read_bytes().splitlines())
     return inventory
+
+
+def source_function_names(root, inventory):
+    return frozenset(name for path in inventory
+                     for name in FUNCTION.findall((root / path).read_text()))
 
 
 def read_tail(path):
@@ -54,12 +63,13 @@ def read_tail(path):
         return content, truncated
 
 
-def summarize(root, inventory):
+def summarize(root, inventory, function_names=frozenset()):
     evidence = {'format_version': 1, 'files_read': 0, 'files_unreadable': 0,
                 'tails_truncated': 0, 'file_limit_reached': False,
                 'location_limit_reached': False, 'result_limit_reached': False,
                 'runner_exit_code': None, 'source_locations': [], 'test_results': [],
-                'recovery_rpc_failures': [], 'recovery_rpc_failure_limit_reached': False}
+                'recovery_rpc_failures': [], 'recovery_rpc_failure_limit_reached': False,
+                'test_cases': [], 'case_limit_reached': False}
     exit_path = root / 'test-exit-code'
     if exit_path.exists() or exit_path.is_symlink():
         try:
@@ -88,6 +98,14 @@ def summarize(root, inventory):
             if len(raw) > 16384:
                 continue
             line = ANSI.sub('', raw)
+            # Export only source-whitelisted leaf names from the runner output.
+            # Module prefixes and ignored-test reasons may contain private data.
+            case = CASE.match(line) if path == root / 'test-output.log' else None
+            if case is not None and case[1] in function_names:
+                if len(evidence['test_cases']) == MAX_CASES:
+                    evidence['case_limit_reached'] = True
+                else:
+                    evidence['test_cases'].append({'name': case[1], 'status': case[2]})
             for match in LOCATION.finditer(line):
                 name, row, column = match.groups()
                 row, column = int(row), int(column)
@@ -130,7 +148,8 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     try:
-        evidence = summarize(args.logs, source_inventory(Path.cwd()))
+        inventory = source_inventory(Path.cwd())
+        evidence = summarize(args.logs, inventory, source_function_names(Path.cwd(), inventory))
         revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True,
                                            stderr=subprocess.DEVNULL, timeout=10).strip()
         if not re.fullmatch(r'[0-9a-f]{40}', revision):

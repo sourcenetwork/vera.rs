@@ -96,9 +96,20 @@ changes, or every failure point during recovery.
 
 ## Linux CI gate
 
+The evidence verifier also accepts a separate `--profile sustained` configuration:
+2,048 workflows, one offered workflow per second, eight outstanding workflows,
+and a 5,400-second whole-run deadline. This keeps the same policy operations,
+four-replica checks, policy edits, explicit regrants and hard restart. It requires
+at least 30 minutes of timed load and the full scheduled arrival span; a short run
+cannot qualify by changing its label. Resource evidence must cover that interval
+with every member present, at least one sample per two seconds on average and no
+gap over ten seconds. Public evidence includes member RSS series and storage
+counts, without fixture paths, keys or raw errors. This profile defines a gate;
+it does not imply that a sustained run has passed.
+
 The Linux checks job builds the existing mixed-policy driver in the normal
 release profile and runs sixteen workflows at two offered workflows per second,
-with at most eight outstanding workflows. It uses the same RocksDB release
+with at most eight outstanding workflows. It uses the same Regolith release
 daemon as the native-ring check and release bundle. The driver retains its
 900-second whole-run deadline; the recorder allows 960 seconds for termination.
 
@@ -117,11 +128,48 @@ and later regrants. Node directories, keys, policy/request identifiers, paths,
 raw JSONL and error messages remain private and are removed after collection.
 Failed qualification exports a fixed failure stage rather than private output.
 
-This is a short functional gate for the four-validator Linux RocksDB deployment.
+This is a short functional gate for the four-validator Linux Regolith deployment.
 It does not establish sustainable capacity, steady-state memory, WAN behavior,
 other storage backends or equivalence to the historical local measurement below.
 
+## Regolith release result on October 11, 2026
+
+[CI run 38124358657](https://github.com/sourcenetwork/vera.rs/actions/runs/38124358657)
+qualified the sixteen-workflow gate on four local validators with Rust 1.98.0,
+normal release features and Regolith history. The actual checkout
+[`e688ae9`](https://github.com/sourcenetwork/vera.rs/commit/e688ae9afbde56dc66f9aec05dead6e6e3972fe6)
+has the same source tree as candidate
+[`9d5c2b9`](https://github.com/sourcenetwork/vera.rs/commit/9d5c2b9ea7cb971a7871028b7b0b22d488a7ecbf).
+The checksum-verified mixed-policy artifact identifies the same daemon SHA-256
+as the exercised Linux release bundle.
+
+| Measurement | Result |
+| --- | ---: |
+| Timed workflows completed | 16 / 16 |
+| Offered arrival rate | 2 workflows/s |
+| Timed interval, including drain | 8.455 s |
+| Completed workflows / timed interval | 1.892/s |
+| Workflow p95 | 1,401.694 ms |
+| Certified submission p50 / p95 / p99 | 108.786 / 221.064 / 2,341.623 ms |
+| Hard restart to verified state | 3,834.464 ms |
+| Sampled per-member peak RSS | 213.70–217.11 MiB |
+
+All 99 distinct submissions certified 275 embedded mutations, with 4,800
+permission decisions and 1,280 ownership proofs verified and no throttled
+requests. Every replica passed the checks after workload completion, definition
+removal, reintroduction, explicit regrant and hard restart. Submission percentiles
+include setup and later policy edits; workflow percentiles cover the timed phase.
+Nine resource samples cover this short run.
+
+The artifact preserves bounded counters, timings and source/binary identities.
+Raw workload records and node state remain private; the driver hash is reported
+rather than independently rehashed from the artifact. This functional gate does
+not establish sustainable capacity, memory bounds, WAN behavior or a controlled
+performance improvement over the historical result below.
+
 ## Hosted Linux result on October 10, 2026
+
+This historical result predates the Regolith-only deployment.
 
 [CI run 38027720672](https://github.com/sourcenetwork/vera.rs/actions/runs/38027720672)
 qualified the gate above from source

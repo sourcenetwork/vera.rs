@@ -4,6 +4,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 spec = importlib.util.spec_from_file_location(
@@ -14,6 +15,22 @@ spec.loader.exec_module(module)
 
 
 class ProcessSelection(unittest.TestCase):
+    def wait_for_process(self, process, binary):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            self.assertIsNone(process.poll(), "test process exited before cleanup")
+            result = subprocess.run(
+                ["pgrep", "-f", "^" + re.escape(str(binary)) + "( |$)"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertIn(result.returncode, (0, 1), result.stderr)
+            if str(process.pid) in result.stdout.splitlines():
+                return
+            time.sleep(0.01)
+        self.fail("test process did not become visible to pgrep")
+
     def test_only_the_selected_executable_matches(self):
         binary = "/runner/work/vera.rs (test)/target/debug/verad"
         pattern = module.process_pattern(binary)
@@ -36,6 +53,8 @@ class ProcessSelection(unittest.TestCase):
             selected = subprocess.Popen([str(binary), "30"])
             other = subprocess.Popen([str(neighbor), "30"])
             try:
+                self.wait_for_process(selected, binary)
+                self.wait_for_process(other, neighbor)
                 subprocess.run([sys.executable, spec.origin, str(binary)], check=True)
                 self.assertLess(selected.wait(timeout=5), 0)
                 self.assertIsNone(other.poll())

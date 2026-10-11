@@ -55,6 +55,17 @@ participant replacement and certified reports. These functional checks support
 the existing integration. They do not prove security of a new DKG construction,
 compatibility with earlier deployed shares, or sustainable service capacity.
 
+The [member-replacement case](https://github.com/sourcenetwork/orbis-rs/blob/7d40cf72795dbdac665337176ca068d4fdddbe0c/bin/orbis-node/tests/support/native_pet/member_replacement.rs)
+also stops two old participants, requiring the incoming share for a two-participant
+signature. It verifies the derived signature before and after restarting both
+remaining participants, then checks that certified revocation denies signing and
+regrant restores it. Persisted shares must match the new committee indices.
+These assertions passed against Vera `9d5c2b9` in the
+[BLS lifecycle job](https://github.com/sourcenetwork/orbis-rs/actions/runs/38142081479/job/114483250187)
+and [Jubjub lifecycle job](https://github.com/sourcenetwork/orbis-rs/actions/runs/38142081479/job/114483250194).
+The selected suites passed 22 and 21 tests respectively; each skipped two separate
+cases, and neither result establishes prolonged membership churn or WAN behavior.
+
 Source references:
 
 - Commonware [DKG modules](https://github.com/commonwarexyz/monorepo/blob/d476a2361ce6840d2b9d0aa6fb30a924429046d4/cryptography/src/bls12381/dkg/mod.rs)

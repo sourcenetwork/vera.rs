@@ -20,10 +20,10 @@ async fn proof_admission_is_shared_and_released_on_errors() {
     drop(permits.pop());
     for _ in 0..2 {
         let error = api
-            .get_state_proof("acp".into(), String::new(), U64::ZERO)
+            .get_current_record_proof(ModuleId::Acp, Bytes::new(), U64::ZERO)
             .await
             .unwrap_err();
-        assert_eq!(error.code(), codes::INTERNAL_ERROR);
+        assert_eq!(error.code(), codes::RESOURCE_UNAVAILABLE);
     }
     assert!(state.proof_permit().is_ok());
 }

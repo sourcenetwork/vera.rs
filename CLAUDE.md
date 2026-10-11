@@ -17,7 +17,7 @@ Related repositories are independent checkouts; discover their paths rather than
 | **defradb.rs** | sourcenetwork | Document storage with native signed submissions and verified ACP evidence |
 | **trust-api** | sourcenetwork | Separate Go gateway for authentication, relay workers and native APIs |
 | **backbone** | sourcenetwork | Shared Rust clients and verification used by native consumers |
-| **regolith** | sourcenetwork | Defra document storage and optional Vera finalized-history backend |
+| **regolith** | sourcenetwork | Defra document storage and Vera finalized-history backend |
 | **bankd-commonware** | mizufinance | Reference: Commonware + REVM chain (infrastructure source for Phase 1) |
 | **monorepo** | commonwarexyz | Commonware primitives (consensus, crypto, p2p, storage) |
 
@@ -238,8 +238,8 @@ module, key and minimum revision. `vera_getCurrentPrefixProof` and
 captured-revision guarantees. `PolicyPrefixResponse::verify_object_owner` derives live
 ownership from policy and complete owner evidence at the same certified root.
 Deleted policies and archived records are unregistered; retained cleanup records
-cannot establish ownership. See `docs/native-relationship-keys.md` for the fresh-state cutover. Standalone `vera_getStateProof` and
-`vera_getRelationProof` remain JMT-only and are unavailable on the native node.
+cannot establish ownership. See `docs/native-relationship-keys.md` for the fresh-state cutover. `vera_getStateProof` and `vera_getRelationProof` are not registered. Record and
+complete-prefix reads use the authenticated native endpoints.
 Historical native activity proofs are not retained.
 Proof RPCs share eight in-flight slots per node; blocking historical certificate
 lookups have a separate eight-slot limit. Excess work returns JSON-RPC -32002
@@ -255,11 +255,11 @@ their narrower byte limits. Cancelling a lookup does not release its
 slot until its blocking task finishes.
 See `docs/permission-proofs.md` for formats and limits.
 
-Legacy `VeraStateSet` and JMT proof support remain available to explicit library
-callers. Native blocks select a tagged commitment encoding and carry four
-additional module log targets and a receipt commitment; blocks omitting both
-retain their original encoding. Native and legacy application layouts cannot
-share one consensus group.
+The application uses ordered QMDB partitions for execution and native modules.
+Native blocks select a tagged commitment encoding and carry four additional
+module log targets and a receipt commitment. Blocks lacking these commitments
+are rejected by the application. Legacy block decoding remains separate from the native application. Proofs
+use Commonware QMDB only; retired JMT proof formats are not supported.
 
 ### RPC surfaces
 
@@ -322,9 +322,9 @@ fixed epoch length. These cache limits do not bound total node history.
 
 A `LightBlock` carries the canonical block, the BLS threshold finalization
 certificate, and the epoch's group public key; `vera_domain::verify_light_block`
-verifies it with one aggregate signature. `ModuleStateProof`s verify module
-state against the header's `module_state_root`. Both are served over the native `vera_*`
-RPC methods above, and signed `GossipHeader`s stream through `vera_subscribeHeaders` as blocks finalize.
+verifies it with one aggregate signature. Native record, prefix and permission
+evidence authenticates module state against that finalized revision. Signed
+`GossipHeader`s stream through `vera_subscribeHeaders` as revisions finalize.
 The native stream is available with only the header broadcaster configured.
 Consumers authenticate headers against their configured finality trust; receiving a
 notification alone does not establish its authority.
@@ -356,7 +356,6 @@ vera.rs/
         vera-overlay/           # Overlay state for unpersisted QMDB changes
         vera-permission/        # Permission/record/prefix evidence types and verification
         vera-qmdb/              # Core QMDB abstractions and traits
-        vera-state/             # JMT-backed module state trees (RocksDB persistence)
         vera-traits/            # StateDb trait abstractions for storage/consensus
         test-infra/            # Shared test primitives: process, ports, logs, binary resolver
         vera-verifier/          # C shared-library verifier for receipts, records, prefixes and policies
@@ -378,6 +377,13 @@ cargo fmt                    # format
 ```
 
 ## Development Principles
+
+Use Regolith for finalized history and Commonware QMDB for authenticated state.
+Do not add RocksDB profiling, optimization or backend-selection work. Qualify the
+native core and one compatible Defra, Backbone, Orbis and separate Go Trust set.
+The separate RocksDB/JMT module store and its proof path are removed. Preserve
+native commitments and recovery behavior. Historical measurements retain their
+original backend labels.
 
 Borrowed from [defradb.rs](https://github.com/sourcenetwork/defradb.rs):
 
@@ -419,7 +425,8 @@ account performs the revocation; the record retains that account in invalidated_
 Resource diagnostics are opt-in with `RUST_LOG=warn,vera_diagnostics=debug`.
 Every 30 seconds the node logs existing Commonware metrics, resident execution
 index counts and accounted revision bytes, finalization/epoch cache entries and
-buffer capacity, and history backend memtable/table-reader/block-cache byte counters.
+buffer capacity, and Regolith memtable used/reserved, arena-pool, pinned-metadata
+and block-cache byte counters.
 Collection runs off the async executor; disabled diagnostics start no sampler.
 Counters are non-atomic and exclude other allocations. Unsupported properties
 remain absent, and collection failures are logged rather than reported as zero.

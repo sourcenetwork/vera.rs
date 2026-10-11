@@ -1,4 +1,5 @@
 import importlib.util
+import copy
 import json
 from pathlib import Path
 import tempfile
@@ -65,6 +66,50 @@ def complete_run():
 
 
 class QualificationTests(unittest.TestCase):
+    def sustained_run(self):
+        records = complete_run()
+        config = next(row for row in records if row['kind'] == 'configuration')
+        config.update(scheduled_arrivals_per_second=1, whole_run_deadline_seconds=5400)
+        next(row for row in records if row['kind'] == 'workload_summary')['elapsed_seconds'] = 1801
+        sample = next(row for row in records if row['kind'] == 'resources')
+        records.remove(sample)
+        for second in range(1801):
+            record = copy.deepcopy(sample)
+            record['elapsed_seconds'] = second
+            records.append(record)
+        return records
+
+    def test_sustained_profile_exports_closed_memory_series_and_storage(self):
+        result = mixed.qualify(self.sustained_run(), 2, 1, 5400, 1800)
+        self.assertEqual(len(result['resources']['member_rss_series']), 1801)
+        self.assertEqual(result['resources']['member_rss_series'][-1],
+                         {'elapsed_seconds': 1800, 'rss_mib': [.5] * 4})
+        self.assertEqual(len(result['resources']['storage']), 12)
+        for private in ('/private', 'private fixture material', 'node_pids'):
+            self.assertNotIn(private, json.dumps(result))
+
+    def test_short_load_cannot_be_promoted_to_sustained_qualification(self):
+        records = self.sustained_run()
+        next(row for row in records if row['kind'] == 'workload_summary')['elapsed_seconds'] = 1799
+        with self.assertRaisesRegex(mixed.InvalidEvidence, '^timing$'):
+            mixed.qualify(records, 2, 1, 5400, 1800)
+
+    def test_sustained_resources_require_full_time_coverage(self):
+        for mode in ('gap', 'missing-tail', 'duplicate-time'):
+            with self.subTest(mode=mode):
+                records = self.sustained_run()
+                if mode == 'gap':
+                    records = [row for row in records if row['kind'] != 'resources'
+                               or not 800 <= row['elapsed_seconds'] <= 820]
+                elif mode == 'missing-tail':
+                    records = [row for row in records if row['kind'] != 'resources'
+                               or row['elapsed_seconds'] <= 1700]
+                else:
+                    resources = [row for row in records if row['kind'] == 'resources']
+                    resources[1]['elapsed_seconds'] = resources[0]['elapsed_seconds']
+                with self.assertRaisesRegex(mixed.InvalidEvidence, '^resources$'):
+                    mixed.qualify(records, 2, 1, 5400, 1800)
+
     def test_complete_run_exports_only_closed_counts_and_timings(self):
         result = mixed.qualify(complete_run(), 2)
         self.assertTrue(result['qualified'])

@@ -57,7 +57,7 @@ impl BlockContext {
         self
     }
 
-    /// Skip module commitment work, including JMT preparation and full-store hashing.
+    /// Skip full-store hashing when authenticated storage supplies the commitment.
     #[must_use]
     pub const fn with_receipt_only(mut self) -> Self {
         self.receipt_only = true;

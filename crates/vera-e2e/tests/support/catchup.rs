@@ -216,7 +216,7 @@ async fn recover_replica_from(
         .chain_id(deployment)
         .genesis(genesis)
         .preset(ConsensusPreset::Normal)
-        .jmt_seeder(move |dir, _| {
+        .node_initializer(move |dir, _| {
             if pruning {
                 use std::io::Write as _;
                 let mut config = fs::OpenOptions::new()

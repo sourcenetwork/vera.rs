@@ -14,7 +14,7 @@ use super::{
     runtime::{TestCluster, TestNode},
 };
 
-type JmtSeeder = Box<dyn Fn(&Path, u64) + Send>;
+type NodeInitializer = Box<dyn Fn(&Path, u64) + Send>;
 
 /// Builder for `TestCluster`.
 pub struct TestClusterBuilder {
@@ -25,7 +25,7 @@ pub struct TestClusterBuilder {
     consensus_override: Option<ConsensusParams>,
     chain_id: u64,
     rpc_max_connections: std::num::NonZeroU32,
-    jmt_seeder: Option<JmtSeeder>,
+    node_initializer: Option<NodeInitializer>,
     binary: Option<PathBuf>,
     rust_log: Option<String>,
     inherit_rpc_listener: bool,
@@ -40,7 +40,7 @@ impl fmt::Debug for TestClusterBuilder {
             .field("preset", &self.preset)
             .field("consensus_override", &self.consensus_override)
             .field("chain_id", &self.chain_id)
-            .field("has_jmt_seeder", &self.jmt_seeder.is_some())
+            .field("has_node_initializer", &self.node_initializer.is_some())
             .field("binary", &self.binary)
             .field("rust_log", &self.rust_log)
             .field("inherit_rpc_listener", &self.inherit_rpc_listener)
@@ -58,7 +58,7 @@ impl Default for TestClusterBuilder {
             consensus_override: None,
             chain_id: 9001,
             rpc_max_connections: std::num::NonZeroU32::new(100).unwrap(),
-            jmt_seeder: None,
+            node_initializer: None,
             binary: None,
             rust_log: None,
             inherit_rpc_listener: cfg!(unix),
@@ -116,10 +116,10 @@ impl TestClusterBuilder {
         self
     }
 
-    /// Set a JMT seeding callback invoked per node directory before startup.
+    /// Initialize each node directory after configuration is written and before startup.
     #[must_use]
-    pub fn jmt_seeder(mut self, f: impl Fn(&Path, u64) + Send + 'static) -> Self {
-        self.jmt_seeder = Some(Box::new(f));
+    pub fn node_initializer(mut self, f: impl Fn(&Path, u64) + Send + 'static) -> Self {
+        self.node_initializer = Some(Box::new(f));
         self
     }
 
@@ -241,9 +241,9 @@ impl TestClusterBuilder {
             keys.write_peers(&peers_path, p2p_ports)?;
         }
 
-        if let Some(seeder) = &self.jmt_seeder {
+        if let Some(initialize) = &self.node_initializer {
             for dir in &node_dirs {
-                seeder(dir, chain_id);
+                initialize(dir, chain_id);
             }
         }
 

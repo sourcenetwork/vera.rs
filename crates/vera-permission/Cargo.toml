@@ -17,7 +17,6 @@ zanzibar.workspace = true
 alloy-primitives.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-hex.workspace = true
 thiserror.workspace = true
 
 [lints]

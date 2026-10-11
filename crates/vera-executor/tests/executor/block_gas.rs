@@ -103,7 +103,7 @@ fn context(gas_limit: u64) -> BlockContext {
 
 fn module_state(snapshot: &ModuleSnapshot) -> vera_executor::ModuleState {
     let view = VeraExecutor::new(9001);
-    view.commit_snapshot(1, snapshot.clone()).unwrap();
+    view.publish_snapshot(snapshot.clone());
     view.modules().read().unwrap().clone()
 }
 
@@ -127,7 +127,7 @@ fn verify_selected(
             state,
             &context.clone().with_verification(),
             &selected,
-            executor.snapshot().unwrap(),
+            executor.snapshot(),
         )
         .unwrap();
     assert_eq!(verified.gas_used, outcome.gas_used);
@@ -150,7 +150,7 @@ fn native_limit_is_reserved_before_nonce_or_module_changes(
     #[case] accepted: u64,
 ) {
     let executor = VeraExecutor::new(9001);
-    let parent = executor.snapshot().unwrap();
+    let parent = executor.snapshot();
     let before = module_state(&parent).serialize_stores();
     let (first, actor) = native(0, policy(true));
     let creation_gas = native_gas_used(&first);
@@ -180,7 +180,7 @@ fn native_limit_is_reserved_before_nonce_or_module_changes(
         Err(ExecutionError::BlockValidation(_))
     ));
     assert_eq!(
-        module_state(&executor.snapshot().unwrap()).serialize_stores(),
+        module_state(&executor.snapshot()).serialize_stores(),
         before
     );
     let (deferred, _) = native(accepted, policy(true));
@@ -212,7 +212,7 @@ fn failed_native_and_reverted_batch_consume_full_capacity(#[case] batch: bool) {
     let state = MockStateDb::new();
     let context = context(NATIVE_LIMIT);
     let (outcome, next) = executor
-        .execute_with_modules(&state, &context, &txs, executor.snapshot().unwrap())
+        .execute_with_modules(&state, &context, &txs, executor.snapshot())
         .unwrap();
     assert_eq!(outcome.executed_tx_indices, Some(vec![0]));
     assert_eq!(outcome.gas_used, NATIVE_LIMIT);
@@ -247,7 +247,7 @@ fn evm_limit_must_fit_before_account_changes(#[case] declared: u64, #[case] acce
             &state,
             &context,
             std::slice::from_ref(&tx),
-            executor.snapshot().unwrap(),
+            executor.snapshot(),
         )
         .unwrap();
     assert_eq!(
@@ -287,7 +287,7 @@ fn native_and_evm_share_actual_usage_while_reserving_full_limits() {
     let txs = [evm, native_tx, deferred_native, deferred_evm];
     let context = context(NATIVE_LIMIT);
     let (outcome, next) = executor
-        .execute_with_modules(&state, &context, &txs, executor.snapshot().unwrap())
+        .execute_with_modules(&state, &context, &txs, executor.snapshot())
         .unwrap();
     assert_eq!(outcome.executed_tx_indices, Some(vec![1, 0]));
     assert_eq!(outcome.gas_used, creation_gas + 21_000);
@@ -320,7 +320,7 @@ fn failed_native_leaves_only_remaining_gas_for_evm() {
     let txs = [evm, failed, deferred];
     let context = context(NATIVE_LIMIT + 21_000);
     let (outcome, next) = executor
-        .execute_with_modules(&state, &context, &txs, executor.snapshot().unwrap())
+        .execute_with_modules(&state, &context, &txs, executor.snapshot())
         .unwrap();
     assert_eq!(outcome.executed_tx_indices, Some(vec![1, 0]));
     assert_eq!(outcome.gas_used, NATIVE_LIMIT + 21_000);

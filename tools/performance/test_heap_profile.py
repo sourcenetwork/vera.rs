@@ -14,23 +14,30 @@ LAUNCHER = Path(__file__).resolve().parents[2] / '.github/scripts/profiled-verad
 
 class HeapEvidence(unittest.TestCase):
     def test_sustained_profile_covers_the_measured_late_window(self):
-        count, rate, deadline, arena = profile_workload('sustained')
+        count, rate, deadline, arena, objects = profile_workload('sustained')
         self.assertEqual((count, rate, arena), (90000, 50, '2'))
+        self.assertEqual(objects, 128)
         self.assertEqual(count / rate, 1800)
         self.assertGreater(deadline, count / rate)
-        self.assertEqual(profile_workload('startup'), (6000, 20, 1200, None))
+        self.assertEqual(profile_workload('startup'), (6000, 20, 1200, None, 128))
+        growing = profile_workload('growing')
+        self.assertEqual(growing[:4], (count, rate, deadline, arena))
+        self.assertEqual(growing[4], 0, 'registration workload must create distinct objects')
         with self.assertRaises(ValueError):
             profile_workload('unbounded')
 
     def test_qualification_uses_the_selected_operation_count(self):
-        for selection in ('startup', 'sustained'):
+        for selection in ('startup', 'sustained', 'growing'):
             count = profile_workload(selection)[0]
+            objects = profile_workload(selection)[4]
             records = {
+                'configuration': {'count': count, 'fixed_update_objects': objects,
+                                  'workload': 'certified_native_registrations' if objects == 0 else 'certified_native_object_updates'},
                 'summary': {'offered': count, 'completed_workflows': count},
                 'verification': {'verified': count, 'replicas': 4, 'unresolved': 0},
                 'recovery': {'inspected_operations': count, 'receipt_mismatches': 0, 'state_mismatches': 0},
             }
-            qualify_outcomes(records, count)
+            qualify_outcomes(records, count, objects)
             for section, key, value in [
                     ('summary', 'completed_workflows', count - 1),
                     ('verification', 'verified', count - 1),
@@ -43,7 +50,24 @@ class HeapEvidence(unittest.TestCase):
                 incomplete[section][key] = value
                 with self.subTest(selection=selection, section=section, key=key):
                     with self.assertRaisesRegex(ValueError, 'incomplete certified workload'):
-                        qualify_outcomes(incomplete, count)
+                        qualify_outcomes(incomplete, count, objects)
+
+    def test_fixed_successful_workload_cannot_qualify_as_growing(self):
+        count = 90000
+        records = {
+            'configuration': {'count': count, 'fixed_update_objects': 128,
+                              'workload': 'certified_native_object_updates'},
+            'summary': {'offered': count, 'completed_workflows': count},
+            'verification': {'verified': count, 'replicas': 4, 'unresolved': 0},
+            'recovery': {'inspected_operations': count, 'receipt_mismatches': 0, 'state_mismatches': 0},
+        }
+        qualify_outcomes(records, count, 128)
+        with self.assertRaisesRegex(ValueError, 'recorded configuration'):
+            qualify_outcomes(records, count, 0)
+        for configuration in (None, {}, {'count': count, 'fixed_update_objects': False,
+                                         'workload': 'certified_native_registrations'}):
+            with self.subTest(configuration=configuration), self.assertRaisesRegex(ValueError, 'recorded configuration'):
+                qualify_outcomes(dict(records, configuration=configuration), count, 0)
 
     def test_profile_build_flags_are_explicit_and_not_overridden(self):
         environment = {'CARGO_PROFILE_RELEASE_DEBUG': 'full',
@@ -202,6 +226,23 @@ class HeapEvidence(unittest.TestCase):
                 demangle_stacks(raw, decoded, ['fixture-decoder'])
             self.assertEqual(run.call_args.kwargs['timeout'], 118)
             self.assertEqual(retained_sites(decoded), {'commonware_storage::cache::Entry': 64})
+
+    def test_sustained_trace_scan_budget_preserves_the_decoder_deadline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raw, decoded = (Path(directory) / name for name in ('raw', 'decoded'))
+            raw.write_text('_RNvC6_123foo3bar; 64\n')
+            response = subprocess.CompletedProcess([], 0, stdout='commonware_storage::cache::Entry\n')
+            with patch('heap_profile.time.monotonic', side_effect=[0, 599, 599, 600, 900, 1499]), \
+                    patch('heap_profile.subprocess.run', return_value=response) as run:
+                demangle_stacks(raw, decoded, ['fixture-decoder'], scan_timeout_seconds=600)
+            self.assertEqual(run.call_args.kwargs['timeout'], 119)
+            self.assertEqual(retained_sites(decoded), {'commonware_storage::cache::Entry': 64})
+            for clock in ([0, 600], [0, 0, 0, 120], [0, 0, 0, 0, 0, 600]):
+                with self.subTest(clock=clock), \
+                        patch('heap_profile.time.monotonic', side_effect=clock), \
+                        patch('heap_profile.subprocess.run', return_value=response):
+                    with self.assertRaisesRegex(ValueError, 'decoding exceeded its deadline'):
+                        demangle_stacks(raw, decoded, ['fixture-decoder'], scan_timeout_seconds=600)
 
     def test_every_decode_phase_still_rejects_its_exhausted_budget(self):
         with tempfile.TemporaryDirectory() as directory:

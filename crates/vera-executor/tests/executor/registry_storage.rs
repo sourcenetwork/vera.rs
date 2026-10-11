@@ -157,7 +157,7 @@ fn native_membership_cannot_remove_or_deactivate_the_last_active_member() {
         B256::ZERO,
     );
     let (outcome, _) = executor
-        .execute_with_modules(&state, &context, &requests, executor.snapshot().unwrap())
+        .execute_with_modules(&state, &context, &requests, executor.snapshot())
         .unwrap();
     assert_eq!(
         outcome
@@ -197,7 +197,7 @@ fn native_membership_changes_share_proposal_storage_and_preserve_parent() {
         B256::ZERO,
         B256::ZERO,
     );
-    let parent = executor.snapshot().unwrap();
+    let parent = executor.snapshot();
     let (outcome, _) = executor
         .execute_with_modules(
             &state,
@@ -264,12 +264,7 @@ fn native_membership_storage_failure_aborts_the_proposal(#[case] building: bool)
     );
     context.is_verification = !building;
     let error = executor
-        .execute_with_modules(
-            &state,
-            &context,
-            &[registration],
-            executor.snapshot().unwrap(),
-        )
+        .execute_with_modules(&state, &context, &[registration], executor.snapshot())
         .unwrap_err();
     assert!(matches!(
         error,
@@ -297,12 +292,7 @@ fn native_membership_requires_the_configured_actor_permission() {
         B256::ZERO,
     );
     let (outcome, _) = executor
-        .execute_with_modules(
-            &state,
-            &context,
-            &[registration],
-            executor.snapshot().unwrap(),
-        )
+        .execute_with_modules(&state, &context, &[registration], executor.snapshot())
         .unwrap();
     assert!(!outcome.receipts[0].success());
     assert!(
@@ -339,8 +329,7 @@ fn native_membership_bounds_the_full_stored_count(#[case] count: U256, #[case] c
         B256::ZERO,
         B256::ZERO,
     );
-    let result =
-        executor.execute_with_modules(&state, &context, &[request], executor.snapshot().unwrap());
+    let result = executor.execute_with_modules(&state, &context, &[request], executor.snapshot());
     if corrupt {
         assert!(matches!(
             result,
@@ -389,7 +378,7 @@ fn native_membership_rejects_reusing_an_inactive_consensus_identity() {
             &state,
             &context,
             &[registration, backup_member_call(1), inactive, duplicate],
-            executor.snapshot().unwrap(),
+            executor.snapshot(),
         )
         .unwrap();
     assert_eq!(
@@ -423,12 +412,7 @@ fn native_membership_rejects_truncated_record_fields(#[case] offset: u64, #[case
         B256::ZERO,
     );
     let (outcome, parent) = executor
-        .execute_with_modules(
-            &state,
-            &context,
-            &[registration],
-            executor.snapshot().unwrap(),
-        )
+        .execute_with_modules(&state, &context, &[registration], executor.snapshot())
         .unwrap();
     let mut accounts = state.accounts.write().unwrap();
     let storage = &mut accounts
@@ -626,7 +610,7 @@ fn epoch_rosters_capture_the_boundary_branch_and_survive_later_changes() {
     let (registration, actor) = native_member_call(0, native_registration());
     let (state, executor) = authorized_actor(actor);
     let executor = executor.with_membership_epochs(NonZeroU64::new(10).unwrap(), NonZeroU64::MIN);
-    let parent = executor.snapshot().unwrap();
+    let parent = executor.snapshot();
     let mut context = BlockContext::new(
         Header {
             number: 8,
@@ -678,14 +662,19 @@ fn epoch_rosters_capture_the_boundary_branch_and_survive_later_changes() {
             parent.clone(),
         )
         .unwrap();
-    assert_ne!(selected.state_root(9), sibling.state_root(9));
+    assert!(
+        selected
+            .changes_from(&sibling)
+            .iter()
+            .any(|changes| !changes.is_empty())
+    );
     let mut verification = context.clone();
     verification.is_verification = true;
     let (registration, _) = native_member_call(0, native_registration());
     let (_, verified) = executor
         .execute_with_modules(&state, &verification, &[registration], parent)
         .unwrap();
-    assert_eq!(selected.state_root(9), verified.state_root(9));
+    assert!(selected.changes_from(&verified).iter().all(Vec::is_empty));
     futures::executor::block_on(state.commit(outcome.changes)).unwrap();
     context.header.number = 19;
     let (_, later) = executor
@@ -786,9 +775,9 @@ fn membership_epoch_capacity_rejects_addition_and_both_reactivation_paths(
         let outcome = if native {
             let request = native_member_call(sequence as u64, calldata).0;
             let (outcome, modules) = executor
-                .execute_with_modules(&state, &context, &[request], executor.snapshot().unwrap())
+                .execute_with_modules(&state, &context, &[request], executor.snapshot())
                 .unwrap();
-            executor.commit_snapshot(1, modules).unwrap();
+            executor.publish_snapshot(modules);
             outcome
         } else {
             execute_with_executor(

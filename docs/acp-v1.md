@@ -409,6 +409,41 @@ capacity, peak process memory or allocations inside individual leaf calls. Leaf 
 large-policy lifecycle work retain their separate limitations. Batch limits and
 wrapper charges affect execution results, so validators must use matching rules.
 
+## Native gateway coverage
+
+Trust API is a separate Go service. Its native deployment exposes a subset of
+Vera's ACP interface; the legacy gateway procedure count is not a measure of
+native feature coverage. The current native handlers provide:
+
+| Operation | Gateway behavior |
+| --- | --- |
+| Policy creation and definition edits | Authenticated actor submissions, with separate original-outcome lookups |
+| Register object, set/delete relationship, archive/unarchive object | Five command variants under the authenticated actor; outcome lookup does not resubmit |
+| Policy, object and policy-page reads | Verified current-state queries |
+| Permission verification | Queries the requested actor's access without recording a decision |
+| Record access decision | Binds the authenticated caller separately from the evaluated actor |
+| Decision outcome and current-state reads | Recover original issuance or read its stored state; an outcome lookup does not renew it |
+
+Object transfer, policy deletion and supplied-policy-metadata edits are available
+through the Rust native client. They are not command variants of the current Go
+native gateway. Theorem, catalogue and relationship-page queries also have Rust
+client methods; their convenience responses do not carry independent finality
+proofs. Gateway coverage and verified-query coverage must be tracked separately.
+
+Native gateway handlers accept authenticated POST requests with one bounded UTF-8
+JSON body, reject unknown fields, and check API-key procedure permissions before
+execution. Mutation authority still comes from Vera's module rules. Body fields
+cannot replace the authenticated submitting actor; decision and permission queries
+can name a different actor to evaluate.
+
+A verified rejected submission produces HTTP 422. Admission failures produce 503,
+confirmation deadlines 504, and unavailable verification 502. Clients retain the
+operation ID for recovery: rejection of one attempt does not rule out an earlier
+successful attempt. An absent retained outcome produces 404 and does not prove
+nonexecution. Missing current-state records also produce 404, with a different
+meaning. These HTTP statuses do not preserve every Go ACP error type or message;
+the differential fixture's error comparison is success versus failure only.
+
 ## Validation
 
 `tools/acp-oracle` pins and executes the Go engine to produce the committed

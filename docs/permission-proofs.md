@@ -1,24 +1,9 @@
 # Verified record and permission reads
 
-The native node serves a finalized revision and its Commonware permission evidence together through `vera_getCurrentPermissionProof`. `vera_getPermissionProof` accepts a caller-selected revision when its evidence is available. `vera_getCurrentRecordProof` provides native record membership and absence; `vera_getCurrentPrefixProof` proves complete current prefixes. The older `vera_getStateProof` and `vera_getRelationProof` endpoints require an explicitly configured legacy JMT server.
-
-On a JMT server, `vera_getRelationProof(prefix, height)` returns every ACP relationship record under a raw prefix, with evidence for completeness at the requested finalized height. `prefix` is a hex byte string beginning with `relationship/v5/` and ending with `/`. A relation prefix has the form `relationship/v5/<policy-id>/<target-generation>/<subject-generation>/v3/<resource-hex>/<object-hex>/<incarnation>/<relation-hex>/`; use the canonical key builders.
-
-The response contains `version`, `count`, and `records`. Each uses the existing `ModuleStateProof` encoding. The version proof establishes the relationship-index format. The count proof establishes the number of records under the exact prefix, including archived records. Records must have distinct, ordered keys under that prefix, with an inclusion proof for each value. A missing count means zero only when the format marker is authenticated at the same revision.
-
-Clients first verify the requested revision using `verify_light_block` and an independently configured consensus key. They then call `verify_relation_prefix_proof` with that revision's module root, height, requested prefix and local resource limits. The verifier rejects omitted, duplicated, reordered, out-of-prefix and mixed-revision records. Verified record contents still require policy evaluation; record inclusion alone does not grant access.
-
-The endpoint currently permits at most 1,024 records, a 4,096-byte prefix and a 4 MiB serialized proof response. Oversized requests return `LIMIT_EXCEEDED` (`-32005`). There is no partial-result pagination: a truncated relation cannot establish the absence of a deny record. Clients must also bound their transport response before deserialization; the proof verifier checks limits on an already decoded response.
-
-The server uses current module keys as enumeration candidates and proves their values at the requested retained revision. It verifies the complete response before returning it. If relation membership has changed since that revision, the server may return `RESOURCE_UNAVAILABLE` (`-32002`). It never substitutes a current scan for a historical one. Clients can select a newer verified revision and restart the entire evaluation; they must not combine revisions or treat an unavailable proof as an empty relation. Historical values remain provable when membership is unchanged.
-
-## Index activation and recovery
-
-Execution initializes relationship-index format 4 in the first selected revision whose parent lacks the marker. Other retained format markers are rejected. It derives counts from the resulting ACP records, so existing relationships are included. The marker and counts are authenticated ACP tree entries under the reserved null-prefixed namespace `vera/relationship_index`. Ordinary module record updates cannot write that namespace. Each later execution derives count changes from record presence before and after the update; changing or archiving a value does not change its count.
-
-All slash-terminated prefixes under `relationship/v5/` are counted, including delimiter ancestors. These counts establish physical scan completeness, including records awaiting policy cleanup. Counts and records enter the same branch-local tree update and durable revision. Pending alternatives do not change canonical counts, and revision rewind restores both together. Internal index entries are excluded from module record loading.
-
-Activation changes consensus execution and the next module commitment. This format targets fresh state; old relationship namespaces and older index markers have no automatic migration path. No disk rewrite changes a previously finalized root. This index does not replace the underlying storage engine or supply historical key enumeration.
+The native node serves a finalized revision and its Commonware permission evidence together through `vera_getCurrentPermissionProof`. `vera_getPermissionProof` accepts a caller-selected revision when its evidence is available. `vera_getCurrentRecordProof` provides native record membership and absence; `vera_getCurrentPrefixProof` proves complete current prefixes. The service exposes authenticated native QMDB evidence only. `vera_getStateProof`
+and `vera_getRelationProof` are not registered; record and complete-prefix reads
+use the native endpoints below. The server no longer provides JMT storage or
+relationship cardinality indexes.
 
 ## Native record reads
 
@@ -175,25 +160,25 @@ disagree even when they authenticate the same state.
 
 `VeraClient::verify_access_at` verifies a supplied finalized revision against an independently configured consensus key, fetches bounded evidence and evaluates it locally. It checks the HTTP response size before deserialization, including chunked responses, checks the JSON-RPC request ID, and applies a ten-second request timeout. The caller controls revision freshness. The method does not fall back to an older revision or interpret unavailable evidence as a denial or grant.
 
-Service limits are 64 operations, 64 KiB of serialized policy ID and request, 256 evaluation reads, 4,096 returned records across those reads, 1 MiB of request-key and returned-record bytes, and 4 MiB of serialized evidence. JMT complete-prefix reads also obey the relation endpoint's limits. Client transport permits the proof limit plus 1 KiB for the RPC envelope. Clients may impose tighter limits. These read limits do not bound pure expression work or establish a sustained-throughput guarantee.
+Service limits are 64 operations, 64 KiB of serialized policy ID and request, 256 evaluation reads, 4,096 returned records across those reads, 1 MiB of request-key and returned-record bytes, and 4 MiB of serialized evidence. Client transport permits the proof limit plus 1 KiB for the RPC envelope. Clients may impose tighter limits. These read limits do not bound pure expression work or establish a sustained-throughput guarantee.
 
 The server captures reads from one immutable current module snapshot, generates evidence at the requested revision and verifies the resulting request before returning it. Changes in membership or policy can make historical evidence unavailable. Every successful response nevertheless evaluates entirely against the requested revision. Client verification is independent of the server's capture decisions.
 
 ## Ordered Commonware evidence
 
-The same permission endpoint supports ordered Commonware module storage when the
-server is constructed with `with_hub_native_modules`, as in the native node.
-The older `vera_getStateProof` and `vera_getRelationProof` endpoints remain JMT-based.
+Permission requests use ordered Commonware QMDB module storage. The native node
+configures its server with `with_vera_native_modules`. The service exposes native
+record, prefix and permission endpoints.
 
-This format adds `roots`, the four namespace roots in ACP, bulletin, vera and
+Permission evidence includes `roots`, the four namespace roots in ACP, bulletin, identity and
 sequence order. Their combined commitment must match the caller's verified
 revision. Reads use `kind: "current_point"` or `kind: "current_prefix"`, with
 canonical Commonware evidence encoded as hex bytes. A point carries its key and
 optional value; absence requires an exclusion proof. A prefix carries an
 authenticated boundary followed by the complete ordered successor chain. A
 missing successor, reordered record or substituted value invalidates the proof.
-The verifier rejects mixed formats and replays the same ACP evaluator for both.
-Existing JMT responses omit `roots` and retain their original encoding.
+Every permission read uses native QMDB evidence and the shared ACP evaluator.
+Missing namespace roots and retired JMT read variants are rejected.
 
 Generation holds read locks on all four namespaces and checks the selected root
 before reading evidence. Prefix generation walks successors with aggregate record

@@ -6,23 +6,18 @@ use std::sync::Arc;
 
 use alloy_sol_types::SolCall;
 use commonware_consensus::marshal::ancestry;
-use commonware_glue::stateful::{
-    Application, Input, Proposed,
-    db::{DatabaseSet as _, ManagedDb as _, Shared},
-};
-use commonware_runtime::{Runner as _, Supervisor as _, buffer::paged::CacheRef, tokio};
-use commonware_utils::{NZU16, NZUsize};
-use vera_app::{ModuleDb, VeraStateSet, VeraUnmerkleized};
-use vera_app::{NoopSink, ReshareInput, StatefulVeraApp, apply_genesis, genesis_block};
-use vera_backend::{Ctx, VeraStateSet as BackendStateSet, state_set_config};
+use commonware_glue::stateful::{Application, Input, Proposed, db::DatabaseSet as _};
+use commonware_runtime::{Runner as _, Supervisor as _, tokio};
+use vera_app::ordered_state::{OrderedPending, OrderedState};
+use vera_app::{NoopSink, ReshareInput, StatefulVeraApp};
+use vera_backend::Ctx;
 use vera_client::{ACP_ADDRESS, BlsSigner};
 use vera_consensus::{Mempool as _, components::InMemoryMempool};
 use vera_domain::{Block, Tx};
-use vera_executor::{ModuleTrees, VeraExecutor};
+use vera_executor::VeraExecutor;
 use vera_genesis::GenesisState;
-use vera_modules::module_state::state_root_from_jmt;
-use vera_modules::{ModuleState, acp::abi::IAcp};
-use vera_state::ModuleStateTree;
+use vera_modules::acp::abi::IAcp;
+mod support;
 
 const CHAIN_ID: u64 = 9001;
 
@@ -49,7 +44,7 @@ async fn propose(
     app: &mut StatefulVeraApp<NoopSink>,
     context: Ctx,
     parent: &Block,
-    batches: VeraUnmerkleized,
+    batches: OrderedPending,
     tx: Option<Tx>,
 ) -> Proposed<StatefulVeraApp<NoopSink>, Ctx> {
     let provider = InMemoryMempool::new();
@@ -74,42 +69,24 @@ async fn propose(
 
 #[test]
 fn pending_branches_do_not_replace_query_state() {
-    check_pending_branches(false);
-}
-
-#[test]
-fn pending_branches_do_not_change_persistent_trees() {
-    check_pending_branches(true);
-}
-
-fn check_pending_branches(persistent: bool) {
     let dir = tempfile::tempdir().unwrap();
     let config = tokio::Config::default().with_storage_directory(dir.path().to_path_buf());
     tokio::Runner::new(config).start(|context| async move {
-        let page_cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
-        let set = BackendStateSet::init(
+        let executor = VeraExecutor::new(CHAIN_ID);
+        let set = OrderedState::init(
             context.child("set"),
-            state_set_config("modules", page_cache.clone()),
+            support::state_config(&context, "modules", executor.clone()),
             None,
         )
         .await;
-        let (root, targets) = apply_genesis(&set, &GenesisState::default()).await.unwrap();
-        let genesis = genesis_block(root, targets, ModuleState::default().state_root());
-        let trees: Option<ModuleTrees> = persistent.then(|| {
-            std::array::from_fn(|i| {
-                Arc::new(std::sync::Mutex::new(
-                    ModuleStateTree::open(dir.path().join(format!("module-{i}"))).unwrap(),
-                ))
-            })
-        });
-        let mut executor = VeraExecutor::new(CHAIN_ID);
-        if let Some(trees) = &trees {
-            executor = executor.with_module_trees(trees.clone());
-        }
-        let native = ModuleDb::init(context.child("native"), executor.clone(), None)
-            .await
-            .unwrap();
-        let set: VeraStateSet = (set.0, set.1, set.2, Shared::new("native", native));
+        let genesis = support::genesis(&set, &GenesisState::default()).await;
+        drop(set);
+        let set = OrderedState::init(
+            context.child("anchored_genesis"),
+            support::state_config(&context, "modules", executor.clone()).recover_from_marshal(),
+            Some(StatefulVeraApp::<NoopSink>::sync_targets(&genesis)),
+        )
+        .await;
         let mut app = StatefulVeraApp::new(
             executor.clone(),
             genesis.clone(),
@@ -142,16 +119,16 @@ fn check_pending_branches(persistent: bool) {
         assert_eq!(b.block.txs.len(), 1);
 
         let target = StatefulVeraApp::<NoopSink>::sync_targets(&a.block);
-        assert!(VeraStateSet::matches_sync_targets(&a.merkleized, &target));
-        let mut wrong_height = target.clone();
-        wrong_height.3.height += 1;
-        assert!(!VeraStateSet::matches_sync_targets(
+        assert!(OrderedState::matches_sync_targets(&a.merkleized, &target));
+        let mut wrong_bounds = a.block.clone();
+        wrong_bounds.native_targets.as_mut().unwrap()[0].tip += 1;
+        assert!(!OrderedState::matches_sync_targets(
             &a.merkleized,
-            &wrong_height
+            &StatefulVeraApp::<NoopSink>::sync_targets(&wrong_bounds)
         ));
         let mut wrong_root = target;
-        wrong_root.3.root = b.block.module_state_root;
-        assert!(!VeraStateSet::matches_sync_targets(
+        wrong_root.3.root = b.block.native_targets.as_ref().unwrap()[0].root;
+        assert!(!OrderedState::matches_sync_targets(
             &a.merkleized,
             &wrong_root
         ));
@@ -162,38 +139,32 @@ fn check_pending_branches(persistent: bool) {
                 &mut app,
                 context.child("child_a"),
                 &a.block,
-                VeraStateSet::fork_batches(&a.merkleized),
+                OrderedState::fork_batches(&a.merkleized),
                 None
             ),
             propose(
                 &mut sibling,
                 context.child("child_b"),
                 &b.block,
-                VeraStateSet::fork_batches(&b.merkleized),
+                OrderedState::fork_batches(&b.merkleized),
                 None
             ),
         );
-        assert_eq!(
-            child_a.block.module_state_root, a.block.module_state_root,
-            "empty child changed Alice's state root"
-        );
-        assert_eq!(
-            child_b.block.module_state_root, b.block.module_state_root,
-            "empty child changed Bob's state root"
-        );
-        if let Some(trees) = &trees {
-            for tree in trees {
-                let tree = tree.lock().unwrap();
-                assert_eq!(
-                    tree.version(),
-                    0,
-                    "pending execution advanced the persistent version"
-                );
-                assert_eq!(tree.canonical_height(), 0);
-                assert!(tree.load_all().unwrap().is_empty());
-                assert!(tree.root_at_height(1).is_err());
-            }
+        for child in [&child_a, &child_b] {
+            assert!(child.block.txs.is_empty());
+            assert!(OrderedState::matches_sync_targets(
+                &child.merkleized,
+                &StatefulVeraApp::<NoopSink>::sync_targets(&child.block)
+            ));
         }
+        assert_eq!(child_a.block.parent, a.block.id());
+        assert_eq!(child_b.block.parent, b.block.id());
+        assert_eq!(
+            set.committed_targets().await,
+            StatefulVeraApp::<NoopSink>::sync_targets(&genesis),
+            "pending execution advanced committed storage"
+        );
+
         {
             let visible = executor.modules().read().unwrap();
             assert_eq!(
@@ -220,7 +191,10 @@ fn check_pending_branches(persistent: bool) {
                 )
                 .await;
             set.apply(winner.merkleized).await;
-            assert_eq!(set.committed_targets().await.3.height, winner.block.height);
+            assert_eq!(
+                set.committed_targets().await,
+                StatefulVeraApp::<NoopSink>::sync_targets(&winner.block)
+            );
             assert_eq!(
                 executor
                     .modules()
@@ -239,75 +213,79 @@ fn check_pending_branches(persistent: bool) {
                 set.readers(),
             )
             .await;
+            let partitions = set.native_databases();
+            let [a, b, h, n] = vera_backend::native::read_partitions([
+                &partitions.0,
+                &partitions.1,
+                &partitions.2,
+                &partitions.3,
+            ])
+            .await;
+            assert_eq!(
+                vera_modules::module_state::combine_module_roots(&[
+                    a.root().0,
+                    b.root().0,
+                    h.root().0,
+                    n.root().0
+                ]),
+                winner.block.module_state_root
+            );
             let visible = executor.modules().read().unwrap();
             assert_eq!(visible.nonces.get_nonce(alice.did()).unwrap(), 1);
             assert_eq!(visible.nonces.get_nonce(bob.did()).unwrap(), 0);
             assert_eq!(visible.acp.query_policy_ids().unwrap().len(), 1);
-            if let Some(trees) = &trees {
-                let roots = std::array::from_fn(|i| {
-                    let tree = trees[i].lock().unwrap();
-                    assert_eq!(tree.canonical_height(), winner.block.height);
-                    let root = tree.root().unwrap();
-                    assert_eq!(tree.root_at_height(winner.block.height).unwrap(), root);
-                    root.0
-                });
-                assert_eq!(state_root_from_jmt(&roots), winner.block.module_state_root);
-            } else {
-                assert_eq!(visible.state_root(), winner.block.module_state_root);
-            }
         }
         assert!(set.finalize().await.durable().await);
-        if persistent {
-            drop(b);
-            drop(child_b);
-            drop(set);
-            let config = state_set_config("modules", page_cache.clone());
-            let set = VeraStateSet::init(
-                context.child("recovered_first"),
-                (config.0, config.1, config.2, executor.clone()),
-                Some(first_target),
-            )
-            .await;
-            assert_eq!(executor.module_height().unwrap(), 1);
-            assert_eq!(
-                executor
-                    .modules()
-                    .read()
-                    .unwrap()
-                    .nonces
-                    .get_nonce(alice.did())
-                    .unwrap(),
-                1
-            );
-            drop(set);
-            let config = state_set_config("modules", page_cache);
-            let _set = VeraStateSet::init(
-                context.child("recovered_genesis"),
-                (config.0, config.1, config.2, executor.clone()),
-                Some(StatefulVeraApp::<NoopSink>::sync_targets(&genesis)),
-            )
-            .await;
-            assert_eq!(executor.module_height().unwrap(), 0);
-            assert!(
-                executor
-                    .modules()
-                    .read()
-                    .unwrap()
-                    .acp
-                    .query_policy_ids()
-                    .unwrap()
-                    .is_empty()
-            );
-            assert_eq!(
-                executor
-                    .modules()
-                    .read()
-                    .unwrap()
-                    .nonces
-                    .get_nonce(alice.did())
-                    .unwrap(),
-                0
-            );
-        }
+        drop(b);
+        drop(child_b);
+        drop(set);
+        let set = OrderedState::init(
+            context.child("recovered_first"),
+            support::state_config(&context, "modules", executor.clone()).recover_from_marshal(),
+            Some(first_target.clone()),
+        )
+        .await;
+        assert_eq!(set.committed_targets().await, first_target);
+        assert_eq!(
+            executor
+                .modules()
+                .read()
+                .unwrap()
+                .nonces
+                .get_nonce(alice.did())
+                .unwrap(),
+            1
+        );
+        drop(set);
+        let set = OrderedState::init(
+            context.child("recovered_genesis"),
+            support::state_config(&context, "modules", executor.clone()).recover_from_marshal(),
+            Some(StatefulVeraApp::<NoopSink>::sync_targets(&genesis)),
+        )
+        .await;
+        assert_eq!(
+            set.committed_targets().await,
+            StatefulVeraApp::<NoopSink>::sync_targets(&genesis)
+        );
+        assert!(
+            executor
+                .modules()
+                .read()
+                .unwrap()
+                .acp
+                .query_policy_ids()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            executor
+                .modules()
+                .read()
+                .unwrap()
+                .nonces
+                .get_nonce(alice.did())
+                .unwrap(),
+            0
+        );
     });
 }

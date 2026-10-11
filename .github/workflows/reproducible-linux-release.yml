@@ -1,0 +1,97 @@
+name: Reproducible Linux release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Immutable Vera commit to compile twice
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reproducible-linux-release-${{ inputs.source }}
+  cancel-in-progress: false
+
+jobs:
+  clean-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        member: ['1', '2']
+    env:
+      CARGO_BUILD_JOBS: '2'
+      PROTOC: /usr/bin/protoc
+      SOURCE_REF: ${{ inputs.source }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Validate immutable source
+        run: python3 .github/scripts/reproducible-linux-release.py --source "$SOURCE_REF" validate
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          path: candidate
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@62ae3a85dbdd2bedbb5819da8ce45635129289a1 # 1.98.0
+        with:
+          toolchain: 1.98.0
+      - name: Install normal release build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
+      - name: Fetch locked source dependencies
+        working-directory: candidate
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
+        run: cargo fetch --locked
+      - name: Compile from a clean target and record provenance
+        env:
+          BUILD_MEMBER: ${{ matrix.member }}
+        run: >-
+          python3 .github/scripts/reproducible-linux-release.py --source "$SOURCE_REF" build
+          --root "$GITHUB_WORKSPACE/candidate" --member "$BUILD_MEMBER"
+          --output "$RUNNER_TEMP/clean-release"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: clean-release-${{ matrix.member }}
+          path: ${{ runner.temp }}/clean-release/
+          if-no-files-found: error
+          retention-days: 14
+
+  compare:
+    needs: clean-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SOURCE_REF: ${{ inputs.source }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: clean-release-*
+          path: ${{ runner.temp }}/clean-releases
+      - name: Verify checksums, source, environment and binary equality
+        run: >-
+          python3 .github/scripts/reproducible-linux-release.py --source "$SOURCE_REF" compare
+          --first "$RUNNER_TEMP/clean-releases/clean-release-1"
+          --second "$RUNNER_TEMP/clean-releases/clean-release-2"
+          --output "$RUNNER_TEMP/reproducible-release.json"
+      - name: Check independent-build evidence regressions
+        run: python3 -m unittest discover -s .github/scripts -p test_reproducible_linux_release.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: reproducible-release-evidence
+          path: ${{ runner.temp }}/reproducible-release.json
+          if-no-files-found: error
+          retention-days: 30

@@ -27,7 +27,7 @@ async fn disk_full_validator_recovers_acknowledged_operations() {
         .chain_id(deployment)
         .genesis(GenesisBuilder::devnet().simplex(SimplexParameters::default()))
         .preset(ConsensusPreset::Normal)
-        .jmt_seeder(move |directory, _| {
+        .node_initializer(move |directory, _| {
             if directory.file_name().is_some_and(|name| name == "node3") {
                 node_volume
                     .bind_node(directory)

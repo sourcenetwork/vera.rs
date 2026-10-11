@@ -4,10 +4,6 @@ use std::{collections::BTreeMap, sync::Mutex};
 
 use alloy_primitives::{B256, Bytes};
 use serde::{Deserialize, Serialize};
-use vera_domain::{
-    ModuleStateProof, RelationPrefixProof, RelationProofLimits, verify_module_state_proof,
-    verify_relation_prefix_proof,
-};
 use vera_modules::acp::{record_store::RecordStore, zanzibar_store::evaluate_access_request};
 use zanzibar::error::{Error as EvaluationError, Result as EvaluationResult};
 
@@ -89,25 +85,13 @@ pub enum PermissionRead {
         /// Bounded canonical complete-prefix evidence.
         proof: Bytes,
     },
-    /// Proven record value or absence.
-    Point {
-        /// Record evidence at the selected revision.
-        proof: ModuleStateProof,
-    },
-    /// Every relationship record under a prefix.
-    Prefix {
-        /// Exact raw prefix, encoded as hex bytes.
-        prefix: Bytes,
-        /// Complete enumeration evidence.
-        proof: Box<RelationPrefixProof>,
-    },
 }
 
 /// Read evidence; the consumer computes its own permission result.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PermissionProof {
-    /// Current-state namespace roots in ACP, bulletin, vera and sequence order.
-    /// Omitted for the original proof format.
+    /// Authenticated roots in ACP, bulletin, identity and native sequence order.
+    /// Missing roots are invalid evidence and never yield an access decision.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub roots: Option<[B256; 4]>,
     /// Distinct point and prefix reads used by the evaluator.
@@ -126,12 +110,6 @@ pub enum PermissionError {
     /// Invalid request or read coverage.
     #[error("invalid permission evidence: {0}")]
     Invalid(&'static str),
-    /// An individual record proof failed verification.
-    #[error(transparent)]
-    Record(#[from] vera_domain::ProofError),
-    /// Complete-prefix verification failed.
-    #[error(transparent)]
-    Prefix(#[from] vera_domain::RelationProofError),
     /// Policy evaluation failed, including missing read coverage.
     #[error(transparent)]
     Evaluation(#[from] EvaluationError),
@@ -160,7 +138,7 @@ pub fn validate_request(
 /// revision. Transport must bound the response before deserializing this type.
 pub fn verify_permission_proof(
     root: B256,
-    height: u64,
+    _height: u64,
     policy: &str,
     request: &AccessRequest,
     proof: &PermissionProof,
@@ -171,62 +149,10 @@ pub fn verify_permission_proof(
         return Err(PermissionError::Limit);
     }
     encoded_size(proof, limits.proof_bytes)?;
-    if let Some(roots) = proof.roots {
-        return current::verify(root, roots, policy, request, proof, limits);
-    }
-    let mut store = VerifiedRecords {
-        points: BTreeMap::new(),
-        prefixes: BTreeMap::new(),
-        remaining: Mutex::new(limits.reads),
-    };
-    let mut records = limits.reads.records;
-    for read in &proof.reads {
-        match read {
-            PermissionRead::CurrentPoint { .. } | PermissionRead::CurrentPrefix { .. } => {
-                return Err(PermissionError::Invalid("current-state roots missing"));
-            }
-            PermissionRead::Point { proof } => {
-                records = records
-                    .checked_sub(usize::from(proof.value.is_some()))
-                    .ok_or(PermissionError::Limit)?;
-                if proof.module != ModuleId::Acp || proof.height != height {
-                    return Err(PermissionError::Invalid(
-                        "point belongs to another module or height",
-                    ));
-                }
-                verify_module_state_proof(root, proof)?;
-                let key = decode(&proof.key)?;
-                let value = proof.value.as_deref().map(decode).transpose()?;
-                if store.points.insert(key, value).is_some() {
-                    return Err(PermissionError::Invalid("duplicate point read"));
-                }
-            }
-            PermissionRead::Prefix { prefix, proof } => {
-                records = records
-                    .checked_sub(proof.records.len())
-                    .ok_or(PermissionError::Limit)?;
-                let entries = verify_relation_prefix_proof(
-                    root,
-                    height,
-                    prefix,
-                    proof,
-                    RelationProofLimits {
-                        records: limits.reads.records,
-                        bytes: limits.proof_bytes,
-                    },
-                )?;
-                if store.prefixes.insert(prefix.to_vec(), entries).is_some() {
-                    return Err(PermissionError::Invalid("duplicate prefix read"));
-                }
-            }
-        }
-    }
-    Ok(evaluate_access_request(store, policy, request)?)
-}
-
-fn decode(value: &str) -> Result<Vec<u8>, PermissionError> {
-    hex::decode(value.strip_prefix("0x").unwrap_or(value))
-        .map_err(|_| PermissionError::Invalid("invalid record hex"))
+    let roots = proof
+        .roots
+        .ok_or(PermissionError::Invalid("current-state roots missing"))?;
+    current::verify(root, roots, policy, request, proof, limits)
 }
 
 type Entries = Vec<(Vec<u8>, Vec<u8>)>;
@@ -321,6 +247,26 @@ mod tests {
     }
 
     #[test]
+    fn permission_evidence_rejects_retired_formats_and_missing_roots() {
+        for kind in ["point", "prefix"] {
+            let response = serde_json::json!({"reads": [{"kind": kind, "proof": {}}]});
+            let error = serde_json::from_value::<PermissionProof>(response).unwrap_err();
+            assert!(error.to_string().starts_with("unknown variant"));
+        }
+        assert!(matches!(
+            verify_permission_proof(
+                B256::ZERO,
+                1,
+                "policy",
+                &request(),
+                &PermissionProof::default(),
+                PERMISSION_LIMITS
+            ),
+            Err(PermissionError::Invalid("current-state roots missing"))
+        ));
+    }
+
+    #[test]
     fn encoded_limits_match_wire_bytes_and_reject_empty_requests() {
         assert_eq!(
             serde_json::to_string(&PermissionProof::default()).unwrap(),
@@ -357,15 +303,14 @@ mod tests {
 
     #[test]
     fn missing_evidence_is_an_error_even_for_a_denied_request() {
+        let roots = [B256::ZERO; 4];
+        let root = vera_modules::module_state::combine_module_roots(&roots.map(|root| root.0));
+        let proof = PermissionProof {
+            roots: Some(roots),
+            reads: Vec::new(),
+        };
         assert!(matches!(
-            verify_permission_proof(
-                B256::ZERO,
-                1,
-                "policy",
-                &request(),
-                &PermissionProof::default(),
-                PERMISSION_LIMITS
-            ),
+            verify_permission_proof(root, 1, "policy", &request(), &proof, PERMISSION_LIMITS),
             Err(PermissionError::Evaluation(_))
         ));
     }

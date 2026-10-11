@@ -15,6 +15,7 @@ REPLICA_PHASES = ('after_workload', 'remove_member', 'reintroduce_member', 'afte
 COUNT_FIELDS = ('issued_native_submissions', 'issued_embedded_mutations', 'certified_embedded_mutations',
                 'submission_attempts', 'certified_successes', 'verified_permission_checks',
                 'verified_owners', 'throttled_requests')
+PROFILES = {'ci': (16, 2, 900, 0), 'sustained': (2048, 1, 5400, 1800)}
 
 
 class InvalidEvidence(ValueError):
@@ -30,8 +31,8 @@ def integer(value, minimum=0):
     return type(value) is int and minimum <= value <= 10**9
 
 
-def timing(value):
-    require(type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 960_000, 'timing')
+def timing(value, maximum=960_000):
+    require(type(value) in (int, float) and math.isfinite(value) and 0 <= value <= maximum, 'timing')
     return value
 
 
@@ -44,21 +45,29 @@ def unique(rows, fields, expected):
     require(len(keys) == len(set(keys)) and set(keys) == expected, 'coverage')
 
 
-def distribution(values):
-    values = sorted(timing(value) for value in values)
+def distribution(values, maximum=960_000):
+    values = sorted(timing(value, maximum) for value in values)
     require(bool(values), 'timing')
     return {name: values[max(0, math.ceil(len(values) * fraction) - 1)]
             for name, fraction in (('p50', .5), ('p95', .95), ('p99', .99))}
 
 
-def resource_summary(records):
+def resource_summary(records, timed_seconds=None, sustained=False):
     config = [row for row in records if row.get('kind') == 'resource_configuration']
     require(len(config) == 1, 'resources')
     pids = config[0]['node_pids']
     require(len(pids) == len(set(pids)) == 4 and all(integer(pid, 1) for pid in pids), 'resources')
     peaks = {pid: 0 for pid in pids}
+    series = []
     samples = [row for row in records if row.get('kind') == 'resources']
     require(bool(samples), 'resources')
+    elapsed = [sample['elapsed_seconds'] for sample in samples]
+    require(all(type(value) in (int, float) and math.isfinite(value) and value >= 0 for value in elapsed)
+            and all(right > left for left, right in zip(elapsed, elapsed[1:])), 'resources')
+    if sustained:
+        require(elapsed[0] <= 10 and elapsed[-1] >= timed_seconds - 10
+                and len(samples) >= math.floor(timed_seconds / 2)
+                and all(right - left <= 10 for left, right in zip(elapsed, elapsed[1:])), 'resources')
     for sample in samples:
         require('error' not in sample['sample'], 'resources')
         found = {}
@@ -69,6 +78,9 @@ def resource_summary(records):
             found[pid] = rss
             peaks[pid] = max(peaks[pid], rss)
         require(set(found) == set(pids), 'resources')
+        if sustained:
+            series.append({'elapsed_seconds': sample['elapsed_seconds'],
+                           'rss_mib': [found[pid] / 1024 for pid in pids]})
         breakdown = sample['sample']['rss_breakdown']
         require(len(breakdown) == 4 and {row['pid'] for row in breakdown} == set(pids), 'resources')
         require(all(row['availability'] == 'complete' and all(integer(row[field]) for field in
@@ -78,10 +90,16 @@ def resource_summary(records):
            ('before_workload', 'after_workload', 'after_verification') for node in range(4)})
     require(all(row['error'] is None and all(integer(row[field]) for field in
                 ('logical_bytes', 'allocated_file_bytes', 'regular_files')) for row in storage), 'resources')
-    return {'sample_count': len(samples), 'peak_member_rss_mib': [peaks[pid] / 1024 for pid in pids]}
+    result = {'sample_count': len(samples), 'peak_member_rss_mib': [peaks[pid] / 1024 for pid in pids]}
+    if sustained:
+        result['member_rss_series'] = series
+        result['storage'] = [{field: row[field] for field in
+                             ('phase', 'node', 'logical_bytes', 'allocated_file_bytes', 'regular_files')}
+                            for row in storage]
+    return result
 
 
-def qualify(records, workflows=16):
+def qualify(records, workflows=16, rate=2, deadline=900, minimum_seconds=0):
     def rows(kind):
         return [row for row in records if row.get('kind') == kind]
 
@@ -92,8 +110,8 @@ def qualify(records, workflows=16):
 
     config, result, summary, restart = (one(kind) for kind in ('configuration', 'result', 'workload_summary', 'restart'))
     expected_config = {'schema_version': 1, 'workflows': workflows, 'validators': 4, 'epoch_revisions': 192,
-                       'scheduled_arrivals_per_second': 2, 'maximum_outstanding_workflows': 8,
-                       'whole_run_deadline_seconds': 900, 'request_deadline_seconds': 30,
+                       'scheduled_arrivals_per_second': rate, 'maximum_outstanding_workflows': 8,
+                       'whole_run_deadline_seconds': deadline, 'request_deadline_seconds': 30,
                        'workflow_deadline_seconds': 120, 'objects_per_workflow': 4, 'readers': 2, 'outsiders': 1,
                        'verification_concurrency_per_replica': 8, 'timing': 'normal',
                        'pipelined': True, 'debug_assertions': False}
@@ -103,7 +121,8 @@ def qualify(records, workflows=16):
     require(summary['scheduled_workflows'] == summary['completed_workflows'] == workflows
             and summary['failed_workflows'] == 0 and summary['failures'] == [], 'workflows')
     require(type(summary['elapsed_seconds']) in (int, float)
-            and math.isfinite(summary['elapsed_seconds']) and 0 < summary['elapsed_seconds'] <= 900, 'timing')
+            and math.isfinite(summary['elapsed_seconds']) and 0 < summary['elapsed_seconds'] <= deadline
+            and summary['elapsed_seconds'] >= max(minimum_seconds, (workflows - 1) / rate), 'timing')
     counts = result['counts']
     require(all(integer(counts[field]) for field in COUNT_FIELDS), 'counts')
     expected_counts = {'issued_native_submissions': 6 * workflows + 3, 'certified_successes': 6 * workflows + 3,
@@ -152,24 +171,26 @@ def qualify(records, workflows=16):
                 and row['failure_kind'] is None and row['error'] is None for row in checks), 'replicas')
     require(restart['replica'] == 3 and restart['verified_workflows'] == workflows
             and restart['minimum_revision'] == targets['after_hard_restart'], 'restart')
+    maximum_ms = deadline * 1000
     return {'format_version': 1, 'qualified': True, 'workflows': workflows,
             'timed_seconds': summary['elapsed_seconds'], 'completed_workflows_per_second': workflows / summary['elapsed_seconds'],
             'counts': {field: counts[field] for field in COUNT_FIELDS}, 'replica_phases': list(REPLICA_PHASES),
-            'workflow_ms': distribution([row['elapsed_ms'] for row in completed]),
-            'scheduled_workflow_ms': distribution([row['scheduled_to_complete_ms'] for row in completed]),
-            'schedule_lag_ms': distribution([row['schedule_lag_ms'] for row in completed]),
-            'certified_submission_ms': distribution([row['elapsed_ms'] for row in submissions]),
-            'restart_ms': timing(restart['elapsed_ms']), 'resources': resource_summary(records)}
+            'workflow_ms': distribution([row['elapsed_ms'] for row in completed], maximum_ms),
+            'scheduled_workflow_ms': distribution([row['scheduled_to_complete_ms'] for row in completed], maximum_ms),
+            'schedule_lag_ms': distribution([row['schedule_lag_ms'] for row in completed], maximum_ms),
+            'certified_submission_ms': distribution([row['elapsed_ms'] for row in submissions], maximum_ms),
+            'restart_ms': timing(restart['elapsed_ms'], maximum_ms),
+            'resources': resource_summary(records, summary['elapsed_seconds'], minimum_seconds > 0)}
 
 
-def read_bounded(path):
+def read_bounded(path, maximum=16 * 1024 * 1024):
     flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0)
     descriptor = os.open(path, flags)
     with os.fdopen(descriptor, 'rb') as stream:
         metadata = os.fstat(stream.fileno())
-        require(stat.S_ISREG(metadata.st_mode) and metadata.st_size <= 16 * 1024 * 1024, 'input')
-        content = stream.read(16 * 1024 * 1024 + 1)
-        require(len(content) <= 16 * 1024 * 1024, 'input')
+        require(stat.S_ISREG(metadata.st_mode) and metadata.st_size <= maximum, 'input')
+        content = stream.read(maximum + 1)
+        require(len(content) <= maximum, 'input')
         return content
 
 
@@ -187,7 +208,9 @@ def main():
     parser.add_argument('--node', type=Path, required=True)
     parser.add_argument('--runner', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--profile', choices=PROFILES, default='ci')
     args = parser.parse_args()
+    workflows, rate, deadline, minimum_seconds = PROFILES[args.profile]
     evidence = {'format_version': 1, 'qualified': False, 'failure_stage': 'input'}
     try:
         revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True, timeout=10).strip()
@@ -197,18 +220,20 @@ def main():
         require(manifest['source'] == manifest['runner_source'] == revision
                 and manifest['dirty'] is False and manifest['runner_dirty'] is False
                 and manifest['exit_code'] == 0 and manifest['history'] == 'regolith'
-                and manifest['arguments'] == ['16', '2', '8', '900']
+                and manifest['arguments'] == [str(workflows), str(rate), '8', str(deadline)]
                 and manifest['trace_span_close'] is False and manifest['rust_log'] == 'warn', 'provenance')
         require(manifest['node_sha256'] == digest(args.node)
                 and manifest['runner_sha256'] == digest(args.runner), 'provenance')
-        lines = read_bounded(args.directory / 'workload.jsonl').splitlines()
+        lines = read_bounded(args.directory / 'workload.jsonl',
+                             (64 if args.profile == 'sustained' else 16) * 1024 * 1024).splitlines()
         require(bool(lines) and all(len(line) <= 64 * 1024 for line in lines), 'input')
         records = [json.loads(line) for line in lines if line.strip()]
         require(all(type(row) is dict for row in records), 'input')
         configurations = [row for row in records if row.get('kind') == 'configuration']
         require(len(configurations) == 1 and configurations[0]['daemon'] == str(args.node.resolve()), 'provenance')
-        evidence = qualify(records)
-        evidence.update(source_revision=revision, node_sha256=manifest['node_sha256'], runner_sha256=manifest['runner_sha256'])
+        evidence = qualify(records, workflows, rate, deadline, minimum_seconds)
+        evidence.update(profile=args.profile, source_revision=revision,
+                        node_sha256=manifest['node_sha256'], runner_sha256=manifest['runner_sha256'])
     except InvalidEvidence as error:
         evidence['failure_stage'] = str(error)
     except (OSError, KeyError, TypeError, ValueError, subprocess.SubprocessError):

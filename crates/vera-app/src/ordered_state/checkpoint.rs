@@ -89,9 +89,6 @@ impl OrderedState {
     where
         OrderedDatabases: StateSyncSet<Ctx, R, Digest, Error = String>,
     {
-        if config.executor.module_trees().is_some() {
-            return Err("ordered storage cannot attach JMT trees".into());
-        }
         let (_updates, updates_rx) = ring::channel(NZUsize!(1));
         let (databases, reached) = Box::pin(OrderedDatabases::sync(
             context,
