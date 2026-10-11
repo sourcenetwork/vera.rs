@@ -662,14 +662,19 @@ fn epoch_rosters_capture_the_boundary_branch_and_survive_later_changes() {
             parent.clone(),
         )
         .unwrap();
-    assert_ne!(selected.state_root(9), sibling.state_root(9));
+    assert!(
+        selected
+            .changes_from(&sibling)
+            .iter()
+            .any(|changes| !changes.is_empty())
+    );
     let mut verification = context.clone();
     verification.is_verification = true;
     let (registration, _) = native_member_call(0, native_registration());
     let (_, verified) = executor
         .execute_with_modules(&state, &verification, &[registration], parent)
         .unwrap();
-    assert_eq!(selected.state_root(9), verified.state_root(9));
+    assert!(selected.changes_from(&verified).iter().all(Vec::is_empty));
     futures::executor::block_on(state.commit(outcome.changes)).unwrap();
     context.header.number = 19;
     let (_, later) = executor

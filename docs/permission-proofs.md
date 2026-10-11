@@ -160,25 +160,25 @@ disagree even when they authenticate the same state.
 
 `VeraClient::verify_access_at` verifies a supplied finalized revision against an independently configured consensus key, fetches bounded evidence and evaluates it locally. It checks the HTTP response size before deserialization, including chunked responses, checks the JSON-RPC request ID, and applies a ten-second request timeout. The caller controls revision freshness. The method does not fall back to an older revision or interpret unavailable evidence as a denial or grant.
 
-Service limits are 64 operations, 64 KiB of serialized policy ID and request, 256 evaluation reads, 4,096 returned records across those reads, 1 MiB of request-key and returned-record bytes, and 4 MiB of serialized evidence. JMT complete-prefix reads also obey the relation endpoint's limits. Client transport permits the proof limit plus 1 KiB for the RPC envelope. Clients may impose tighter limits. These read limits do not bound pure expression work or establish a sustained-throughput guarantee.
+Service limits are 64 operations, 64 KiB of serialized policy ID and request, 256 evaluation reads, 4,096 returned records across those reads, 1 MiB of request-key and returned-record bytes, and 4 MiB of serialized evidence. Client transport permits the proof limit plus 1 KiB for the RPC envelope. Clients may impose tighter limits. These read limits do not bound pure expression work or establish a sustained-throughput guarantee.
 
 The server captures reads from one immutable current module snapshot, generates evidence at the requested revision and verifies the resulting request before returning it. Changes in membership or policy can make historical evidence unavailable. Every successful response nevertheless evaluates entirely against the requested revision. Client verification is independent of the server's capture decisions.
 
 ## Ordered Commonware evidence
 
-The same permission endpoint supports ordered Commonware module storage when the
-server is constructed with `with_hub_native_modules`, as in the native node.
-The older `vera_getStateProof` and `vera_getRelationProof` endpoints remain JMT-based.
+Permission requests use ordered Commonware QMDB module storage. The native node
+configures its server with `with_vera_native_modules`. The service exposes native
+record, prefix and permission endpoints.
 
-This format adds `roots`, the four namespace roots in ACP, bulletin, vera and
+Permission evidence includes `roots`, the four namespace roots in ACP, bulletin, identity and
 sequence order. Their combined commitment must match the caller's verified
 revision. Reads use `kind: "current_point"` or `kind: "current_prefix"`, with
 canonical Commonware evidence encoded as hex bytes. A point carries its key and
 optional value; absence requires an exclusion proof. A prefix carries an
 authenticated boundary followed by the complete ordered successor chain. A
 missing successor, reordered record or substituted value invalidates the proof.
-The verifier rejects mixed formats and replays the same ACP evaluator for both.
-Existing JMT responses omit `roots` and retain their original encoding.
+Every permission read uses native QMDB evidence and the shared ACP evaluator.
+Missing namespace roots and retired JMT read variants are rejected.
 
 Generation holds read locks on all four namespaces and checks the selected root
 before reading evidence. Prefix generation walks successors with aggregate record

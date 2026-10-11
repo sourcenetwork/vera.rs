@@ -8,7 +8,7 @@ use vera_executor::VeraExecutor;
 use vera_genesis::GenesisState;
 use vera_modules::module_state::combine_module_roots;
 
-pub fn state_config(context: &Ctx, prefix: &str, executor: VeraExecutor) -> OrderedConfig {
+pub(super) fn state_config(context: &Ctx, prefix: &str, executor: VeraExecutor) -> OrderedConfig {
     let cache = CacheRef::from_pooler(context, NZU16!(4084), NZUsize!(128));
     ordered_config(
         state_set_config(prefix, cache.clone()),
@@ -17,7 +17,7 @@ pub fn state_config(context: &Ctx, prefix: &str, executor: VeraExecutor) -> Orde
     )
 }
 
-pub async fn genesis(state: &OrderedState, allocation: &GenesisState) -> Block {
+pub(super) async fn genesis(state: &OrderedState, allocation: &GenesisState) -> Block {
     let (root, targets) = vera_app::apply_genesis(&state.execution_databases(), allocation)
         .await
         .expect("initialize execution genesis");

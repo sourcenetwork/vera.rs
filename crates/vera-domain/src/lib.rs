@@ -43,15 +43,8 @@ pub use light_block::{
     LightBlockError, LightConsensusScheme, verify_finalized_block, verify_light_block,
 };
 
-pub mod relation_index;
-
-mod relation_proof;
-pub use relation_proof::{
-    RelationPrefixProof, RelationProofError, RelationProofLimits, verify_relation_prefix_proof,
-};
-
-mod proof;
-pub use proof::{ModuleId, ModuleStateProof, ProofError, verify_module_state_proof};
+mod module_id;
+pub use module_id::ModuleId;
 
 mod gossip;
 pub use gossip::{GOSSIP_HEADER_SIZE, GossipHeader};

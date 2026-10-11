@@ -241,7 +241,6 @@ pub(super) fn verify(
                     return Err(PermissionError::Invalid("duplicate prefix read"));
                 }
             }
-            _ => return Err(PermissionError::Invalid("mixed proof formats")),
         }
     }
     Ok(evaluate_access_request(store, policy, request)?)
