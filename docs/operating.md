@@ -69,6 +69,12 @@ Archive timestamps, owners and member ordering are fixed, so packaging the same
 binary and provenance produces the same bytes. Packaging alone does not establish
 reproducible compilation or qualify an older runtime environment.
 
+The release comparison verifier reads only the two canonical USTAR members,
+checking each header before its payload. It bounds the executable to 512 MiB
+and the manifest to 64 KiB, rejects links, extension records and extra entries,
+and hashes executable bytes without extracting or loading the whole binary.
+These checks enforce the bundle format; they do not authenticate its publisher.
+
 [Reproducibility run 38134444674](https://github.com/sourcenetwork/vera.rs/actions/runs/38134444674)
 compiled candidate `9d5c2b9` on two separate Ubuntu 24.04 hosted runners with
 Rust 1.98.0, absent target directories and no restored build caches. Both normal

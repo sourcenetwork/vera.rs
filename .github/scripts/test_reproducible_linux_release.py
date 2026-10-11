@@ -1,7 +1,9 @@
+import gzip
 import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -96,6 +98,60 @@ class IndependentReleaseEvidence(unittest.TestCase):
         }):
             with self.assertRaisesRegex(ValueError, 'provenance differs'):
                 reproduction.bundle(forged, SOURCE)
+
+    def test_oversized_members_are_rejected_from_their_headers(self):
+        first = self.bundle('oversized', '1')
+        archive = first / reproduction.ARCHIVE
+        pristine = gzip.decompress(archive.read_bytes())
+        for name, size, prefix in (
+                ('verad', reproduction.MAX_BINARY_BYTES + 1, b''),
+                ('build.json', reproduction.MAX_MANIFEST_BYTES + 1, pristine[:1024])):
+            with self.subTest(name=name):
+                entry = tarfile.TarInfo(name)
+                entry.size = size
+                entry.mode = 0o755 if name == 'verad' else 0o644
+                archive.write_bytes(gzip.compress(prefix + entry.tobuf(format=tarfile.USTAR_FORMAT)))
+                with self.assertRaisesRegex(ValueError, 'comparison bounds'):
+                    reproduction.release_members(archive)
+
+    def test_extension_links_and_unexpected_first_members_are_rejected(self):
+        archive = self.root / 'unexpected.tar.gz'
+        for kind, name in ((tarfile.XHDTYPE, 'extended'), (tarfile.GNUTYPE_LONGNAME, '././@LongLink'),
+                           (tarfile.SYMTYPE, 'verad'), (tarfile.LNKTYPE, 'verad'),
+                           (tarfile.REGTYPE, '../verad'), (tarfile.REGTYPE, 'validator.key')):
+            with self.subTest(kind=kind, name=name):
+                entry = tarfile.TarInfo(name)
+                entry.type = kind
+                entry.size = reproduction.MAX_BINARY_BYTES + 1
+                archive.write_bytes(gzip.compress(entry.tobuf(format=tarfile.USTAR_FORMAT)))
+                with self.assertRaisesRegex(ValueError, 'unexpected release archive members'):
+                    reproduction.release_members(archive)
+
+    def test_truncation_nonzero_padding_and_extra_members_fail(self):
+        first = self.bundle('damaged', '1')
+        archive = first / reproduction.ARCHIVE
+        pristine = gzip.decompress(archive.read_bytes())
+        nonzero_padding = bytearray(pristine)
+        nonzero_padding[512 + len(ELF)] = 1
+        extra = tarfile.TarInfo('verad').tobuf(format=tarfile.USTAR_FORMAT)
+        for index, damaged in enumerate((pristine[:511], pristine[:550], pristine[:-1],
+                                        nonzero_padding, pristine + b'\0',
+                                        pristine[:2048] + extra + pristine[2560:])):
+            with self.subTest(index=index):
+                archive.write_bytes(gzip.compress(damaged))
+                with self.assertRaises((ValueError, tarfile.HeaderError)):
+                    reproduction.release_members(archive)
+
+    def test_archive_size_is_checked_before_hashing_or_decompression(self):
+        first = self.bundle('compressed-limit', '1')
+        with patch.object(reproduction, 'MAX_BINARY_BYTES', 0), \
+                patch.object(reproduction, 'MAX_MANIFEST_BYTES', 0), \
+                patch.object(reproduction, 'digest') as hash_archive:
+            with (first / reproduction.ARCHIVE).open('ab') as archive:
+                archive.write(bytes(1024 * 1024))
+            with self.assertRaisesRegex(ValueError, 'comparison bounds'):
+                reproduction.bundle(first, SOURCE)
+            hash_archive.assert_not_called()
 
     def test_source_cannot_be_mutable_or_an_argument(self):
         for value in ('main', '--upload-pack=command', 'a' * 39, 'A' * 40, SOURCE + '\n'):

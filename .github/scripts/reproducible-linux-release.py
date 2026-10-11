@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Build and compare independent normal Linux release bundles."""
 import argparse
+import gzip
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -12,6 +14,8 @@ import tarfile
 
 
 ARCHIVE = 'verad-x86_64-unknown-linux-gnu-regolith.tar.gz'
+MAX_BINARY_BYTES = 512 * 1024 * 1024
+MAX_MANIFEST_BYTES = 64 * 1024
 
 
 def digest(stream):
@@ -71,31 +75,66 @@ def build(root, destination, source, member):
     (destination / 'compilation.json').write_text(json.dumps(evidence, sort_keys=True, indent=2) + '\n')
 
 
+def read_exact(stream, size):
+    content = stream.read(size)
+    if len(content) != size:
+        raise ValueError('truncated release archive')
+    return content
+
+
+def release_members(archive):
+    # Inspect fixed USTAR headers before reading payloads or extension records.
+    consumed = 0
+    with gzip.open(archive, 'rb') as stream:
+        for name, mode, minimum, maximum in (
+                ('verad', 0o755, 64, MAX_BINARY_BYTES),
+                ('build.json', 0o644, 2, MAX_MANIFEST_BYTES)):
+            header = read_exact(stream, tarfile.BLOCKSIZE)
+            entry = tarfile.TarInfo.frombuf(header, 'utf-8', 'strict')
+            if entry.name != name or entry.type != tarfile.REGTYPE:
+                raise ValueError('unexpected release archive members')
+            if not minimum <= entry.size <= maximum:
+                raise ValueError('release archive exceeds comparison bounds')
+            if (entry.mode != mode or entry.uid or entry.gid or entry.mtime
+                    or entry.uname or entry.gname or entry.linkname
+                    or header[257:265] != tarfile.POSIX_MAGIC):
+                raise ValueError('release archive metadata is not canonical')
+            if name == 'verad':
+                executable_header = read_exact(stream, 64)
+                if (executable_header[:6] != b'\x7fELF\x02\x01'
+                        or executable_header[18:20] != b'\x3e\x00'):
+                    raise ValueError('release executable is not Linux x86-64')
+                binary = hashlib.sha256(executable_header)
+                remaining = entry.size - len(executable_header)
+                while remaining:
+                    chunk = read_exact(stream, min(remaining, 1024 * 1024))
+                    binary.update(chunk)
+                    remaining -= len(chunk)
+                binary_sha = binary.hexdigest()
+            else:
+                metadata = json.load(io.BytesIO(read_exact(stream, entry.size)))
+            padding = (-entry.size) % tarfile.BLOCKSIZE
+            if any(read_exact(stream, padding)):
+                raise ValueError('release archive metadata is not canonical')
+            consumed += tarfile.BLOCKSIZE + entry.size + padding
+        trailer_size = (-consumed) % tarfile.RECORDSIZE
+        if trailer_size < 2 * tarfile.BLOCKSIZE:
+            trailer_size += tarfile.RECORDSIZE
+        trailer = read_exact(stream, trailer_size)
+        if any(trailer) or stream.read(1):
+            raise ValueError('unexpected release archive members')
+    return metadata, binary_sha
+
+
 def bundle(directory, source):
     archive = directory / ARCHIVE
     with archive.open('rb') as stream:
+        if os.fstat(stream.fileno()).st_size > MAX_BINARY_BYTES + MAX_MANIFEST_BYTES + 1024 * 1024:
+            raise ValueError('release archive exceeds comparison bounds')
         archive_sha = digest(stream)
     if (directory / 'SHA256SUMS').read_text() != f'{archive_sha}  {ARCHIVE}\n':
         raise ValueError('archive checksum mismatch')
-    with tarfile.open(archive, 'r:gz') as contents:
-        members = contents.getmembers()
-        if ([entry.name for entry in members] != ['verad', 'build.json']
-                or any(not entry.isfile() for entry in members)):
-            raise ValueError('unexpected release archive members')
-        executable, manifest = members
-        if executable.size > 512 * 1024 * 1024 or manifest.size > 64 * 1024:
-            raise ValueError('release archive exceeds comparison bounds')
-        if (executable.mode != 0o755 or manifest.mode != 0o644
-                or any(entry.uid or entry.gid or entry.mtime for entry in members)):
-            raise ValueError('release archive metadata is not canonical')
-        with contents.extractfile(executable) as stream:
-            header = stream.read(20)
-            if header[:6] != b'\x7fELF\x02\x01' or header[18:20] != b'\x3e\x00':
-                raise ValueError('release executable is not Linux x86-64')
-        with contents.extractfile(executable) as stream:
-            binary_sha = digest(stream)
-        with contents.extractfile(manifest) as stream:
-            metadata = json.load(stream)
+    metadata, binary_sha = release_members(archive)
     if (metadata['source_commit'] != source or metadata['binary_sha256'] != binary_sha
             or metadata['format_version'] != 1 or metadata['history_backend'] != 'regolith'
             or metadata['target'] != 'x86_64-unknown-linux-gnu'
