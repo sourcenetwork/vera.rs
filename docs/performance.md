@@ -1,5 +1,8 @@
 # Performance measurements
 
+See the [matched Go/Rust and allocator measurements](performance-20261011.md)
+for the independently checked October 11 runs and their qualification limits.
+
 Vera provides these workload drivers:
 
 - `operation_baseline`: four local members; certified native ACP writes,
