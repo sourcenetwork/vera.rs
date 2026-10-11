@@ -96,6 +96,17 @@ changes, or every failure point during recovery.
 
 ## Linux CI gate
 
+The evidence verifier also accepts a separate `--profile sustained` configuration:
+2,048 workflows, one offered workflow per second, eight outstanding workflows,
+and a 5,400-second whole-run deadline. This keeps the same policy operations,
+four-replica checks, policy edits, explicit regrants and hard restart. It requires
+at least 30 minutes of timed load and the full scheduled arrival span; a short run
+cannot qualify by changing its label. Resource evidence must cover that interval
+with every member present, at least one sample per two seconds on average and no
+gap over ten seconds. Public evidence includes member RSS series and storage
+counts, without fixture paths, keys or raw errors. This profile defines a gate;
+it does not imply that a sustained run has passed.
+
 The Linux checks job builds the existing mixed-policy driver in the normal
 release profile and runs sixteen workflows at two offered workflows per second,
 with at most eight outstanding workflows. It uses the same Regolith release
