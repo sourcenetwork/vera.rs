@@ -6,7 +6,7 @@ use alloy_primitives::{B256, Bytes, U64};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
 use commonware_cryptography::Hasher as _;
-use vera_domain::{LightBlock, ModuleId, ModuleStateProof, RelationPrefixProof};
+use vera_domain::{LightBlock, ModuleId};
 
 #[cfg(test)]
 mod admission_tests;
@@ -16,9 +16,7 @@ mod policy;
 mod prefix;
 mod receipt;
 mod record;
-mod relation;
-mod state_proof;
-use vera_executor::{ModuleTrees, SharedModuleState};
+use vera_executor::SharedModuleState;
 use vera_indexer::{BlockIndex, LightBlockIndex};
 use vera_permission::{
     AccessRequest, PermissionProof, PermissionResponse, PolicyPrefixPageResponse,
@@ -74,27 +72,6 @@ pub trait VeraApi {
     /// Returns the on-chain native nonce for a BLS identity.
     #[method(name = "getNativeNonce")]
     async fn get_native_nonce(&self, did: String) -> RpcResult<U64>;
-
-    /// Returns a Merkle inclusion/exclusion proof for a key in a module's state.
-    ///
-    /// The proof is verifiable against the `module_state_root` in the block header
-    /// at the given height. Supports both existence and non-existence proofs.
-    #[method(name = "getStateProof")]
-    async fn get_state_proof(
-        &self,
-        module: String,
-        key: String,
-        height: U64,
-    ) -> RpcResult<ModuleStateProof>;
-
-    /// Prove a complete ACP relationship prefix at a retained finalized height.
-    /// Returns unavailable if the current record index cannot enumerate that revision.
-    #[method(name = "getRelationProof")]
-    async fn get_relation_proof(
-        &self,
-        prefix: Bytes,
-        height: U64,
-    ) -> RpcResult<RelationPrefixProof>;
 
     /// Return bounded evidence for evaluating this request at a finalized revision.
     #[method(name = "getPermissionProof")]
@@ -172,7 +149,6 @@ pub struct VeraApiImpl {
     tx_submit: Option<TxSubmitCallback>,
     index: Option<Arc<BlockIndex>>,
     modules: Option<SharedModuleState>,
-    module_trees: Option<ModuleTrees>,
     native_modules: Option<vera_backend::native::NativeStateSet>,
     light_block_index: Option<Arc<LightBlockIndex>>,
     light_block_lookup: Option<LightBlockLookup>,
@@ -187,7 +163,6 @@ impl std::fmt::Debug for VeraApiImpl {
             .field("tx_submit", &self.tx_submit.is_some())
             .field("index", &self.index.is_some())
             .field("modules", &self.modules.is_some())
-            .field("module_trees", &self.module_trees.is_some())
             .field("native_modules", &self.native_modules.is_some())
             .field("light_block_index", &self.light_block_index.is_some())
             .field("light_block_lookup", &self.light_block_lookup.is_some())
@@ -204,7 +179,6 @@ impl VeraApiImpl {
             tx_submit,
             index: None,
             modules: None,
-            module_trees: None,
             native_modules: None,
             light_block_index: None,
             light_block_lookup: None,
@@ -222,13 +196,6 @@ impl VeraApiImpl {
     ) -> Self {
         self.index = Some(index);
         self.modules = Some(modules);
-        self
-    }
-
-    /// Set the JMT-backed module state trees for proof generation.
-    #[must_use]
-    pub fn with_module_trees(mut self, trees: ModuleTrees) -> Self {
-        self.module_trees = Some(trees);
         self
     }
 
@@ -393,25 +360,6 @@ impl VeraApiServer for VeraApiImpl {
             .get_nonce(&did)
             .map_err(|e| RpcError::Internal(e.to_string()))?;
         Ok(U64::from(nonce))
-    }
-
-    async fn get_state_proof(
-        &self,
-        module: String,
-        key: String,
-        height: U64,
-    ) -> RpcResult<ModuleStateProof> {
-        let _permit = self.state.proof_permit()?;
-        self.state_proof(module, key, height).await
-    }
-
-    async fn get_relation_proof(
-        &self,
-        prefix: Bytes,
-        height: U64,
-    ) -> RpcResult<RelationPrefixProof> {
-        let _permit = self.state.proof_permit()?;
-        self.relation_proof(&prefix, height.to()).await
     }
 
     async fn get_permission_proof(

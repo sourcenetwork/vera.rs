@@ -120,7 +120,7 @@ async fn main() {
         .chain_id(CHAIN_ID)
         .preset(preset)
         .rpc_max_connections(rpc_connections)
-        .jmt_seeder(move |dir, _| {
+        .node_initializer(move |dir, _| {
             if retained_consensus > 0 {
                 use std::io::Write as _;
                 let mut config = std::fs::OpenOptions::new().append(true)

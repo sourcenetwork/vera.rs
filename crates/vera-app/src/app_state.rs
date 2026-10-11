@@ -3,7 +3,7 @@ use vera_backend::Ctx;
 use vera_domain::{Block, DbTarget, DbTargets, StateRoot, Tx};
 use vera_executor::{BlockContext, ExecutionOutcome, VeraExecutor};
 
-use crate::{AppError, VeraStateSet, execute_block, module_db, ordered_state::OrderedState};
+use crate::{AppError, ordered_state::OrderedState};
 
 /// Executed commitments and receipts carried into the application callback.
 pub struct StateExecution<D: ApplicationState> {
@@ -37,39 +37,6 @@ pub trait ApplicationState: DatabaseSet<Ctx> + Clone + Send + Sync + 'static {
         context: &BlockContext,
         txs: &[Tx],
     ) -> impl Future<Output = Result<StateExecution<Self>, AppError>> + Send;
-}
-
-impl ApplicationState for VeraStateSet {
-    fn accepts(block: &Block) -> bool {
-        block.native_targets.is_none()
-    }
-    fn targets(block: &Block) -> Self::SyncTargets {
-        module_db::module_targets(
-            crate::sync_targets(&block.db_targets),
-            block.height,
-            block.module_state_root,
-        )
-    }
-    async fn execute(
-        executor: &VeraExecutor,
-        batches: Self::Unmerkleized,
-        context: &BlockContext,
-        txs: &[Tx],
-    ) -> Result<StateExecution<Self>, AppError> {
-        let (batches, modules) = module_db::split_batches(batches);
-        let executed = execute_block(executor, batches, context, txs, modules).await?;
-        Ok(StateExecution {
-            batches: module_db::seal_batches(
-                executed.merkleized,
-                context.header.number,
-                executed.modules,
-            ),
-            state_root: executed.state_root,
-            db_targets: executed.db_targets,
-            native_targets: None,
-            outcome: executed.outcome,
-        })
-    }
 }
 
 impl ApplicationState for OrderedState {

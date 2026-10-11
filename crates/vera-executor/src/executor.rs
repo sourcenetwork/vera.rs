@@ -2,7 +2,7 @@
 //! and native BLS transaction support.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 
 use crate::{
     BlockContext, BlockExecutor, ExecutionConfig, ExecutionError, ExecutionOutcome,
@@ -25,11 +25,10 @@ use vera_crypto::bls;
 use vera_domain::NativeTx;
 use vera_modules::acp::AcpModule;
 use vera_modules::bulletin::BulletinModule;
-use vera_modules::module_state::{ModuleState, SharedModuleState, state_root_from_jmt};
+use vera_modules::module_state::{ModuleState, SharedModuleState};
 use vera_modules::native_account::NativeNonceStore;
 use vera_modules::types::{BlockExecCtx, Timestamp, TxExecCtx};
 use vera_modules::vera::VeraModule;
-use vera_state::ModuleStateTree;
 use vera_traits::StateDb;
 
 use crate::precompiles::{
@@ -42,13 +41,9 @@ const NATIVE_TX_GAS_LIMIT: u64 = 1_000_000;
 
 mod gas_budget;
 mod native_authentication;
-mod recovery;
 
 use gas_budget::BlockGasBudget;
 use native_authentication::AuthenticatedNativeTx;
-
-/// Per-module JMT-backed state trees: [acp, bulletin, vera, nonces].
-pub type ModuleTrees = [Arc<Mutex<ModuleStateTree>>; 4];
 
 /// Block executor with vera precompiles (ACP, Bulletin, Vera).
 ///
@@ -62,9 +57,7 @@ pub type ModuleTrees = [Arc<Mutex<ModuleStateTree>>; 4];
 pub struct VeraExecutor {
     config: ExecutionConfig,
     modules: SharedModuleState,
-    module_trees: Option<ModuleTrees>,
     native_verification: Option<Rayon>,
-    commit_lock: Arc<Mutex<()>>,
     #[cfg(feature = "fault-injection")]
     crash_marker: Option<std::path::PathBuf>,
 }
@@ -95,9 +88,7 @@ impl VeraExecutor {
         Self {
             config: ExecutionConfig::new(chain_id),
             modules: Arc::new(RwLock::new(ModuleState::default())),
-            module_trees: None,
             native_verification: None,
-            commit_lock: Arc::default(),
             #[cfg(feature = "fault-injection")]
             crash_marker: None,
         }
@@ -108,9 +99,7 @@ impl VeraExecutor {
         Self {
             config,
             modules: Arc::new(RwLock::new(ModuleState::default())),
-            module_trees: None,
             native_verification: None,
-            commit_lock: Arc::default(),
             #[cfg(feature = "fault-injection")]
             crash_marker: None,
         }
@@ -121,13 +110,6 @@ impl VeraExecutor {
     #[must_use]
     pub fn with_native_verification_strategy(mut self, strategy: Rayon) -> Self {
         self.native_verification = Some(strategy);
-        self
-    }
-
-    /// Attach JMT-backed module state trees for authenticated state roots.
-    #[must_use]
-    pub fn with_module_trees(mut self, trees: ModuleTrees) -> Self {
-        self.module_trees = Some(trees);
         self
     }
 
@@ -165,72 +147,21 @@ impl VeraExecutor {
         &self.modules
     }
 
-    /// Get the JMT-backed module state trees, if attached.
-    pub const fn module_trees(&self) -> Option<&ModuleTrees> {
-        self.module_trees.as_ref()
-    }
-
     /// Install module state loaded at startup or selected by finalization.
     pub fn set_base_modules(&self, modules: ModuleState) {
         *self.modules.write().unwrap() = modules;
     }
 
-    /// Capture module values and tree views from the same committed revision.
-    pub fn snapshot(&self) -> Result<ModuleSnapshot, ExecutionError> {
-        let _guard = self.commit_lock.lock().unwrap();
-        let trees = self
-            .module_trees
-            .as_ref()
-            .map(|trees| {
-                let snapshots = trees
-                    .iter()
-                    .map(|tree| tree.lock().unwrap().snapshot())
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| ExecutionError::ModuleTree(e.to_string()))?;
-                Ok::<_, ExecutionError>(snapshots.try_into().expect("four module trees"))
-            })
-            .transpose()?;
-        Ok(ModuleSnapshot {
+    /// Capture an isolated view of the committed logical module values.
+    pub fn snapshot(&self) -> ModuleSnapshot {
+        ModuleSnapshot {
             modules: self.modules.read().unwrap().clone(),
-            trees,
-        })
+        }
     }
 
-    /// Persist selected tree updates before replacing the shared module values.
-    pub fn commit_snapshot(
-        &self,
-        height: u64,
-        snapshot: ModuleSnapshot,
-    ) -> Result<(), ExecutionError> {
-        let _guard = self.commit_lock.lock().unwrap();
-        match (&self.module_trees, &snapshot.trees) {
-            (Some(trees), Some(snapshots)) => {
-                #[cfg(feature = "fault-injection")]
-                let changed = trees.iter().zip(snapshots).any(|(tree, snapshot)| {
-                    tree.lock().unwrap().root().expect("read module root") != snapshot.root()
-                });
-                for (index, (tree, snapshot)) in trees.iter().zip(snapshots).enumerate() {
-                    tree.lock()
-                        .unwrap()
-                        .commit_prepared(height, snapshot)
-                        .map_err(|e| ExecutionError::ModuleTree(e.to_string()))?;
-                    #[cfg(feature = "fault-injection")]
-                    if changed && let Some(marker) = &self.crash_marker {
-                        crate::faults::after_module_commit(marker, height, index);
-                    }
-                    #[cfg(not(feature = "fault-injection"))]
-                    let _ = index;
-                }
-            }
-            (None, None) => {}
-            _ => {
-                return Err(ExecutionError::ModuleTree(
-                    "module snapshot has incompatible trees".into(),
-                ));
-            }
-        }
+    /// Publish the selected logical values after their authenticated storage transition.
+    pub fn publish_snapshot(&self, snapshot: ModuleSnapshot) {
         self.set_base_modules(snapshot.modules);
-        Ok(())
     }
 
     /// Execute a native BLS transaction: verify signature, derive DID, dispatch to module.
@@ -405,7 +336,6 @@ impl VeraExecutor {
     ) -> Result<(ExecutionOutcome, ModuleSnapshot), ExecutionError> {
         let ModuleSnapshot {
             modules: base_modules,
-            trees: mut snapshots,
         } = parent;
         let mut modules = base_modules.clone();
 
@@ -623,43 +553,11 @@ impl VeraExecutor {
         outcome.gas_used = gas_budget.used();
         outcome.module_state_root = if context.receipt_only {
             B256::ZERO
-        } else if let Some(ref trees) = self.module_trees {
-            let stores = [
-                modules.acp.store(),
-                modules.bulletin.store(),
-                modules.vera.store(),
-                modules.nonces.store(),
-            ];
-            let changes = modules.diff_from(&base_modules);
-
-            let parents = snapshots
-                .as_mut()
-                .ok_or_else(|| ExecutionError::ModuleTree("missing parent tree views".into()))?;
-            for (i, (tree_lock, mut dirty)) in trees.iter().zip(changes).enumerate() {
-                if i == 0 {
-                    crate::relation_index::index_relationships(&parents[i], stores[i], &mut dirty)?;
-                }
-                parents[i] = tree_lock
-                    .lock()
-                    .unwrap()
-                    .prepare(&parents[i], dirty)
-                    .map_err(|e| ExecutionError::ModuleTree(e.to_string()))?;
-            }
-            let jmt_roots = std::array::from_fn(|i| parents[i].root().0);
-            state_root_from_jmt(&jmt_roots)
         } else {
-            // Fallback for tests without JMT trees. Production code always
-            // provides module_trees, so this path should never run in prod.
             modules.state_root()
         };
 
-        Ok((
-            outcome,
-            ModuleSnapshot {
-                modules,
-                trees: snapshots,
-            },
-        ))
+        Ok((outcome, ModuleSnapshot { modules }))
     }
 }
 
@@ -672,7 +570,7 @@ impl<S: StateDb> BlockExecutor<S> for VeraExecutor {
         context: &BlockContext,
         txs: &[Self::Tx],
     ) -> Result<ExecutionOutcome, ExecutionError> {
-        let modules = self.snapshot()?;
+        let modules = self.snapshot();
         self.execute_with_modules(state, context, txs, modules)
             .map(|(outcome, _)| outcome)
     }
@@ -815,11 +713,8 @@ mod tests {
                 )
                 .unwrap();
         }
-        let mut parent = ModuleSnapshot {
-            modules,
-            trees: None,
-        };
-        let published = executor.snapshot().unwrap().modules.serialize_stores();
+        let mut parent = ModuleSnapshot { modules };
+        let published = executor.snapshot().modules.serialize_stores();
         for (offset, remaining) in [129, 1, 0].into_iter().enumerate() {
             let before = parent.modules.serialize_stores();
             let context = BlockContext::new(
@@ -857,17 +752,13 @@ mod tests {
             );
             assert!(proposed.receipts.is_empty());
             assert_eq!(parent.modules.serialize_stores(), before);
-            assert_eq!(
-                executor.snapshot().unwrap().modules.serialize_stores(),
-                published
-            );
+            assert_eq!(executor.snapshot().modules.serialize_stores(), published);
             let stores = next
                 .modules
                 .serialize_stores()
                 .map(|bytes| InMemoryKvStore::deserialize(&bytes).unwrap());
             parent = ModuleSnapshot {
                 modules: ModuleState::from_stores(stores),
-                trees: None,
             };
             parent.modules.vera.validate_restored_tokens().unwrap();
         }
@@ -902,10 +793,9 @@ mod tests {
             }
             let parent = ModuleSnapshot {
                 modules: ModuleState::from_stores(stores),
-                trees: None,
             };
             let before = parent.modules.serialize_stores();
-            let published = executor.snapshot().unwrap().modules.serialize_stores();
+            let published = executor.snapshot().modules.serialize_stores();
             for verification in [false, true] {
                 let mut context = BlockContext::new(
                     alloy_consensus::Header {
@@ -924,10 +814,7 @@ mod tests {
                     .unwrap_err();
                 assert!(error.to_string().contains(expected), "{error}");
                 assert_eq!(parent.modules.serialize_stores(), before);
-                assert_eq!(
-                    executor.snapshot().unwrap().modules.serialize_stores(),
-                    published
-                );
+                assert_eq!(executor.snapshot().modules.serialize_stores(), published);
             }
         }
     }
@@ -969,7 +856,7 @@ mod tests {
             B256::ZERO,
             B256::ZERO,
         );
-        let before = parallel.snapshot().unwrap().modules.state_root();
+        let before = parallel.snapshot().modules.state_root();
         let expected = sequential.execute(&MockStateDb, &context, &txs).unwrap();
         let actual = parallel.execute(&MockStateDb, &context, &txs).unwrap();
         assert_eq!(actual.receipts.len(), 64);
@@ -1007,7 +894,7 @@ mod tests {
             parallel.execute(&MockStateDb, &context.with_verification(), &txs),
             Err(ExecutionError::NonceMismatch { .. })
         ));
-        assert_eq!(parallel.snapshot().unwrap().modules.state_root(), before);
+        assert_eq!(parallel.snapshot().modules.state_root(), before);
     }
 
     #[test]

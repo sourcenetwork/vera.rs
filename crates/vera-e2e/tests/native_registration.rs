@@ -62,7 +62,7 @@ async fn registration_workflow(pruning: bool) {
         .seed(deployment)
         .chain_id(deployment)
         .preset(ConsensusPreset::Normal)
-        .jmt_seeder(move |dir, _| {
+        .node_initializer(move |dir, _| {
             if pruning {
                 use std::io::Write as _;
                 let mut config = std::fs::OpenOptions::new().append(true)

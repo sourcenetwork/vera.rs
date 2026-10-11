@@ -238,8 +238,8 @@ module, key and minimum revision. `vera_getCurrentPrefixProof` and
 captured-revision guarantees. `PolicyPrefixResponse::verify_object_owner` derives live
 ownership from policy and complete owner evidence at the same certified root.
 Deleted policies and archived records are unregistered; retained cleanup records
-cannot establish ownership. See `docs/native-relationship-keys.md` for the fresh-state cutover. Standalone `vera_getStateProof` and
-`vera_getRelationProof` remain JMT-only and are unavailable on the native node.
+cannot establish ownership. See `docs/native-relationship-keys.md` for the fresh-state cutover. `vera_getStateProof` and `vera_getRelationProof` are not registered. Record and
+complete-prefix reads use the authenticated native endpoints.
 Historical native activity proofs are not retained.
 Proof RPCs share eight in-flight slots per node; blocking historical certificate
 lookups have a separate eight-slot limit. Excess work returns JSON-RPC -32002
@@ -255,11 +255,11 @@ their narrower byte limits. Cancelling a lookup does not release its
 slot until its blocking task finishes.
 See `docs/permission-proofs.md` for formats and limits.
 
-Legacy `VeraStateSet` and JMT proof support remain available to explicit library
-callers. Native blocks select a tagged commitment encoding and carry four
-additional module log targets and a receipt commitment; blocks omitting both
-retain their original encoding. Native and legacy application layouts cannot
-share one consensus group.
+The application uses ordered QMDB partitions for execution and native modules.
+Native blocks select a tagged commitment encoding and carry four additional
+module log targets and a receipt commitment. Blocks lacking these commitments
+are rejected by the application. Legacy block decoding and pure proof-verifier
+types remain separate from the service storage and RPC surfaces.
 
 ### RPC surfaces
 
@@ -356,7 +356,6 @@ vera.rs/
         vera-overlay/           # Overlay state for unpersisted QMDB changes
         vera-permission/        # Permission/record/prefix evidence types and verification
         vera-qmdb/              # Core QMDB abstractions and traits
-        vera-state/             # JMT-backed module state trees (RocksDB persistence)
         vera-traits/            # StateDb trait abstractions for storage/consensus
         test-infra/            # Shared test primitives: process, ports, logs, binary resolver
         vera-verifier/          # C shared-library verifier for receipts, records, prefixes and policies

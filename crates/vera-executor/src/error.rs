@@ -52,10 +52,6 @@ pub enum ExecutionError {
     #[error("unknown native tx target: {0}")]
     UnknownNativeTarget(Address),
 
-    /// Module state tree (JMT) operation failed.
-    #[error("module state tree error: {0}")]
-    ModuleTree(String),
-
     /// Native transaction nonce does not match the expected value for the signer DID.
     #[error("nonce mismatch for {did}: expected {expected}, got {got}")]
     NonceMismatch {

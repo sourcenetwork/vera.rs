@@ -9,7 +9,7 @@ use jsonrpsee_server::{BatchRequestConfig, PingConfig, Server, ServerConfig, Ser
 use tokio::sync::broadcast;
 use tracing::{error, info};
 
-use vera_executor::{ModuleTrees, SharedModuleState};
+use vera_executor::SharedModuleState;
 use vera_indexer::{BlockIndex, LightBlockIndex};
 
 use vera_domain::GossipHeader;
@@ -57,7 +57,6 @@ pub struct RpcServer<S: StateProvider = NoopStateProvider> {
     extra_modules: Vec<jsonrpsee::RpcModule<()>>,
     vera_index: Option<Arc<BlockIndex>>,
     vera_modules: Option<SharedModuleState>,
-    vera_module_trees: Option<ModuleTrees>,
     vera_native_modules: Option<(vera_backend::native::NativeStateSet, SharedModuleState)>,
     vera_light_block_index: Option<Arc<LightBlockIndex>>,
     vera_light_block_lookup: Option<LightBlockLookup>,
@@ -93,7 +92,6 @@ impl RpcServer<NoopStateProvider> {
             extra_modules: Vec::new(),
             vera_index: None,
             vera_modules: None,
-            vera_module_trees: None,
             vera_native_modules: None,
             vera_light_block_index: None,
             vera_light_block_lookup: None,
@@ -117,7 +115,6 @@ impl RpcServer<NoopStateProvider> {
             extra_modules: Vec::new(),
             vera_index: None,
             vera_modules: None,
-            vera_module_trees: None,
             vera_native_modules: None,
             vera_light_block_index: None,
             vera_light_block_lookup: None,
@@ -148,7 +145,6 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
             extra_modules: Vec::new(),
             vera_index: None,
             vera_modules: None,
-            vera_module_trees: None,
             vera_native_modules: None,
             vera_light_block_index: None,
             vera_light_block_lookup: None,
@@ -209,13 +205,6 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
     ) -> Self {
         self.vera_index = Some(index);
         self.vera_modules = Some(modules);
-        self
-    }
-
-    /// Set JMT-backed module state trees for proof generation.
-    #[must_use]
-    pub fn with_vera_module_trees(mut self, trees: ModuleTrees) -> Self {
-        self.vera_module_trees = Some(trees);
         self
     }
 
@@ -292,7 +281,6 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
         let subscription_headers = self.subscription_headers;
         let vera_index = self.vera_index;
         let vera_modules = self.vera_modules;
-        let vera_module_trees = self.vera_module_trees;
         let vera_native_modules = self.vera_native_modules;
         let vera_light_block_index = self.vera_light_block_index;
         let vera_light_block_lookup = self.vera_light_block_lookup;
@@ -355,9 +343,6 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
                 let mut api = VeraApiImpl::new(node_state_for_jsonrpc, tx_submit);
                 if let (Some(idx), Some(mods)) = (vera_index, vera_modules) {
                     api = api.with_index_and_modules(idx, mods);
-                }
-                if let Some(trees) = vera_module_trees {
-                    api = api.with_module_trees(trees);
                 }
                 if let Some((databases, modules)) = vera_native_modules {
                     api = api.with_native_modules(databases, modules);
@@ -465,7 +450,6 @@ pub struct JsonRpcServer<S: StateProvider = NoopStateProvider> {
     extra_modules: Vec<jsonrpsee::RpcModule<()>>,
     vera_index: Option<Arc<BlockIndex>>,
     vera_modules: Option<SharedModuleState>,
-    vera_module_trees: Option<ModuleTrees>,
     vera_native_modules: Option<(vera_backend::native::NativeStateSet, SharedModuleState)>,
     vera_light_block_index: Option<Arc<LightBlockIndex>>,
     vera_light_block_lookup: Option<LightBlockLookup>,
@@ -499,7 +483,6 @@ impl JsonRpcServer<NoopStateProvider> {
             extra_modules: Vec::new(),
             vera_index: None,
             vera_modules: None,
-            vera_module_trees: None,
             vera_native_modules: None,
             vera_light_block_index: None,
             vera_light_block_lookup: None,
@@ -525,7 +508,6 @@ impl<S: StateProvider + Clone + 'static> JsonRpcServer<S> {
             extra_modules: Vec::new(),
             vera_index: None,
             vera_modules: None,
-            vera_module_trees: None,
             vera_native_modules: None,
             vera_light_block_index: None,
             vera_light_block_lookup: None,
@@ -593,13 +575,6 @@ impl<S: StateProvider + Clone + 'static> JsonRpcServer<S> {
     ) -> Self {
         self.vera_index = Some(index);
         self.vera_modules = Some(modules);
-        self
-    }
-
-    /// Set JMT-backed module state trees for proof generation.
-    #[must_use]
-    pub fn with_vera_module_trees(mut self, trees: ModuleTrees) -> Self {
-        self.vera_module_trees = Some(trees);
         self
     }
 
@@ -696,9 +671,6 @@ impl<S: StateProvider + Clone + 'static> JsonRpcServer<S> {
                 let mut api = VeraApiImpl::new(node_state, self.tx_submit);
                 if let (Some(idx), Some(mods)) = (self.vera_index, self.vera_modules) {
                     api = api.with_index_and_modules(idx, mods);
-                }
-                if let Some(trees) = self.vera_module_trees {
-                    api = api.with_module_trees(trees);
                 }
                 if let Some((databases, modules)) = self.vera_native_modules {
                     api = api.with_native_modules(databases, modules);

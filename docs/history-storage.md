@@ -13,7 +13,8 @@ cargo build --frozen -p verad
 
 `regolith-history` remains an accepted build marker for existing deployment
 manifests; omitting it selects the same Regolith implementation. The history
-implementation no longer depends on RocksDB.
+implementation and module persistence no longer depend on RocksDB. Authenticated
+module state uses Commonware QMDB; the separate JMT/RocksDB store is removed.
 
 Regolith is pinned to the revision used by DefraDB. History writes explicitly
 request synchronous WAL persistence; they do not use Regolith's default eventual

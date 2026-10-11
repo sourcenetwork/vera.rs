@@ -12,7 +12,6 @@ fault-injection = []
 vera-crypto.workspace = true
 vera-domain.workspace = true
 vera-modules.workspace = true
-vera-state.workspace = true
 vera-overlay.workspace = true
 vera-traits.workspace = true
 vera-qmdb.workspace = true

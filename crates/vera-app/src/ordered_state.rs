@@ -174,7 +174,7 @@ impl OrderedSealed {
 #[cfg(test)]
 mod tests;
 
-/// Configure execution and native journals alongside an executor without JMT trees.
+/// Configure execution and authenticated native journals alongside their executor.
 pub fn ordered_config(
     execution: VeraConfig,
     native: NativeConfig,
@@ -226,11 +226,6 @@ impl OrderedState {
         if config.marshal_recovery {
             return Err(AppError::Execution(
                 "marshal recovery requires the stateful actor".into(),
-            ));
-        }
-        if config.executor.module_trees().is_some() {
-            return Err(AppError::Execution(
-                "ordered storage cannot attach JMT trees".into(),
             ));
         }
         let databases = Box::pin(OrderedDatabases::init(
@@ -383,10 +378,6 @@ impl DatabaseSet<Ctx> for OrderedState {
         expected: Option<Self::SyncTargets>,
     ) -> Self {
         if config.marshal_recovery {
-            assert!(
-                config.executor.module_trees().is_none(),
-                "ordered storage cannot attach JMT trees"
-            );
             let databases =
                 Box::pin(OrderedDatabases::init(context, config.databases, expected)).await;
             return Self::restore(databases, config.executor)
@@ -414,10 +405,7 @@ impl DatabaseSet<Ctx> for OrderedState {
     async fn new_batches(&self) -> OrderedPending {
         OrderedPending {
             databases: self.databases.new_batches().await,
-            modules: self
-                .executor
-                .snapshot()
-                .expect("capture ordered module state"),
+            modules: self.executor.snapshot(),
         }
     }
 
@@ -443,7 +431,7 @@ impl DatabaseSet<Ctx> for OrderedState {
         #[cfg(feature = "fault-injection")]
         let changed = batches
             .modules
-            .changes_from(&self.executor.snapshot().expect("capture committed modules"))
+            .changes_from(&self.executor.snapshot())
             .iter()
             .any(|changes| !changes.is_empty());
         #[cfg(feature = "fault-injection")]
@@ -451,9 +439,7 @@ impl DatabaseSet<Ctx> for OrderedState {
         #[cfg(not(feature = "fault-injection"))]
         Box::pin(self.databases.apply(batches.databases)).await;
         let applied = started.map(|started| started.elapsed());
-        self.executor
-            .commit_snapshot(batches.height, batches.modules)
-            .expect("publish applied module state");
+        self.executor.publish_snapshot(batches.modules);
         if let Some((started, applied)) = started.zip(applied) {
             let publication = started.elapsed() - applied;
             *self.diagnostic_height.lock() = Some(batches.height);
@@ -510,9 +496,6 @@ where
         tip_updates: ring::Receiver<TipUpdate<Digest, Self::SyncTargets>>,
         sync_config: SyncEngineConfig,
     ) -> Result<(Self, Anchor<Digest>), String> {
-        if config.executor.module_trees().is_some() {
-            return Err("ordered storage cannot attach JMT trees".into());
-        }
         tracing::debug!(target: "vera_diagnostics", height = %anchor.height,
             "snapshot database transfer started");
         let (databases, anchor) = Box::pin(OrderedDatabases::sync(

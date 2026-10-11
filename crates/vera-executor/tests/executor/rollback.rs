@@ -102,9 +102,9 @@ pub(super) fn execute_with_executor(
         B256::ZERO,
     );
     let (outcome, modules) = executor
-        .execute_with_modules(state, &context, &[wire], executor.snapshot().unwrap())
+        .execute_with_modules(state, &context, &[wire], executor.snapshot())
         .unwrap();
-    executor.commit_snapshot(1, modules).unwrap();
+    executor.publish_snapshot(modules);
     let modules = executor.modules().read().unwrap().clone();
     (outcome, modules)
 }

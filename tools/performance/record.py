@@ -60,7 +60,7 @@ def main():
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--runner-source', type=Path, default=Path.cwd(),
                         help='Checkout used to build the workload runner; defaults to the node checkout.')
-    parser.add_argument('--history', required=True, choices=['rocksdb', 'regolith'])
+    parser.add_argument('--history', required=True, choices=['regolith'])
     parser.add_argument('--rust-log', default='warn,vera_storage=info')
     parser.add_argument('--glibc-arena-max', choices=['default', '2'],
                         help='Controlled Linux comparison; unset the arena override or limit it to two.')

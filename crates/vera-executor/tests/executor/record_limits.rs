@@ -77,7 +77,7 @@ fn native(nonce: u64, calldata: Vec<u8>) -> (Bytes, String) {
 
 fn module_state(snapshot: &ModuleSnapshot) -> ModuleState {
     let view = VeraExecutor::new(9001);
-    view.commit_snapshot(1, snapshot.clone()).unwrap();
+    view.publish_snapshot(snapshot.clone());
     view.modules().read().unwrap().clone()
 }
 
@@ -99,7 +99,7 @@ fn context() -> BlockContext {
 #[case(true)]
 fn oversized_native_registration_rolls_back_and_allows_next_nonce(#[case] batch: bool) {
     let (executor, policy) = fixture();
-    let parent = executor.snapshot().unwrap();
+    let parent = executor.snapshot();
     let before = module_state(&parent).serialize_stores();
     let object = oversized_object(policy);
     let oversized = register(policy, &object);
@@ -203,7 +203,7 @@ fn oversized_native_registration_rolls_back_and_allows_next_nonce(#[case] batch:
     );
     assert_eq!(module_state(&parent).serialize_stores(), before);
     assert_eq!(
-        module_state(&executor.snapshot().unwrap()).serialize_stores(),
+        module_state(&executor.snapshot()).serialize_stores(),
         before
     );
 }
@@ -211,7 +211,7 @@ fn oversized_native_registration_rolls_back_and_allows_next_nonce(#[case] batch:
 #[test]
 fn oversized_evm_registration_rolls_back_but_consumes_account_nonce() {
     let (executor, policy) = fixture();
-    let before = module_state(&executor.snapshot().unwrap()).serialize_stores();
+    let before = module_state(&executor.snapshot()).serialize_stores();
     let object = oversized_object(policy);
     let (outcome, modules) = super::rollback::execute_with_executor(
         &MockStateDb::new(),

@@ -231,7 +231,7 @@ def installed_tool(name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--history', required=True, choices=('rocksdb', 'regolith'))
+    parser.add_argument('--history', required=True, choices=('regolith',))
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--profile', choices=('startup', 'sustained', 'growing'), default='startup')
     args = parser.parse_args()

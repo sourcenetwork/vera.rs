@@ -48,8 +48,8 @@ impl ModuleState {
 
     /// Compute a deterministic state root from all module stores.
     ///
-    /// Uses keccak256-based hashing of serialized stores. Production code
-    /// uses `state_root_from_jmt` with JMT-backed per-module roots instead.
+    /// Uses keccak256-based hashing of serialized stores. Native deployments
+    /// combine the four authenticated QMDB roots with `combine_module_roots` instead.
     pub fn state_root(&self) -> B256 {
         let acp_bytes = self.acp.store().serialize();
         let bulletin_bytes = self.bulletin.store().serialize();
@@ -101,9 +101,6 @@ pub fn combine_module_roots(roots: &[[u8; 32]; 4]) -> B256 {
     keccak256(buf)
 }
 
-/// Combined root of the four JMT module partitions.
-pub use combine_module_roots as state_root_from_jmt;
-
 /// Thread-safe shared module state for use across block executions.
 pub type SharedModuleState = Arc<RwLock<ModuleState>>;
 
@@ -134,19 +131,22 @@ mod tests {
     }
 
     #[test]
-    fn state_root_from_jmt_deterministic() {
+    fn combine_module_roots_deterministic() {
         let roots = [[0xAAu8; 32], [0xBBu8; 32], [0xCCu8; 32], [0xDDu8; 32]];
-        let r1 = state_root_from_jmt(&roots);
-        let r2 = state_root_from_jmt(&roots);
+        let r1 = combine_module_roots(&roots);
+        let r2 = combine_module_roots(&roots);
         assert_eq!(r1, r2);
         assert_ne!(r1, B256::ZERO);
     }
 
     #[test]
-    fn state_root_from_jmt_sensitive_to_order() {
+    fn combine_module_roots_sensitive_to_order() {
         let roots_a = [[1u8; 32], [2u8; 32], [3u8; 32], [4u8; 32]];
         let roots_b = [[2u8; 32], [1u8; 32], [3u8; 32], [4u8; 32]];
-        assert_ne!(state_root_from_jmt(&roots_a), state_root_from_jmt(&roots_b));
+        assert_ne!(
+            combine_module_roots(&roots_a),
+            combine_module_roots(&roots_b)
+        );
     }
 
     #[test]

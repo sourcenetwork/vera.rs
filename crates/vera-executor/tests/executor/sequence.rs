@@ -76,7 +76,7 @@ fn execute(
     if vera {
         let executor = VeraExecutor::new(9001);
         executor
-            .execute_with_modules(state, &context, txs, executor.snapshot().unwrap())
+            .execute_with_modules(state, &context, txs, executor.snapshot())
             .map(|(outcome, _)| outcome)
     } else {
         RevmExecutor::new(9001).execute(state, &context, txs)

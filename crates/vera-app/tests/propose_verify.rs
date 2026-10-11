@@ -6,21 +6,16 @@ use std::sync::Arc;
 
 use alloy_primitives::{Address, U256, keccak256};
 use commonware_consensus::marshal::ancestry;
-use commonware_glue::stateful::{
-    Application, Input,
-    db::{DatabaseSet as _, ManagedDb as _, Merkleized as _, Shared},
-};
-use commonware_runtime::{Runner as _, Supervisor as _, buffer::paged::CacheRef, tokio};
-use commonware_utils::{NZU16, NZUsize};
+use commonware_glue::stateful::{Application, Input, db::DatabaseSet as _};
+use commonware_runtime::{Runner as _, Supervisor as _, tokio};
 use k256::ecdsa::SigningKey;
-use vera_app::{ModuleDb, VeraStateSet};
-use vera_app::{NoopSink, ReshareInput, StatefulVeraApp, apply_genesis, genesis_block};
-use vera_backend::{VeraStateSet as BackendStateSet, state_set_config};
+use vera_app::ordered_state::OrderedState;
+use vera_app::{NoopSink, ReshareInput, StatefulVeraApp};
 use vera_consensus::{Mempool as _, components::InMemoryMempool};
 use vera_domain::{Block, evm::Evm};
 use vera_executor::VeraExecutor;
 use vera_genesis::GenesisState;
-use vera_modules::ModuleState;
+mod support;
 
 const CHAIN_ID: u64 = 9001;
 
@@ -35,10 +30,10 @@ fn competing_proposals_preserve_receipts() {
     let dir = tempfile::tempdir().expect("tempdir");
     let config = tokio::Config::default().with_storage_directory(dir.path().to_path_buf());
     tokio::Runner::new(config).start(|context| async move {
-        let page_cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
-        let set = BackendStateSet::init(
+        let executor = VeraExecutor::new(CHAIN_ID);
+        let set = OrderedState::init(
             context.child("set"),
-            state_set_config("app", page_cache),
+            support::state_config(&context, "app", executor.clone()),
             None,
         )
         .await;
@@ -48,19 +43,13 @@ fn competing_proposals_preserve_receipts() {
             genesis_alloc: vec![(from, U256::from(1_000_000_000_000_000_000u128))],
             ..Default::default()
         };
-        let (root, targets) = apply_genesis(&set, &genesis_state).await.expect("genesis");
-        let genesis = genesis_block(root, targets, ModuleState::default().state_root());
+        let genesis = support::genesis(&set, &genesis_state).await;
 
         let mempool = InMemoryMempool::new();
         let to = Address::repeat_byte(0x42);
         let tx = Evm::sign_eip1559_transfer(&key, CHAIN_ID, to, U256::from(1000u64), 0, 21_000);
         assert!(mempool.insert(tx));
 
-        let executor = VeraExecutor::new(CHAIN_ID);
-        let native = ModuleDb::init(context.child("native"), executor.clone(), None)
-            .await
-            .unwrap();
-        let set: VeraStateSet = (set.0, set.1, set.2, Shared::new("native", native));
         let mut app = StatefulVeraApp::<NoopSink>::new(
             executor,
             genesis.clone(),
@@ -100,14 +89,10 @@ fn competing_proposals_preserve_receipts() {
             )
             .await
             .expect("verification");
-        assert_eq!(
-            vera_qmdb::StateRoot::compute(
-                alloy_primitives::B256::from_slice(verified.0.root().as_ref()),
-                alloy_primitives::B256::from_slice(verified.1.root().as_ref()),
-                alloy_primitives::B256::from_slice(verified.2.root().as_ref())
-            ),
-            block.state_root.0
-        );
+        assert!(OrderedState::matches_sync_targets(
+            &verified,
+            &StatefulVeraApp::<NoopSink>::sync_targets(&block)
+        ));
 
         mempool.prune(&[block.txs[0].id()]);
         let competing_tx = Evm::sign_eip1559_transfer(

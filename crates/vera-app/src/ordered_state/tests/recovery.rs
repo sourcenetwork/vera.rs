@@ -63,7 +63,7 @@ pub(super) async fn revision(set: &OrderedState, version: u8) -> OrderedSealed {
             native.3,
             commitment::Commitment(Some(Digest::from(module_root.0))),
         ),
-        modules: snapshot.snapshot().unwrap(),
+        modules: snapshot.snapshot(),
         height: u64::from(version),
     }
 }
