@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      - Cargo.lock
+      - crates/vera-node/Cargo.toml
       - .github/workflows/history-corruption.yml
       - crates/vera-node/src/history/physical_tests.rs
       - crates/vera-node/src/history/regolith_store.rs
