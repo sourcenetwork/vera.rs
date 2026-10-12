@@ -426,10 +426,15 @@ async fn main() {
     assert_eq!(probe_receipt.status, 1);
     let restart = Instant::now();
     cluster.restart_node(3).expect("restart replica");
-    cluster
-        .wait_ready(driver::REQUEST_TIMEOUT)
-        .await
-        .expect("restarted RPC ready");
+    if let Err(error) = cluster.wait_ready(driver::REQUEST_TIMEOUT).await {
+        println!(
+            "{}",
+            serde_json::json!({"kind": "recovery_readiness_failure", "stage": "restart",
+                "timeout_ms": driver::REQUEST_TIMEOUT.as_millis(),
+                "unavailable_nodes": error.unavailable_nodes()}),
+        );
+        panic!("restarted RPC ready: {error}");
+    }
     let rpc_ready_ms = restart.elapsed().as_secs_f64() * 1000.0;
     let recovered = VeraClient::new(cluster.node(3).rpc_url());
     let recovered_receipt = tokio::time::timeout(

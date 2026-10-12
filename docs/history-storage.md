@@ -161,3 +161,10 @@ window still reject recovery. An ignored component timing fixture uses 5,120
 revisions containing 20,480 signed reverted native submissions. It measures record
 validation and index construction; it does not measure consensus, ACP throughput
 or production restart readiness.
+
+Restart qualification emits a bounded `recovery_readiness_failure` record when
+cluster RPC readiness exceeds its deadline. It identifies unavailable member
+positions without endpoint addresses or remote error messages. Readiness requires
+a matching successful JSON-RPC response within the shared deadline; an HTTP 200
+containing an RPC error is insufficient. This check establishes RPC availability,
+while the following certified receipt and state checks establish recovery outcomes.
