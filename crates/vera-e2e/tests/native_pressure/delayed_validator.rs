@@ -57,7 +57,8 @@ async fn qualify() {
     let fault = netem::Delayed::install(
         cluster.node(3),
         (0..3).map(|i| cluster.node(i).p2p_port).collect(),
-    );
+    )
+    .await;
     let initial_packets = fault.assert_active();
     let checkpoint = certified_head(&clients[0], &trusted).await;
     let started = Instant::now();

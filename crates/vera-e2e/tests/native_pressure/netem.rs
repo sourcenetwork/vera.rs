@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, io, net::SocketAddrV4, process::Command};
+use std::{collections::BTreeSet, io, net::SocketAddrV4, process::Command, time::Duration};
 
 use serde_json::Value;
 use vera_e2e::cluster::TestNode;
@@ -54,7 +54,7 @@ pub(super) struct Delayed<'a> {
 }
 
 impl<'a> Delayed<'a> {
-    pub(super) fn install(node: &'a TestNode, peers: Vec<u16>) -> Self {
+    pub(super) async fn install(node: &'a TestNode, peers: Vec<u16>) -> Self {
         assert_eq!(std::env::var("VERA_E2E_NETEM").as_deref(), Ok("1"));
         let mut fault = Self {
             node,
@@ -62,8 +62,24 @@ impl<'a> Delayed<'a> {
             flows: BTreeSet::new(),
             owns_root: false,
         };
-        fault.flows = fault.connections();
-        assert!(!fault.flows.is_empty() && fault.flows.len() <= 16);
+        fault.flows = tokio::time::timeout(Duration::from_secs(10), async {
+            let mut previous = fault.connections();
+            let mut changed_at = tokio::time::Instant::now();
+            loop {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                let current = fault.connections();
+                assert!(current.len() <= 16, "validator P2P flow limit");
+                if current != previous {
+                    previous = current;
+                    changed_at = tokio::time::Instant::now();
+                }
+                if !previous.is_empty() && changed_at.elapsed() >= Duration::from_secs(2) {
+                    break previous;
+                }
+            }
+        })
+        .await
+        .expect("validator P2P topology did not stabilize before fault installation");
         let prior: Vec<Value> =
             serde_json::from_slice(&tc(&["-j", "qdisc", "show", "dev", "lo"]).unwrap()).unwrap();
         assert!(
