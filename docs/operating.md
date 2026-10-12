@@ -263,6 +263,13 @@ then removes another validator so the resumed member is required for quorum.
 This is a bounded process-stall check; it does not establish a WAN latency limit
 or a total memory bound.
 
+The ordered-state recovery unit test separately exercises all 128 durable
+subsets of the seven journals after an interrupted generation. It checks the
+actual persisted targets, rejects unanchored state, recovers the selected anchor
+before publishing query state, and verifies subsequent writes and reopening.
+This models completed partition writes around a process exit; it does not
+simulate the loss of unsynchronized filesystem writes during a power cut.
+
 ## Monitoring
 
 - `vera_nodeStatus` reports `finalizedHeight`, `finalizedEpoch` and

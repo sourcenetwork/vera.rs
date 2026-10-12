@@ -119,7 +119,7 @@ fn runtime(directory: &Path) -> tokio::Runner {
 fn startup_recovers_each_partial_apply_before_publication() {
     if let Ok(directory) = std::env::var("VERA_ORDERED_RECOVERY_DIR") {
         let directory = Path::new(&directory);
-        let applied: usize = std::env::var("VERA_ORDERED_RECOVERY_COUNT")
+        let durable_mask: u8 = std::env::var("VERA_ORDERED_RECOVERY_MASK")
             .unwrap()
             .parse()
             .unwrap();
@@ -140,7 +140,7 @@ fn startup_recovers_each_partial_apply_before_publication() {
                 let next = revision(&state, 2).await;
                 macro_rules! advance {
                     ($index:tt) => {
-                        if applied > $index {
+                        if durable_mask & (1 << $index) != 0 {
                             state.databases.$index.apply(next.databases.$index).await;
                             assert!(state.databases.$index.finalize().await.durable().await);
                         }
@@ -163,17 +163,18 @@ fn startup_recovers_each_partial_apply_before_publication() {
         unreachable!();
     }
 
-    for applied in 1..=7 {
+    // Concurrent finalization can leave any subset durable, not only a prefix.
+    for durable_mask in 0..=0x7f_u8 {
         let directory = tempfile::tempdir().unwrap();
         let output = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "ordered_state::tests::recovery::startup_recovers_each_partial_apply_before_publication", "--nocapture"])
             .env("VERA_ORDERED_RECOVERY_DIR", directory.path())
-            .env("VERA_ORDERED_RECOVERY_COUNT", applied.to_string())
+            .env("VERA_ORDERED_RECOVERY_MASK", durable_mask.to_string())
             .output().unwrap();
         assert_eq!(
             output.status.code(),
             Some(77),
-            "apply {applied}: {}\n{}",
+            "durable subset {durable_mask:#09b}: {}\n{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
@@ -212,7 +213,7 @@ fn startup_recovers_each_partial_apply_before_publication() {
                 for (index, (actual, expected)) in actual.iter().zip(&first).enumerate() {
                     assert_eq!(
                         actual != expected,
-                        index < applied,
+                        durable_mask & (1 << index) != 0,
                         "unexpected persisted partition {index}"
                     );
                 }
@@ -227,7 +228,7 @@ fn startup_recovers_each_partial_apply_before_publication() {
                     executor.modules().read().unwrap().serialize_stores(),
                     unpublished
                 );
-                if applied == 4 {
+                if durable_mask == 0x0f {
                     let mut wrong = anchor.clone();
                     wrong.3.root = Digest::from([0; 32]);
                     let failed = AssertUnwindSafe(OrderedState::open(
