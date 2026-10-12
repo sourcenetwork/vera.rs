@@ -281,6 +281,15 @@ before publishing query state, and verifies subsequent writes and reopening.
 This models completed partition writes around a process exit; it does not
 simulate the loss of unsynchronized filesystem writes during a power cut.
 
+The native partition I/O test also checks all twelve combinations of four
+partitions and write, truncated-write or synchronization failure. Every
+partition starts with acknowledged data. A failed child must stop before
+acknowledgement; recovery checks all four partitions against the retained anchor
+before retrying and durably publishing the failed write. Injection is restricted
+to the selected partition family, and each case checks its actual I/O witness.
+This is injected I/O
+failure coverage alongside the completed-partition recovery matrix.
+
 ## Monitoring
 
 - `vera_nodeStatus` reports `finalizedHeight`, `finalizedEpoch` and

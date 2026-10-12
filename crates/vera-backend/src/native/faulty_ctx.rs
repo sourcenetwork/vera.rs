@@ -16,7 +16,7 @@ const TRUNCATE_NEXT_WRITE: u64 = 3;
 
 #[derive(Default)]
 struct Faults {
-    armed: Option<u64>,
+    armed: Option<(u64, String)>,
 }
 
 /// The injected failure to trigger on the next matching operation.
@@ -48,20 +48,25 @@ impl FaultyCtx {
         }
     }
 
-    /// Arm `failure` for the next matching storage operation.
-    pub(super) fn arm(&self, failure: Failure) {
+    /// Arm `failure` for the next matching operation in the selected partition family.
+    pub(super) fn arm(&self, failure: Failure, partition_prefix: String) {
         let code = match failure {
             Failure::Write => FAIL_NEXT_WRITE,
             Failure::Sync => FAIL_NEXT_SYNC,
             Failure::TruncatedWrite => TRUNCATE_NEXT_WRITE,
         };
-        self.faults.lock().unwrap().armed = Some(code);
+        self.faults.lock().unwrap().armed = Some((code, partition_prefix));
     }
 
-    fn take(&self, code: u64) -> bool {
+    fn take(&self, code: u64, partition: &str) -> bool {
         let mut faults = self.faults.lock().unwrap();
-        if faults.armed == Some(code) {
+        if faults
+            .armed
+            .as_ref()
+            .is_some_and(|(armed, prefix)| *armed == code && partition.starts_with(prefix))
+        {
             faults.armed = None;
+            eprintln!("native_io_fault code={code} partition={partition}");
             true
         } else {
             false
@@ -135,7 +140,7 @@ impl Storage for FaultyCtx {
 
     async fn open(&self, partition: &str, name: &[u8]) -> Result<(Self::Blob, u64), Error> {
         let (blob, size) = (*self.inner).open(partition, name).await?;
-        Ok((FaultyBlob::new(blob, self), size))
+        Ok((FaultyBlob::new(blob, self, partition), size))
     }
 
     async fn open_versioned(
@@ -147,7 +152,7 @@ impl Storage for FaultyCtx {
         let (blob, size, version) = (*self.inner)
             .open_versioned(partition, name, versions)
             .await?;
-        Ok((FaultyBlob::new(blob, self), size, version))
+        Ok((FaultyBlob::new(blob, self, partition), size, version))
     }
 
     async fn remove(&self, partition: &str, name: Option<&[u8]>) -> Result<(), Error> {
@@ -224,13 +229,15 @@ impl commonware_runtime::Metrics for FaultyCtx {
 pub(super) struct FaultyBlob {
     inner: <tokio::Context as Storage>::Blob,
     ctx: FaultyCtx,
+    partition: String,
 }
 
 impl FaultyBlob {
-    fn new(inner: <tokio::Context as Storage>::Blob, ctx: &FaultyCtx) -> Self {
+    fn new(inner: <tokio::Context as Storage>::Blob, ctx: &FaultyCtx, partition: &str) -> Self {
         Self {
             inner,
             ctx: ctx.clone(),
+            partition: partition.to_owned(),
         }
     }
 }
@@ -262,10 +269,10 @@ impl Blob for FaultyBlob {
         options: commonware_runtime::WriteOptions,
     ) -> Result<(), Error> {
         use bytes::Buf as _;
-        if self.ctx.take(FAIL_NEXT_WRITE) {
+        if self.ctx.take(FAIL_NEXT_WRITE, &self.partition) {
             return Err(Error::WriteFailed);
         }
-        if self.ctx.take(TRUNCATE_NEXT_WRITE) {
+        if self.ctx.take(TRUNCATE_NEXT_WRITE, &self.partition) {
             let mut bufs: IoBufs = bufs.into();
             let keep = bufs.copy_to_bytes(bufs.remaining() / 2);
             self.inner.write_at(offset, keep, options).await?;
@@ -280,14 +287,14 @@ impl Blob for FaultyBlob {
 
     #[allow(clippy::async_yields_async)]
     async fn start_sync(&self) -> Handle<()> {
-        if self.ctx.take(FAIL_NEXT_SYNC) {
+        if self.ctx.take(FAIL_NEXT_SYNC, &self.partition) {
             return Handle::ready(Err(Error::WriteFailed));
         }
         self.inner.start_sync().await
     }
 
     async fn sync(&self) -> Result<(), Error> {
-        if self.ctx.take(FAIL_NEXT_SYNC) {
+        if self.ctx.take(FAIL_NEXT_SYNC, &self.partition) {
             return Err(Error::WriteFailed);
         }
         self.inner.sync().await
