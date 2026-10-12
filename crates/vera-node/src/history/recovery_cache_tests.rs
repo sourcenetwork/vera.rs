@@ -2,6 +2,7 @@ use super::*;
 use std::{num::NonZeroU64, time::Instant};
 use vera_client::{ACP_ADDRESS, BlsSigner};
 use vera_domain::NativeTx;
+use vera_indexer::MAX_CACHED_REVISIONS;
 
 struct Fixture {
     history: FinalizedHistory,
