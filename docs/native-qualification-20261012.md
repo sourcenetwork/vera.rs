@@ -88,6 +88,31 @@ the earlier two-hour workload's readiness timeout. Final consumer, threshold
 soak/fault qualification and the remaining operating-limit checks must retain
 their own source-bound evidence.
 
+## Admission pressure
+
+The four-member pressure fixture admits 4,096 signed namespace registrations
+without quorum and checks that three submissions of the next exact signed request
+are rejected without consuming its sequence. It restores quorum, waits for the
+backlog and the same rejected request to finalize, then checks all 4,097 records,
+owners, sequences and the retry receipt on every member using certified reads.
+Each phase has a 120-second deadline; this is a recovery check, not a throughput
+measurement.
+
+[Debug run 38277526491](https://github.com/sourcenetwork/vera.rs/actions/runs/38277526491)
+timed out recovering the backlog. The normal
+[release run 38280881159](https://github.com/sourcenetwork/vera.rs/actions/runs/38280881159)
+at fixture `17f9914d84` recovered the backlog, finalized the retried request and
+restarted the fourth member, then failed during certified namespace pagination.
+Its retained evidence does not identify the read error. Neither run is a passing
+full pressure qualification, and the original timeout's cause remains unproven.
+
+The fixture retries only explicitly retryable busy responses during pagination,
+preserving the cursor and minimum revision within the original overall deadline.
+Other read errors fail immediately and export only a static error class and
+replica index. Receipt reconciliation also waits for evidence that is not yet
+available, within that same deadline. Compilation has a separate CI step from
+the bounded test run.
+
 ## Threshold lifecycle and consumer storage
 
 [Run 38259512483](https://github.com/sourcenetwork/orbis-rs/actions/runs/38259512483)
@@ -133,8 +158,8 @@ persistence/failure path, regression tests and WAL-recovery implementation were
 compared against Vera's Regolith pin. Newer main also changes level ordering and
 orphan sweeping, so the complete stores are not identical and this is not a
 backend performance comparison. The durability backport does not require a
-consumer dependency bump; final gateway integration must still qualify the
-selected immutable source set.
+consumer dependency bump. The final gateway checks below qualify the selected
+immutable source set for their named workflows.
 
 Defra's lockfile selects Backbone's `acp-light-client` at
 [`7d67ddbb`](https://github.com/sourcenetwork/backbone/tree/7d67ddbbb0d3d671b95dfe322b920e2e943c1daa),

@@ -32,6 +32,23 @@ fn signed_namespace(signer: &BlsSigner, sequence: u64) -> Vec<u8> {
         .unwrap()
 }
 
+fn read_error_kind(error: &ClientError) -> &'static str {
+    match error {
+        ClientError::ResourceBusy(_) => "server-capacity",
+        ClientError::Rpc { code: -32603, .. } => "rpc-internal",
+        ClientError::Rpc { .. } => "rpc-rejected",
+        ClientError::Permission(vera_permission::PermissionError::Limit) => "proof-limit",
+        ClientError::Permission(_) => "proof-invalid",
+        ClientError::Finalization(_) => "finality-invalid",
+        ClientError::Transport(error) if error.is_timeout() => "transport-timeout",
+        ClientError::Transport(_) => "transport",
+        ClientError::Json(_) => "json",
+        ClientError::ResponseTooLarge(_) => "response-limit",
+        ClientError::InvalidResponse(_) | ClientError::MissingResult => "response",
+        _ => "other",
+    }
+}
+
 #[tokio::test]
 async fn pipelined_admission_preserves_work_when_quorum_recovers() {
     let deployment = 9083;
@@ -152,11 +169,27 @@ async fn pipelined_admission_preserves_work_when_quorum_recovers() {
             let client = VeraClient::new(cluster.node(index).rpc_url());
             let mut names = BTreeSet::new();
             let mut cursor = None;
+            let mut minimum = recovered.block_number;
             loop {
-                let page = client
-                    .list_bulletin_namespaces(cursor, 128, recovered.block_number, &trusted)
-                    .await
-                    .unwrap();
+                let page = loop {
+                    match client
+                        .list_bulletin_namespaces(cursor.clone(), 128, minimum, &trusted)
+                        .await
+                    {
+                        Ok(page) => break page,
+                        Err(error) => {
+                            eprintln!(
+                                "recovery_rpc_failure phase=admission-pages kind={} replica={index}",
+                                read_error_kind(&error)
+                            );
+                            if !matches!(error, ClientError::ResourceBusy(_)) {
+                                panic!("certified admission page failed on replica {index}");
+                            }
+                            tokio::time::sleep(POLL).await;
+                        }
+                    }
+                };
+                minimum = page.revision;
                 for record in page.records {
                     assert_eq!(record.owner_did, signer.did());
                     assert!(
@@ -177,7 +210,22 @@ async fn pipelined_admission_preserves_work_when_quorum_recovers() {
                 client.get_native_nonce(signer.did()).await.unwrap(),
                 CAPACITY + 1
             );
-            let receipt = client.read_receipt(retry, &trusted).await.unwrap().unwrap();
+            let receipt = loop {
+                match client.read_receipt(retry, &trusted).await {
+                    Ok(Some(receipt)) => break receipt,
+                    Ok(None) => {}
+                    Err(error) => {
+                        eprintln!(
+                            "recovery_rpc_failure phase=admission-receipts kind={} replica={index}",
+                            read_error_kind(&error)
+                        );
+                        if !matches!(error, ClientError::ResourceBusy(_)) {
+                            panic!("certified admission receipt failed on replica {index}");
+                        }
+                    }
+                }
+                tokio::time::sleep(POLL).await;
+            };
             assert!(receipt.verify(retry, &trusted).unwrap().success());
             assert_eq!(receipt.revision.height, recovered.block_number);
         }

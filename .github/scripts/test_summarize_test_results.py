@@ -230,6 +230,17 @@ class SafeTestEvidence(unittest.TestCase):
             self.assertEqual(len(evidence['recovery_rpc_failures']), 1)
             self.assertTrue(evidence['recovery_rpc_failure_limit_reached'])
 
+    def test_admission_page_failures_keep_only_static_classes(self):
+        evidence = self.collect(
+            'recovery_rpc_failure phase=admission-pages kind=server-capacity replica=0\n'
+            'recovery_rpc_failure phase=admission-receipts kind=proof-invalid replica=1\n'
+            'recovery_rpc_failure phase=admission-pages kind=private replica=2\n'
+            'private proof bytes and endpoint information\n')
+        self.assertEqual(evidence['recovery_rpc_failures'], [
+            {'phase': 'admission-pages', 'kind': 'server-capacity', 'replica': 0},
+            {'phase': 'admission-receipts', 'kind': 'proof-invalid', 'replica': 1}])
+        self.assertNotIn('private', json.dumps(evidence))
+
 
 
 if __name__ == '__main__':

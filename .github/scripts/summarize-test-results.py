@@ -19,10 +19,12 @@ ADMISSION_PROGRESS = re.compile(
     r'native_admission_progress replica=([0-3]) '
     r'nonce=(\d{1,20}|unavailable) elapsed_ms=(\d{1,7})')
 MAX_RPC_FAILURES = 16
-RPC_PHASES = {"initial", "survivors", "restored", "renewed-quorum"}
+RPC_PHASES = {"initial", "survivors", "restored", "renewed-quorum",
+              "admission-pages", "admission-receipts"}
 RPC_KINDS = {"client-capacity", "server-capacity", "finality-unavailable",
              "rpc-internal", "rpc-rejected", "transport-timeout", "transport",
-             "json", "response", "response-limit", "other"}
+             "json", "response", "response-limit", "proof-limit", "proof-invalid",
+             "finality-invalid", "other"}
 RPC_FAILURE = re.compile(r"recovery_rpc_failure phase=([a-z-]{1,32}) "
                          r"kind=([a-z-]{1,32}) replica=([0-3])(?=\s|$)")
 LOCATION = re.compile(r'((?:crates|bin)/[A-Za-z0-9_./-]+\.rs):(\d{1,7}):(\d{1,4})')

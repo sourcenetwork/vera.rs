@@ -51,6 +51,8 @@ jobs:
         run: cargo build --release --frozen -p verad
       - name: Lint pressure fixture
         run: cargo clippy --frozen -p vera-e2e --test native_pressure -- -D warnings
+      - name: Build pressure fixture
+        run: cargo test --release --frozen -p vera-e2e --test native_pressure --no-run
       - name: Run bounded quorum-loss pressure case
         timeout-minutes: 15
         env:
