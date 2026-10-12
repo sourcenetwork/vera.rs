@@ -8,6 +8,9 @@ use vera_domain::{DbTargets, StateRoot, Tx};
 #[path = "physical_tests.rs"]
 mod physical_tests;
 
+#[path = "recovery_cache_tests.rs"]
+mod recovery_cache_tests;
+
 pub(super) fn block(height: u64, parent: BlockId) -> Block {
     Block {
         context: Block::genesis_context(),

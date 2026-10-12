@@ -7374,6 +7374,7 @@ dependencies = [
  "vera-app",
  "vera-backend",
  "vera-cli",
+ "vera-client",
  "vera-config",
  "vera-consensus",
  "vera-crypto",
