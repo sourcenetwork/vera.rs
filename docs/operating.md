@@ -231,6 +231,16 @@ Its live dataset grows throughout the run. Use the recorded hardware, payloads,
 allocator and sampling scope when assessing deployment headroom; this is not a
 minimum RAM requirement or a hard memory bound for arbitrary policies.
 
+## Admission under pressure
+
+The pending queue accepts at most 4,096 requests and 64 MiB of wire payload.
+Exhaustion rejects additional requests without evicting earlier admissions.
+Queue capacity and startup readiness failures return `-32002` with
+`{"retryable": true}`. Retry the same signed request with bounded backoff and
+an overall deadline; signature and sequence validation failures remain permanent.
+An admission response is not a certified outcome. If transport fails after
+submission, check the existing request identity before creating another request.
+
 ## Monitoring
 
 - `vera_nodeStatus` reports `finalizedHeight`, `finalizedEpoch` and

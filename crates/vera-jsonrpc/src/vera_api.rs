@@ -266,9 +266,7 @@ impl VeraApiServer for VeraApiImpl {
                 Ok(false) => {
                     return Err(RpcError::InvalidTransaction("duplicate transaction".into()).into());
                 }
-                Err(msg) => {
-                    return Err(RpcError::InvalidTransaction(msg).into());
-                }
+                Err(error) => return Err(error.into()),
             }
         }
 
@@ -518,6 +516,35 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), expected);
         assert!(submitted.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn send_native_tx_preserves_retryable_admission_failures() {
+        use crate::{TxSubmitError, error_codes};
+
+        for error in [
+            TxSubmitError::AtCapacity,
+            TxSubmitError::NotReady,
+            TxSubmitError::Rejected("invalid signature".into()),
+        ] {
+            let retryable = !matches!(error, TxSubmitError::Rejected(_));
+            let callback: TxSubmitCallback = Arc::new(move |_| {
+                let error = error.clone();
+                Box::pin(async move { Err(error) })
+            });
+            let api = VeraApiImpl::new(Arc::new(NodeState::new(1, 0, 1)), Some(callback));
+            let wire = Bytes::from(sample_native_tx().encode_wire());
+            let response = VeraApiServer::send_native_tx(&api, wire).await.unwrap_err();
+            if retryable {
+                assert_eq!(response.code(), error_codes::RESOURCE_UNAVAILABLE);
+                let data: serde_json::Value =
+                    serde_json::from_str(response.data().unwrap().get()).unwrap();
+                assert_eq!(data, serde_json::json!({"retryable": true}));
+            } else {
+                assert_eq!(response.code(), error_codes::INVALID_PARAMS);
+                assert!(response.data().is_none());
+            }
+        }
     }
 
     #[tokio::test]

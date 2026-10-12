@@ -8,7 +8,7 @@ mod archive;
 pub use archive::{ArchiveReader, IndexLookup};
 
 mod error;
-pub use error::{RpcError, codes as error_codes};
+pub use error::{RpcError, TxSubmitError, codes as error_codes};
 
 mod eth;
 pub use eth::{
