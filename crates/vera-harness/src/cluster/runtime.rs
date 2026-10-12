@@ -102,7 +102,7 @@ impl TestCluster {
     }
 
     /// Wait until every node reports healthy over RPC.
-    pub async fn wait_ready(&self, timeout: Duration) -> eyre::Result<()> {
+    pub async fn wait_ready(&self, timeout: Duration) -> Result<(), health::HealthCheckError> {
         let config = HealthCheckConfig {
             poll_interval: Duration::from_millis(50),
             timeout,

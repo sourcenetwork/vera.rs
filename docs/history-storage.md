@@ -145,3 +145,26 @@ synthetic finalized records. It does not qualify device power loss, writes durin
 compaction, Commonware journal corruption or restoration of a complete running
 validator. Those require separate checks; replacing individual files is not an
 operator recovery procedure.
+
+## Recovery of recent execution indexes
+
+Startup still decodes every retained execution record, checks receipt commitments
+and ancestry through the selected durable anchor, restores epoch material and
+reconciles query mappings and certificates. Transaction indexes are constructed
+only for the most recent 1,024 revisions, matching the resident cache limit. Older
+executions and receipts remain available through durable history lookups;
+consumers still verify their finality evidence independently. Cache eviction does not weaken history validation or change durability.
+
+The focused history regressions compare the recovered cache with full replay and
+check that missing records, broken ancestry and altered receipts outside the cache
+window still reject recovery. An ignored component timing fixture uses 5,120
+revisions containing 20,480 signed reverted native submissions. It measures record
+validation and index construction; it does not measure consensus, ACP throughput
+or production restart readiness.
+
+Restart qualification emits a bounded `recovery_readiness_failure` record when
+cluster RPC readiness exceeds its deadline. It identifies unavailable member
+positions without endpoint addresses or remote error messages. Readiness requires
+a matching successful JSON-RPC response within the shared deadline; an HTTP 200
+containing an RPC error is insufficient. This check establishes RPC availability,
+while the following certified receipt and state checks establish recovery outcomes.

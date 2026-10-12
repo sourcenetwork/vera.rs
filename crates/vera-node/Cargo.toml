@@ -66,4 +66,5 @@ tracing.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
+vera-client.workspace = true
 tracing-subscriber = { workspace = true }

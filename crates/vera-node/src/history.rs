@@ -12,7 +12,9 @@ use commonware_glue::dkg::types::Payload;
 use parking_lot::Mutex;
 use vera_domain::{Block, BlockId, EpochMaterial};
 use vera_executor::ExecutionReceipt;
-use vera_indexer::{BlockIndex, LightBlockIndex, StoredEpochMaterial, StoredFinalization};
+use vera_indexer::{
+    BlockIndex, LightBlockIndex, MAX_CACHED_REVISIONS, StoredEpochMaterial, StoredFinalization,
+};
 mod regolith_store;
 use regolith_store::{HistoryDb as DB, WriteBatch};
 
@@ -314,6 +316,10 @@ impl FinalizedHistory {
             query_batch.delete(QUERY_HEAD);
             write(&self.db, std::mem::take(&mut query_batch))?;
         }
+        // Older executions remain validated and available through durable history.
+        let cache_start = anchor
+            .height
+            .saturating_sub(MAX_CACHED_REVISIONS as u64 - 1);
         let mut previous = genesis.id();
         for height in 1..=anchor.height {
             let bytes = self
@@ -338,8 +344,10 @@ impl FinalizedHistory {
                     write(&self.db, std::mem::take(&mut query_batch))?;
                 }
             }
-            let gas_used = receipts.iter().map(|r| r.gas_used).sum();
-            index_finalized_block(index, &block, record.gas_limit, &receipts, gas_used);
+            if height >= cache_start {
+                let gas_used = receipts.iter().map(|r| r.gas_used).sum();
+                index_finalized_block(index, &block, record.gas_limit, &receipts, gas_used);
+            }
             restore_epoch(light, &block);
             let finalization = match self.db.get(key(CERTIFICATE, height))? {
                 Some(bytes) => borsh::from_slice::<Option<(u64, Vec<u8>)>>(&bytes)?,
