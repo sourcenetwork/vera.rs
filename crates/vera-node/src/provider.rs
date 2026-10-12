@@ -4,15 +4,45 @@ use std::{collections::HashMap, sync::Arc};
 
 use commonware_consensus::types::Epoch;
 use commonware_cryptography::{
-    bls12381::primitives::variant::MinSig,
+    bls12381::primitives::{group::Share, sharing::Sharing, variant::MinSig},
     certificate::{Provider, Scoped},
     ed25519,
 };
 use commonware_glue::dkg::{Registrar as RegistrarTrait, types::SchemeInfo};
+use commonware_utils::{N3f1, ordered::Set};
 use parking_lot::Mutex;
 use vera_app::ConsensusScheme;
 
 type Scheme = ConsensusScheme;
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ShareError {
+    #[error("threshold share does not belong to the local validator")]
+    WrongParticipant,
+    #[error("threshold sharing does not match the participant set")]
+    InvalidCommittee,
+    #[error("threshold share does not match the public sharing")]
+    InvalidShare,
+}
+
+pub(crate) fn signer_scheme(
+    local: &ed25519::PublicKey,
+    participants: Set<ed25519::PublicKey>,
+    sharing: Sharing<MinSig>,
+    share: Share,
+) -> Result<Scheme, ShareError> {
+    let index = usize::try_from(share.index.get()).map_err(|_| ShareError::WrongParticipant)?;
+    if participants.get(index) != Some(local) {
+        return Err(ShareError::WrongParticipant);
+    }
+    if usize::try_from(sharing.total().get()).map_err(|_| ShareError::InvalidCommittee)?
+        != participants.len()
+        || sharing.required() != participants.quorum::<N3f1>()
+    {
+        return Err(ShareError::InvalidCommittee);
+    }
+    Scheme::signer(crate::NAMESPACE, participants, sharing, share).ok_or(ShareError::InvalidShare)
+}
 
 /// Certificate provider whose per-epoch schemes are registered as ceremonies complete.
 #[derive(Clone, Debug, Default)]
@@ -44,12 +74,13 @@ impl Provider for DynamicProvider {
 #[derive(Clone, Debug)]
 pub struct Registrar {
     provider: DynamicProvider,
+    local: ed25519::PublicKey,
 }
 
 impl Registrar {
-    /// Wrap `provider` for registration by the reshare actor.
-    pub const fn new(provider: DynamicProvider) -> Self {
-        Self { provider }
+    /// Bind registration to this validator's identity in each epoch's committee.
+    pub const fn new(provider: DynamicProvider, local: ed25519::PublicKey) -> Self {
+        Self { provider, local }
     }
 }
 
@@ -67,9 +98,13 @@ impl RegistrarTrait for Registrar {
                 participants,
                 sharing,
                 share,
-            } => Scheme::signer(crate::NAMESPACE, participants, sharing, share)
-                .expect("registered share must match participant set"),
+            } => signer_scheme(&self.local, participants, sharing, share)
+                .expect("registered share must match the local participant and sharing"),
         };
         self.provider.register(epoch, scheme);
     }
 }
+
+#[cfg(test)]
+#[path = "provider_tests.rs"]
+mod tests;

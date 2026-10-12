@@ -251,8 +251,7 @@ pub async fn run_node_with_rpc_listener(
     match store.get_share(Epoch::zero()).await {
         Some(share) => provider.register(
             Epoch::zero(),
-            ConsensusScheme::signer(NAMESPACE, players.clone(), sharing.clone(), share)
-                .ok_or_else(|| anyhow::anyhow!("epoch-0 share does not match genesis"))?,
+            crate::provider::signer_scheme(&local, players.clone(), sharing.clone(), share)?,
         ),
         None => provider.register(
             Epoch::zero(),
@@ -477,7 +476,7 @@ pub async fn run_node_with_rpc_listener(
             participants_provider: participants_provider.clone(),
             secret_store: store,
             strategy: Sequential,
-            registrar: Registrar::new(provider.clone()),
+            registrar: Registrar::new(provider.clone(), local.clone()),
             marshal: marshal.clone(),
             state_sync: state_sync.clone(),
             fence,

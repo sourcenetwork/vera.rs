@@ -133,6 +133,11 @@ Writers serialize through file and parent-directory synchronization; cached
 readers keep the previous durable view until the replacement completes. A write
 failure stops the caller before it can acknowledge the update.
 
+A signing share must belong to this validator's position in the selected
+committee and match its public sharing. Startup checks the genesis committee;
+resharing registration checks the new committee. A valid share copied from
+another member is rejected before the certificate provider is updated.
+
 After startup, independently verify a certified revision and the expected policy
 and revocation state at the current checkpoint. RPC availability alone does not
 prove that the member has caught up or holds the current voting share. Exercise
