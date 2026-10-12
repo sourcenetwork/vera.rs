@@ -206,6 +206,31 @@ rejected and require an explicit migration decision, not silent reset.
   The JSON-RPC server enforces its own batch, subscription and body-size limits (see
   [permission-proofs.md](permission-proofs.md) for proof-path budgets).
 
+## Resident memory and measured workloads
+
+Validators retain active module records and authenticated-state indexes in memory.
+Sizing must account for live policies, objects, relationships and signer records,
+as well as protocol queues, storage buffers and allocator retention. History-cache
+limits do not bound total process memory.
+
+| Resident cache | Entry limit | Retained payload budget |
+| --- | ---: | ---: |
+| Execution revisions, transactions and receipts | 1,024 revisions | 64 MiB target |
+| Finalization proofs | 1,024 records | 64 MiB |
+| Epoch verifier material, including genesis | 128 records | 8 MiB |
+
+The execution cache retains its newest revision even when that revision exceeds
+the byte target. Readers can hold references after eviction. The proof budgets
+count retained vector capacities; map metadata and externally held references
+are additional memory. Evicted records remain available from durable history.
+
+The [measured growing-state workload](performance-20261011.md#growing-state-on-merged-main--october-12-2026)
+completed 90,000 distinct registrations at offered 50/s on four local validators,
+with peak sampled RSS of 877–937 MiB per validator and successful restart inspection.
+Its live dataset grows throughout the run. Use the recorded hardware, payloads,
+allocator and sampling scope when assessing deployment headroom; this is not a
+minimum RAM requirement or a hard memory bound for arbitrary policies.
+
 ## Monitoring
 
 - `vera_nodeStatus` reports `finalizedHeight`, `finalizedEpoch` and

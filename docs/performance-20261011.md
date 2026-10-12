@@ -193,3 +193,19 @@ resource coverage were checked against the raw data. The plot uses the timed
 receipt and `ps` RSS samples:
 
 ![Measured receipt latency and growing-state memory](assets/performance/vera-growing-state-20261012.svg)
+
+## Client-worker progress at offered 50 updates/s
+
+The timed workload and four-replica reconciliation in
+[run 38168258211](https://github.com/sourcenetwork/vera.rs/actions/runs/38168258211)
+completed all 360,000 fixed-object updates across 128 independent signer workers.
+Each worker completed 2,812–2,813 operations; per-worker workflow p95 ranged from
+296.84 to 303.18 ms. Peak scheduled-but-incomplete workflows were 40, with at most
+three scheduled workflows not yet started and a time-weighted mean of 9.20
+incomplete workflows.
+
+These values were recomputed from the retained raw timings. They describe client
+object-worker progress at this offered load, including scheduling and per-object
+sequence waits. They do not measure internal validator queues, establish overload
+fairness or qualify the run's subsequent failed restart. The workload used two
+glibc arenas; it is separate from the default-allocator growing-state measurement.
