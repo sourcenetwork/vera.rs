@@ -224,9 +224,9 @@ the byte target. Readers can hold references after eviction. The proof budgets
 count retained vector capacities; map metadata and externally held references
 are additional memory. Evicted records remain available from durable history.
 
-The [measured growing-state workload](performance-20261011.md#growing-state-on-merged-main--october-12-2026)
+The [measured candidate workload](native-qualification-20261012.md#growing-registrations)
 completed 90,000 distinct registrations at offered 50/s on four local validators,
-with peak sampled RSS of 877–937 MiB per validator and successful restart inspection.
+with peak sampled RSS of 889.50–927.39 MiB per validator and successful restart inspection.
 Its live dataset grows throughout the run. Use the recorded hardware, payloads,
 allocator and sampling scope when assessing deployment headroom; this is not a
 minimum RAM requirement or a hard memory bound for arbitrary policies.

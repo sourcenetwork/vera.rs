@@ -14,6 +14,10 @@ TAIL_BYTES = 256 * 1024
 MAX_LOCATIONS = 16
 MAX_RESULTS = 32
 MAX_CASES = 128
+MAX_ADMISSION_SAMPLES = 16
+ADMISSION_PROGRESS = re.compile(
+    r'native_admission_progress replica=([0-3]) '
+    r'nonce=(\d{1,20}|unavailable) elapsed_ms=(\d{1,7})')
 MAX_RPC_FAILURES = 16
 RPC_PHASES = {"initial", "survivors", "restored", "renewed-quorum"}
 RPC_KINDS = {"client-capacity", "server-capacity", "finality-unavailable",
@@ -69,7 +73,8 @@ def summarize(root, inventory, function_names=frozenset()):
                 'location_limit_reached': False, 'result_limit_reached': False,
                 'runner_exit_code': None, 'source_locations': [], 'test_results': [],
                 'recovery_rpc_failures': [], 'recovery_rpc_failure_limit_reached': False,
-                'test_cases': [], 'case_limit_reached': False}
+                'test_cases': [], 'case_limit_reached': False,
+                'admission_progress': [], 'admission_progress_limit_reached': False}
     exit_path = root / 'test-exit-code'
     if exit_path.exists() or exit_path.is_symlink():
         try:
@@ -98,6 +103,18 @@ def summarize(root, inventory, function_names=frozenset()):
             if len(raw) > 16384:
                 continue
             line = ANSI.sub('', raw)
+            progress = ADMISSION_PROGRESS.fullmatch(line) if path == root / 'test-output.log' else None
+            if progress is not None:
+                replica, nonce, elapsed = progress.groups()
+                nonce = None if nonce == 'unavailable' else int(nonce)
+                elapsed = int(elapsed)
+                if (nonce is None or nonce <= (1 << 64) - 1) and elapsed <= 900000:
+                    sample = {'replica': int(replica), 'native_nonce': nonce, 'elapsed_ms': elapsed}
+                    if sample not in evidence['admission_progress']:
+                        if len(evidence['admission_progress']) == MAX_ADMISSION_SAMPLES:
+                            evidence['admission_progress_limit_reached'] = True
+                        else:
+                            evidence['admission_progress'].append(sample)
             # Export only source-whitelisted leaf names from the runner output.
             # Module prefixes and ignored-test reasons may contain private data.
             case = CASE.match(line) if path == root / 'test-output.log' else None

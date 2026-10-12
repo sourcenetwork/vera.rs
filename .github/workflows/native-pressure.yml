@@ -27,7 +27,7 @@ jobs:
       CARGO_BUILD_JOBS: '2'
       CARGO_TERM_COLOR: always
       PROTOC: /usr/bin/protoc
-      VERAD_BINARY: ${{ github.workspace }}/target/debug/verad
+      VERAD_BINARY: ${{ github.workspace }}/target/release/verad
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -47,8 +47,8 @@ jobs:
           GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
           GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: cargo fetch --locked
-      - name: Build normal daemon
-        run: cargo build --frozen -p verad
+      - name: Build normal release daemon
+        run: cargo build --release --frozen -p verad
       - name: Lint pressure fixture
         run: cargo clippy --frozen -p vera-e2e --test native_pressure -- -D warnings
       - name: Run bounded quorum-loss pressure case
@@ -59,7 +59,7 @@ jobs:
           RUST_LOG: warn,vera_storage=info
         run: >-
           python3 .github/scripts/capture-tests.py --logs "$VERA_E2E_DIR"
-          cargo test --frozen -p vera-e2e --test native_pressure
+          cargo test --release --frozen -p vera-e2e --test native_pressure
           -- --test-threads=1
       - name: Collect bounded recovery evidence
         if: always()

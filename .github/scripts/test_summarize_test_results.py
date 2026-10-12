@@ -23,6 +23,35 @@ class SafeTestEvidence(unittest.TestCase):
             (root / 'test-output.log').write_text(content)
             return summary.summarize(root, {'crates/vera-e2e/tests/case.rs': 100}, function_names)
 
+    def test_admission_progress_retains_only_bounded_numeric_runner_samples(self):
+        evidence = self.collect(
+            'native_admission_progress replica=0 nonce=2048 elapsed_ms=120001\n'
+            'native_admission_progress replica=2 nonce=unavailable elapsed_ms=120003\n'
+            'native_admission_progress replica=4 nonce=1 elapsed_ms=1\n'
+            'native_admission_progress replica=0 nonce=18446744073709551616 elapsed_ms=1\n'
+            'native_admission_progress replica=0 nonce=1 elapsed_ms=900001\n'
+            'native_admission_progress replica=0 nonce=1 elapsed_ms=1 private-secret\n')
+        self.assertEqual(evidence['admission_progress'], [
+            {'replica': 0, 'native_nonce': 2048, 'elapsed_ms': 120001},
+            {'replica': 2, 'native_nonce': None, 'elapsed_ms': 120003}])
+        self.assertNotIn('private-secret', json.dumps(evidence))
+
+    def test_admission_progress_is_bounded_and_excludes_application_logs(self):
+        with patch.object(summary, 'MAX_ADMISSION_SAMPLES', 2):
+            evidence = self.collect(''.join(
+                f'native_admission_progress replica=0 nonce={nonce} elapsed_ms=1\n'
+                for nonce in (1, 1, 2, 3)))
+        self.assertEqual(len(evidence['admission_progress']), 2)
+        self.assertTrue(evidence['admission_progress_limit_reached'])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'test-output.log').write_text('')
+            logs = root / 'node0/logs'
+            logs.mkdir(parents=True)
+            (logs / 'stdout.log').write_text(
+                'native_admission_progress replica=0 nonce=100 elapsed_ms=1\n')
+            self.assertEqual(summary.summarize(root, {})['admission_progress'], [])
+
     def test_cases_export_only_source_names_without_private_prefixes_or_reasons(self):
         evidence = self.collect('test private_actor::restores_revocations ... ok\n'
                                 'test rejected_proof ... FAILED\n'

@@ -1,6 +1,9 @@
 //! Fill native admission during quorum loss, then recover all admitted work.
 
-use std::{collections::BTreeSet, time::Duration};
+use std::{
+    collections::BTreeSet,
+    time::{Duration, Instant},
+};
 
 use alloy_sol_types::SolCall;
 use vera_client::{BULLETIN_ADDRESS, BlsSigner, ClientError, VeraClient};
@@ -92,13 +95,30 @@ async fn pipelined_admission_preserves_work_when_quorum_recovers() {
     assert_eq!(origin.get_native_nonce(signer.did()).await.unwrap(), 0);
 
     cluster.restart_node(2).unwrap();
+    let recovery_started = Instant::now();
     let last = tokio::time::timeout(
         PHASE_DEADLINE,
         origin.wait_for_receipt(*pending.last().unwrap(), POLL, 1_200),
     )
-    .await
-    .expect("admitted work recovery deadline")
-    .unwrap();
+    .await;
+    if !matches!(&last, Ok(Ok(_))) {
+        for index in 0..3 {
+            let client = VeraClient::new(cluster.node(index).rpc_url());
+            let nonce = tokio::time::timeout(
+                Duration::from_secs(2),
+                client.get_native_nonce(signer.did()),
+            )
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .map_or_else(|| "unavailable".to_owned(), |value| value.to_string());
+            eprintln!(
+                "native_admission_progress replica={index} nonce={nonce} elapsed_ms={}",
+                recovery_started.elapsed().as_millis()
+            );
+        }
+    }
+    let last = last.expect("admitted work recovery deadline").unwrap();
     assert_eq!(last.status, 1);
 
     let retry = tokio::time::timeout(PHASE_DEADLINE, async {

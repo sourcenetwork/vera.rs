@@ -151,6 +151,11 @@ Both use the final Vera daemon/shared verifier and frozen Rust Defra source set.
 The scenario exercises four Vera members and the shared Rust document store,
 including provider authentication, policy/object operations, retained outcomes,
 restart and relay revocation. The container runs as its normal image user.
-Final both-curve gateway ring contracts remain a separate qualification; a
-successful recovery scenario does not establish every gateway route or operating
-limit.
+[Final ring run 38260732413](https://github.com/sourcenetwork/trust-api/actions/runs/38260732413)
+passed all four executable/container contracts across BLS12-381 and Jubjub. Each
+curve reports two real Go test executions, six production-KDF stores and sixteen
+checked ring records. The source sets and actual gateway, verifier and Vera image
+binary hashes match across curves. The Trust PR merge checkout's complete tree
+equals candidate `4b58e16`; daemon `6448833486`, SDK `9d5c2b9`, normal Orbis
+`20dfa47` and Rust Defra `8cfd791` are bound independently. These named workflows
+do not establish every gateway route, WAN behavior or an operating resource limit.
