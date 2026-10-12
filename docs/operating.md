@@ -255,6 +255,14 @@ an overall deadline; signature and sequence validation failures remain permanent
 An admission response is not a certified outcome. If transport fails after
 submission, check the existing request identity before creating another request.
 
+The native admission workflow also has a `stalled-validator` selection. On Linux
+it suspends one of four validators for at least 30 seconds while the remaining
+three certify native writes across an epoch. After resuming the process, it
+checks certified receipts, namespace ownership and sequences on every replica,
+then removes another validator so the resumed member is required for quorum.
+This is a bounded process-stall check; it does not establish a WAN latency limit
+or a total memory bound.
+
 ## Monitoring
 
 - `vera_nodeStatus` reports `finalizedHeight`, `finalizedEpoch` and
