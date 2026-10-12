@@ -9,7 +9,10 @@ use commonware_cryptography::{
     ed25519,
 };
 use commonware_glue::dkg::{Registrar as RegistrarTrait, types::SchemeInfo};
-use commonware_utils::{N3f1, ordered::Set};
+use commonware_utils::{
+    N3f1,
+    ordered::{Quorum as _, Set},
+};
 use parking_lot::Mutex;
 use vera_app::ConsensusScheme;
 
