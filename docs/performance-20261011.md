@@ -152,3 +152,44 @@ The run used glibc 2.39 with two arenas on a four-CPU AMD EPYC host.
 `vera_diagnostics=debug` enabled per-revision events as well as resource snapshots.
 The measurements therefore do not establish behavior without that logging,
 successful restart, a stable memory bound, maximum capacity or WAN performance.
+## Growing state on merged main — October 12, 2026
+
+[Run 38220052997](https://github.com/sourcenetwork/vera.rs/actions/runs/38220052997)
+used source `7383d38aa79ec8c1f970ef685aae6479a7c9e4e9`, Rust 1.98.0 release
+builds, four validators on one Ubuntu 24.04 hosted machine (AMD EPYC 7763,
+four logical CPUs and 15.61 GiB visible RAM), Regolith history,
+and the default glibc allocator without an arena override. It offered 90,000
+distinct signed ACP registrations at 50/s over 30 minutes. Permission checks
+followed each verified receipt. All 90,000 operations reconciled across four
+replicas; the restarted validator retained every inspected receipt and owner.
+
+The measured daemon's SHA-256 matches the normal native Linux release artifact
+from [main CI 38218777647](https://github.com/sourcenetwork/vera.rs/actions/runs/38218777647).
+
+| Measurement | Observed result |
+| --- | ---: |
+| Completed operations | 90,000 / 90,000 |
+| Completed operations/s, including drain | 49.997 |
+| Certified receipt latency p50 / p95 / p99 | 169.88 / 290.16 / 333.50 ms |
+| Permission-read latency p95 | 10.31 ms |
+| Restart to valid RPC readiness | 8.63 s |
+| Peak sampled RSS per validator (`ps`) | 877.48–937.33 MiB |
+| Mean process CPU use per validator | 0.41–0.45 cores |
+| RSS change during the final observed ten-minute window | +151.28–185.44 MiB |
+| Missing validator resource samples | 0 |
+
+The live object and signer dataset grows throughout this workload. These results
+qualify the recorded growing-state case and its restart, rather than a constant
+memory plateau or maximum capacity. `ps` RSS and Linux `/proc` status components
+are separate, non-atomic samples. CPU cores are cumulative process CPU-seconds
+divided by the observed wall-clock interval. Backend counters include later
+verification time and must not be added to timed RSS or allocator counters.
+Resource snapshots run every 30 seconds; per-revision diagnostics and span-close
+tracing were disabled. No zero-overhead or WAN claim follows.
+
+Raw observations, manifests, backend counters, plots and an offline HTML replay
+are in the workflow artifact. All recorded outcomes, latency percentiles and
+resource coverage were checked against the raw data. The plot uses the timed
+receipt and `ps` RSS samples:
+
+![Measured receipt latency and growing-state memory](assets/performance/vera-growing-state-20261012.svg)

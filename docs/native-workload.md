@@ -108,11 +108,13 @@ JSONL format version 2 reports:
 
 Resource collection requires `ps`. Failed samples/scans carry an `error` field;
 missing measurements are not zero usage. Validate PID coverage when analyzing
-samples. The report summarizes peak sampled RSS, average CPU cores and late-window
+samples. The report summarizes peak sampled RSS from `ps`, average CPU cores and late-window
 RSS changes separately for each validator. Average cores are the change in
 cumulative process CPU time divided by the observed wall-clock interval. Late
 memory changes use recorded endpoints within the requested final ten minutes;
-the actual interval and missing samples remain in `report.json`. These observations
+the actual interval and missing samples remain in `report.json`. Linux `/proc`
+status components are separate, non-atomic samples; their peaks can differ from
+`ps`. These observations
 do not establish a hard memory limit or a steady-state plateau. One-second
 sampling can miss short memory peaks. Directory sizes are
 live, non-atomic observations. Allocated file bytes use Unix file block counts

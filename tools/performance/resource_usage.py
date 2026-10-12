@@ -91,11 +91,11 @@ def summarize_resources(path, late_window_seconds=600):
         summaries.append(usage)
     return {'source': 'ps_rss_and_cpu_time' if members is not None else 'unavailable',
             'members': summaries,
-            'scope': 'Sampled RSS and cumulative process CPU time, excluding startup before the first sample. Missing samples remain explicit. Late-window growth describes observed endpoints, not a steady-state or hard memory bound. CPU cores are process CPU-seconds divided by observed wall-seconds.'}
+            'scope': 'RSS and cumulative CPU time come from ps, excluding startup before the first sample. Linux /proc status counters are separate, non-atomic samples. Missing samples remain explicit. Late-window growth describes observed endpoints, not a steady-state or hard memory bound. CPU cores are process CPU-seconds divided by observed wall-seconds.'}
 
 
 def markdown_resources(usage):
-    lines = ['| Validator | Peak RSS (MiB) | Mean CPU cores | Late-window RSS change (MiB) | Missing samples |',
+    lines = ['| Validator | Peak RSS (ps, MiB) | Mean CPU cores | Late-window RSS change (MiB) | Missing samples |',
              '| --- | ---: | ---: | ---: | ---: |']
     for member in usage['members']:
         rss, cpu, growth = member['rss_mib'], member['observed_window'], member['late_rss_growth']
