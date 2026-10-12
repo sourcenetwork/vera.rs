@@ -229,6 +229,15 @@ the byte target. Readers can hold references after eviction. The proof budgets
 count retained vector capacities; map metadata and externally held references
 are additional memory. Evicted records remain available from durable history.
 
+Consensus entry releases full threshold schemes for earlier epochs, retaining
+the entered epoch and any staged future epochs. History lookups cannot advance
+that retirement boundary. Recovered certificates use a separate verifier bound
+to the deployment's fixed group key, so historical verification does not retain
+private shares or old participant sets. A registration changing that group key
+stops before publication. Running engines can retain their own scheme copies;
+staged epochs can accumulate if consensus entry stalls. This is retirement with
+consensus progress, not a hard process-memory bound or a key-zeroization claim.
+
 The [measured candidate workload](native-qualification-20261012.md#growing-registrations)
 completed 90,000 distinct registrations at offered 50/s on four local validators,
 with peak sampled RSS of 889.50–927.39 MiB per validator and successful restart inspection.

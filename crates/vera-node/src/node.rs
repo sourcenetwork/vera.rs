@@ -686,7 +686,7 @@ pub async fn run_node_with_rpc_listener(
         orchestrator::Config {
             oracle: oracle.clone(),
             manager: oracle.clone(),
-            provider: provider.clone(),
+            provider: provider.for_consensus(),
             marshal: marshal.clone(),
             application: deferred,
             strategy: Sequential,

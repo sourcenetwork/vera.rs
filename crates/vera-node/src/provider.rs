@@ -47,16 +47,51 @@ pub(crate) fn signer_scheme(
     Scheme::signer(crate::NAMESPACE, participants, sharing, share).ok_or(ShareError::InvalidShare)
 }
 
-/// Certificate provider whose per-epoch schemes are registered as ceremonies complete.
-#[derive(Clone, Debug, Default)]
+/// Epoch signing material and a fixed group verifier for historical certificates.
+#[derive(Clone, Default)]
 pub struct DynamicProvider {
-    schemes: Arc<Mutex<HashMap<Epoch, Arc<Scheme>>>>,
+    state: Arc<Mutex<ProviderState>>,
+}
+
+#[derive(Default)]
+struct ProviderState {
+    schemes: HashMap<Epoch, Arc<Scheme>>,
+    verifier: Option<Arc<Scheme>>,
+}
+
+impl std::fmt::Debug for DynamicProvider {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DynamicProvider")
+            .field("schemes", &self.state.lock().schemes.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl DynamicProvider {
     /// Register the certificate scheme for `epoch`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the scheme changes the deployment's fixed group identity.
     pub fn register(&self, epoch: Epoch, scheme: Scheme) {
-        self.schemes.lock().insert(epoch, Arc::new(scheme));
+        let mut state = self.state.lock();
+        if let Some(verifier) = &state.verifier {
+            assert!(
+                verifier.identity() == scheme.identity(),
+                "registered scheme must retain the deployment group identity"
+            );
+        } else {
+            state.verifier = Some(Arc::new(Scheme::certificate_verifier(
+                crate::NAMESPACE,
+                *scheme.identity(),
+            )));
+        }
+        state.schemes.insert(epoch, Arc::new(scheme));
+    }
+
+    pub(crate) fn for_consensus(&self) -> ConsensusProvider {
+        ConsensusProvider(self.clone())
     }
 }
 
@@ -64,12 +99,34 @@ impl Provider for DynamicProvider {
     type Scope = Epoch;
     type Scheme = Scheme;
 
-    fn scoped(&self, scope: Self::Scope) -> Option<Scoped<Self::Scheme>> {
-        self.schemes.lock().get(&scope).cloned().map(Scoped::scheme)
+    fn scoped(&self, _: Self::Scope) -> Option<Scoped<Self::Scheme>> {
+        self.state.lock().verifier.clone().map(Scoped::verifier)
     }
 
     fn scheme(&self, scope: Self::Scope) -> Option<Arc<Self::Scheme>> {
-        self.schemes.lock().get(&scope).cloned()
+        self.state.lock().schemes.get(&scope).cloned()
+    }
+}
+
+/// Retires full schemes only when the orchestrator enters a registered epoch.
+#[derive(Clone, Debug)]
+pub(crate) struct ConsensusProvider(DynamicProvider);
+
+impl Provider for ConsensusProvider {
+    type Scope = Epoch;
+    type Scheme = Scheme;
+
+    fn scoped(&self, scope: Self::Scope) -> Option<Scoped<Self::Scheme>> {
+        self.0.scoped(scope)
+    }
+
+    fn scheme(&self, scope: Self::Scope) -> Option<Arc<Self::Scheme>> {
+        let mut state = self.0.state.lock();
+        let scheme = state.schemes.get(&scope).cloned()?;
+        // Marshal may look up other epochs while serving retained history.
+        // Only the orchestrator's successful entry can retire signing material.
+        state.schemes.retain(|epoch, _| *epoch >= scope);
+        Some(scheme)
     }
 }
 
@@ -111,3 +168,7 @@ impl RegistrarTrait for Registrar {
 #[cfg(test)]
 #[path = "provider_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "provider_retention_tests.rs"]
+mod retention_tests;
