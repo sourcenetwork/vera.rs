@@ -129,7 +129,11 @@ fn concurrent_duplicate_submissions_preserve_nonces_and_local_retry_tracking() {
                 finalized_nonces.check_and_increment(&signer, 0).unwrap();
                 recheck(&pool, &validator, state, finalized_nonces).await;
                 let stale = gossip.submit(first).await.unwrap_err();
-                assert!(stale.contains("expected 2, got 0"), "{stale}");
+                assert!(
+                    matches!(&stale, vera_jsonrpc::TxSubmitError::Rejected(message)
+                        if message.contains("expected 2, got 0")),
+                    "{stale}"
+                );
                 assert!(!pool.contains(&first_tx.id()));
                 assert_eq!(pool.len(), 1);
 
@@ -159,6 +163,28 @@ fn concurrent_duplicate_submissions_preserve_nonces_and_local_retry_tracking() {
                     )
                     .is_empty()
                 );
+
+                let mut filler: Vec<_> = (0..5)
+                    .map(|byte| Tx::new(vec![byte; vera_domain::MAX_TX_BYTES].into()))
+                    .collect();
+                filler.push(Tx::new(
+                    vec![0xff; (64 << 20) - 5 * vera_domain::MAX_TX_BYTES].into(),
+                ));
+                for tx in &filler {
+                    assert!(pool.insert(tx.clone()));
+                }
+                let blocked = signed_request(3);
+                assert!(matches!(
+                    gossip.submit(blocked.clone()).await,
+                    Err(vera_jsonrpc::TxSubmitError::AtCapacity)
+                ));
+                assert_eq!(pool.len(), filler.len());
+                assert_eq!(sender.0.lock().len(), 2);
+                assert!(!pool.contains(&Tx::new(blocked.clone()).id()));
+                pool.prune(&[filler[0].id()]);
+                assert!(gossip.submit(blocked.clone()).await.unwrap());
+                assert!(pool.contains(&Tx::new(blocked).id()));
+                assert_eq!(sender.0.lock().len(), 3);
             })
         },
     );
