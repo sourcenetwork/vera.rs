@@ -1,5 +1,9 @@
 # Performance measurements
 
+See the [October 12 native candidate measurements](native-qualification-20261012.md)
+for the final Regolith source, 90,000-operation growing workload, recovery results
+and independently checked executable provenance.
+
 See the [matched Go/Rust and allocator measurements](performance-20261011.md)
 for the independently checked October 11 runs and their qualification limits.
 
