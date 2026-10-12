@@ -16,13 +16,22 @@ manifests; omitting it selects the same Regolith implementation. The history
 implementation and module persistence no longer depend on RocksDB. Authenticated
 module state uses Commonware QMDB; the separate JMT/RocksDB store is removed.
 
-Regolith is pinned to the revision used by DefraDB. History writes explicitly
-request synchronous WAL persistence; they do not use Regolith's default eventual
-durability. Execution, certificate and query-index updates share one batch.
+Regolith is pinned to `061846fc870389391f77b8c2a3cf370b6e69d95f`, which includes
+atomic compaction-manifest edit batches and batched WAL rewriting during recovery.
+History writes explicitly request synchronous WAL persistence; they do not use
+Regolith's default eventual durability. Execution, certificate and query-index
+updates share one batch.
 Snapshots pin consistent reads and borrowed record values. Cursor reads check
 status separately from exhaustion so errors cannot appear as empty history.
 Recovery batches retain the existing flush threshold, using a running payload
 estimate for the Regolith batch.
+
+Compaction removes its input tables and installs replacement tables in one
+checksummed manifest frame. Recovery retains or discards the complete edit batch,
+and uncertain manifest writes stop further edits until reopening. The reader
+accepts legacy manifests; new manifests use format V1, which older Regolith
+readers reject. Rollback requires a complete stopped backup from before upgrading,
+rather than opening upgraded history with an older node.
 
 A history-write error stops finalization before updating the in-memory head or
 acknowledging execution. An error does not establish that the batch is absent:
