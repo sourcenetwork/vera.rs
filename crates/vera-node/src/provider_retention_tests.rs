@@ -1,6 +1,6 @@
 use super::*;
 use commonware_consensus::{
-    simplex::{scheme::Subject, types::Proposal},
+    simplex::types::{Proposal, Subject},
     types::{Round, View},
 };
 use commonware_cryptography::{
