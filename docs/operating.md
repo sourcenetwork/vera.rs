@@ -133,6 +133,11 @@ Writers serialize through file and parent-directory synchronization; cached
 readers keep the previous durable view until the replacement completes. A write
 failure stops the caller before it can acknowledge the update.
 
+A signing share must belong to this validator's position in the selected
+committee and match its public sharing. Startup checks the genesis committee;
+resharing registration checks the new committee. A valid share copied from
+another member is rejected before the certificate provider is updated.
+
 After startup, independently verify a certified revision and the expected policy
 and revocation state at the current checkpoint. RPC availability alone does not
 prove that the member has caught up or holds the current voting share. Exercise
@@ -224,9 +229,18 @@ the byte target. Readers can hold references after eviction. The proof budgets
 count retained vector capacities; map metadata and externally held references
 are additional memory. Evicted records remain available from durable history.
 
-The [measured growing-state workload](performance-20261011.md#growing-state-on-merged-main--october-12-2026)
+Consensus entry releases full threshold schemes for earlier epochs, retaining
+the entered epoch and any staged future epochs. History lookups cannot advance
+that retirement boundary. Recovered certificates use a separate verifier bound
+to the deployment's fixed group key, so historical verification does not retain
+private shares or old participant sets. A registration changing that group key
+stops before publication. Running engines can retain their own scheme copies;
+staged epochs can accumulate if consensus entry stalls. This is retirement with
+consensus progress, not a hard process-memory bound or a key-zeroization claim.
+
+The [measured candidate workload](native-qualification-20261012.md#growing-registrations)
 completed 90,000 distinct registrations at offered 50/s on four local validators,
-with peak sampled RSS of 877–937 MiB per validator and successful restart inspection.
+with peak sampled RSS of 889.50–927.39 MiB per validator and successful restart inspection.
 Its live dataset grows throughout the run. Use the recorded hardware, payloads,
 allocator and sampling scope when assessing deployment headroom; this is not a
 minimum RAM requirement or a hard memory bound for arbitrary policies.

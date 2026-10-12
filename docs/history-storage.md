@@ -21,6 +21,16 @@ atomic compaction-manifest edit batches and batched WAL rewriting during recover
 History writes explicitly request synchronous WAL persistence; they do not use
 Regolith's default eventual durability. Execution, certificate and query-index
 updates share one batch.
+
+The pinned backend's [durability run](https://github.com/sourcenetwork/regolith/actions/runs/37856386632)
+passed eight power-loss-model cases, including cuts during memtable flush,
+compaction, manifest append and recovery, plus its process-crash checks. The
+recorded checkout matches the pinned revision. These models discard unsynchronized
+writes using the child's recorded syscall stream and verify acknowledged data;
+the required fault interposer cannot silently fall back to a weaker model.
+This qualifies those Regolith backend scenarios. It does not model all of Vera's
+Commonware journals together or establish physical-device power-loss behavior.
+
 Snapshots pin consistent reads and borrowed record values. Cursor reads check
 status separately from exhaustion so errors cannot appear as empty history.
 Recovery batches retain the existing flush threshold, using a running payload

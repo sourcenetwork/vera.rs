@@ -1,0 +1,84 @@
+name: Native admission pressure
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/native-pressure.yml
+      - crates/vera-e2e/tests/native_pressure.rs
+      - crates/vera-consensus/src/components/mempool.rs
+      - crates/vera-node/src/tx_gossip.rs
+      - crates/vera-executor/src/mempool.rs
+      - Cargo.lock
+      - crates/vera-node/Cargo.toml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-pressure-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pressure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_TERM_COLOR: always
+      PROTOC: /usr/bin/protoc
+      VERAD_BINARY: ${{ github.workspace }}/target/release/verad
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@62ae3a85dbdd2bedbb5819da8ce45635129289a1 # 1.98.0
+        with:
+          components: clippy
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: linux-recovery
+      - name: Fetch locked dependencies
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
+        run: cargo fetch --locked
+      - name: Build normal release daemon
+        run: cargo build --release --frozen -p verad
+      - name: Lint pressure fixture
+        run: cargo clippy --frozen -p vera-e2e --test native_pressure -- -D warnings
+      - name: Build pressure fixture
+        run: cargo test --release --frozen -p vera-e2e --test native_pressure --no-run
+      - name: Run bounded quorum-loss pressure case
+        timeout-minutes: 15
+        env:
+          VERA_E2E_DIR: ${{ runner.temp }}/e2e-logs
+          VERA_E2E_KEEP: '1'
+          RUST_LOG: warn,vera_storage=info
+        run: >-
+          python3 .github/scripts/capture-tests.py --logs "$VERA_E2E_DIR"
+          cargo test --release --frozen -p vera-e2e --test native_pressure
+          -- --test-threads=1
+      - name: Collect bounded recovery evidence
+        if: always()
+        run: >-
+          python3 .github/scripts/summarize-test-results.py
+          --logs "$RUNNER_TEMP/e2e-logs"
+          --output "$RUNNER_TEMP/recovery-evidence.json"
+      - name: Retain pressure evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-pressure-evidence
+          path: ${{ runner.temp }}/recovery-evidence.json
+          if-no-files-found: error
+      - name: Stop fixture nodes
+        if: always()
+        run: python3 .github/scripts/stop-test-nodes.py "$VERAD_BINARY"
+      - name: Remove private recovery files
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/e2e-logs"
