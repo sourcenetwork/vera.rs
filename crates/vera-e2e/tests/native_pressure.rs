@@ -4,6 +4,10 @@
 #[path = "native_pressure/stalled_validator.rs"]
 mod stalled_validator;
 
+#[cfg(target_os = "linux")]
+#[path = "native_pressure/delayed_validator.rs"]
+mod delayed_validator;
+
 use std::{
     collections::BTreeSet,
     time::{Duration, Instant},

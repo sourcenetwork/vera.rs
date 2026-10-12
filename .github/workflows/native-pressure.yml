@@ -6,7 +6,7 @@ on:
       case:
         description: Focused validator availability case
         type: choice
-        options: [all, admission, stalled-validator]
+        options: [all, admission, stalled-validator, delayed-validator]
         default: all
   pull_request:
     paths:
@@ -44,7 +44,7 @@ jobs:
         with:
           components: clippy
       - name: Install native build dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler iproute2
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: linux-recovery
@@ -67,13 +67,15 @@ jobs:
           VERA_E2E_DIR: ${{ runner.temp }}/e2e-logs
           VERA_E2E_KEEP: '1'
           RUST_LOG: warn,vera_storage=info
+          VERA_E2E_NETEM: '1'
         shell: bash
         run: |
           set -euo pipefail
           case "$PRESSURE_CASE" in
-            all) selector=() ;;
+            all) selector=(--include-ignored) ;;
             admission) selector=(pipelined_admission_preserves_work_when_quorum_recovers --exact) ;;
             stalled-validator) selector=(stalled_validator::pipelined_stalled_validator_crosses_epoch_and_rejoins_quorum --exact) ;;
+            delayed-validator) selector=(delayed_validator::pipelined_delayed_validator_crosses_epoch_and_preserves_work --exact --ignored) ;;
             *) echo 'invalid validator availability case' >&2; exit 1 ;;
           esac
           python3 .github/scripts/capture-tests.py --logs "$VERA_E2E_DIR" \

@@ -263,6 +263,17 @@ then removes another validator so the resumed member is required for quorum.
 This is a bounded process-stall check; it does not establish a WAN latency limit
 or a total memory bound.
 
+The `delayed-validator` selection runs an explicitly enabled, otherwise ignored
+Linux transport case on an isolated hosted runner. It identifies the managed
+validator's established P2P sockets and applies a 100 ms packet delay and a
+shared 20 Mbit/s rate using [netem](https://man7.org/linux/man-pages/man8/tc-netem.8.html),
+with a 1,024-packet queue. Exact TCP flow filters cover both directions and leave
+RPC traffic unshaped. The test requires unchanged socket coverage and advancing
+fault-queue packet counters throughout its certified epoch-progress phase.
+It restores only its own queue, checks all replica records and requires the
+affected member for a subsequent quorum. This is local transport-fault coverage;
+real WAN latency and capacity measurements still require separate hosts.
+
 The ordered-state recovery unit test separately exercises all 128 durable
 subsets of the seven journals after an interrupted generation. It checks the
 actual persisted targets, rejects unanchored state, recovers the selected anchor

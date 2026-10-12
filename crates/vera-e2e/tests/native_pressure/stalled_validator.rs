@@ -75,7 +75,7 @@ impl Drop for Suspended<'_> {
     }
 }
 
-async fn certified_receipt(
+pub(super) async fn certified_receipt(
     client: &VeraClient,
     id: B256,
     trusted: &ConsensusPublicKey,
@@ -96,7 +96,7 @@ async fn certified_receipt(
     .expect("stalled-validator certified receipt deadline")
 }
 
-async fn submit(
+pub(super) async fn submit(
     client: &VeraClient,
     signer: &BlsSigner,
     sequence: u64,
@@ -108,7 +108,10 @@ async fn submit(
     (id, certified_receipt(client, id, trusted).await)
 }
 
-async fn certified_head(client: &VeraClient, trusted: &ConsensusPublicKey) -> LightBlock {
+pub(super) async fn certified_head(
+    client: &VeraClient,
+    trusted: &ConsensusPublicKey,
+) -> LightBlock {
     tokio::time::timeout(PHASE_DEADLINE, async {
         loop {
             let height = client.block_number().await.unwrap();
@@ -196,18 +199,42 @@ async fn qualify() {
     let recovered = certified_receipt(&clients[3], last_id, &trusted).await;
     assert_eq!(recovered.revision.block_hash, last.revision.block_hash);
 
-    let expected: BTreeSet<_> = (0..next_sequence)
+    reconcile(
+        &clients,
+        &signer,
+        last.revision.height,
+        next_sequence,
+        &trusted,
+    )
+    .await;
+
+    // The resumed process must vote: only two other validators remain available.
+    cluster.kill_node(2);
+    let (required_id, required) = submit(&clients[0], &signer, next_sequence, &trusted).await;
+    assert!(required.revision.height > last.revision.height);
+    let recovered = certified_receipt(&clients[3], required_id, &trusted).await;
+    assert_eq!(recovered.revision.block_hash, required.revision.block_hash);
+}
+
+pub(super) async fn reconcile(
+    clients: &[VeraClient],
+    signer: &BlsSigner,
+    minimum_height: u64,
+    count: u64,
+    trusted: &ConsensusPublicKey,
+) {
+    let expected: BTreeSet<_> = (0..count)
         .map(|sequence| format!("bulletin/{}", namespace(sequence)))
         .collect();
-    for client in &clients {
+    for client in clients {
         let mut names = BTreeSet::new();
         let mut cursor = None;
-        let mut minimum = last.revision.height;
+        let mut minimum = minimum_height;
         loop {
             let page = tokio::time::timeout(PHASE_DEADLINE, async {
                 loop {
                     match client
-                        .list_bulletin_namespaces(cursor.clone(), 128, minimum, &trusted)
+                        .list_bulletin_namespaces(cursor.clone(), 128, minimum, trusted)
                         .await
                     {
                         Ok(page) => break page,
@@ -229,16 +256,6 @@ async fn qualify() {
             }
         }
         assert_eq!(names, expected, "replica lost certified work");
-        assert_eq!(
-            client.get_native_nonce(signer.did()).await.unwrap(),
-            next_sequence
-        );
+        assert_eq!(client.get_native_nonce(signer.did()).await.unwrap(), count);
     }
-
-    // The resumed process must vote: only two other validators remain available.
-    cluster.kill_node(2);
-    let (required_id, required) = submit(&clients[0], &signer, next_sequence, &trusted).await;
-    assert!(required.revision.height > last.revision.height);
-    let recovered = certified_receipt(&clients[3], required_id, &trusted).await;
-    assert_eq!(recovered.revision.block_hash, required.revision.block_hash);
 }
