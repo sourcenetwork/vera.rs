@@ -45,7 +45,12 @@ numeric resource diagnostics were enabled. Recorded host load averages were
 | 3 | 889.50 MiB | 0.395 cores | 137.30 MiB |
 
 Each validator has 1,801 resource samples, with no missing members. Memory was
-still growing with the dataset. This run establishes the recorded 50/s workload,
+still growing with the dataset. Linux status samples show 666.46–701.93 MiB of
+anonymous RSS growth, while file-backed RSS grew only 1.00–1.25 MiB. Anonymous
+memory includes live state, heap caches and allocator retention; these counters
+do not identify component ownership or establish a leak.
+
+This run establishes the recorded 50/s workload,
 not maximum capacity, a steady-state memory ceiling or WAN behavior. Receipt
 latency includes scheduled-arrival delay, submission, polling and verification;
 it is not consensus-only finality latency. The earlier
@@ -88,6 +93,13 @@ the earlier two-hour workload's readiness timeout. Final consumer, threshold
 soak/fault qualification and the remaining operating-limit checks must retain
 their own source-bound evidence.
 
+Merged-main unit results also record successful WebSocket dispatch backpressure,
+shutdown with a non-reading client, and release of that client's connection slot
+after the writer timeout. The server limits each connection's queued messages and
+active request tasks; batches execute sequentially under an aggregate response
+budget. These checks cover the implemented slow-client behavior, not aggregate
+RSS at the maximum connection and payload limits or slow-validator/WAN behavior.
+
 ## Admission pressure
 
 The four-member pressure fixture admits 4,096 signed namespace registrations
@@ -98,13 +110,20 @@ owners, sequences and the retry receipt on every member using certified reads.
 Each phase has a 120-second deadline; this is a recovery check, not a throughput
 measurement.
 
+[Run 38284119585](https://github.com/sourcenetwork/vera.rs/actions/runs/38284119585)
+passed the complete scenario at fixture `af24c6a2c5`: one executed case, zero
+failures or ignored cases, and command exit status zero. The retained source is
+the synthetic PR merge `1af8a4dc30`, whose tree exactly matches that fixture.
+This qualifies the named normal-release saturation, recovery and reconciliation
+case, without changing production code or dependencies.
+
 [Debug run 38277526491](https://github.com/sourcenetwork/vera.rs/actions/runs/38277526491)
 timed out recovering the backlog. The normal
 [release run 38280881159](https://github.com/sourcenetwork/vera.rs/actions/runs/38280881159)
 at fixture `17f9914d84` recovered the backlog, finalized the retried request and
 restarted the fourth member, then failed during certified namespace pagination.
-Its retained evidence does not identify the read error. Neither run is a passing
-full pressure qualification, and the original timeout's cause remains unproven.
+Its retained evidence does not identify the read error. Those earlier failures'
+causes remain unproven; the later pass does not establish their causes.
 
 The fixture retries only explicitly retryable busy responses during pagination,
 preserving the cursor and minimum revision within the original overall deadline.
