@@ -32,6 +32,35 @@ pub mod codes {
     pub const EXECUTION_ERROR: i32 = -32015;
 }
 
+/// Admission failures before an operation enters the pending queue.
+#[derive(Debug, Clone, Error)]
+pub enum TxSubmitError {
+    /// Committed state has not finished opening.
+    #[error("node is still starting")]
+    NotReady,
+    /// The pending request count or byte budget is full.
+    #[error("pending request capacity reached")]
+    AtCapacity,
+    /// The request failed admission validation.
+    #[error("{0}")]
+    Rejected(String),
+}
+
+impl From<TxSubmitError> for ErrorObjectOwned {
+    fn from(error: TxSubmitError) -> Self {
+        match error {
+            TxSubmitError::Rejected(message) => RpcError::InvalidTransaction(message).into(),
+            error @ (TxSubmitError::NotReady | TxSubmitError::AtCapacity) => {
+                ErrorObjectOwned::owned(
+                    codes::RESOURCE_UNAVAILABLE,
+                    error.to_string(),
+                    Some(serde_json::json!({"retryable": true})),
+                )
+            }
+        }
+    }
+}
+
 /// RPC-specific errors that can occur during request handling.
 #[derive(Debug, Error)]
 pub enum RpcError {
@@ -125,6 +154,19 @@ impl From<RpcError> for ErrorObjectOwned {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn submission_capacity_and_startup_are_retryable_but_rejections_are_not() {
+        for error in [TxSubmitError::AtCapacity, TxSubmitError::NotReady] {
+            let rpc: ErrorObjectOwned = error.into();
+            assert_eq!(rpc.code(), codes::RESOURCE_UNAVAILABLE);
+            let data: serde_json::Value = serde_json::from_str(rpc.data().unwrap().get()).unwrap();
+            assert_eq!(data, serde_json::json!({"retryable": true}));
+        }
+        let rejected: ErrorObjectOwned = TxSubmitError::Rejected("invalid signature".into()).into();
+        assert_eq!(rejected.code(), codes::INVALID_PARAMS);
+        assert!(rejected.data().is_none());
+    }
 
     #[test]
     fn error_codes_standard_values() {

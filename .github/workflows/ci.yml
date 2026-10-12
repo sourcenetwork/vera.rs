@@ -348,6 +348,9 @@ jobs:
           GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: cargo fetch --locked
 
+      - name: Native admission regressions
+        run: bash .github/scripts/test-native-admission.sh
+
       - name: Unit and storage tests
         run: |
           cargo test --frozen -p vera-cli --lib

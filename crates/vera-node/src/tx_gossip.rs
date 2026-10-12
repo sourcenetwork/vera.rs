@@ -13,6 +13,7 @@ use tracing::{debug, trace, warn};
 use vera_consensus::{Mempool as _, components::InMemoryMempool};
 use vera_domain::{NativeTx, Tx};
 use vera_executor::MempoolValidator;
+use vera_jsonrpc::TxSubmitError;
 use vera_modules::native_account::NativeNonceStore;
 
 use crate::CommittedState;
@@ -53,13 +54,13 @@ pub(crate) async fn admit(
     validator: &SharedValidator,
     chain_id: u64,
     bytes: Bytes,
-) -> Result<bool, String> {
+) -> Result<bool, TxSubmitError> {
     if bytes.len() > vera_domain::MAX_TX_BYTES {
-        return Err("signed request exceeds its byte limit".into());
+        return Err(TxSubmitError::Rejected(
+            "signed request exceeds its byte limit".into(),
+        ));
     }
-    let validator = validator
-        .get()
-        .ok_or_else(|| "node is still starting".to_string())?;
+    let validator = validator.get().ok_or(TxSubmitError::NotReady)?;
     let tx = Tx::new(bytes.clone());
     let id = tx.id();
     if mempool.contains(&id) {
@@ -69,7 +70,7 @@ pub(crate) async fn admit(
     let pre = if is_native {
         Some(
             MempoolValidator::<CommittedState>::pre_validate_native(chain_id, &bytes)
-                .map_err(|e| e.to_string())?,
+                .map_err(|error| TxSubmitError::Rejected(error.to_string()))?,
         )
     } else {
         None
@@ -79,12 +80,17 @@ pub(crate) async fn admit(
         return Ok(false);
     }
     if !mempool.can_insert(&tx) {
-        return Err("pending request capacity reached".into());
+        return Err(TxSubmitError::AtCapacity);
     }
     if let Some(pre) = pre {
-        guard.admit_native(&pre).map_err(|e| e.to_string())?;
+        guard
+            .admit_native(&pre)
+            .map_err(|error| TxSubmitError::Rejected(error.to_string()))?;
     } else {
-        guard.validate_tx(&bytes).await.map_err(|e| e.to_string())?;
+        guard
+            .validate_tx(&bytes)
+            .await
+            .map_err(|error| TxSubmitError::Rejected(error.to_string()))?;
     }
     Ok(mempool.insert(tx))
 }
@@ -108,7 +114,7 @@ impl<S: Sender, E: Clock> TxGossip<S, E> {
     }
 
     /// Admit a locally submitted transaction and forward it to every peer.
-    pub async fn submit(&self, bytes: Bytes) -> Result<bool, String> {
+    pub async fn submit(&self, bytes: Bytes) -> Result<bool, TxSubmitError> {
         let tx = Tx::new(bytes.clone());
         let inserted = admit(&self.mempool, &self.validator, self.chain_id, bytes.clone()).await?;
         if inserted {

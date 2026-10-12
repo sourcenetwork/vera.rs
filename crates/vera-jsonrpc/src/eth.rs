@@ -206,9 +206,12 @@ pub struct FeeHistory {
 /// Transaction submission callback type.
 ///
 /// Called when a raw transaction is submitted via `eth_sendRawTransaction`.
-/// Returns `Ok(true)` if accepted, `Ok(false)` if duplicate, `Err(msg)` on validation failure.
-pub type TxSubmitCallback =
-    Arc<dyn Fn(Bytes) -> Pin<Box<dyn Future<Output = Result<bool, String>> + Send>> + Send + Sync>;
+/// Returns acceptance, duplicate status, or a classified admission failure.
+pub type TxSubmitCallback = Arc<
+    dyn Fn(Bytes) -> Pin<Box<dyn Future<Output = Result<bool, crate::TxSubmitError>> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// Ethereum API implementation with state provider.
 pub struct EthApiImpl<S: StateProvider> {
@@ -345,9 +348,7 @@ impl<S: StateProvider + 'static> EthApiServer for EthApiImpl<S> {
                 Ok(false) => {
                     return Err(RpcError::InvalidTransaction("duplicate transaction".into()).into());
                 }
-                Err(msg) => {
-                    return Err(RpcError::InvalidTransaction(msg).into());
-                }
+                Err(error) => return Err(error.into()),
             }
         }
 

@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 
 from process_io import summarize_io
+from resource_usage import markdown_resources, summarize_resources
 from worker_progress import summarize_worker_progress
 
 
@@ -68,6 +69,7 @@ def main():
     args = parser.parse_args()
     manifest, config, summary, passed, latencies, series, missing, verification, recovery = load_run(args.directory)
     worker_progress = summarize_worker_progress(args.directory / 'workload.jsonl', passed)
+    resource_usage = summarize_resources(args.directory / 'workload.jsonl')
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -100,6 +102,7 @@ def main():
         'configuration': {key: value for key, value in config.items() if key != 'node_data_dirs'},
         'summary': summary, 'missing_member_samples': missing,
         'process_io': summarize_io(args.directory / 'workload.jsonl'),
+        'resource_usage': resource_usage,
         'worker_progress': worker_progress,
         'verification': verification or None, 'recovery': recovery or None,
         'scope': 'Four members on one host; receipt latency is not consensus finality latency. No maximum capacity or WAN claim.',
@@ -118,6 +121,7 @@ def main():
         f"Confirmed but incomplete: {summary['confirmed_incomplete_workflows']}. "
         f"Verification failures: {summary['verification_failures']}.\n\n"
         f"Missing member resource samples: {missing}.\n\n{details['scope']}\n\n"
+        f"{markdown_resources(resource_usage)}\n"
         '![Measured receipt latency and resident memory](measurements.svg)\n'
     )
     if not passed:

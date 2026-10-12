@@ -247,6 +247,27 @@ mod tests {
     }
 
     #[test]
+    fn full_pending_queue_rejects_without_eviction_and_recovers_after_pruning() {
+        let pool = InMemoryMempool::new();
+        let accepted: Vec<_> = (0..MAX_PENDING_TXS)
+            .map(|index| Tx::new(index.to_be_bytes().to_vec().into()))
+            .collect();
+        for tx in &accepted {
+            assert!(pool.insert(tx.clone()));
+        }
+        let overflow = Tx::new(MAX_PENDING_TXS.to_be_bytes().to_vec().into());
+        assert!(!pool.can_insert(&overflow));
+        assert!(!pool.insert(overflow.clone()));
+        assert_eq!(pool.build(usize::MAX, &Default::default()), accepted);
+        pool.prune(&[accepted[0].id()]);
+        assert!(pool.can_insert(&overflow));
+        assert!(pool.insert(overflow.clone()));
+        let mut expected = accepted[1..].to_vec();
+        expected.push(overflow);
+        assert_eq!(pool.build(usize::MAX, &Default::default()), expected);
+    }
+
+    #[test]
     fn large_requests_respect_proposal_and_pending_budgets() {
         let pool = InMemoryMempool::new();
         let txs: Vec<_> = (0..6)
