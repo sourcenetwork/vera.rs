@@ -12,10 +12,17 @@ from pathlib import Path
 SNAPSHOT_MARK = 'node resource snapshot'
 TIMESTAMP = re.compile(r'^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s+')
 ANSI = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
-FIELD_START = re.compile(r'\s+(runtime_metrics|history_memory_bytes|durable_height|index|proofs|allocator_memory_bytes|process_id)=')
+FIELD_START = re.compile(r'\s+(runtime_metrics|history_memory_bytes|durable_height|index|proofs|allocator_memory_bytes|process_id|history_write_statistics)=')
 LEAF_STRUCT = re.compile(r'([a-z_0-9]+): (\d+)')
 LEAF_OPTION = re.compile(r'"([a-z_0-9]+)": (?:Some\((\d+)\)|(None))')
 METRIC = re.compile(r'^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{.*\})?\s+([^\s]+)(?:\s+#.*)?$')
+WRITE_STATISTICS_FIELDS = (
+    'batch_input_bytes', 'wal_bytes', 'wal_syncs', 'flush_bytes',
+    'compaction_bytes', 'admitted_stall_us',
+)
+WRITE_STATISTICS = re.compile(
+    r'Some\(HistoryWriteStatistics \{ ' +
+    ', '.join(name + r': ([0-9]{1,20})' for name in WRITE_STATISTICS_FIELDS) + r' \}\)')
 
 
 def sections(event):
@@ -64,7 +71,7 @@ def parse_snapshot(event):
         return None
     fields = sections(event)
     required = {'runtime_metrics', 'history_memory_bytes', 'durable_height', 'index', 'proofs'}
-    if not required <= set(fields) <= required | {'allocator_memory_bytes', 'process_id'}:
+    if not required <= set(fields) <= required | {'allocator_memory_bytes', 'process_id', 'history_write_statistics'}:
         raise ValueError('incomplete node resource snapshot')
     record = {'durable_height': int(fields['durable_height'].strip())}
     if 'process_id' in fields:
@@ -84,6 +91,19 @@ def parse_snapshot(event):
             raise ValueError('partially supported allocator memory snapshot')
         for name, value in values.items():
             record['allocator_memory_bytes.' + name] = value
+    if 'history_write_statistics' in fields:
+        text = fields['history_write_statistics'].strip()
+        if text == 'None':
+            values = [None] * len(WRITE_STATISTICS_FIELDS)
+        else:
+            match = WRITE_STATISTICS.fullmatch(text)
+            if match is None:
+                raise ValueError('invalid history write statistics')
+            values = [int(value) for value in match.groups()]
+            if any(value > 0xffffffffffffffff for value in values):
+                raise ValueError('history write statistics exceed u64')
+        for name, value in zip(WRITE_STATISTICS_FIELDS, values):
+            record['history_write_statistics.' + name] = value
     return record
 
 

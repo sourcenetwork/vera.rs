@@ -302,6 +302,21 @@ publication, and do not isolate individual sync calls or write-lock holds. Use
 sample-count, sum and bucket differences over the workload interval, excluding
 startup and verification. Numeric collection still has measurement overhead.
 
+Resource diagnostics also enable Regolith statistics at history-store opening.
+`history_write_statistics` contains batch input bytes, WAL bytes/syncs,
+flush/compaction output bytes and admitted capacity-stall microseconds. These
+process-local counters are sampled independently; disabled statistics are
+unavailable rather than zero. In the selected backend, the batch input ticker
+counts put/delete key bytes and put values before commit, including column-family
+key prefixes. Range-delete endpoints are excluded. Failed submissions can enter
+that input count. Use byte differences only over successful-write intervals with
+a nonzero denominator, and exclude startup/reopening when estimating history
+write amplification. WAL/flush/compaction output is backend accounting, not
+physical-device I/O, and does not include Commonware state journals. Capacity
+stall time covers admitted waits, not every blocked or failed write. Enabling
+backend statistics adds measurement overhead; it does not change synchronous
+history writes or the selected cache/pool budgets.
+
 ```sh
 gh workflow run performance.yml --repo sourcenetwork/vera.rs --ref <branch-or-tag> \
   -f sustained_growing_state=true -f sustained_memory_attribution=true

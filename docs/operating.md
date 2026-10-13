@@ -323,6 +323,12 @@ failure coverage alongside the completed-partition recovery matrix.
   filesystem sync timings. Shutdown, failed and cancelled barriers add no sample.
   Resource-only collection performs numeric observations without per-revision
   log events. All three diagnostic targets disabled returns the original barrier.
+  When resource diagnostics are enabled at startup, Regolith also records
+  process-local history write statistics: batch input bytes, completed WAL bytes
+  and syncs, flush/compaction output bytes and admitted capacity-stall time.
+  Disabling diagnostics leaves backend statistics disabled. These counters are
+  sampled independently and reset on reopening; compare intervals within one
+  process. They do not measure physical-device writes or individual sync latency.
 - Consensus warnings (`floor not updated`, view skips) at `warn` are normal
   during epoch transitions; sustained notarization timeouts are not.
 

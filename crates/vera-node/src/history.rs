@@ -17,6 +17,8 @@ use vera_indexer::{
 };
 mod regolith_store;
 use regolith_store::{HistoryDb as DB, WriteBatch};
+mod statistics;
+use statistics::HistoryWriteStatistics;
 
 use crate::{FinalizationArtifacts, FinalizationLookup, index_finalized_block};
 
@@ -110,6 +112,11 @@ pub struct FinalizedHistory {
 }
 
 impl FinalizedHistory {
+    /// Independently sampled backend write counters, absent when statistics are disabled.
+    pub(crate) fn write_statistics(&self) -> Option<HistoryWriteStatistics> {
+        self.db.write_statistics()
+    }
+
     /// Height of the durable history head (zero before the first record).
     pub fn head_height(&self) -> u64 {
         self.head.lock().0
