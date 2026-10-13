@@ -37,7 +37,7 @@ impl PeerCapacity {
         self.participants.get()
     }
 
-    pub(crate) fn tracked(&self) -> NonZeroUsize {
+    pub(crate) const fn tracked(&self) -> NonZeroUsize {
         // Dealers, players and next players may be disjoint; the local identity
         // also counts when it is outside every committee.
         NonZeroUsize::new(3 * self.participants.get() + 1)

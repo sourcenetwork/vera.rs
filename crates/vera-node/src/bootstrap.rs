@@ -24,7 +24,7 @@ use commonware_stream::{
     sake::{self, Sake},
 };
 use commonware_utils::{
-    N3f1, NZU64, NZUsize, TestRng,
+    N3f1, NZU64, TestRng,
     ordered::{Map, Set},
     sequence::Unit,
 };
