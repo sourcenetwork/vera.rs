@@ -28,49 +28,51 @@ fn storage_pool_config(parallelism: NonZeroUsize) -> BufferPoolConfig {
 mod tests {
     use super::*;
     use commonware_runtime::{
-        BufferPool, buffer::paged::CacheRef, iobuf::PoolError, telemetry::metrics::Registry,
+        BufferPooler as _, Runner as _, buffer::paged::CacheRef, iobuf::PoolError,
     };
 
     #[test]
     fn cached_pages_leave_reusable_buffers_for_concurrent_io() {
         let page_bytes = usize::from(PAGE_SIZE.get()).next_power_of_two();
-        let mut registry = Registry::default();
-        let default_pool = BufferPool::new(BufferPoolConfig::for_storage(), &mut registry);
-        let default_cache = CacheRef::new(default_pool.clone(), PAGE_SIZE, PAGE_CACHE_SIZE);
-        assert!(matches!(
-            default_pool.try_alloc(page_bytes),
-            Err(PoolError::Exhausted)
-        ));
-        drop(default_cache);
-        drop(default_pool);
+        tokio::Runner::new(tokio::Config::default())
+            .start(|context| async move {
+                let pool = context.storage_buffer_pool();
+                let cache = CacheRef::new(pool.clone(), PAGE_SIZE, PAGE_CACHE_SIZE);
+                assert!(matches!(
+                    pool.try_alloc(page_bytes),
+                    Err(PoolError::Exhausted)
+                ));
+                drop(cache);
+            })
+            .unwrap();
 
-        let mut registry = Registry::default();
-        let pool = BufferPool::new(storage_pool_config(NZUsize!(8)), &mut registry);
-        let cache = CacheRef::new(pool.clone(), PAGE_SIZE, PAGE_CACHE_SIZE);
-        std::thread::scope(|scope| {
-            for worker in 0..8u8 {
-                let pool = &pool;
-                scope.spawn(move || {
-                    for _ in 0..8 {
-                        let mut buffers = (0..64)
-                            .map(|_| pool.try_alloc_zeroed(page_bytes).unwrap())
-                            .collect::<Vec<_>>();
-                        for buffer in &mut buffers {
-                            assert!(buffer.as_ref().iter().all(|byte| *byte == 0));
-                            buffer.as_mut().fill(worker + 1);
-                        }
-                        assert!(
-                            buffers.iter().all(|buffer| buffer
-                                .as_ref()
-                                .iter()
-                                .all(|byte| *byte == worker + 1))
-                        );
+        let runtime = configure_storage_buffers(tokio::Config::default().with_worker_threads(8));
+        tokio::Runner::new(runtime)
+            .start(|context| async move {
+                let pool = context.storage_buffer_pool();
+                let cache = CacheRef::new(pool.clone(), PAGE_SIZE, PAGE_CACHE_SIZE);
+                std::thread::scope(|scope| {
+                    for worker in 0..8u8 {
+                        scope.spawn(move || {
+                            for _ in 0..8 {
+                                let mut buffers = (0..64)
+                                    .map(|_| pool.try_alloc_zeroed(page_bytes).unwrap())
+                                    .collect::<Vec<_>>();
+                                for buffer in &mut buffers {
+                                    assert!(buffer.as_ref().iter().all(|byte| *byte == 0));
+                                    buffer.as_mut().fill(worker + 1);
+                                }
+                                assert!(buffers.iter().all(|buffer| {
+                                    buffer.as_ref().iter().all(|byte| *byte == worker + 1)
+                                }));
+                            }
+                        });
                     }
                 });
-            }
-        });
-        // The original cache remains alive throughout worker allocation and reuse.
-        drop(cache);
-        assert!(pool.try_alloc_zeroed(page_bytes).is_ok());
+                // Keep the cache alive throughout worker allocation and reuse.
+                drop(cache);
+                assert!(pool.try_alloc_zeroed(page_bytes).is_ok());
+            })
+            .unwrap();
     }
 }
