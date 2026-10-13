@@ -92,6 +92,29 @@ impl HistoryDb {
     }
 
     #[cfg(test)]
+    pub(super) fn open_for_test(
+        path: &Path,
+        env: Arc<dyn regolith::Env>,
+    ) -> std::result::Result<Self, regolith::Error> {
+        let statistics = Some(Arc::new(regolith::Statistics::new()));
+        let db = regolith::Db::open(
+            path.join("regolith"),
+            regolith::Options {
+                env,
+                max_background_compactions: 0,
+                statistics: statistics.clone(),
+                ..Default::default()
+            },
+        )?;
+        Ok(Self { db, statistics })
+    }
+
+    #[cfg(test)]
+    pub(super) fn flush_for_test(&self) -> std::result::Result<(), regolith::Error> {
+        self.db.flush()
+    }
+
+    #[cfg(test)]
     pub(super) fn put(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<()> {
         let mut batch = WriteBatch::default();
         batch.put(key, value);
