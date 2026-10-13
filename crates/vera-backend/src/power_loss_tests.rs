@@ -35,7 +35,7 @@ fn config(context: &Context) -> <Databases as DatabaseSet<Context>>::Config {
     let cache = CacheRef::from_pooler(context, NZU16!(4084), NZUsize!(4096));
     let execution = crate::state_set_config("power-loss", cache.clone());
     let native = native::state_config("power-loss", cache);
-    (
+    let mut config = (
         execution.0,
         execution.1,
         execution.2,
@@ -43,7 +43,15 @@ fn config(context: &Context) -> <Databases as DatabaseSet<Context>>::Config {
         native.1,
         native.2,
         native.3,
-    )
+    );
+    // Issue unsynced writes before section rollover would make them durable.
+    macro_rules! small_buffers {
+        ($($index:tt),+) => {
+            $(config.$index.journal_config.write_buffer = NZUsize!(64);)+
+        };
+    }
+    small_buffers!(0, 1, 2, 3, 4, 5, 6);
+    config
 }
 
 async fn revision(databases: &Databases, version: u8, count: usize) -> Sealed {
@@ -132,7 +140,7 @@ async fn assert_restored_records(databases: &Databases, version: u8) {
             .unwrap(),
         vec![version; 128]
     );
-    let key = 16_384u64.to_be_bytes();
+    let key = 1u64.to_be_bytes();
     let mut address = [0; 20];
     address[..8].copy_from_slice(&key);
     assert!(
@@ -220,7 +228,7 @@ fn seven_journals_recover_the_anchor_after_unsynced_write_loss() {
                         retention_rate: retention,
                         mode,
                     });
-                let next = revision(&databases, 2, 16_385).await;
+                let next = revision(&databases, 2, 2).await;
                 macro_rules! apply {
                     ($index:tt) => {
                         let before = written_bytes(&context);
