@@ -30,6 +30,32 @@ def snapshot(second=0, labels=''):
 
 
 class SnapshotParser(unittest.TestCase):
+    def test_write_statistics_preserve_zero_and_full_width_counters(self):
+        values = (0, 18446744073709551615, 2, 3, 4, 5)
+        fields = ', '.join('%s: %d' % pair for pair in zip(metrics.WRITE_STATISTICS_FIELDS, values))
+        record = metrics.parse_snapshot(snapshot().rstrip() +
+            ' history_write_statistics=Some(HistoryWriteStatistics { ' + fields + ' })\n')
+        self.assertEqual([record['history_write_statistics.' + name]
+                          for name in metrics.WRITE_STATISTICS_FIELDS], list(values))
+
+    def test_disabled_write_statistics_remain_unavailable(self):
+        record = metrics.parse_snapshot(snapshot().rstrip() + ' history_write_statistics=None\n')
+        self.assertTrue(all(record['history_write_statistics.' + name] is None
+                            for name in metrics.WRITE_STATISTICS_FIELDS))
+        self.assertFalse(any(key.startswith('history_write_statistics.')
+                             for key in metrics.parse_snapshot(snapshot())))
+
+    def test_malformed_write_statistics_fail_without_exporting_text(self):
+        values = ', '.join('%s: 1' % name for name in metrics.WRITE_STATISTICS_FIELDS)
+        valid = 'Some(HistoryWriteStatistics { ' + values + ' })'
+        for invalid in ('Some(HistoryWriteStatistics {})',
+                        valid.replace('wal_bytes: 1', 'wal_bytes: -1'),
+                        valid.replace('wal_bytes: 1', 'wal_bytes: 18446744073709551616'),
+                        valid.replace('wal_bytes: 1', 'wal_bytes: private-key'),
+                        valid.replace('wal_bytes: 1', 'wal_bytes: 1, wal_bytes: 2')):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                metrics.parse_snapshot(snapshot().rstrip() + ' history_write_statistics=' + invalid + '\n')
+
     def test_multiline_prometheus_and_debug_fields(self):
         record = metrics.parse_snapshot(snapshot())
         self.assertEqual(record['durable_height'], 42)

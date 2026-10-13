@@ -2,10 +2,17 @@ name: Native admission pressure
 
 on:
   workflow_dispatch:
+    inputs:
+      case:
+        description: Focused validator availability case
+        type: choice
+        options: [all, admission, stalled-validator, delayed-validator]
+        default: all
   pull_request:
     paths:
       - .github/workflows/native-pressure.yml
       - crates/vera-e2e/tests/native_pressure.rs
+      - crates/vera-e2e/tests/native_pressure/**
       - crates/vera-consensus/src/components/mempool.rs
       - crates/vera-node/src/tx_gossip.rs
       - crates/vera-executor/src/mempool.rs
@@ -28,6 +35,7 @@ jobs:
       CARGO_TERM_COLOR: always
       PROTOC: /usr/bin/protoc
       VERAD_BINARY: ${{ github.workspace }}/target/release/verad
+      PRESSURE_CASE: ${{ inputs.case || 'all' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -36,7 +44,7 @@ jobs:
         with:
           components: clippy
       - name: Install native build dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler iproute2
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: linux-recovery
@@ -53,16 +61,26 @@ jobs:
         run: cargo clippy --frozen -p vera-e2e --test native_pressure -- -D warnings
       - name: Build pressure fixture
         run: cargo test --release --frozen -p vera-e2e --test native_pressure --no-run
-      - name: Run bounded quorum-loss pressure case
+      - name: Run selected validator availability cases
         timeout-minutes: 15
         env:
           VERA_E2E_DIR: ${{ runner.temp }}/e2e-logs
           VERA_E2E_KEEP: '1'
           RUST_LOG: warn,vera_storage=info
-        run: >-
-          python3 .github/scripts/capture-tests.py --logs "$VERA_E2E_DIR"
-          cargo test --release --frozen -p vera-e2e --test native_pressure
-          -- --test-threads=1
+          VERA_E2E_NETEM: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$PRESSURE_CASE" in
+            all) selector=(--include-ignored) ;;
+            admission) selector=(pipelined_admission_preserves_work_when_quorum_recovers --exact) ;;
+            stalled-validator) selector=(stalled_validator::pipelined_stalled_validator_crosses_epoch_and_rejoins_quorum --exact) ;;
+            delayed-validator) selector=(delayed_validator::pipelined_delayed_validator_crosses_epoch_and_preserves_work --exact --ignored) ;;
+            *) echo 'invalid validator availability case' >&2; exit 1 ;;
+          esac
+          python3 .github/scripts/capture-tests.py --logs "$VERA_E2E_DIR" \
+            cargo test --release --frozen -p vera-e2e --test native_pressure \
+            -- --test-threads=1 "${selector[@]}"
       - name: Collect bounded recovery evidence
         if: always()
         run: >-

@@ -60,12 +60,19 @@ def profile_settings(environment):
             'rustflags': expected['RUSTFLAGS']}
 
 
+def regolith_site(location):
+    return location.startswith(('regolith/src/', 'regolith::'))
+
+
 def component_site(location):
-    return (location.startswith(('crates/vera-', 'commonware-', 'vera_', 'commonware_')) or
+    return (regolith_site(location) or
+            location.startswith(('crates/vera-', 'commonware-', 'vera_', 'commonware_')) or
             re.match(r'^(storage|runtime|consensus|p2p|utils|broadcast|marshal|glue)/src/', location))
 
 
 def attribution_class(location):
+    if regolith_site(location):
+        return 'regolith_caller'
     if component_site(location):
         return 'vera_commonware_caller'
     if location == 'unresolved':
@@ -76,13 +83,17 @@ def attribution_class(location):
 
 
 def source_location(frame):
+    match = re.search(r'(?:^|/)regolith(?:-[0-9a-f]{16}|-\d+\.\d+\.\d+)?'
+                      r'(?:/[0-9a-f]{7,40})?/src/([\w/.-]+\.rs):(\d+)\)', frame)
+    if match and '..' not in match.group(1).split('/'):
+        return 'regolith/src/%s:%s' % match.groups()
     match = re.search(r"(?:^|/)(crates/vera-[\w-]+/src/[\w/.-]+\.rs|"
                       r"commonware-[\w-]+-[0-9.]+/src/[\w/.-]+\.rs|"
                       r"(?:storage|runtime|consensus|p2p|utils|broadcast|marshal|glue)/src/[\w/.-]+\.rs):(\d+)\)", frame)
     if match and '..' not in match.group(1).split('/'):
         return '%s:%s' % match.groups()
     symbol = frame.split(' (', 1)[0]
-    match = re.search(r'(?:vera_[a-z_]+|commonware_[a-z_]+|alloc|std|core|tokio|hashbrown|rocksdb)'
+    match = re.search(r'(?:vera_[a-z_]+|commonware_[a-z_]+|regolith|alloc|std|core|tokio|hashbrown|rocksdb)'
                       r'(?:::[a-zA-Z_][a-zA-Z_0-9]*)+', symbol)
     if not match:
         return 'unresolved'
@@ -328,7 +339,8 @@ def main():
                     'timeline': timeline, 'total_retained_bytes': sum(sites.values()),
                     'retained_sites': dict(sites.most_common(50)),
                     'attribution_bytes': {kind: attribution[kind] for kind in
-                                          ('vera_commonware_caller', 'library_caller', 'allocator_only', 'unresolved')},
+                                          ('vera_commonware_caller', 'regolith_caller', 'library_caller',
+                                           'allocator_only', 'unresolved')},
                     'symbolization': {'unresolved_before_bytes': original_sites['unresolved'],
                                       'unresolved_after_bytes': sites['unresolved'],
                                       'unresolved_stack_formats': dict(unresolved)},

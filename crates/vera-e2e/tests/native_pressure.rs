@@ -1,4 +1,12 @@
-//! Fill native admission during quorum loss, then recover all admitted work.
+//! Qualify native admission and finalization while validators cannot process work.
+
+#[cfg(target_os = "linux")]
+#[path = "native_pressure/stalled_validator.rs"]
+mod stalled_validator;
+
+#[cfg(target_os = "linux")]
+#[path = "native_pressure/delayed_validator.rs"]
+mod delayed_validator;
 
 use std::{
     collections::BTreeSet,

@@ -214,6 +214,14 @@ rejected and require an explicit migration decision, not silent reset.
 ## Resident memory and measured workloads
 
 Validators retain active module records and authenticated-state indexes in memory.
+
+The runtime reserves 5,120 buffers in the 4 KiB storage size class: 4,096 for
+the shared page cache and 1,024 for transient I/O. Buffers are allocated lazily;
+cache construction fills its slots. Storage thread-local caches retain at most
+one free buffer per size class per thread. The tracked page payload ceiling is
+20 MiB; other storage classes, exhausted-pool fallback and allocator overhead
+are separate. This is not a process-memory bound.
+
 Sizing must account for live policies, objects, relationships and signer records,
 as well as protocol queues, storage buffers and allocator retention. History-cache
 limits do not bound total process memory.
@@ -255,6 +263,41 @@ an overall deadline; signature and sequence validation failures remain permanent
 An admission response is not a certified outcome. If transport fails after
 submission, check the existing request identity before creating another request.
 
+The native admission workflow also has a `stalled-validator` selection. On Linux
+it suspends one of four validators for at least 30 seconds while the remaining
+three certify native writes across an epoch. After resuming the process, it
+checks certified receipts, namespace ownership and sequences on every replica,
+then removes another validator so the resumed member is required for quorum.
+This is a bounded process-stall check; it does not establish a WAN latency limit
+or a total memory bound.
+
+The `delayed-validator` selection runs an explicitly enabled, otherwise ignored
+Linux transport case on an isolated hosted runner. It identifies the managed
+validator's established P2P sockets and applies a 100 ms packet delay and a
+shared 20 Mbit/s rate using [netem](https://man7.org/linux/man-pages/man8/tc-netem.8.html),
+with a 1,024-packet queue. Exact TCP flow filters cover both directions and leave
+RPC traffic unshaped. The test requires unchanged socket coverage and advancing
+fault-queue packet counters throughout its certified epoch-progress phase.
+It restores only its own queue, checks all replica records and requires the
+affected member for a subsequent quorum. This is local transport-fault coverage;
+real WAN latency and capacity measurements still require separate hosts.
+
+The ordered-state recovery unit test separately exercises all 128 durable
+subsets of the seven journals after an interrupted generation. It checks the
+actual persisted targets, rejects unanchored state, recovers the selected anchor
+before publishing query state, and verifies subsequent writes and reopening.
+This models completed partition writes around a process exit; it does not
+simulate the loss of unsynchronized filesystem writes during a power cut.
+
+The native partition I/O test also checks all twelve combinations of four
+partitions and write, truncated-write or synchronization failure. Every
+partition starts with acknowledged data. A failed child must stop before
+acknowledgement; recovery checks all four partitions against the retained anchor
+before retrying and durably publishing the failed write. Injection is restricted
+to the selected partition family, and each case checks its actual I/O witness.
+This is injected I/O
+failure coverage alongside the completed-partition recovery matrix.
+
 ## Monitoring
 
 - `vera_nodeStatus` reports `finalizedHeight`, `finalizedEpoch` and
@@ -279,6 +322,21 @@ submission, check the existing request identity before creating another request.
   history-backend memory counters). Collection runs off the async executor and
   is opt-in. `vera_publication_diagnostics=debug` enables per-revision apply and
   publication times; `vera_diagnostics=debug` enables both kinds of diagnostics.
+  Resource snapshots include `state_durability_wait_seconds` and
+  `state_durability_completion_seconds` histograms, prefixed by the runtime
+  context. They record successful state barriers from first poll and from entry
+  to finalization, respectively. These measurements include the asynchronous
+  durability wait omitted by Commonware's finalized-block timer. They exclude
+  subsequent pruning and finalized-history publication; they are not individual
+  filesystem sync timings. Shutdown, failed and cancelled barriers add no sample.
+  Resource-only collection performs numeric observations without per-revision
+  log events. All three diagnostic targets disabled returns the original barrier.
+  When resource diagnostics are enabled at startup, Regolith also records
+  process-local history write statistics: batch input bytes, completed WAL bytes
+  and syncs, flush/compaction output bytes and admitted capacity-stall time.
+  Disabling diagnostics leaves backend statistics disabled. These counters are
+  sampled independently and reset on reopening; compare intervals within one
+  process. They do not measure physical-device writes or individual sync latency.
 - Consensus warnings (`floor not updated`, view skips) at `warn` are normal
   during epoch transitions; sustained notarization timeouts are not.
 

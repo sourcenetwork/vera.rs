@@ -118,6 +118,7 @@ pub struct OrderedState {
     databases: OrderedDatabases,
     executor: VeraExecutor,
     diagnostic_height: std::sync::Arc<parking_lot::Mutex<Option<u64>>>,
+    durability_metrics: durability::DurabilityMetrics,
 }
 
 impl std::fmt::Debug for OrderedPending {
@@ -228,6 +229,7 @@ impl OrderedState {
                 "marshal recovery requires the stateful actor".into(),
             ));
         }
+        let durability_metrics = durability::DurabilityMetrics::register(&context);
         let databases = Box::pin(OrderedDatabases::init(
             context,
             config.databases,
@@ -249,25 +251,28 @@ impl OrderedState {
             }
             None => {}
         }
-        Self::restore(databases, config.executor).await
+        Self::restore(databases, config.executor, durability_metrics).await
     }
 
     async fn restore(
         databases: OrderedDatabases,
         executor: VeraExecutor,
+        durability_metrics: durability::DurabilityMetrics,
     ) -> Result<Self, AppError> {
         Self::check_module_root(&databases).await?;
-        Self::hydrate(databases, executor).await
+        Self::hydrate(databases, executor, durability_metrics).await
     }
 
     async fn hydrate(
         databases: OrderedDatabases,
         executor: VeraExecutor,
+        durability_metrics: durability::DurabilityMetrics,
     ) -> Result<Self, AppError> {
         let set = Self {
             databases,
             executor,
             diagnostic_height: std::sync::Arc::default(),
+            durability_metrics,
         };
         set.reload().await?;
         Ok(set)
@@ -378,9 +383,10 @@ impl DatabaseSet<Ctx> for OrderedState {
         expected: Option<Self::SyncTargets>,
     ) -> Self {
         if config.marshal_recovery {
+            let durability_metrics = durability::DurabilityMetrics::register(&context);
             let databases =
                 Box::pin(OrderedDatabases::init(context, config.databases, expected)).await;
-            return Self::restore(databases, config.executor)
+            return Self::restore(databases, config.executor, durability_metrics)
                 .await
                 .expect("restore authenticated module state");
         }
@@ -456,7 +462,8 @@ impl DatabaseSet<Ctx> for OrderedState {
 
     async fn finalize(&self) -> Barrier {
         let started = (tracing::enabled!(target: "vera_diagnostics", tracing::Level::DEBUG)
-            || tracing::enabled!(target: "vera_publication_diagnostics", tracing::Level::DEBUG))
+            || tracing::enabled!(target: "vera_publication_diagnostics", tracing::Level::DEBUG)
+            || tracing::enabled!(target: "vera_resource_diagnostics", tracing::Level::DEBUG))
         .then(std::time::Instant::now);
         let barrier = Box::pin(self.databases.finalize()).await;
         let Some(started) = started else {
@@ -468,7 +475,12 @@ impl DatabaseSet<Ctx> for OrderedState {
             "finalized state synchronization started");
         tracing::debug!(target: "vera_publication_diagnostics", ?height, sync_start_us,
             "finalized state synchronization started");
-        durability::observe(barrier, height, started)
+        durability::observe(
+            barrier,
+            height,
+            started,
+            Some(self.durability_metrics.clone()),
+        )
     }
 
     async fn prune(&self, targets: &Self::SyncTargets) {
@@ -498,6 +510,7 @@ where
     ) -> Result<(Self, Anchor<Digest>), String> {
         tracing::debug!(target: "vera_diagnostics", height = %anchor.height,
             "snapshot database transfer started");
+        let durability_metrics = durability::DurabilityMetrics::register(&context);
         let (databases, anchor) = Box::pin(OrderedDatabases::sync(
             context,
             config.databases,
@@ -520,7 +533,7 @@ where
             tracing::debug!(target: "vera_diagnostics", height = %anchor.height,
                 "snapshot history handoff completed");
         }
-        let state = Self::hydrate(databases, config.executor)
+        let state = Self::hydrate(databases, config.executor, durability_metrics)
             .await
             .map_err(|e| e.to_string())?;
         tracing::debug!(target: "vera_diagnostics", height = %anchor.height,

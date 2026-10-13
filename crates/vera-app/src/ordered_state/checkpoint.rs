@@ -90,6 +90,7 @@ impl OrderedState {
         OrderedDatabases: StateSyncSet<Ctx, R, Digest, Error = String>,
     {
         let (_updates, updates_rx) = ring::channel(NZUsize!(1));
+        let durability_metrics = super::durability::DurabilityMetrics::register(&context);
         let (databases, reached) = Box::pin(OrderedDatabases::sync(
             context,
             config.databases,
@@ -107,7 +108,7 @@ impl OrderedState {
         if let Some(handoff) = config.sync_handoff {
             handoff(reached).await?;
         }
-        let state = Self::hydrate(databases, config.executor)
+        let state = Self::hydrate(databases, config.executor, durability_metrics)
             .await
             .map_err(|e| e.to_string())?;
         Ok((state, reached))

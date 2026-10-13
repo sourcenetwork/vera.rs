@@ -51,9 +51,11 @@ type FaultyTargets = (FaultyTarget, FaultyTarget, FaultyTarget, FaultyTarget);
 
 fn failed_reader(readers: &FaultyReaders, module: usize) -> &Reader<FaultyDb> {
     match module {
+        0 => &readers.0,
         1 => &readers.1,
         2 => &readers.2,
-        _ => &readers.3,
+        3 => &readers.3,
+        _ => panic!("invalid native fault partition"),
     }
 }
 
@@ -117,13 +119,15 @@ fn injected_io_failures_are_fatal_and_recovery_republishes_the_anchor() {
         let failure = match code.parse::<u64>().unwrap() {
             1 => Failure::Write,
             2 => Failure::TruncatedWrite,
-            _ => Failure::Sync,
+            3 => Failure::Sync,
+            _ => panic!("invalid native fault type"),
         };
         let config = tokio::Config::new().with_storage_directory(&directory);
         tokio::Runner::new(config).start(|context| async move {
             let faulty = FaultyCtx::new(context);
             let set = open(&faulty).await;
-            let sealed = super::prepare(set.new_batches().await, changes(0, 1))
+            let baseline = std::array::from_fn(|index| changes(index, 1)[index].clone());
+            let sealed = super::prepare(set.new_batches().await, baseline)
                 .await
                 .unwrap();
             set.apply(sealed).await;
@@ -132,7 +136,8 @@ fn injected_io_failures_are_fatal_and_recovery_republishes_the_anchor() {
                 std::path::Path::new(&sidecar),
                 &set.committed_targets().await,
             );
-            faulty.arm(failure);
+            let module_name = ["acp", "bulletin", "vera", "nonces"][module];
+            faulty.arm(failure, format!("fault-native-{module_name}-"));
             let batch = super::prepare(set.new_batches().await, changes(module, 2))
                 .await
                 .unwrap();
@@ -142,11 +147,14 @@ fn injected_io_failures_are_fatal_and_recovery_republishes_the_anchor() {
         panic!("injected failure must stop the actor before acknowledgement");
     }
 
-    for (module, code, failure_message) in [
-        (1, 1u64, "database finalize failed"),
-        (2, 2, "database finalize failed"),
-        (3, 3, "database sync failed"),
-    ] {
+    for (module, (code, failure_message)) in (0..4).flat_map(|module| {
+        [
+            (1u64, "database finalize failed"),
+            (2, "database finalize failed"),
+            (3, "database sync failed"),
+        ]
+        .map(|failure| (module, failure))
+    }) {
         let directory = tempfile::tempdir().unwrap();
         let anchor_sidecar = directory.path().join("anchor");
         let output = std::process::Command::new(std::env::current_exe().unwrap())
@@ -162,8 +170,32 @@ fn injected_io_failures_are_fatal_and_recovery_republishes_the_anchor() {
             .output()
             .unwrap();
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(output.status.code(), Some(101), "{module}: {stderr}");
-        assert!(stderr.contains(failure_message), "{module}: {stderr}");
+        let module_name = ["acp", "bulletin", "vera", "nonces"][module];
+        let internal_code = match code {
+            1 => 1,
+            2 => 3,
+            3 => 2,
+            _ => unreachable!(),
+        };
+        let witness =
+            format!("native_io_fault code={internal_code} partition=fault-native-{module_name}-");
+        assert_eq!(
+            stderr
+                .lines()
+                .filter(|line| line.starts_with(&witness))
+                .count(),
+            1,
+            "partition {module}, fault {code} did not inject exactly one matching I/O failure: {stderr}"
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(101),
+            "partition {module}, fault {code}: {stderr}"
+        );
+        assert!(
+            stderr.contains(failure_message),
+            "partition {module}, fault {code}: {stderr}"
+        );
 
         let anchor = read_anchor(&anchor_sidecar);
         let config = tokio::Config::new().with_storage_directory(directory.path());
@@ -177,21 +209,17 @@ fn injected_io_failures_are_fatal_and_recovery_republishes_the_anchor() {
             )
             .await;
             let readers = set.readers();
-            let acp = readers.0.read().await;
-            assert_eq!(
-                acp.get_many(&[&vec![1u8; 8], &vec![2u8; 8]]).await.unwrap(),
-                [Some(Bytes::from(vec![1u8; 32])), None]
-            );
-            let failed = failed_reader(&readers, module).read().await;
-            assert_eq!(
-                failed
-                    .get_many(&[&vec![2u8; 8], &vec![2u8; 9]])
-                    .await
-                    .unwrap(),
-                [None, None]
-            );
-            drop(failed);
-            drop(acp);
+            for index in 0..4 {
+                let restored = failed_reader(&readers, index).read().await;
+                assert_eq!(
+                    restored
+                        .get_many(&[&vec![1u8; 8], &vec![2u8; 8], &vec![2u8; 9]])
+                        .await
+                        .unwrap(),
+                    [Some(Bytes::from(vec![1u8 ^ index as u8; 32])), None, None],
+                    "partition {index} lost or advanced past the acknowledged anchor"
+                );
+            }
 
             let batch = super::prepare(set.new_batches().await, changes(module, 2))
                 .await

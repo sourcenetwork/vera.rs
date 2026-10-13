@@ -165,6 +165,35 @@ compaction, Commonware journal corruption or restoration of a complete running
 validator. Those require separate checks; replacing individual files is not an
 operator recovery procedure.
 
+## Compaction I/O failures
+
+The history fault test flushes three tables, then injects one partial output
+write, output-table sync failure or MANIFEST sync failure during foreground
+compaction. Each case requires the selected fault to fire. The partial-write
+case also checks that a strict subset of the submitted bytes reached the file.
+Stored execution records, finalization bytes, receipt lookups and both history
+heads must remain unchanged.
+
+An output failure before publication must remove the unreferenced table. A
+MANIFEST sync failure must retain the inputs and potentially referenced output:
+its uncertain tail can only be resolved by reopen. The test rejects another
+metadata update on that handle, reopens through normal history startup, and
+requires a subsequent failed receipt to survive another reopen.
+
+```sh
+cargo test --frozen -p vera-node --lib \
+  history::tests::compaction_tests::failed_compaction_preserves_history_receipts_and_durable_reopen \
+  -- --exact
+```
+
+The focused history workflow runs this test with the physical damage cases.
+The fixture uses real Regolith files and codecs, synthetic execution/finality
+records and test-only I/O wrappers. Background compaction is disabled in the
+fixture so faults land in the selected foreground operation. Production
+settings are unchanged. This checks history recovery after reported I/O
+failures; it does not verify live consensus certificates or simulate a physical
+power cut across the validator's other stores.
+
 ## Recovery of recent execution indexes
 
 Startup still decodes every retained execution record, checks receipt commitments

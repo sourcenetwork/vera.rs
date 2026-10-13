@@ -49,5 +49,10 @@ jobs:
       - name: Check physical damage rejection and restoration
         run: >-
           cargo test --frozen -p vera-node --lib history::tests::physical_tests::
+      - name: Check compaction failure recovery
+        run: >-
+          cargo test --frozen -p vera-node --lib
+          history::tests::compaction_tests::failed_compaction_preserves_history_receipts_and_durable_reopen
+          -- --exact
       - name: Lint affected node tests
         run: cargo clippy --frozen -p vera-node --lib --tests -- -D warnings

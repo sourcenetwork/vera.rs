@@ -8,6 +8,9 @@ use vera_domain::{DbTargets, StateRoot, Tx};
 #[path = "physical_tests.rs"]
 mod physical_tests;
 
+#[path = "compaction_tests.rs"]
+mod compaction_tests;
+
 #[path = "recovery_cache_tests.rs"]
 mod recovery_cache_tests;
 

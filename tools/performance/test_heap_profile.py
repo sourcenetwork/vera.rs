@@ -122,6 +122,35 @@ class HeapEvidence(unittest.TestCase):
                             'private_secret (/secret/key.rs:1); 8\n')
             self.assertEqual(retained_sites(path), {'storage/src/cache.rs:24': 64, 'unresolved': 8})
 
+    def test_regolith_allocations_are_not_charged_to_outer_vera_callers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'stacks'
+            path.write_text('vera_node::history::write (function.rs);'
+                            'regolith::engine::memtable::Arena (arena.rs);alloc::alloc (alloc.rs); 64\n'
+                            'commonware_runtime::tokio::Context (runtime.rs);'
+                            'regolith::engine::BlockCache (cache.rs);??; 32\n'
+                            'vera_node::history::write (function.rs);alloc::alloc (alloc.rs); 16\n'
+                            'private_secret (/secret/key.rs:1); 8\n')
+            attribution = collections.Counter()
+            sites = retained_sites(path, attribution=attribution)
+            self.assertEqual(sites, {'regolith::engine::memtable::Arena (arena.rs)': 64,
+                                     'regolith::engine::BlockCache (cache.rs)': 32,
+                                     'vera_node::history::write (function.rs)': 16, 'unresolved': 8})
+            self.assertEqual(attribution, {'regolith_caller': 96, 'vera_commonware_caller': 16,
+                                          'unresolved': 8})
+            self.assertEqual(sum(sites.values()), sum(attribution.values()))
+            self.assertNotIn('secret', json.dumps(sites))
+
+    def test_regolith_source_paths_drop_checkout_names_and_private_roots(self):
+        paths = ['regolith/src/engine/arena.rs', 'regolith-0.1.9/src/engine/arena.rs',
+                 'regolith-640572c4f6c2030c/061846f/src/engine/arena.rs']
+        for path in paths:
+            with self.subTest(path=path):
+                frame = 'regolith::engine::Arena (/private/credentials/%s:27)' % path
+                self.assertEqual(source_location(frame), 'regolith/src/engine/arena.rs:27')
+        frame = 'regolith::engine::Arena (/private/regolith/src/../../secret.rs:27)'
+        self.assertEqual(source_location(frame), 'regolith::engine::Arena')
+
     def test_unknown_leaf_does_not_discard_known_allocator_frames(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'stacks'
