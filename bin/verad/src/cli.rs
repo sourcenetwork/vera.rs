@@ -200,7 +200,9 @@ impl Cli {
             genesis,
             peers,
         };
-        let runtime = tokio::Config::default().with_storage_directory(storage);
+        let runtime = vera_node::configure_storage_buffers(
+            tokio::Config::default().with_storage_directory(storage),
+        );
         let info = tokio::Runner::new(runtime)
             .start(|context| async move { vera_node::run_bootstrap(context, settings).await })
             .map_err(anyhow_to_eyre)?;
@@ -339,8 +341,10 @@ fn node_settings(
 /// Run the node on a commonware tokio runtime until it stops.
 fn run(settings: NodeSettings, listener: Option<std::net::TcpListener>) -> eyre::Result<()> {
     use commonware_runtime::{Runner as _, tokio};
-    let runtime = tokio::Config::default()
-        .with_storage_directory(settings.config.data_dir.join("commonware"));
+    let runtime = vera_node::configure_storage_buffers(
+        tokio::Config::default()
+            .with_storage_directory(settings.config.data_dir.join("commonware")),
+    );
     tokio::Runner::new(runtime)
         .start(|context| async move {
             vera_node::run_node_with_rpc_listener(context, settings, listener).await

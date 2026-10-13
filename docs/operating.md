@@ -214,6 +214,14 @@ rejected and require an explicit migration decision, not silent reset.
 ## Resident memory and measured workloads
 
 Validators retain active module records and authenticated-state indexes in memory.
+
+The runtime reserves 5,120 buffers in the 4 KiB storage size class: 4,096 for
+the shared page cache and 1,024 for transient I/O. Buffers are allocated lazily;
+cache construction fills its slots. Storage thread-local caches retain at most
+one free buffer per size class per thread. The tracked page payload ceiling is
+20 MiB; other storage classes, exhausted-pool fallback and allocator overhead
+are separate. This is not a process-memory bound.
+
 Sizing must account for live policies, objects, relationships and signer records,
 as well as protocol queues, storage buffers and allocator retention. History-cache
 limits do not bound total process memory.
