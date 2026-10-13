@@ -12,7 +12,7 @@ remain open.
 | Component | Revision | Role |
 | --- | --- | --- |
 | Vera | `0c26e9e568c179790cc2f3eb9e48849b08e6173f` | Daemon and shared verifier |
-| Merged Vera main | `112a1df99dbf23915c5764e540d495d63c7eacab` | Same complete tree as the tested candidate |
+| Vera runtime merge | `112a1df99dbf23915c5764e540d495d63c7eacab` | Same complete tree as the tested candidate |
 | Trust API | `52f66e6d4b7ccdd3c3446aa91b9a147f531527bc` | Executable and container gateway |
 | Orbis normal runtime | `20dfa47de9ad5ae5fe4c7748089dea5be286b556` | BLS12-381 and Jubjub threshold services |
 | Orbis qualification fixture | `c638455a5d43e5e31aeac41427a69ed18733f705` | Native integration driver |
@@ -28,7 +28,7 @@ boundary before reusing its images. Fixture revisions do not imply a runtime
 upgrade. The Backbone client source matches its approved candidate; Defra's
 lockfile selects the SDK revision in the table.
 
-Vera pins Rust 1.98.0, Regolith 0.1.9 at
+The measured cohort pins Rust 1.98.0, Regolith 0.1.9 at
 `061846fc870389391f77b8c2a3cf370b6e69d95f` and Commonware 2026.9.0 at
 `0ebcf164594621f2c82769eef7e9f3a21153055f`. Consumer stores retain their tested
 pins; they are not assumed to be identical to Vera's history store.
@@ -117,10 +117,70 @@ submission, polling and verification. The
 [Go/Rust comparison](performance-20261011.md#matched-gorust-registrations) remains
 a separate deployment comparison with its own sources and settings.
 
-The [extended fixed-state mode](performance.md) measures 360,000 updates over two
-hours with complete replica/restart checks and numeric resource snapshots. A
-successful workload alone cannot establish a plateau; the late memory trend and
-post-load checks must also be evaluated.
+### Two-hour fixed-state run
+
+[Extended run 38402671704](https://github.com/sourcenetwork/vera.rs/actions/runs/38402671704)
+completed all 360,000 updates and verified permission reads over two hours at
+49.999 updates/s. All four replicas reconciled; the restart inspection checked
+360,000 operations with zero receipt or state mismatches. Two receipt-read
+throttles recovered. There were no rejected, reverted, unresolved or incomplete
+workflows. Restart RPC readiness took 3.51 seconds.
+
+| Measurement | Observed result |
+| --- | ---: |
+| Certified receipt p50 / p95 / p99 | 168.19 / 286.00 / 310.95 ms |
+| Verified permission-read p50 / p95 / p99 | 3.10 / 11.01 / 16.64 ms |
+| Peak sampled RSS per validator | 669.62–679.10 MiB |
+| Average CPU per validator | 0.40–0.44 cores |
+| RSS change during the last ten minutes | -0.05 to +6.31 MiB |
+| RSS change during the last thirty minutes | +263.07 to +274.70 MiB |
+
+![Two-hour certified receipt latency and validator resident memory](performance/20261013-fixed-state.svg)
+
+The run used 128 fixed objects, four local validators, a 100 ms batch interval,
+192-revision epochs and two controlled glibc 2.39 arenas on one four-CPU AMD EPYC
+7763 Ubuntu host. Source `dd0bc0e89630e128053b192a532f886bf74a9592` produced the same
+normal daemon hash as the two clean builds above. Per-revision span-close tracing
+was disabled; numeric diagnostics and one-second sampling remained enabled.
+All 7,201 resource samples per validator were present. The artifact checksum
+matched GitHub's digest and the numeric report regenerated exactly from raw
+observations. These are offered-load results, rather than a maximum-capacity
+measurement or a 300 ms guarantee.
+
+The synchronized RSS jump coincides with the first Regolith compaction after the
+fourth memtable flush. Between recording seconds 6,330 and 6,360, each validator's
+compaction-output counter increased from zero to 116,683,074 bytes, while free
+glibc arena memory increased by 252–258 MiB. Live allocator usage and directly
+mapped memory did not show the same jump. The selected Regolith source scans
+compaction inputs through the shared read cache and evicts those inputs after
+publication. This establishes cache pollution in that implementation; the
+30-second diagnostic interval does not capture its transient peak or attribute
+the entire RSS jump to one owner.
+
+The slower final ten minutes do not prove a memory plateau. The thirty-minute
+window includes the compaction jump, and the complete run covers only one
+observed compaction episode. A successful restart also does not explain older timeouts.
+
+### Compaction cache boundary
+
+Vera now selects Regolith revision `f6958cf0cea97f658dbdbc3572063a8122645101`.
+Compaction scans use a zero-capacity cache instead of populating the foreground
+read cache with input blocks that become obsolete when the merge completes.
+Foreground reads retain their configured cache; obsolete-file eviction still
+targets that shared cache. The default history cache budget and allocator are
+unchanged. Partitioned-index scans also bypass metadata caching during the merge,
+which can increase metadata reads. Checksums, version reduction and durable
+publication retain their existing paths.
+
+The Regolith candidate's Linux workspace run passed all 1,810 selected tests,
+including the cache-inspection fixture. That fixture checks the cache during
+compaction, before eviction can hide pollution, and verifies all 256 output
+key/value pairs for flat and partitioned indexes with uncompressed and LZ4 data.
+The Linux CI profile has no default test filter; successful individual case lines
+are suppressed in its log. The selected revision also passed strict lint, MSRV,
+allocation budgets and modeled durability checks. These results establish the
+tested code boundary, rather than a measured whole-Vera RSS reduction. The
+two-hour numbers above remain results from the preceding Regolith revision.
 
 ## Remaining qualification
 
