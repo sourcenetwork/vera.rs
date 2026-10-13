@@ -393,7 +393,6 @@ fn threshold_object_requires_gas_before_decoding_or_admission() {
 mod tests {
     use super::*;
     use alloy_sol_types::SolEvent;
-    use revm::precompile::{PrecompileHalt, PrecompileStatus};
     use vera_modules::{types::Timestamp, vera::types::JWSTokenStatus};
 
     #[test]
