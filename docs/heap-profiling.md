@@ -70,8 +70,8 @@ member run without it. The production allocator and runtime source are unchanged
 
 The artifact records source/binary/tool provenance, operation outcomes, interval peak
 heap samples and the largest retained allocation callers. Each allocation is
-charged once to its innermost resolved Vera/Commonware frame, or the innermost
-recognized allocator/library frame when no component frame is available. An
+charged once to its innermost resolved Vera, Commonware or Regolith frame, or the
+innermost recognized allocator/library frame when no component frame is available. An
 unresolved leaf cannot discard a recognized caller. Generic allocator names
 identify an allocation mechanism; they do not establish the owning component. Heaptrack1.5's
 folded stacks expose function names and file basenames; source paths and line
@@ -79,13 +79,18 @@ numbers are retained only when the installed tool includes them. Unresolved
 frames remain explicit. Raw traces, node files and full profiler output stay in
 a private runner directory and are removed when the profiling step ends.
 
-`attribution_bytes` separates Vera/Commonware callers, other recognized library
-callers, generic allocator frames and unresolved stacks. These totals cover every
+`attribution_bytes` separates Vera/Commonware callers, Regolith callers, other
+recognized library callers, generic allocator frames and unresolved stacks. These totals cover every
 allocation, including callers omitted from the largest-50 table, and must sum to
 `total_retained_bytes`. Low unresolved-symbol bytes alone do not establish
 component ownership. The collector checks and records the diagnostic build
 settings before starting a workload; encoded Rust flags that would override the
 declared frame-pointer setting are rejected.
+
+Regolith source locations omit private checkout paths and normalize registry and
+Git checkouts to `regolith/src/`. Older artifacts lack the `regolith_caller`
+category; their Vera/Commonware caller totals may include deeper Regolith
+allocations and cannot establish the storage component's ownership.
 
 Compare sampled heap peaks with previously measured RSS and bounded cache/pool
 counters. Bytes retained when a process is stopped include ordinary live caches
