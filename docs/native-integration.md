@@ -1,7 +1,7 @@
 # Native integration baseline
 
 The current Linux version set and source-bound results are in
-[native qualification, October 11](native-qualification-20261011.md). The baseline
+[native qualification, October 13](native-qualification-20261013.md). The baseline
 below records the earlier September checks.
 
 This version set passed the focused local integration checks below on macOS
