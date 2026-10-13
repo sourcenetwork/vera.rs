@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from protocol import SCHEMAS, unavailable
-from compare_pr import COMPONENTS, LIFECYCLE_COMPONENTS, LOGICAL_EDIT_COMPONENTS, TAGS, change, compare, components
+from compare_pr import BASIC_ACP_COMPONENTS, BULLETIN_COMPONENTS, COMPONENT_FIXTURES, COMPONENTS, LIFECYCLE_COMPONENTS, LOGICAL_EDIT_COMPONENTS, TAGS, change, compare, components
 
 
 class CompareTests(unittest.TestCase):
@@ -242,6 +242,45 @@ class CompareTests(unittest.TestCase):
         result = json.loads((self.root / 'comparison-report.json').read_text())
         self.assertEqual(result['metrics'][-1]['verdict'], 'new benchmark; no baseline')
         self.assertIsNone(result['metrics'][-1]['change_percent'])
+
+    def write_native_components(self, tag, value=100, version=4):
+        rows = [dict(format_version=1, fixture_version=version, kind='configuration',
+                     samples=9, sample_ms=100, warmup_ms=200)]
+        rows += [dict(name=name, unit='ns/op', samples=[value] * 9, iterations=[10] * 9)
+                 for name in COMPONENT_FIXTURES[version]]
+        (self.root / tag / 'components.jsonl').write_text('\n'.join(json.dumps(row) for row in rows))
+
+    def test_native_component_additions_preserve_existing_baselines(self):
+        for tag in ('base1', 'base2'):
+            self.write_native_components(tag, version=3)
+        for tag in ('head1', 'head2'):
+            self.write_native_components(tag)
+        with patch('compare_pr.load_run', side_effect=self.run_fixture):
+            self.assertFalse(compare(self.root))
+        result = json.loads((self.root / 'comparison-report.json').read_text())
+        self.assertFalse(result['errors'])
+        metrics = {row['metric']: row for row in result['metrics']}
+        for name in COMPONENT_FIXTURES[3]:
+            self.assertEqual(metrics[f'{name}: ns/op']['change_percent'], 0)
+        for name in BASIC_ACP_COMPONENTS + BULLETIN_COMPONENTS:
+            row = metrics[f'{name}: ns/op']
+            self.assertEqual(row['base'], [])
+            self.assertIsNone(row['change_percent'])
+            self.assertEqual(row['verdict'], 'new benchmark; no baseline')
+
+    def test_native_component_regression_and_missing_measurement(self):
+        for tag in TAGS:
+            self.write_native_components(tag, 120 if tag.startswith('head') else 100)
+        with patch('compare_pr.load_run', side_effect=self.run_fixture):
+            self.assertFalse(compare(self.root))
+        result = json.loads((self.root / 'comparison-report.json').read_text())
+        metrics = {row['metric']: row for row in result['metrics']}
+        for name in BASIC_ACP_COMPONENTS + BULLETIN_COMPONENTS:
+            self.assertEqual(metrics[f'{name}: ns/op']['verdict'], 'regression signal')
+        path = self.root / 'head1' / 'components.jsonl'
+        path.write_text('\n'.join(path.read_text().splitlines()[:-1]))
+        with self.assertRaisesRegex(ValueError, 'missing component'):
+            components(path)
 
     def write_lifecycle(self, tag, value=100):
         rows = [dict(self.rows[0], fixture_version=2)] + self.rows[1:]

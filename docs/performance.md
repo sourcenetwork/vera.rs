@@ -458,6 +458,25 @@ without inventing a baseline. Matching measurements retain their comparisons;
 missing measurements or inconsistent fixtures fail the report. These component
 ratios do not measure service throughput or establish a production resource bound.
 
+## Creation, registration and bulletin components
+
+Fixture version 4 retains the thirteen earlier measurements and adds policy
+creation, object registration, archive and unarchive, plus bulletin namespace
+registration and post creation/reads. Bulletin registration has separate cold and
+warm cases: cold includes lazy ACP policy initialization; warm uses an existing
+module policy. Post cases use 1 KiB and 64 KiB payloads with 64 proof bytes and an
+authorized collaborator.
+
+Before sampling, the fixtures check creation metadata, permission changes,
+collaborator rejection before a grant and after revocation, post payload/proof
+restoration and unchanged source snapshots. Every mutation starts from a fresh
+snapshot; owned command preparation and result disposal occur outside its timer.
+Reads include record decoding, allocation and result disposal. These are in-memory
+module costs. They exclude signing, executor dispatch, durable storage, consensus,
+transport and proof generation; bulletin reads do not verify application proof bytes.
+Existing component fixtures remain comparable, and added cases report no baseline
+until the target revision contains them.
+
 ## Local pipelined load measurement
 
 On September 19, 2026, four validators on one macOS host used RocksDB history,
