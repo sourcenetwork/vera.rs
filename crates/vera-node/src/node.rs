@@ -67,7 +67,9 @@ use crate::{
     MAX_BLOCK_TXS, MAX_MESSAGE_SIZE, MAX_PARTICIPANTS, MAX_SUPPORTED_MODE, MAX_TX_BYTES,
     MEMPOOL_CHANNEL, MESSAGE_RATE, NAMESPACE, NodeSettings, P2P_SUFFIX, PAGE_CACHE_SIZE, PAGE_SIZE,
     RESOLVER_CHANNEL, REVEAL, Registrar, RegistryParticipants, SHARING_MODE, TxGossip,
-    VOTE_CHANNEL, VrfElectorConfig, rejoin,
+    VOTE_CHANNEL, VrfElectorConfig,
+    peer_capacity::PeerCapacity,
+    rejoin,
     sink::{FinalizationArtifacts, FinalizationLookup, NodeSink, SinkParts},
     spawn_tx_receiver,
     tx_gossip::SharedValidator,
@@ -128,6 +130,7 @@ pub async fn run_node_with_rpc_listener(
     .expect("validated leader term length");
     let blocks_per_epoch = std::num::NonZeroU64::new(genesis.blocks_per_epoch)
         .ok_or_else(|| anyhow::anyhow!("genesis blocks_per_epoch must be non-zero"))?;
+    let peer_capacity = PeerCapacity::new(blocks_per_epoch, term_length)?;
     let prune_config = config
         .pruning
         .as_ref()
@@ -153,7 +156,7 @@ pub async fn run_node_with_rpc_listener(
         .decode_epoch_info()?
         .ok_or_else(|| anyhow::anyhow!("genesis.json is missing epoch_info"))?;
     let players = epoch_info.output.players().clone();
-    let capacity = vera_domain::max_epoch_participants(blocks_per_epoch, term_length);
+    let capacity = peer_capacity.participants();
     for (set, count) in [
         ("voting participants", players.len()),
         ("DKG players", epoch_info.players.len()),
@@ -161,7 +164,7 @@ pub async fn run_node_with_rpc_listener(
         ("registry validators", genesis.validators.len()),
     ] {
         anyhow::ensure!(
-            count <= capacity as usize,
+            count <= capacity,
             "genesis has {count} {set}, but epoch length {blocks_per_epoch} and leader term {term_length} support at most {capacity}",
         );
     }
@@ -180,7 +183,7 @@ pub async fn run_node_with_rpc_listener(
         .filter(|(pk, _)| *pk != local)
         .map(|(pk, addr)| (pk.clone(), Ingress::Socket(*addr)))
         .collect();
-    let max_peers_per_set = NZUsize!(MAX_PARTICIPANTS.get() as usize);
+    let max_peers_per_set = peer_capacity.tracked();
     let mut p2p_config = discovery::Config::local(
         Cups::<_, ChaCha20Poly1305>::new(
             Sake {
