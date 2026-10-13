@@ -44,10 +44,10 @@ fn config(context: &Context) -> <Databases as DatabaseSet<Context>>::Config {
         native.2,
         native.3,
     );
-    // Issue unsynced writes before section rollover would make them durable.
+    // The paged writer requires two pages; fill them without sealing a section.
     macro_rules! small_buffers {
         ($($index:tt),+) => {
-            $(config.$index.journal_config.write_buffer = NZUsize!(64);)+
+            $(config.$index.journal_config.write_buffer = NZUsize!(2 * 4084);)+
         };
     }
     small_buffers!(0, 1, 2, 3, 4, 5, 6);
@@ -140,7 +140,7 @@ async fn assert_restored_records(databases: &Databases, version: u8) {
             .unwrap(),
         vec![version; 128]
     );
-    let key = 1u64.to_be_bytes();
+    let key = 99u64.to_be_bytes();
     let mut address = [0; 20];
     address[..8].copy_from_slice(&key);
     assert!(
@@ -228,7 +228,7 @@ fn seven_journals_recover_the_anchor_after_unsynced_write_loss() {
                         retention_rate: retention,
                         mode,
                     });
-                let next = revision(&databases, 2, 2).await;
+                let next = revision(&databases, 2, 100).await;
                 macro_rules! apply {
                     ($index:tt) => {
                         let before = written_bytes(&context);
