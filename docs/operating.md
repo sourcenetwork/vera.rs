@@ -314,6 +314,15 @@ failure coverage alongside the completed-partition recovery matrix.
   history-backend memory counters). Collection runs off the async executor and
   is opt-in. `vera_publication_diagnostics=debug` enables per-revision apply and
   publication times; `vera_diagnostics=debug` enables both kinds of diagnostics.
+  Resource snapshots include `state_durability_wait_seconds` and
+  `state_durability_completion_seconds` histograms, prefixed by the runtime
+  context. They record successful state barriers from first poll and from entry
+  to finalization, respectively. These measurements include the asynchronous
+  durability wait omitted by Commonware's finalized-block timer. They exclude
+  subsequent pruning and finalized-history publication; they are not individual
+  filesystem sync timings. Shutdown, failed and cancelled barriers add no sample.
+  Resource-only collection performs numeric observations without per-revision
+  log events. All three diagnostic targets disabled returns the original barrier.
 - Consensus warnings (`floor not updated`, view skips) at `warn` are normal
   during epoch transitions; sustained notarization timeouts are not.
 

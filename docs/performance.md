@@ -294,6 +294,14 @@ This resource target leaves per-revision tracing disabled. Earlier measurements
 using `vera_diagnostics=debug` enabled resource snapshots and per-revision events;
 they remain instrumented measurements.
 
+State durability histograms in the runtime snapshots measure successful barrier
+completion from the first poll and from finalization entry. Commonware's
+finalized-block timer stops before this wait; its duration cannot substitute for
+the barrier measurement. The histograms exclude later pruning and history
+publication, and do not isolate individual sync calls or write-lock holds. Use
+sample-count, sum and bucket differences over the workload interval, excluding
+startup and verification. Numeric collection still has measurement overhead.
+
 ```sh
 gh workflow run performance.yml --repo sourcenetwork/vera.rs --ref <branch-or-tag> \
   -f sustained_growing_state=true -f sustained_memory_attribution=true
