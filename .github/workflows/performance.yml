@@ -23,6 +23,10 @@ on:
         description: Compare default and two glibc arenas in two 30-minute fixed-state runs
         type: boolean
         default: false
+      extended_fixed_state:
+        description: Offer 360,000 updates over two hours against 128 objects with two glibc arenas
+        type: boolean
+        default: false
       storage_attribution:
         description: Run the bounded Regolith storage diagnostic instead of performance baselines
         type: boolean
@@ -48,7 +52,7 @@ jobs:
   workload:
     if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && (inputs.sustained_fixed_state || inputs.sustained_growing_state || inputs.allocator_comparison) && 180 || 60 }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.extended_fixed_state && 240 || github.event_name == 'workflow_dispatch' && (inputs.sustained_fixed_state || inputs.sustained_growing_state || inputs.allocator_comparison) && 180 || 60 }}
     strategy:
       fail-fast: false
       matrix:
@@ -62,39 +66,24 @@ jobs:
       ARCHIVE_RETENTION: ${{ github.event_name == 'workflow_dispatch' && inputs.archive_retention }}
       SUSTAINED_FIXED_STATE: ${{ github.event_name == 'workflow_dispatch' && (inputs.sustained_fixed_state || inputs.allocator_comparison) }}
       ALLOCATOR_COMPARISON: ${{ github.event_name == 'workflow_dispatch' && inputs.allocator_comparison }}
+      EXTENDED_FIXED_STATE: ${{ github.event_name == 'workflow_dispatch' && inputs.extended_fixed_state }}
       SUSTAINED_GROWING_STATE: ${{ github.event_name == 'workflow_dispatch' && inputs.sustained_growing_state }}
-      SUSTAINED_MEMORY_ATTRIBUTION: ${{ github.event_name == 'workflow_dispatch' && (inputs.sustained_memory_attribution || inputs.archive_retention || inputs.allocator_comparison) }}
+      SUSTAINED_MEMORY_ATTRIBUTION: ${{ github.event_name == 'workflow_dispatch' && (inputs.sustained_memory_attribution || inputs.archive_retention || inputs.allocator_comparison || inputs.extended_fixed_state) }}
     steps:
-      - name: Validate measurement selection
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "$ARCHIVE_RETENTION" == true && ( "$SUSTAINED_FIXED_STATE" == true || "$SUSTAINED_GROWING_STATE" == true || "$STORAGE_ATTRIBUTION" == true ) ]]; then
-            echo 'archive_retention requires its own bounded workload' >&2
-            exit 1
-          fi
-          if [[ "$SUSTAINED_FIXED_STATE" == true && "$SUSTAINED_GROWING_STATE" == true ]]; then
-            echo 'sustained_fixed_state and sustained_growing_state are mutually exclusive' >&2
-            exit 1
-          fi
-          if [[ ( "$SUSTAINED_FIXED_STATE" == true || "$SUSTAINED_GROWING_STATE" == true ) && "$STORAGE_ATTRIBUTION" == true ]]; then
-            echo 'sustained modes and storage_attribution are mutually exclusive' >&2
-            exit 1
-          fi
-          if [[ "$SUSTAINED_MEMORY_ATTRIBUTION" == true && "$SUSTAINED_FIXED_STATE" != true && "$SUSTAINED_GROWING_STATE" != true && "$ARCHIVE_RETENTION" != true ]]; then
-            echo 'sustained_memory_attribution requires a sustained mode or archive_retention' >&2
-            exit 1
-          fi
-
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
 
+      - name: Validate measurement selection
+        run: |
+          python3 -m unittest discover -s tools/performance -p test_workload_selection.py
+          python3 tools/performance/workload_selection.py > "$RUNNER_TEMP/performance-selection.json"
+
       - name: Install build and reporting dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler python3-venv
+          sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler python3-venv jq
           if [[ "$STORAGE_ATTRIBUTION" == true && "$STORAGE_ATTRIBUTION_MODE" == full ]]; then
             sudo apt-get install -y strace
           fi
@@ -157,33 +146,21 @@ jobs:
         run: |
           set -euo pipefail
           result=0
-          count=3000
-          object_counts=(0 128)
-          recorder=(python3 tools/performance/record.py)
-          if [[ "$ARCHIVE_RETENTION" == true ]]; then
-            count=6000
-            object_counts=(128)
-          fi
-          if [[ "$SUSTAINED_FIXED_STATE" == true ]]; then
-            count=90000
-            object_counts=(128)
-            recorder+=(--timeout-seconds 7200)
-          fi
-          if [[ "$SUSTAINED_GROWING_STATE" == true ]]; then
-            count=90000
-            object_counts=(0)
-            recorder+=(--timeout-seconds 7200)
-          fi
+          plan="$RUNNER_TEMP/performance-selection.json"
+          count="$(jq -r '.count' "$plan")"
+          mapfile -t object_counts < <(jq -r '.objects[]' "$plan")
+          mapfile -t arena_cases < <(jq -r '.arenas[]' "$plan")
+          controlled_arenas="$(jq -r '.controlled_arenas' "$plan")"
+          recorder=(python3 tools/performance/record.py --timeout-seconds "$(jq -r '.timeout_seconds' "$plan")")
           if [[ "$SUSTAINED_MEMORY_ATTRIBUTION" == true ]]; then
             recorder+=(--rust-log 'warn,vera_storage=info,vera_resource_diagnostics=debug')
           fi
-          arena_cases=(default)
-          if [[ "$ALLOCATOR_COMPARISON" == true ]]; then arena_cases+=(2); fi
           for arena in "${arena_cases[@]}"; do
             for objects in "${object_counts[@]}"; do
+              case_result=0
               directory="performance-results/objects-$objects"
               arena_options=()
-              if [[ "$ALLOCATOR_COMPARISON" == true ]]; then
+              if [[ "$controlled_arenas" == true ]]; then
                 directory+="-allocator-$arena"
                 arena_options=(--glibc-arena-max "$arena")
               fi
@@ -196,20 +173,21 @@ jobs:
               env "${node_environment[@]}" "${recorder[@]}" \
                 --node target/release/verad --runner target/release/examples/operation_baseline \
                 --history "$HISTORY_BACKEND" --output "$directory" "${arena_options[@]}" \
-                "$count" 50 128 1 normal 100 192 0 "$objects" 256 1 || result=1
+                "$count" 50 128 1 normal 100 192 0 "$objects" 256 1 || case_result=1
               if [[ "$SUSTAINED_MEMORY_ATTRIBUTION" == true ]]; then
                 python3 tools/performance/snapshot_metrics.py "$directory" \
-                  --node-logs "$node_logs" --minimum-samples "$((count / 50 / 30))" || result=1
+                  --node-logs "$node_logs" --minimum-samples "$((count / 50 / 30))" || case_result=1
               fi
               if [[ "$ARCHIVE_RETENTION" == true ]]; then
-                python3 tools/performance/archive_retention.py "$directory" || result=1
+                python3 tools/performance/archive_retention.py "$directory" || case_result=1
               fi
-              "$RUNNER_TEMP/performance-python/bin/python" tools/performance/report.py "$directory" || result=1
-              if [[ "$ALLOCATOR_COMPARISON" == true ]]; then
+              "$RUNNER_TEMP/performance-python/bin/python" tools/performance/report.py "$directory" || case_result=1
+              if [[ "$controlled_arenas" == true ]]; then
                 echo "### Glibc arena selection: $arena" >> "$GITHUB_STEP_SUMMARY"
               fi
               if [[ -f "$directory/report.md" ]]; then sed '/^!\[/d' "$directory/report.md" >> "$GITHUB_STEP_SUMMARY"; fi
-              if [[ "$ALLOCATOR_COMPARISON" == true ]]; then rm -rf -- "$node_logs"; fi
+              if ((case_result != 0)); then result=1; fi
+              if [[ "$controlled_arenas" == true && "$case_result" == 0 ]]; then rm -rf -- "$node_logs"; fi
             done
           done
           exit "$result"

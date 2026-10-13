@@ -9,7 +9,7 @@ relationship between consensus, operator-managed membership, and ACP.
 
 ## Deployment
 
-Use the [qualified native source set](native-qualification-20261011.md) when
+Use the [qualified native source set](native-qualification-20261013.md) when
 reproducing the current consumer checks. Its evidence and outstanding gates are
 explicit; green integration checks alone do not establish production readiness.
 

@@ -256,7 +256,7 @@ not a production allocator recommendation or maximum-capacity measurement.
 The same workflow accepts `sustained_fixed_state=true` only through manual
 dispatch. It selects one Regolith fixed-state run: 90,000 offered
 operations at 50/s against 128 objects, a 30-minute arrival schedule within the
-driver's 100,000-operation bound. It retains the normal release profile, normal
+driver's 360,000-update bound. It retains the normal release profile, normal
 deadlines, 128 outstanding workflows, one verified permission read per write,
 100 RPC connections, pipelined consensus, 192-revision epochs and 256 retained
 consensus revisions. Receipt verification, all-replica reconciliation, hard
@@ -267,6 +267,25 @@ remain enabled.
 gh workflow run performance.yml --repo sourcenetwork/vera.rs --ref <branch-or-tag> \
   -f sustained_fixed_state=true
 ```
+
+For a longer fixed-state qualification, `extended_fixed_state=true` selects one
+360,000-update case at the same 50/s load over two hours, using two glibc arenas.
+Numeric resource snapshots are enabled without per-revision span-close tracing.
+The driver has three hours for setup, arrivals, complete replica verification
+and restart checks; the hosted job allows four hours including compilation.
+This mode cannot combine with the allocator comparison, growing-state,
+archive-retention or storage-attribution modes. It does not change the production
+allocator or interpret successful completion as a memory plateau.
+
+```sh
+gh workflow run performance.yml --repo sourcenetwork/vera.rs --ref <branch-or-tag> \
+  -f extended_fixed_state=true
+```
+
+Workload selection is validated before dependency installation. Controlled cases
+delete private node directories only after their workload, extraction and report
+checks pass. Failed-case directories remain private on the runner; exported
+manifests retain bounded failure locations, not panic payloads or raw node logs.
 
 `sustained_growing_state=true` selects the same schedule against a growing
 dataset (the driver's zero-seeded object mode) instead of 128 fixed objects.
@@ -457,6 +476,39 @@ Comparisons still accept version 1 or 2 baselines and show new measurements
 without inventing a baseline. Matching measurements retain their comparisons;
 missing measurements or inconsistent fixtures fail the report. These component
 ratios do not measure service throughput or establish a production resource bound.
+
+## Creation, registration and bulletin components
+
+Fixture version 4 retains the thirteen earlier measurements and adds policy
+creation, object registration, archive and unarchive, plus bulletin namespace
+registration and post creation/reads. Bulletin registration has separate cold and
+warm cases: cold includes lazy ACP policy initialization; warm uses an existing
+module policy. Post cases use 1 KiB and 64 KiB payloads with 64 proof bytes and an
+authorized collaborator.
+
+Before sampling, the fixtures check creation metadata, permission changes,
+collaborator rejection before a grant and after revocation, post payload/proof
+restoration and unchanged source snapshots. Every mutation starts from a fresh
+snapshot; owned command preparation and result disposal occur outside its timer.
+Reads include record decoding, allocation and result disposal. These are in-memory
+module costs. They exclude signing, executor dispatch, durable storage, consensus,
+transport and proof generation; bulletin reads do not verify application proof bytes.
+Existing component fixtures remain comparable, and added cases report no baseline
+until the target revision contains them.
+
+Fixture version 5 also measures caller operation-token signing, delegation
+authorization, delegated object registration and authenticated outcome recovery
+through another worker. The actor uses an ES256K operation token; workers have
+separate BLS identities. Fixture checks establish ownership, exact outcome
+binding, unchanged effects on retry, rejection of worker/operation substitution,
+and rejection after revocation before sampling. Module snapshots and owned
+commands are prepared outside the execution timer. Result disposal is outside
+all four timers. Authorization includes signature verification, claim/deployment
+and operation checks, and the current token-revocation lookup. Registration
+includes the original outcome and token-usage writes; retry includes authorization
+and outcome decoding. Native worker-signature verification, RPC, consensus and
+durable persistence are separate costs. Existing fixture versions retain their
+baselines; these four additions initially have no baseline.
 
 ## Local pipelined load measurement
 

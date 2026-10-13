@@ -1,5 +1,8 @@
 # Native qualification: October 11, 2026
 
+This is a historical source set. The [October 13 record](native-qualification-20261013.md)
+contains the current compatible sources and focused qualification results.
+
 This source set passed focused Linux consumer qualification with four pipelined
 Vera validators, Regolith finalized history and separate Go Trust and Rust Orbis
 services. These are immutable tested revisions, rather than moving branch heads.

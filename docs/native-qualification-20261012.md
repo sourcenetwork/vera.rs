@@ -1,5 +1,8 @@
 # Native candidate qualification on October 12, 2026
 
+This is a historical source set. The [October 13 record](native-qualification-20261013.md)
+contains the current compatible sources and focused qualification results.
+
 These results exercise Vera with Regolith finalized history and Commonware QMDB
 authenticated state. Candidate
 [`6448833486`](https://github.com/sourcenetwork/vera.rs/commit/64488334864dd03033513df389b7fb03d348452d)
