@@ -32,7 +32,7 @@ impl VeraApiImpl {
             .ok_or_else(|| error("finalized revision index unavailable"))?;
         let mut updates = self.state.proof_updates();
         tokio::time::timeout(Duration::from_secs(2), async {
-            let (selected, record) = loop {
+            let (selected, record, _permit) = loop {
                 let captured = {
                     let [a, b, h, n] = vera_backend::native::read_partitions([
                         &databases.0,
@@ -57,6 +57,7 @@ impl VeraApiImpl {
                         super::record::wait_for_proof_progress(&mut updates).await;
                         continue;
                     }
+                    let permit = self.state.proof_permit()?;
                     match vera_backend::native::record_proof_at(
                         [&a, &b, &h, &n],
                         selected.module_state_root,
@@ -65,7 +66,7 @@ impl VeraApiImpl {
                     )
                     .await
                     {
-                        Ok(record) => Some((selected, record)),
+                        Ok(record) => Some((selected, record, permit)),
                         Err(vera_backend::BackendError::Permission(PermissionError::Invalid(
                             "selected module root changed",
                         ))) => None,

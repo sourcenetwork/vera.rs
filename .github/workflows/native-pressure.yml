@@ -6,13 +6,21 @@ on:
       case:
         description: Focused validator availability case
         type: choice
-        options: [all, admission, stalled-validator, delayed-validator]
+        options: [all, admission, multiworker, stalled-validator, delayed-validator]
         default: all
   pull_request:
     paths:
       - .github/workflows/native-pressure.yml
       - crates/vera-e2e/tests/native_pressure.rs
       - crates/vera-e2e/tests/native_pressure/**
+      - crates/vera-e2e/examples/operation_baseline/resources.rs
+      - crates/vera-e2e/examples/operation_baseline/process_io.rs
+      - .github/scripts/run-native-pressure.py
+      - .github/scripts/qualify-native-pressure.py
+      - .github/scripts/test_qualify_native_pressure.py
+      - tools/performance/resource_usage.py
+      - tools/performance/process_io.py
+      - tools/performance/record.py
       - crates/vera-consensus/src/components/mempool.rs
       - crates/vera-node/src/tx_gossip.rs
       - crates/vera-executor/src/mempool.rs
@@ -36,6 +44,7 @@ jobs:
       PROTOC: /usr/bin/protoc
       VERAD_BINARY: ${{ github.workspace }}/target/release/verad
       PRESSURE_CASE: ${{ inputs.case || 'all' }}
+      VERA_TRACE_SPANS: '0'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -60,8 +69,15 @@ jobs:
       - name: Lint pressure fixture
         run: cargo clippy --frozen -p vera-e2e --test native_pressure -- -D warnings
       - name: Build pressure fixture
-        run: cargo test --release --frozen -p vera-e2e --test native_pressure --no-run
+        run: >-
+          cargo test --release --frozen -p vera-e2e --test native_pressure
+          --no-run --message-format=json > "$RUNNER_TEMP/pressure-build.jsonl"
+      - name: Check pressure evidence validation
+        run: >-
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover
+          -s .github/scripts -p test_qualify_native_pressure.py
       - name: Run selected validator availability cases
+        id: availability
         timeout-minutes: 15
         env:
           VERA_E2E_DIR: ${{ runner.temp }}/e2e-logs
@@ -71,9 +87,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "$PRESSURE_CASE" == all || "$PRESSURE_CASE" == admission ]]; then
+            python3 .github/scripts/run-native-pressure.py \
+              --build-metadata "$RUNNER_TEMP/pressure-build.jsonl" \
+              --directory "$RUNNER_TEMP/pressure-measurement" \
+              --logs "$VERA_E2E_DIR" \
+              --output "$RUNNER_TEMP/pressure-evidence.json"
+            if [[ "$PRESSURE_CASE" == admission ]]; then exit 0; fi
+          fi
+          if [[ "$PRESSURE_CASE" == all || "$PRESSURE_CASE" == multiworker ]]; then
+            python3 .github/scripts/run-native-pressure.py \
+              --case pipelined_multiworker_admission_preserves_each_sequence_when_quorum_recovers \
+              --build-metadata "$RUNNER_TEMP/pressure-build.jsonl" \
+              --directory "$RUNNER_TEMP/multiworker-pressure-measurement" \
+              --logs "$VERA_E2E_DIR/multiworker" \
+              --output "$RUNNER_TEMP/multiworker-pressure-evidence.json"
+            if [[ "$PRESSURE_CASE" == multiworker ]]; then exit 0; fi
+          fi
           case "$PRESSURE_CASE" in
-            all) selector=(--include-ignored) ;;
-            admission) selector=(pipelined_admission_preserves_work_when_quorum_recovers --exact) ;;
+            all) selector=(--include-ignored --skip pipelined_admission_preserves_work_when_quorum_recovers --skip pipelined_multiworker_admission_preserves_each_sequence_when_quorum_recovers) ;;
             stalled-validator) selector=(stalled_validator::pipelined_stalled_validator_crosses_epoch_and_rejoins_quorum --exact) ;;
             delayed-validator) selector=(delayed_validator::pipelined_delayed_validator_crosses_epoch_and_preserves_work --exact --ignored) ;;
             *) echo 'invalid validator availability case' >&2; exit 1 ;;
@@ -81,6 +113,15 @@ jobs:
           python3 .github/scripts/capture-tests.py --logs "$VERA_E2E_DIR" \
             cargo test --release --frozen -p vera-e2e --test native_pressure \
             -- --test-threads=1 "${selector[@]}"
+      - name: Retain numeric overload resources
+        if: always() && (steps.availability.outcome == 'success' || steps.availability.outcome == 'failure') && (inputs.case == 'admission' || inputs.case == 'multiworker' || inputs.case == 'all' || github.event_name == 'pull_request')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-admission-resources
+          path: |
+            ${{ runner.temp }}/pressure-evidence.json
+            ${{ runner.temp }}/multiworker-pressure-evidence.json
+          if-no-files-found: error
       - name: Collect bounded recovery evidence
         if: always()
         run: >-

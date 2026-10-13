@@ -192,7 +192,7 @@ async fn run(config: Config, counts: Arc<Counts>) -> Result<()> {
         evidence,
     });
     resources::storage(&cluster, "before_workload").await;
-    let (stop, sampler) = resources::start(&cluster);
+    let (stop, sampler, _) = resources::start(&cluster);
     let measured = measured(&config, &scenario, &client).await;
     let _ = stop.send(());
     sampler

@@ -287,3 +287,63 @@ and bounded, and incomplete or invalid observations fail qualification. Older
 version-1 artifacts retain aggregate timings; the missing observations cannot be
 recovered from those published files. The October 11 sustained result retains that
 limitation.
+
+## Hosted load curve
+
+The [Native mixed load workflow](../.github/workflows/native-mixed-load.yml)
+builds one normal release daemon and driver, then offers 1, 2, 4 and 8 workflows/s
+on the same hosted Linux machine. Each case starts four fresh validators and
+runs 256 workflows with at most eight concurrent workers. The topology, policy,
+object count, deadlines and binaries remain fixed across cases.
+
+Each timed case confirms 1,280 native submissions, 3,328 embedded mutations and
+15,360 permission checks. Setup, later definition edits, replica reconciliation
+and restart are outside throughput timing. Every case still requires all five
+replica verification phases and hard-restart recovery.
+
+The retained JSON includes individual workflow/submission timings, the member
+RSS series, CPU and process-I/O intervals, filesystem samples and source/binary
+hashes. The comparison rejects differing sources, binaries or hardware, missing
+cases, incomplete resources and timing summaries that disagree with observations.
+Fixture keys, databases and private logs are removed before upload.
+
+Backlog is reconstructed from scheduled arrivals, actual workflow starts and
+completions, so delayed starts remain visible even when all work eventually
+succeeds. This measures the bounded client; it does not measure validator queues
+or establish server saturation. Results describe these offered loads, rather than
+maximum capacity, a memory ceiling, WAN behavior or the separate Go gateway.
+
+## Measured four-rate result
+
+[Run 38461033855](https://github.com/sourcenetwork/vera.rs/actions/runs/38461033855)
+passed all four cases on the same hosted machine and normal release binaries.
+Each case completed 256 workflows, including its policy-definition edits,
+regrants, four-replica verification and hard-restart checks. The artifact checksum
+matched GitHub's digest and the numerical comparison regenerated exactly.
+
+| Offered workflows/s | Completed workflows/s | Certified native submissions/s | Scheduled workflow p95 | Schedule-lag p95 | Peak waiting workflows |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 0.999 | 4.997 | 1,188.51 ms | 1.83 ms | 1 |
+| 2 | 1.996 | 9.979 | 1,239.58 ms | 2.32 ms | 1 |
+| 4 | 3.951 | 19.754 | 1,289.06 ms | 2.61 ms | 1 |
+| 8 | 7.399 | 36.993 | 2,606.37 ms | 1,519.20 ms | 14 |
+
+The eight-workflow concurrency limit introduces waiting at the highest offered
+rate. All work still completes, but this is a client constraint measurement;
+it does not establish the validator's maximum service rate. A workflow contains
+five sequential certified submissions and sixty permission checks. Workflow
+latency therefore is not individual operation latency or consensus finality.
+
+Peak sampled validator RSS ranged from 147.29 to 218.10 MiB across the four cases.
+The workload count is fixed, so the case durations differ: approximately 256,
+128, 65 and 35 seconds. Their memory peaks cover different warm-up and history
+windows and do not establish a load-dependent memory improvement or ceiling.
+
+The tested merge is `f27117bc7247477cdffa2a05bb9f28d787263397`; its complete tree
+matches candidate `3f3f4673fc8ed44518e542c1ac37e2ae694390a4`. The normal daemon's
+SHA-256 is `a5349a3a3ad03f664dd5a9aae7b2556e7edf5203e43cddc6aef9d52824fd71f2`,
+matching the independently reproduced release and two-hour resource run. The
+artifact ZIP SHA-256 is
+`178400ffe8938f5ea95a46c41db327b591519bd33157b5f4df043f5d0ee639c4`.
+These are bounded mixed-policy results; whole-stack overload behavior, sustained
+resource limits and WAN qualification remain separate.

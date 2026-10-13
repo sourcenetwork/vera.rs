@@ -153,6 +153,72 @@ async fn rss_sample(pid: u32) -> serde_json::Value {
     })
 }
 
+pub(super) fn start(cluster: &TestCluster) -> (oneshot::Sender<()>, JoinHandle<()>, Instant) {
+    let started = Instant::now();
+    let started_at_unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|elapsed| u64::try_from(elapsed.as_millis()).ok());
+    let pids: Vec<_> = (0..4)
+        .map(|i| cluster.node(i).process.id().expect("running node"))
+        .collect();
+    println!(
+        "{}",
+        json!({"kind": "resource_configuration", "node_pids": pids,
+        "started_at_unix_ms": started_at_unix_ms,
+        "sample_interval_ms": 1000, "rss_unit": "KiB", "cpu_time": "cumulative ps time",
+        "process_io_source": if cfg!(target_os = "linux") { "linux_proc_io" } else { "unsupported" },
+        "rss_breakdown_source": if cfg!(target_os = "linux") { "linux_proc_status" } else { "unsupported" }})
+    );
+    let selection = pids
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let (stop, mut stopped) = oneshot::channel();
+    let task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                _ = &mut stopped => break,
+                _ = interval.tick() => {}
+            }
+            let (output, rss_breakdown, process_io) = tokio::join!(
+                async {
+                    tokio::time::timeout(
+                        Duration::from_secs(2),
+                        Command::new("ps")
+                            .args(["-p", &selection, "-o", "pid=,rss=,time="])
+                            .kill_on_drop(true)
+                            .output(),
+                    )
+                    .await
+                },
+                futures::future::join_all(pids.iter().copied().map(rss_sample)),
+                futures::future::join_all(pids.iter().copied().map(process_io::sample)),
+            );
+            let mut sample = match output {
+                Ok(Ok(output)) if output.status.success() => match String::from_utf8(output.stdout)
+                {
+                    Ok(rows) => json!({"rows": rows}),
+                    Err(error) => json!({"error": error.to_string()}),
+                },
+                Ok(Ok(output)) => json!({"error": String::from_utf8_lossy(&output.stderr)}),
+                Ok(Err(error)) => json!({"error": error.to_string()}),
+                Err(_) => json!({"error": "process sampling timed out"}),
+            };
+            sample["rss_breakdown"] = json!(rss_breakdown);
+            sample["process_io"] = json!(process_io);
+            println!(
+                "{}",
+                json!({"kind": "resources", "elapsed_seconds": started.elapsed().as_secs_f64(), "sample": sample})
+            );
+        }
+    });
+    (stop, task, started)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,65 +310,4 @@ mod tests {
                 .sum::<u64>()
         );
     }
-}
-
-pub(super) fn start(cluster: &TestCluster) -> (oneshot::Sender<()>, JoinHandle<()>) {
-    let pids: Vec<_> = (0..4)
-        .map(|i| cluster.node(i).process.id().expect("running node"))
-        .collect();
-    println!(
-        "{}",
-        json!({"kind": "resource_configuration", "node_pids": pids,
-        "sample_interval_ms": 1000, "rss_unit": "KiB", "cpu_time": "cumulative ps time",
-        "process_io_source": if cfg!(target_os = "linux") { "linux_proc_io" } else { "unsupported" },
-        "rss_breakdown_source": if cfg!(target_os = "linux") { "linux_proc_status" } else { "unsupported" }})
-    );
-    let selection = pids
-        .iter()
-        .map(u32::to_string)
-        .collect::<Vec<_>>()
-        .join(",");
-    let (stop, mut stopped) = oneshot::channel();
-    let task = tokio::spawn(async move {
-        let started = Instant::now();
-        let mut interval = tokio::time::interval(Duration::from_secs(1));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            tokio::select! {
-                _ = &mut stopped => break,
-                _ = interval.tick() => {}
-            }
-            let (output, rss_breakdown, process_io) = tokio::join!(
-                async {
-                    tokio::time::timeout(
-                        Duration::from_secs(2),
-                        Command::new("ps")
-                            .args(["-p", &selection, "-o", "pid=,rss=,time="])
-                            .kill_on_drop(true)
-                            .output(),
-                    )
-                    .await
-                },
-                futures::future::join_all(pids.iter().copied().map(rss_sample)),
-                futures::future::join_all(pids.iter().copied().map(process_io::sample)),
-            );
-            let mut sample = match output {
-                Ok(Ok(output)) if output.status.success() => match String::from_utf8(output.stdout)
-                {
-                    Ok(rows) => json!({"rows": rows}),
-                    Err(error) => json!({"error": error.to_string()}),
-                },
-                Ok(Ok(output)) => json!({"error": String::from_utf8_lossy(&output.stderr)}),
-                Ok(Err(error)) => json!({"error": error.to_string()}),
-                Err(_) => json!({"error": "process sampling timed out"}),
-            };
-            sample["rss_breakdown"] = json!(rss_breakdown);
-            sample["process_io"] = json!(process_io);
-            println!(
-                "{}",
-                json!({"kind": "resources", "elapsed_seconds": started.elapsed().as_secs_f64(), "sample": sample})
-            );
-        }
-    });
-    (stop, task)
 }

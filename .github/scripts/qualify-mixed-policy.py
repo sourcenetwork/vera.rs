@@ -9,6 +9,11 @@ from pathlib import Path
 import re
 import stat
 import subprocess
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tools' / 'performance'))
+from process_io import summarize_io
+from resource_usage import summarize_resources
 
 WORKFLOW_PHASES = ('initial_grants', 'member_revoke', 'member_regrant', 'blocked_deny', 'unblock')
 REPLICA_PHASES = ('after_workload', 'remove_member', 'reintroduce_member', 'after_explicit_regrant', 'after_hard_restart')
@@ -16,6 +21,7 @@ COUNT_FIELDS = ('issued_native_submissions', 'issued_embedded_mutations', 'certi
                 'submission_attempts', 'certified_successes', 'verified_permission_checks',
                 'verified_owners', 'throttled_requests')
 PROFILES = {'ci': (16, 2, 900, 0), 'sustained': (2048, 1, 5400, 1800)}
+PROFILES.update({f'curve-{rate}': (256, rate, 1800, 255 // rate) for rate in (1, 2, 4, 8)})
 
 
 class InvalidEvidence(ValueError):
@@ -255,10 +261,20 @@ def main():
         configurations = [row for row in records if row.get('kind') == 'configuration']
         require(len(configurations) == 1 and configurations[0]['daemon'] == str(args.node.resolve()), 'provenance')
         hardware = hardware_manifest(manifest)
-        evidence = qualify(records, workflows, rate, deadline, minimum_seconds)
-        evidence.update(profile=args.profile, source_revision=revision,
-                        node_sha256=manifest['node_sha256'], runner_sha256=manifest['runner_sha256'],
-                        hardware=hardware)
+        qualified = qualify(records, workflows, rate, deadline, minimum_seconds)
+        qualified.update(profile=args.profile, source_revision=revision,
+                         node_sha256=manifest['node_sha256'], runner_sha256=manifest['runner_sha256'],
+                         hardware=hardware)
+        if args.profile.startswith('curve-'):
+            summary = next(row for row in records if row.get('kind') == 'workload_summary')
+            qualified.update(
+                offered_workflows_per_second=rate,
+                timed_counts={field: summary['counts_after'][field] - summary['counts_before'][field]
+                              for field in COUNT_FIELDS},
+                process_io=summarize_io(args.directory / 'workload.jsonl'),
+                resource_usage=summarize_resources(args.directory / 'workload.jsonl'),
+            )
+        evidence = qualified
     except InvalidEvidence as error:
         evidence['failure_stage'] = str(error)
     except (OSError, KeyError, TypeError, ValueError, subprocess.SubprocessError):

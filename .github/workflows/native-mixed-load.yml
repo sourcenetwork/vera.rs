@@ -1,0 +1,78 @@
+name: Native mixed load
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/native-mixed-load.yml
+      - .github/scripts/qualify-mixed-policy.py
+      - .github/scripts/run-native-mixed-load.sh
+      - tools/performance/mixed_curve.py
+      - tools/performance/test_mixed_curve.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-mixed-load-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  curve:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_TERM_COLOR: always
+      VERA_TRACE_SPANS: '0'
+      VERA_E2E_KEEP: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@62ae3a85dbdd2bedbb5819da8ce45635129289a1 # 1.98.0
+        with:
+          toolchain: 1.98.0
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: performance-regolith
+      - name: Fetch locked dependencies
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
+        run: cargo fetch --locked
+      - name: Check evidence validation
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_qualify_mixed_policy.py
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_mixed_curve.py
+      - name: Build normal release artifacts once
+        run: |
+          cargo build --release --frozen -p verad
+          cargo build --release --frozen -p vera-e2e --example mixed_policy_workload
+      - name: Measure four increasing mixed loads
+        timeout-minutes: 125
+        shell: bash
+        run: bash .github/scripts/run-native-mixed-load.sh
+      - name: Compare source-matched cases
+        run: |
+          python3 tools/performance/mixed_curve.py --directory mixed-load-results
+          cat mixed-load-results/report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain bounded numerical evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-mixed-load-${{ github.sha }}
+          path: mixed-load-results/*.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Stop remaining fixture nodes
+        if: always()
+        run: python3 .github/scripts/stop-test-nodes.py "$GITHUB_WORKSPACE/target/release/verad"

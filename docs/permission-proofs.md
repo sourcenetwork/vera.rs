@@ -5,6 +5,12 @@ and `vera_getRelationProof` are not registered; record and complete-prefix reads
 use the native endpoints below. The server no longer provides JMT storage or
 relationship cardinality indexes.
 
+The JSON-RPC request budget covers the complete encoded body, including all batch
+members and request metadata. HTTP requests exceeding that budget return HTTP 413
+with JSON-RPC code `-32007`, whether the length is declared or the body is streamed.
+Rejection occurs before dispatching any member. The separate 64-member batch limit
+also applies.
+
 ## Native record reads
 
 `vera_getCurrentRecordProof(module, key, minimum_height)` returns
@@ -161,6 +167,14 @@ disagree even when they authenticate the same state.
 `VeraClient::verify_access_at` verifies a supplied finalized revision against an independently configured consensus key, fetches bounded evidence and evaluates it locally. It checks the HTTP response size before deserialization, including chunked responses, checks the JSON-RPC request ID, and applies a ten-second request timeout. The caller controls revision freshness. The method does not fall back to an older revision or interpret unavailable evidence as a denial or grant.
 
 Service limits are 64 operations, 64 KiB of serialized policy ID and request, 256 evaluation reads, 4,096 returned records across those reads, 1 MiB of request-key and returned-record bytes, and 4 MiB of serialized evidence. Client transport permits the proof limit plus 1 KiB for the RPC envelope. Clients may impose tighter limits. These read limits do not bound pure expression work or establish a sustained-throughput guarantee.
+
+Current permission, policy, record, prefix and page reads share eight request
+slots while waiting for publication or storage. They acquire one of eight shared
+proof slots only after the selected revision is eligible, before allocating
+evidence. Captured evidence retains that slot through finality lookup and response
+size checks; storage guards are released before finality waits. Cancellation,
+deadline expiry and failed attempts release their slots. Capacity exhaustion
+returns a retryable resource-unavailable error, not an authorization result.
 
 The server captures reads from one immutable current module snapshot, generates evidence at the requested revision and verifies the resulting request before returning it. Changes in membership or policy can make historical evidence unavailable. Every successful response nevertheless evaluates entirely against the requested revision. Client verification is independent of the server's capture decisions.
 

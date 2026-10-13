@@ -3,7 +3,7 @@ use crate::error::codes;
 use std::time::Duration;
 
 #[tokio::test]
-async fn proof_admission_is_shared_and_released_on_errors() {
+async fn missing_storage_releases_current_evidence_waiting_permit() {
     let state = Arc::new(NodeState::new(1, 0, 1));
     let api = VeraApiImpl::new(Arc::new(state.as_ref().clone()), None);
     let mut permits: Vec<_> = (0..8).map(|_| state.proof_permit().unwrap()).collect();
@@ -12,20 +12,22 @@ async fn proof_admission_is_shared_and_released_on_errors() {
         .await
         .unwrap_err();
     assert_eq!(error.code(), codes::RESOURCE_UNAVAILABLE);
-    assert_eq!(error.data().unwrap().get(), r#"{"retryable":true}"#);
-    assert_eq!(
-        api.get_receipt_proof(B256::ZERO).await.unwrap_err().code(),
-        codes::RESOURCE_UNAVAILABLE
-    );
+    assert_eq!(error.message(), "native module storage unavailable");
+    assert!(state.proof_permit().is_err());
     drop(permits.pop());
-    for _ in 0..2 {
+    for _ in 0..16 {
         let error = api
             .get_current_record_proof(ModuleId::Acp, Bytes::new(), U64::ZERO)
             .await
             .unwrap_err();
         assert_eq!(error.code(), codes::RESOURCE_UNAVAILABLE);
+        assert_eq!(error.message(), "native module storage unavailable");
     }
     assert!(state.proof_permit().is_ok());
+    let _waiting: Vec<_> = (0..8)
+        .map(|_| state.permission_read_permit().unwrap())
+        .collect();
+    assert!(state.permission_read_permit().is_err());
 }
 
 #[tokio::test]

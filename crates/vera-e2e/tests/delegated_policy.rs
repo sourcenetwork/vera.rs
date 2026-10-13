@@ -11,7 +11,7 @@ use vera_client::{
     RECORD_PROOF_BYTES, VERA_ADDRESS, VeraClient, create_bearer_token, create_scoped_bearer_token,
 };
 use vera_domain::{ConsensusPublicKey, NativeTx};
-use vera_e2e::cluster::{ConsensusPreset, KeySet, TestCluster};
+use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, TestCluster};
 use vera_modules::{
     acp::{abi::IAcp, keys::policy_key, types::PolicyRecord},
     vera::abi::IVera,
@@ -138,6 +138,7 @@ async fn native_workers_preserve_policy_ownership_results_and_revocation() {
         .nodes(4)
         .seed(deployment)
         .chain_id(deployment)
+        .genesis(GenesisBuilder::devnet().simplex(Default::default()))
         .preset(ConsensusPreset::Normal)
         .build()
         .await
@@ -352,7 +353,6 @@ mod administration_support;
 async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
     use vera_client::{administration::AdministrativeCommand, create_relay_token};
     use vera_crypto::jwt::{JwtClaims, RelayAssertion};
-    use vera_e2e::cluster::GenesisBuilder;
     use vera_modules::{
         acp::{delegated_operation::DelegatedOperation, types::PolicyMarshalingType},
         vera::relay::RelayGrant,
@@ -371,7 +371,11 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
         .nodes(4)
         .seed(deployment)
         .chain_id(deployment)
-        .genesis(GenesisBuilder::devnet().operators(administration_support::operators()))
+        .genesis(
+            GenesisBuilder::devnet()
+                .operators(administration_support::operators())
+                .simplex(Default::default()),
+        )
         .preset(ConsensusPreset::Normal)
         .build()
         .await
