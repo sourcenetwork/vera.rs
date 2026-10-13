@@ -256,7 +256,7 @@ not a production allocator recommendation or maximum-capacity measurement.
 The same workflow accepts `sustained_fixed_state=true` only through manual
 dispatch. It selects one Regolith fixed-state run: 90,000 offered
 operations at 50/s against 128 objects, a 30-minute arrival schedule within the
-driver's 100,000-operation bound. It retains the normal release profile, normal
+driver's 360,000-update bound. It retains the normal release profile, normal
 deadlines, 128 outstanding workflows, one verified permission read per write,
 100 RPC connections, pipelined consensus, 192-revision epochs and 256 retained
 consensus revisions. Receipt verification, all-replica reconciliation, hard
@@ -267,6 +267,25 @@ remain enabled.
 gh workflow run performance.yml --repo sourcenetwork/vera.rs --ref <branch-or-tag> \
   -f sustained_fixed_state=true
 ```
+
+For a longer fixed-state qualification, `extended_fixed_state=true` selects one
+360,000-update case at the same 50/s load over two hours, using two glibc arenas.
+Numeric resource snapshots are enabled without per-revision span-close tracing.
+The driver has three hours for setup, arrivals, complete replica verification
+and restart checks; the hosted job allows four hours including compilation.
+This mode cannot combine with the allocator comparison, growing-state,
+archive-retention or storage-attribution modes. It does not change the production
+allocator or interpret successful completion as a memory plateau.
+
+```sh
+gh workflow run performance.yml --repo sourcenetwork/vera.rs --ref <branch-or-tag> \
+  -f extended_fixed_state=true
+```
+
+Workload selection is validated before dependency installation. Controlled cases
+delete private node directories only after their workload, extraction and report
+checks pass. Failed-case directories remain private on the runner; exported
+manifests retain bounded failure locations, not panic payloads or raw node logs.
 
 `sustained_growing_state=true` selects the same schedule against a growing
 dataset (the driver's zero-seeded object mode) instead of 128 fixed objects.
