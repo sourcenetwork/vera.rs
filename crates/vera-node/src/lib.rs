@@ -41,6 +41,8 @@ pub use node::{run_node, run_node_with_rpc_listener};
 mod participants;
 pub use participants::{RegistryParticipants, validator_address};
 
+mod peer_capacity;
+
 mod provider;
 mod ready_application;
 mod rejoin;

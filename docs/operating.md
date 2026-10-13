@@ -226,6 +226,23 @@ Sizing must account for live policies, objects, relationships and signer records
 as well as protocol queues, storage buffers and allocator retention. History-cache
 limits do not bound total process memory.
 
+The authenticated network derives its per-set capacity from the genesis epoch
+length and leader term. If each committee supports at most `C` participants,
+the tracked set permits `3 * C + 1` identities: disjoint dealers, current players
+and next players, plus the local identity when it is outside those groups.
+Bootstrap rejects a participant count beyond the epoch's committee capacity
+before creating the network.
+
+Commonware retains four tracked sets by default and separately counts distinct
+configured remote bootstrappers. Every channel reserves one 64-message burst
+per retained identity; the shared outbound queue adds the contributions from
+all channels to its 1,024-message base. With 100-block epochs, 16-view leader
+terms and three remote bootstrappers, the per-set limit is 13, the retained-peer
+bound is 55, each inbound queue has 3,520 slots and the 16-channel outbound
+queue has 57,344 slots. These are queue element limits, not allocated payload
+bytes or a process-memory bound. A deployment supporting 64 participants per
+committee needs a per-set limit of 193 to permit disjoint membership changes.
+
 | Resident cache | Entry limit | Retained payload budget |
 | --- | ---: | ---: |
 | Execution revisions, transactions and receipts | 1,024 revisions | 64 MiB target |

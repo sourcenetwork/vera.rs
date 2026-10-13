@@ -24,7 +24,7 @@ use commonware_stream::{
     sake::{self, Sake},
 };
 use commonware_utils::{
-    N3f1, NZU64, NZUsize, TestRng,
+    N3f1, NZU64, TestRng,
     ordered::{Map, Set},
     sequence::Unit,
 };
@@ -34,9 +34,9 @@ use vera_genesis::VeraGenesis;
 
 use crate::{
     BACKFILL_CHANNEL, BROADCAST_CHANNEL, CERTIFICATE_CHANNEL, DKG_CHANNEL, FileSecretStore,
-    IO_BUFFER_SIZE, MAILBOX_SIZE, MAX_MESSAGE_SIZE, MAX_PARTICIPANTS, MAX_SUPPORTED_MODE,
-    MESSAGE_RATE, NAMESPACE, P2P_SUFFIX, PAGE_CACHE_SIZE, PAGE_SIZE, PeerSet, RESOLVER_CHANNEL,
-    REVEAL, SHARING_MODE, VOTE_CHANNEL,
+    IO_BUFFER_SIZE, MAILBOX_SIZE, MAX_MESSAGE_SIZE, MAX_SUPPORTED_MODE, MESSAGE_RATE, NAMESPACE,
+    P2P_SUFFIX, PAGE_CACHE_SIZE, PAGE_SIZE, PeerSet, RESOLVER_CHANNEL, REVEAL, SHARING_MODE,
+    VOTE_CHANNEL, peer_capacity::PeerCapacity,
 };
 
 /// Epoch-0 artifact carried by the genesis block.
@@ -60,6 +60,19 @@ pub async fn run_bootstrap(
     context: tokio::Context,
     mut settings: BootstrapSettings,
 ) -> anyhow::Result<GenesisEpochInfo> {
+    if let Some(parameters) = settings.genesis.simplex {
+        parameters.validate().map_err(anyhow::Error::msg)?;
+    }
+    let term_length = NonZeroU64::new(
+        settings
+            .genesis
+            .simplex
+            .map_or(1, |parameters| parameters.term_length),
+    )
+    .expect("validated leader term length");
+    let blocks_per_epoch = NonZeroU64::new(settings.genesis.blocks_per_epoch)
+        .ok_or_else(|| anyhow::anyhow!("genesis blocks_per_epoch must be non-zero"))?;
+    let peer_capacity = PeerCapacity::new(blocks_per_epoch, term_length)?;
     let signing_key = settings.config.validator_key()?;
     let local = signing_key.public_key();
     let participants = Set::from_iter_dedup(settings.peers.participants.iter().cloned());
@@ -69,6 +82,12 @@ pub async fn run_bootstrap(
     if participants.position(&local).is_none() {
         anyhow::bail!("validator key is not listed in peers.json");
     }
+    anyhow::ensure!(
+        participants.len() <= peer_capacity.participants(),
+        "bootstrap has {} participants, but epoch length {blocks_per_epoch} and leader term {term_length} support at most {}",
+        participants.len(),
+        peer_capacity.participants(),
+    );
 
     let listen = settings.config.network.listen_addr.parse()?;
     let dial = settings
@@ -98,7 +117,7 @@ pub async fn run_bootstrap(
         listen,
         dial,
         bootstrappers,
-        NZUsize!(MAX_PARTICIPANTS.get() as usize),
+        peer_capacity.tracked(),
         MAX_MESSAGE_SIZE,
     );
     p2p_config.mailbox_size = MAILBOX_SIZE;
@@ -111,8 +130,6 @@ pub async fn run_bootstrap(
     let dkg = p2p.register(DKG_CHANNEL, MESSAGE_RATE);
 
     let store = FileSecretStore::load(&settings.secrets_path)?;
-    let blocks_per_epoch = NonZeroU64::new(settings.genesis.blocks_per_epoch)
-        .ok_or_else(|| anyhow::anyhow!("genesis blocks_per_epoch must be non-zero"))?;
     let engine = bootstrap::Engine::<_, MinSig, _, _, _, _, _>::new(
         context.child("bootstrap"),
         bootstrap::Config {
