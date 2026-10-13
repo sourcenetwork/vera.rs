@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from protocol import SCHEMAS, unavailable
-from compare_pr import BASIC_ACP_COMPONENTS, BULLETIN_COMPONENTS, COMPONENT_FIXTURES, COMPONENTS, LIFECYCLE_COMPONENTS, LOGICAL_EDIT_COMPONENTS, TAGS, change, compare, components
+from compare_pr import BASIC_ACP_COMPONENTS, BULLETIN_COMPONENTS, COMPONENT_FIXTURES, COMPONENTS, DELEGATION_COMPONENTS, LIFECYCLE_COMPONENTS, LOGICAL_EDIT_COMPONENTS, TAGS, change, compare, components
 
 
 class CompareTests(unittest.TestCase):
@@ -276,6 +276,39 @@ class CompareTests(unittest.TestCase):
         result = json.loads((self.root / 'comparison-report.json').read_text())
         metrics = {row['metric']: row for row in result['metrics']}
         for name in BASIC_ACP_COMPONENTS + BULLETIN_COMPONENTS:
+            self.assertEqual(metrics[f'{name}: ns/op']['verdict'], 'regression signal')
+        path = self.root / 'head1' / 'components.jsonl'
+        path.write_text('\n'.join(path.read_text().splitlines()[:-1]))
+        with self.assertRaisesRegex(ValueError, 'missing component'):
+            components(path)
+
+    def test_delegation_additions_preserve_v3_and_v4_baselines(self):
+        for version in (3, 4):
+            with self.subTest(version=version):
+                for tag in ('base1', 'base2'):
+                    self.write_native_components(tag, version=version)
+                for tag in ('head1', 'head2'):
+                    self.write_native_components(tag, version=5)
+                with patch('compare_pr.load_run', side_effect=self.run_fixture):
+                    self.assertFalse(compare(self.root))
+                result = json.loads((self.root / 'comparison-report.json').read_text())
+                self.assertFalse(result['errors'])
+                metrics = {row['metric']: row for row in result['metrics']}
+                for name in COMPONENT_FIXTURES[version]:
+                    self.assertEqual(metrics[f'{name}: ns/op']['change_percent'], 0)
+                for name in DELEGATION_COMPONENTS:
+                    self.assertEqual(metrics[f'{name}: ns/op']['base'], [])
+                    self.assertIsNone(metrics[f'{name}: ns/op']['change_percent'])
+                    self.assertEqual(metrics[f'{name}: ns/op']['verdict'], 'new benchmark; no baseline')
+
+    def test_delegation_regression_and_missing_case_are_not_hidden(self):
+        for tag in TAGS:
+            self.write_native_components(tag, 120 if tag.startswith('head') else 100, version=5)
+        with patch('compare_pr.load_run', side_effect=self.run_fixture):
+            self.assertFalse(compare(self.root))
+        result = json.loads((self.root / 'comparison-report.json').read_text())
+        metrics = {row['metric']: row for row in result['metrics']}
+        for name in DELEGATION_COMPONENTS:
             self.assertEqual(metrics[f'{name}: ns/op']['verdict'], 'regression signal')
         path = self.root / 'head1' / 'components.jsonl'
         path.write_text('\n'.join(path.read_text().splitlines()[:-1]))

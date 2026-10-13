@@ -496,6 +496,20 @@ transport and proof generation; bulletin reads do not verify application proof b
 Existing component fixtures remain comparable, and added cases report no baseline
 until the target revision contains them.
 
+Fixture version 5 also measures caller operation-token signing, delegation
+authorization, delegated object registration and authenticated outcome recovery
+through another worker. The actor uses an ES256K operation token; workers have
+separate BLS identities. Fixture checks establish ownership, exact outcome
+binding, unchanged effects on retry, rejection of worker/operation substitution,
+and rejection after revocation before sampling. Module snapshots and owned
+commands are prepared outside the execution timer. Result disposal is outside
+all four timers. Authorization includes signature verification, claim/deployment
+and operation checks, and the current token-revocation lookup. Registration
+includes the original outcome and token-usage writes; retry includes authorization
+and outcome decoding. Native worker-signature verification, RPC, consensus and
+durable persistence are separate costs. Existing fixture versions retain their
+baselines; these four additions initially have no baseline.
+
 ## Local pipelined load measurement
 
 On September 19, 2026, four validators on one macOS host used RocksDB history,

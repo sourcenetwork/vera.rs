@@ -6,6 +6,8 @@ mod basic_acp;
 mod bulletin;
 #[path = "component_baseline/certificate.rs"]
 mod certificate;
+#[path = "component_baseline/delegation.rs"]
+mod delegation;
 #[path = "component_baseline/lifecycle.rs"]
 mod lifecycle;
 #[path = "component_baseline/logical_edit.rs"]
@@ -86,7 +88,7 @@ fn main() {
     }
     println!(
         "{}",
-        json!({"format_version": 1, "fixture_version": 4,
+        json!({"format_version": 1, "fixture_version": 5,
         "kind": "configuration", "samples": 9, "sample_ms": 100, "warmup_ms": 200})
     );
     let signer = BlsSigner::new(42_u64.into(), 9001).unwrap();
@@ -146,4 +148,5 @@ fn main() {
     logical_edit::run();
     basic_acp::run();
     bulletin::run();
+    delegation::run();
 }

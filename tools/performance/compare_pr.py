@@ -22,11 +22,14 @@ BULLETIN_COMPONENTS = ('bulletin_namespace_cold', 'bulletin_namespace_warm') + t
     f'bulletin_post_{operation}_{size}'
     for size in ('1k', '64k') for operation in ('create', 'read')
 )
+DELEGATION_COMPONENTS = ('native_operation_token_sign', 'native_delegation_authorize',
+                         'acp_delegated_register', 'acp_delegated_retry')
 COMPONENT_FIXTURES = {
     1: COMPONENTS,
     2: COMPONENTS + LIFECYCLE_COMPONENTS,
     3: COMPONENTS + LIFECYCLE_COMPONENTS + LOGICAL_EDIT_COMPONENTS,
     4: COMPONENTS + LIFECYCLE_COMPONENTS + LOGICAL_EDIT_COMPONENTS + BASIC_ACP_COMPONENTS + BULLETIN_COMPONENTS,
+    5: COMPONENTS + LIFECYCLE_COMPONENTS + LOGICAL_EDIT_COMPONENTS + BASIC_ACP_COMPONENTS + BULLETIN_COMPONENTS + DELEGATION_COMPONENTS,
 }
 
 
