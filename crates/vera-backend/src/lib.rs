@@ -25,3 +25,6 @@ pub mod native;
 
 /// Bounded peer transport for persisted state partitions.
 pub mod p2p;
+
+#[cfg(test)]
+mod power_loss_tests;
