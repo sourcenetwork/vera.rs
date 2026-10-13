@@ -179,7 +179,7 @@ mod tests {
                     Result<(), Error>,
                 >())]);
             let mut observed =
-                Box::pin(observe(barrier, None, Instant::now(), Some(metrics)).durable());
+                Box::pin(observe(barrier, None, Instant::now(), Some(metrics.clone())).durable());
             assert!(observed.as_mut().now_or_never().is_none());
             drop(observed);
             counts(1);
