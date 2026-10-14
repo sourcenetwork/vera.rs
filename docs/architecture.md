@@ -6,9 +6,10 @@ return results that clients can verify. Operators control consensus membership.
 DefraDB stores application documents; Vera stores policies, relationships,
 identities, coordination records, and their certified history.
 
-This describes the native implementation. Recovery qualification, deployment
-packaging, and sustained capacity measurements remain open. Implementation is
-not a claim of production qualification.
+This describes the native implementation. Source-bound recovery, consumer and
+workload results are recorded in the [qualification report](native-qualification-20261014.md)
+and [operating envelope](storage-resource-envelope.md). Those finite local results
+do not establish a release's behavior across every deployment or a WAN.
 
 The [causal authorization design](causal-authorization.md) records the agreed
 direction for offline policy and document histories, existing function boundaries,
