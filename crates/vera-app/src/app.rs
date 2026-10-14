@@ -1,7 +1,7 @@
 //! The glue stateful application.
 
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::BTreeSet,
     sync::Arc,
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
@@ -14,23 +14,17 @@ use commonware_consensus::types::Round;
 use commonware_cryptography::Digestible as _;
 use commonware_glue::stateful::{Application, Input, Proposed};
 use futures::StreamExt as _;
-use parking_lot::Mutex;
 use std::marker::PhantomData;
 use tracing::{info, warn};
 use vera_backend::Ctx;
 use vera_consensus::{Mempool as _, TxId, components::InMemoryMempool};
-use vera_domain::{Block, BlockId, ConsensusContext, PublicKey};
+use vera_domain::{Block, ConsensusContext, PublicKey};
 use vera_executor::{BlockContext, ExecutionReceipt, VeraExecutor, receipt_commitment};
 
 use crate::{AppError, ConsensusScheme, FinalizedSink, ReshareInput};
 
 const MAX_CLOCK_DRIFT_SECS: u64 = 15;
 const MAX_PENDING_ANCESTORS: usize = 64;
-
-struct PendingExecution {
-    height: u64,
-    receipts: Vec<ExecutionReceipt>,
-}
 
 /// Vera block production and verification on top of glue-managed state.
 #[derive(Clone)]
@@ -46,7 +40,6 @@ pub struct StatefulVeraApp<S: FinalizedSink, D: ApplicationState = OrderedState>
     vrf_seeds: VrfSeedCache,
     native_pipeline: bool,
     proposal_batch_wait: std::time::Duration,
-    pending: Arc<Mutex<HashMap<BlockId, PendingExecution>>>,
 }
 
 impl<S: FinalizedSink, D: ApplicationState> std::fmt::Debug for StatefulVeraApp<S, D> {
@@ -84,7 +77,6 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
             vrf_seeds: VrfSeedCache::default(),
             native_pipeline: false,
             proposal_batch_wait: std::time::Duration::ZERO,
-            pending: Arc::default(),
         }
     }
 
@@ -180,18 +172,10 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
         }) {
             return Err(AppError::RootMismatch("execution receipts"));
         }
-        self.cache_execution(block, executed.outcome.receipts);
-        Ok(executed.batches)
-    }
-
-    fn cache_execution(&self, block: &Block, receipts: Vec<ExecutionReceipt>) {
-        self.pending.lock().insert(
-            block.id(),
-            PendingExecution {
-                height: block.height,
-                receipts,
-            },
-        );
+        Ok(D::with_receipts(
+            executed.batches,
+            executed.outcome.receipts,
+        ))
     }
 
     fn pending_tx_ids(blocks: &[Arc<Block>]) -> BTreeSet<TxId> {
@@ -322,7 +306,6 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         if !block.fits_wire_limits() {
             return None;
         }
-        self.cache_execution(&block, executed.outcome.receipts);
         info!(
             block_digest = ?block.digest(),
             height,
@@ -336,7 +319,7 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         self.sink.proposed(&block);
         Some(Proposed {
             block,
-            merkleized: executed.batches,
+            merkleized: D::with_receipts(executed.batches, executed.outcome.receipts),
         })
     }
 
@@ -433,14 +416,16 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         &mut self,
         _context: (Ctx, Self::Context),
         block: &Self::Block,
-        _batches: &D::Merkleized,
+        batches: &D::Merkleized,
         _readers: D::Readers,
     ) -> Self::Captured {
-        let pending = self.pending.lock();
-        let execution = pending
-            .get(&block.id())
-            .expect("finalized block must have its execution result");
-        execution.receipts.clone()
+        let receipts = D::receipts(batches);
+        assert_eq!(
+            block.receipt_commitment,
+            Some(receipt_commitment(self.gas_limit, receipts)),
+            "sealed execution receipts must match the selected block"
+        );
+        receipts.to_vec()
     }
 
     async fn finalized(
@@ -454,8 +439,5 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         self.mempool.prune(&ids);
         self.sink.finalized(block, captured).await;
         self.vrf_seeds.finalized(block.context.round);
-        self.pending
-            .lock()
-            .retain(|_, execution| execution.height >= block.height);
     }
 }

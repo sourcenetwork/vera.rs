@@ -1,7 +1,7 @@
 use commonware_glue::stateful::db::DatabaseSet;
 use vera_backend::Ctx;
 use vera_domain::{Block, DbTarget, DbTargets, StateRoot, Tx};
-use vera_executor::{BlockContext, ExecutionOutcome, VeraExecutor};
+use vera_executor::{BlockContext, ExecutionOutcome, ExecutionReceipt, VeraExecutor};
 
 use crate::{AppError, ordered_state::OrderedState};
 
@@ -30,6 +30,13 @@ pub trait ApplicationState: DatabaseSet<Ctx> + Clone + Send + Sync + 'static {
     fn accepts(block: &Block) -> bool;
     /// Targets from a block whose storage layout has already been checked.
     fn targets(block: &Block) -> Self::SyncTargets;
+    /// Attach execution receipts to their sealed proposal, outside storage commitments.
+    fn with_receipts(
+        batches: Self::Merkleized,
+        receipts: Vec<ExecutionReceipt>,
+    ) -> Self::Merkleized;
+    /// Receipts produced by this proposal's execution or verified replay.
+    fn receipts(batches: &Self::Merkleized) -> &[ExecutionReceipt];
     /// Execute and seal one proposal against its parent's isolated batches.
     fn execute(
         executor: &VeraExecutor,
@@ -40,6 +47,21 @@ pub trait ApplicationState: DatabaseSet<Ctx> + Clone + Send + Sync + 'static {
 }
 
 impl ApplicationState for OrderedState {
+    fn with_receipts(
+        mut batches: Self::Merkleized,
+        receipts: Vec<ExecutionReceipt>,
+    ) -> Self::Merkleized {
+        batches.receipts = Some(receipts.into());
+        batches
+    }
+
+    fn receipts(batches: &Self::Merkleized) -> &[ExecutionReceipt] {
+        batches
+            .receipts
+            .as_deref()
+            .expect("sealed application execution must carry its receipts")
+    }
+
     fn accepts(block: &Block) -> bool {
         block.native_targets.is_some() && block.receipt_commitment.is_some()
     }

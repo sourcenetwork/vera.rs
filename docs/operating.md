@@ -222,6 +222,11 @@ repeatable CI resource gate.
 
 Validators retain active module records and authenticated-state indexes in memory.
 
+Execution receipts belong to their sealed proposal state. Dropping a discarded
+execution releases its receipts once all clones are gone; the application keeps
+no separate receipt map waiting for a later finalized height. Capture checks the
+receipt commitment against the selected block before durable publication.
+
 The runtime reserves 5,120 buffers in the 4 KiB storage size class: 4,096 for
 the shared page cache and 1,024 for transient I/O. Buffers are allocated lazily;
 cache construction fills its slots. Storage thread-local caches retain at most

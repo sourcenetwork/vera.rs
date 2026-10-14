@@ -8,6 +8,69 @@ use commonware_glue::stateful::{Application, Input};
 use vera_consensus::{Mempool as _, components::InMemoryMempool};
 
 #[test]
+fn discarded_native_proposals_release_receipts_before_finality_advances() {
+    let directory = tempfile::tempdir().unwrap();
+    tokio::Runner::new(tokio::Config::new().with_storage_directory(directory.path())).start(
+        |context| {
+            Box::pin(async move {
+                let executor = VeraExecutor::new(DEPLOYMENT);
+                let set = OrderedState::init(
+                    context.child("state"),
+                    config(&context, "state", executor.clone()),
+                    None,
+                )
+                .await;
+                let genesis = checkpoint::block(&set, 0).await;
+                let targets = set.committed_targets().await;
+                let mempool = InMemoryMempool::new();
+                let mut app = StatefulVeraApp::<NoopSink>::new(
+                    executor,
+                    genesis.clone(),
+                    mempool.clone(),
+                    NoopSink,
+                    64,
+                    30_000_000,
+                )
+                .with_native_pipeline(true, Duration::ZERO);
+                for view in 1..=64 {
+                    let signer = BlsSigner::new(1u64.into(), DEPLOYMENT).unwrap();
+                    let tx = policy(&signer, &format!("discarded{view}"));
+                    assert!(mempool.insert(tx.clone()));
+                    let mut round = vera_domain::Block::genesis_context();
+                    round.round = Round::new(Epoch::zero(), View::new(view));
+                    let proposal = app
+                        .propose(
+                            (context.child("propose"), round),
+                            ancestry::from_iter([Arc::new(genesis.clone())]),
+                            set.new_batches().await,
+                            Input {
+                                upstream: ReshareInput {
+                                    upstream: (),
+                                    payload: None,
+                                },
+                                provider: mempool.clone(),
+                            },
+                        )
+                        .await
+                        .unwrap();
+                    let receipts = proposal.merkleized.receipts.as_ref().unwrap();
+                    assert_eq!(receipts.len(), 1);
+                    assert!(receipts[0].success());
+                    let owner = Arc::downgrade(receipts);
+                    let held = proposal.merkleized.clone();
+                    drop(proposal);
+                    assert!(owner.upgrade().is_some());
+                    drop(held);
+                    assert!(owner.upgrade().is_none(), "discarded receipts remain owned");
+                    mempool.prune(&[tx.id()]);
+                    assert_eq!(set.committed_targets().await, targets);
+                }
+            })
+        },
+    );
+}
+
+#[test]
 fn native_proposals_bind_every_target_and_isolate_competing_execution() {
     let directory = tempfile::tempdir().unwrap();
     tokio::Runner::new(tokio::Config::new().with_storage_directory(directory.path())).start(
