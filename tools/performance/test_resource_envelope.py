@@ -12,9 +12,12 @@ def fixture():
         max_outstanding=128, permission_reads_per_write=1, preset='Normal',
         proposal_batch_wait_ms=100, revisions_per_epoch=192, runner_debug_assertions=False,
         pruning=dict(retained_consensus_revisions=256, retained_state_revisions=0)),
-        summary=dict(confirmed=90000, completed_workflows=90000),
+        summary=dict(confirmed=90000, completed_workflows=90000, elapsed_seconds=1800,
+                     scheduled_to_certified_receipt_ms=dict(count=90000, p95=300, p99=400),
+                     permission_read_ms=dict(count=90000, p95=15)),
         verification=dict(verified=90000, unresolved=0, replicas=4),
-        recovery=dict(inspected_operations=90000, receipt_mismatches=0, state_mismatches=0),
+        recovery=dict(inspected_operations=90000, receipt_mismatches=0, state_mismatches=0,
+                      restart_to_probe_observed_ms=5000),
         resource_usage=dict(source='ps_rss_and_cpu_time', members=[dict(member=i, samples=1801,
             missing_samples=0, rss_mib=dict(peak=800), observed_window=dict(duration_seconds=1800))
             for i in range(4)]))
@@ -28,7 +31,9 @@ class EnvelopeTests(unittest.TestCase):
         report, storage = fixture()
         report['configuration'].update(count=360000, fixed_update_objects=128,
                                       workload='certified_native_object_updates')
-        report['summary'].update(confirmed=360000, completed_workflows=360000)
+        report['summary'].update(confirmed=360000, completed_workflows=360000, elapsed_seconds=7200)
+        report['summary']['scheduled_to_certified_receipt_ms']['count'] = 360000
+        report['summary']['permission_read_ms']['count'] = 360000
         report['verification']['verified'] = 360000
         report['recovery']['inspected_operations'] = 360000
         with self.assertRaises(ValueError):
@@ -36,6 +41,48 @@ class EnvelopeTests(unittest.TestCase):
         for member in report['resource_usage']['members']:
             member.update(samples=7201, observed_window=dict(duration_seconds=7200))
         self.assertEqual(qualify(report, storage, 'fixed-360k')['status'], 'passed')
+
+    def test_complete_runs_exceeding_latency_rate_or_restart_budgets_fail(self):
+        report, storage = fixture()
+        mutations = [
+            ('summary', 'elapsed_seconds', None, 2000),
+            ('summary', 'scheduled_to_certified_receipt_ms', 'p95', 401),
+            ('summary', 'scheduled_to_certified_receipt_ms', 'p99', 601),
+            ('summary', 'permission_read_ms', 'p95', 26),
+            ('recovery', 'restart_to_probe_observed_ms', None, 30001),
+        ]
+        for section, key, nested, value in mutations:
+            with self.subTest(key=key, nested=nested), self.assertRaises(ValueError):
+                candidate = copy.deepcopy(report)
+                if nested is None:
+                    candidate[section][key] = value
+                else:
+                    candidate[section][key][nested] = value
+                qualify(candidate, storage, 'growing-90k')
+
+    def test_missing_invalid_or_partial_latency_observations_fail(self):
+        report, storage = fixture()
+        for value in (float('nan'), float('inf'), -1, True):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                candidate = copy.deepcopy(report)
+                candidate['summary']['permission_read_ms']['p95'] = value
+                qualify(candidate, storage, 'growing-90k')
+        for kind in ('permission_read_ms', 'scheduled_to_certified_receipt_ms'):
+            with self.subTest(kind=kind), self.assertRaises(ValueError):
+                candidate = copy.deepcopy(report)
+                candidate['summary'][kind]['count'] -= 1
+                qualify(candidate, storage, 'growing-90k')
+
+    def test_exact_operating_budget_boundaries_pass_and_percentile_regression_fails(self):
+        report, storage = fixture()
+        report['summary']['elapsed_seconds'] = 90000 / 49
+        report['summary']['scheduled_to_certified_receipt_ms'].update(p95=400, p99=600)
+        report['summary']['permission_read_ms']['p95'] = 25
+        report['recovery']['restart_to_probe_observed_ms'] = 30000
+        self.assertEqual(qualify(report, storage, 'growing-90k')['status'], 'passed')
+        report['summary']['scheduled_to_certified_receipt_ms']['p99'] = 399
+        with self.assertRaisesRegex(ValueError, 'percentiles are inconsistent'):
+            qualify(report, storage, 'growing-90k')
 
     def test_measured_headroom_and_exact_budget_boundary(self):
         report, storage = fixture()
