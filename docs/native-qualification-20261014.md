@@ -125,8 +125,10 @@ consumer binaries.
   passed executable and container contracts on both BLS12-381 and Jubjub. Each
   curve checked six production-KDF stores, two Go contracts and sixteen ring
   records. Official result ZIP checksums and their source/image bindings were
-  verified. The executed driver checks transferred binary and image digests;
-  independent rehashing of this run's larger runtime package is separate.
+  verified. The runtime ZIP, inner archive, all five transferred host files and
+  both transferred image archives were also independently hashed. Gateway and
+  verifier image-binary hashes match their transferred executables; the Vera
+  image and host builds retain distinct recipes and are not assumed identical.
 - [Orbis lifecycle run 38497865514](https://github.com/sourcenetwork/orbis-rs/actions/runs/38497865514)
   passed twenty-two BLS and twenty-one Jubjub tests, including seventeen live
   native cases covering signing, encryption/PRE, authorization and revocation,
@@ -140,13 +142,25 @@ Orbis reuses normal runtime `9ebdeda8f475e917fd26fdfe37517497842f7040`, with the
 previously verified BLS and Jubjub image digests. Trust's ring/gateway fixtures
 use Defra `8cfd791fe7f3b69777c60b436f6b32c1a4447526` for identity storage; the
 complete document/replication checks use the newer Defra source in the table.
-Defra selects Backbone SDK `7d67ddbbb0d3d671b95dfe322b920e2e943c1daa`.
+The newer Defra provider build selects Backbone SDK
+`2720b61c1475133581b920240b191a5efc13fc26`; the older identity-store build selects
+`7d67ddbbb0d3d671b95dfe322b920e2e943c1daa`.
 The different SDK and Defra revisions are explicit tested bindings, not a claim
 that all consumers use identical verifier or application source.
 
 These checks qualify their named workflows. New runtime changes, prolonged
 membership qualification, operating-resource limits and the final release review
 remain separate; earlier results must not be relabeled as tests of a newer build.
+
+[Focused membership-churn run 38511427791](https://github.com/sourcenetwork/orbis-rs/actions/runs/38511427791)
+also passed on BLS12-381 and Jubjub with the same Orbis fixture/runtime and Vera
+runtime revisions above. Each curve completed five membership changes, ten crash
+restarts and four member reentries while checking signing and encryption/PRE
+authorization through the transitions. Official numeric result ZIP checksums,
+exact test selection and runtime/image source bindings were verified. The
+scenario took 132.745 seconds on BLS and 136.377 seconds on Jubjub, excluding
+compilation and fixture preparation. This finite churn case is distinct from
+the fifteen-minute active threshold soak and multi-host qualification.
 
 ## Admission overload and recovery
 
