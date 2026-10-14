@@ -140,3 +140,7 @@ added; this alone is not evidence of a leak. The fixed two-hour workload ended a
 ten minutes. That finite window does not establish an indefinite plateau.
 These results define measured workload envelopes, rather than a hard memory
 ceiling for arbitrary datasets or a maximum sustainable throughput.
+
+The [storage resource envelope](storage-resource-envelope.md) records the selected
+finite-profile regression budgets and their measured unused capacity. Its gate
+validates both retained artifacts and runs in future sustained selections.

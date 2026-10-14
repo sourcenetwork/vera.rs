@@ -216,6 +216,9 @@ rejected. Restore a complete compatible backup or use authenticated recovery.
 
 ## Resident memory and measured workloads
 
+The [qualified storage envelope](storage-resource-envelope.md) records the fixed
+and growing workload budgets, measured headroom and repeatable CI resource gate.
+
 Validators retain active module records and authenticated-state indexes in memory.
 
 The runtime reserves 5,120 buffers in the 4 KiB storage size class: 4,096 for
@@ -304,7 +307,7 @@ Linux transport case on an isolated hosted runner. It identifies the managed
 validator's established P2P sockets and applies a 100 ms packet delay and a
 shared 20 Mbit/s rate using [netem](https://man7.org/linux/man-pages/man8/tc-netem.8.html),
 with a 1,024-packet queue. Exact TCP flow filters cover both directions and leave
-RPC traffic unshaped. The test requires unchanged socket coverage and advancing
+RPC traffic unshaped. The test requires every active socket to remain covered and advancing
 fault-queue packet counters throughout its certified epoch-progress phase.
 It restores only its own queue, checks all replica records and requires the
 affected member for a subsequent quorum. This is local transport-fault coverage;
