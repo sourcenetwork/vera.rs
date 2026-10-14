@@ -65,6 +65,7 @@ pub(super) async fn revision(set: &OrderedState, version: u8) -> OrderedSealed {
         ),
         modules: snapshot.snapshot(),
         height: u64::from(version),
+        receipts: None,
     }
 }
 
