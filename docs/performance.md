@@ -1,5 +1,9 @@
 # Performance measurements
 
+See the [October 14 growing-state and overload measurements](native-qualification-20261014.md)
+for 90,000 verified registrations, measured latency and memory curves, four-worker
+backlog recovery and the earlier recovery deadline that remains unexplained.
+
 See [native admission saturation](native-pressure.md) for the focused queue-full
 resource and recovery fixture, separate from ordinary offered-load measurements.
 

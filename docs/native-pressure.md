@@ -1,5 +1,9 @@
 # Native admission saturation
 
+See the [October 14 one- and four-worker measurements](native-qualification-20261014.md#admission-overload-and-recovery)
+for measured rejection latency, every worker's observed backlog-tail time, source
+and artifact bindings, and the unresolved earlier recovery deadline.
+
 The multiworker case fills the same 4,096-entry queue with four independent
 signers in round-robin order, 1,024 submissions each. Recovery waits for every
 worker's tail, checks each sequence and verifies namespace ownership on all four
