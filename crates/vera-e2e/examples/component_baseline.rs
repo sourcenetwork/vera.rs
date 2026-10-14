@@ -88,7 +88,7 @@ fn main() {
     }
     println!(
         "{}",
-        json!({"format_version": 1, "fixture_version": 5,
+        json!({"format_version": 1, "fixture_version": 6,
         "kind": "configuration", "samples": 9, "sample_ms": 100, "warmup_ms": 200})
     );
     let signer = BlsSigner::new(42_u64.into(), 9001).unwrap();
@@ -97,6 +97,19 @@ fn main() {
         .unwrap();
     let tx = NativeTx::decode_wire(&wire).unwrap();
     let message = tx.signing_data();
+    measure("native_pubkey_identify_arkworks", || {
+        let key =
+            vera_crypto::bls::deserialize_pubkey(black_box(tx.bls_pubkey.as_slice())).unwrap();
+        let did = vera_crypto::bls::did_from_bls_pubkey(black_box(&key)).unwrap();
+        assert_eq!(did, signer.did());
+        black_box(did);
+    });
+    measure("native_pubkey_identify_blst", || {
+        let did = vera_crypto::bls::did_from_compressed_pubkey(black_box(tx.bls_pubkey.as_slice()))
+            .unwrap();
+        assert_eq!(did, signer.did());
+        black_box(did);
+    });
     measure("native_bls_verify", || {
         let did = vera_crypto::bls::verify_and_identify(
             black_box(tx.bls_pubkey.as_slice()),

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run the exact prebuilt admission fixture with source and binary provenance."""
 import argparse
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,19 @@ import sys
 
 CASES = ('pipelined_admission_preserves_work_when_quorum_recovers',
          'pipelined_multiworker_admission_preserves_each_sequence_when_quorum_recovers')
+
+
+def failure_provenance(directory, node, runner, case):
+    spec = importlib.util.spec_from_file_location(
+        'pressure_qualification', Path(__file__).with_name('qualify-native-pressure.py'))
+    qualification = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(qualification)
+    try:
+        manifest = json.loads(qualification.mixed.read_bounded(directory / 'manifest.json', 65536))
+        return {'provenance_available': True,
+                **qualification.provenance(manifest, node, runner, case)}
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        return {'provenance_available': False}
 
 
 def executable(metadata, workspace):
@@ -48,18 +62,24 @@ def main():
         args.case,
         '--exact', '--nocapture', '--test-threads=1',
     ]).returncode
-    args.logs.mkdir(mode=0o700, parents=True, exist_ok=True)
-    descriptor = os.open(args.logs / 'test-output.log', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(descriptor, 'wb') as output:
-        for name in ('workload.jsonl', 'stderr.log'):
-            output.write((args.directory / name).read_bytes())
-    (args.logs / 'test-exit-code').write_text(str(code) + '\n')
     if code:
         args.output.write_text(json.dumps({
             'qualified': False, 'failure_stage': 'process', 'runner_exit_code': code,
             'case': args.case,
+            **failure_provenance(args.directory, node, runner, args.case),
         }) + '\n')
-        raise SystemExit(code)
+    try:
+        args.logs.mkdir(mode=0o700, parents=True, exist_ok=True)
+        descriptor = os.open(args.logs / 'test-output.log', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, 'wb') as output:
+            for name in ('workload.jsonl', 'stderr.log'):
+                path = args.directory / name
+                if not code or path.exists():
+                    output.write(path.read_bytes())
+        (args.logs / 'test-exit-code').write_text(str(code) + '\n')
+    finally:
+        if code:
+            raise SystemExit(code)
     subprocess.run([
         sys.executable, '.github/scripts/qualify-native-pressure.py',
         '--directory', str(args.directory), '--node', str(node),

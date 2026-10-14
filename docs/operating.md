@@ -9,7 +9,7 @@ relationship between consensus, operator-managed membership, and ACP.
 
 ## Deployment
 
-Use the [qualified native source set](native-qualification-20261013.md) when
+Use the [qualified native source set](native-qualification-20261014.md#native-consumer-checks) when
 reproducing the current consumer checks. Its evidence and outstanding gates are
 explicit; green integration checks alone do not establish production readiness.
 
@@ -155,8 +155,11 @@ after stopping another voter. It uses four validators, normal timing, pipelined
 Simplex and 192-revision epochs. Linux CI exercises the Regolith deployment
 through the lifecycle job.
 
-This is a prepared process-level filesystem-copy qualification. Passing results
-must be tied to the tested source; it does not establish live filesystem snapshot
+[Merged-main lifecycle job 115674428227](https://github.com/sourcenetwork/vera.rs/actions/runs/38509474343/job/115674428227)
+passed this case at `bc4c876b275f552c7501a40ce2ce02a66a927a93`.
+The official case artifact records this source
+and the passing stopped-backup case. This qualifies the described stopped-process
+filesystem-copy scenario; it does not establish live filesystem snapshot
 consistency, stale-signing-state rollback safety, backup encryption, physical
 media failure or power-loss behavior. Those require deployment-specific validation.
 
@@ -263,12 +266,20 @@ stops before publication. Running engines can retain their own scheme copies;
 staged epochs can accumulate if consensus entry stalls. This is retirement with
 consensus progress, not a hard process-memory bound or a key-zeroization claim.
 
-The [measured candidate workload](native-qualification-20261012.md#growing-registrations)
+The [October 14 growing-state workload](native-qualification-20261014.md#growing-state)
 completed 90,000 distinct registrations at offered 50/s on four local validators,
-with peak sampled RSS of 889.50–927.39 MiB per validator and successful restart inspection.
+with peak sampled RSS of 802.67–816.31 MiB per validator and successful restart inspection.
 Its live dataset grows throughout the run. Use the recorded hardware, payloads,
 allocator and sampling scope when assessing deployment headroom; this is not a
 minimum RAM requirement or a hard memory bound for arbitrary policies.
+
+RSS still grew by 154.31–182.30 MiB per validator during the final ten minutes.
+The run used default glibc arenas and a growing set of objects and signer records.
+Near its end, history block-cache use was 0.03–2.34 MiB; allocator free space
+inside retained arenas was 200.15–237.70 MiB. Allocator and storage counters
+overlap and cannot be summed as independent parts of RSS. Provision headroom for
+the intended live dataset and workload rather than sizing from the history-cache
+limit or interpreting this finite run as a stable memory ceiling.
 
 ## Admission under pressure
 
@@ -394,6 +405,37 @@ workloads and measurement boundaries.
 - Certificate and proof endpoints apply fixed budgets; a client exceeding
   them receives retryable `-32002` errors and must back off, not reconnect
   harder.
+
+## Native consumer configuration
+
+Use the [qualified consumer versions](native-qualification-20261014.md#native-consumer-checks)
+together. The table records the validator, SDK, verifier and application sources
+actually tested; sharing a release name does not establish compatibility.
+Consensus trust must come from the operator's deployment configuration, independently
+of the RPC endpoint.
+
+| Service | Native selection | Required deployment material |
+| --- | --- | --- |
+| DefraDB | `--document-acp-type verars --vera-rs-address <url>` | `--vera-consensus-key <key>` and `--vera-deployment-id <id>`, with the configured keyring and persistent worker journal |
+| Go Trust API | Build with `vera_native` and set `native.enabled: true` | `native.trusted_key`, `native.genesis`, `native.deployment`, operator-authorized relay grants, encrypted relay keys and independently provisioned workers |
+| Orbis | Native-only build with `native,redb,iroh` and the selected curve; start with `--vera-config <file>` | `consensus_key`, `deployment_root`, `deployment_id`, controller public key, encrypted node database and persistent native worker journal |
+
+Trust remains a separate service. Its native provisioning uses `init-native-workers`;
+it does not require service-account funding or fee allowances. Each gateway instance
+needs distinct workers and journals. Orbis selects authorization and bulletin adapters
+through the existing traits; its normal native images exclude diagnostic features.
+
+The current native state and proof formats require a fresh deployment cutover.
+Provision a new deployment identity and root, matching consensus trust, fresh worker
+journals and the corresponding application state. Do not reuse old signed requests,
+pending submissions, ring state or ciphertexts as a migration mechanism. Restore an
+existing deployment only from its matching state, identities and journals, following
+the backup requirements above.
+
+Current permission evidence is bounded by freshness and the consumer's observed
+revision. It cannot prove that the endpoint has disclosed every newer revocation.
+Keep clocks accurate and configure the documented request and evidence-age limits;
+offline authorization changes belong to the separate ACP v2 design.
 
 ## Certified read check
 

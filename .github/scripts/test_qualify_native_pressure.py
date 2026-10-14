@@ -13,8 +13,8 @@ pressure = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pressure)
 runner_spec = importlib.util.spec_from_file_location(
     'pressure_runner', Path(__file__).with_name('run-native-pressure.py'))
-runner = importlib.util.module_from_spec(runner_spec)
-runner_spec.loader.exec_module(runner)
+pressure_runner = importlib.util.module_from_spec(runner_spec)
+runner_spec.loader.exec_module(pressure_runner)
 
 
 def fixture():
@@ -46,6 +46,90 @@ def fixture():
 
 
 class PressureQualification(unittest.TestCase):
+    def test_failed_process_retains_only_verified_source_binary_and_host_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            node, runner = root / 'node', root / 'runner'
+            node.write_bytes(b'node')
+            runner.write_bytes(b'runner')
+            manifest = {'exit_code': 101, 'source': 'a' * 40, 'runner_source': 'a' * 40,
+                        'dirty': False, 'runner_dirty': False, 'history': 'regolith',
+                        'trace_span_close': False, 'rust_log': 'warn,vera_storage=info',
+                        'arguments': [pressure.CASE, '--exact', '--nocapture', '--test-threads=1'],
+                        'node_sha256': hashlib.sha256(b'node').hexdigest(),
+                        'runner_sha256': hashlib.sha256(b'runner').hexdigest(),
+                        'platform': 'Linux', 'architecture': 'x86_64', 'logical_cpus': 4,
+                        'cpu_model': 'AMD', 'private_log': 'do-not-export',
+                        'failure': {'panic_payload': 'do-not-export'}}
+            (root / 'manifest.json').write_text(json.dumps(manifest))
+            with patch.object(pressure.subprocess, 'check_output', return_value='a' * 40):
+                result = pressure_runner.failure_provenance(root, node, runner, pressure.CASE)
+            self.assertEqual(set(result), {'provenance_available', 'source_revision',
+                                         'node_sha256', 'runner_sha256', 'hardware'})
+            self.assertTrue(result['provenance_available'])
+            self.assertEqual(result['source_revision'], 'a' * 40)
+            self.assertEqual(result['hardware']['logical_cpus'], 4)
+            self.assertNotIn('do-not-export', json.dumps(result))
+            self.assertNotIn('qualified', result)
+
+            for field, value in [('source', 'b' * 40), ('dirty', True),
+                                 ('node_sha256', '0' * 64), ('cpu_model', ''),
+                                 ('arguments', ['private-command'])]:
+                bad = {**manifest, field: value}
+                (root / 'manifest.json').write_text(json.dumps(bad))
+                with self.subTest(field=field), \
+                        patch.object(pressure.subprocess, 'check_output', return_value='a' * 40):
+                    self.assertEqual(pressure_runner.failure_provenance(root, node, runner, pressure.CASE),
+                                     {'provenance_available': False})
+
+    def test_failure_provenance_keeps_missing_corrupt_and_oversized_manifests_explicit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / 'manifest.json'
+            for content in [None, b'{', b' ' * 65537]:
+                if content is not None:
+                    manifest.write_bytes(content)
+                self.assertEqual(pressure_runner.failure_provenance(root, root / 'node', root / 'runner', pressure.CASE),
+                                 {'provenance_available': False})
+
+    def test_process_failure_preserves_exit_code_and_never_exports_log_contents(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            node, runner = root / 'target/release/verad', root / 'target/release/deps/native_pressure'
+            runner.parent.mkdir(parents=True)
+            node.write_bytes(b'node')
+            runner.write_bytes(b'runner')
+            build = root / 'build.jsonl'
+            build.write_text(json.dumps({'reason': 'compiler-artifact', 'target': {'name': 'native_pressure'},
+                                         'profile': {'test': True}, 'executable': str(runner)}) + '\n')
+            measurement = root / 'measurement'
+            measurement.mkdir()
+            manifest = {'source': 'a' * 40, 'runner_source': 'a' * 40, 'exit_code': 101,
+                        'dirty': False, 'runner_dirty': False, 'history': 'regolith',
+                        'trace_span_close': False, 'rust_log': 'warn,vera_storage=info',
+                        'arguments': [pressure.CASE, '--exact', '--nocapture', '--test-threads=1'],
+                        'node_sha256': hashlib.sha256(b'node').hexdigest(),
+                        'runner_sha256': hashlib.sha256(b'runner').hexdigest(),
+                        'platform': 'Linux', 'architecture': 'x86_64', 'logical_cpus': 4, 'cpu_model': 'AMD'}
+            (measurement / 'manifest.json').write_text(json.dumps(manifest))
+            (measurement / 'workload.jsonl').write_text('private-do-not-export\n')
+            output = root / 'evidence.json'
+            argv = ['run', '--build-metadata', str(build), '--directory', str(measurement),
+                    '--logs', str(root / 'private-logs'), '--output', str(output)]
+            with patch.object(sys, 'argv', argv), patch.object(Path, 'cwd', return_value=root), \
+                    patch.object(pressure.subprocess, 'check_output', return_value='a' * 40), \
+                    patch.object(pressure.subprocess, 'run') as process:
+                process.return_value.returncode = 101
+                with self.assertRaises(SystemExit) as code:
+                    pressure_runner.main()
+            self.assertEqual(code.exception.code, 101)
+            result = json.loads(output.read_text())
+            self.assertFalse(result['qualified'])
+            self.assertEqual(result['runner_exit_code'], 101)
+            self.assertTrue(result['provenance_available'])
+            self.assertNotIn('private-do-not-export', json.dumps(result))
+            self.assertEqual(process.call_count, 1)
+
     def test_multiworker_tail_coverage_and_counts(self):
         rows = fixture()
         rows[-1].update(workers=4, worker_recoveries=[
@@ -168,7 +252,7 @@ class CargoExecutableSelection(unittest.TestCase):
                                            '--directory', str(root / 'measurement'),
                                            '--logs', str(root / 'logs'),
                                            '--output', str(output)]), self.assertRaises(ValueError):
-                runner.main()
+                pressure_runner.main()
             self.assertEqual(json.loads(output.read_text()),
                              {'qualified': False, 'failure_stage': 'setup', 'case': pressure.CASE})
 
@@ -182,7 +266,7 @@ class CargoExecutableSelection(unittest.TestCase):
                    'profile': {'test': True}, 'executable': str(target)}
             metadata = root / 'build.jsonl'
             metadata.write_text(json.dumps({'reason': 'build-finished'}) + '\n' + json.dumps(row))
-            self.assertEqual(runner.executable(metadata, root), target)
+            self.assertEqual(pressure_runner.executable(metadata, root), target)
 
     def test_rejects_missing_ambiguous_and_foreign_executables(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -199,7 +283,7 @@ class CargoExecutableSelection(unittest.TestCase):
             for selection in ([], targets[:2], targets[2:]):
                 metadata.write_text('\n'.join(json.dumps(row(path)) for path in selection))
                 with self.subTest(selection=selection), self.assertRaises(ValueError):
-                    runner.executable(metadata, root)
+                    pressure_runner.executable(metadata, root)
 
 
 if __name__ == '__main__':

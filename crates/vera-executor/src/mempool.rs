@@ -130,10 +130,8 @@ impl<S: StateDb> MempoolValidator<S> {
             return Err(ExecutionError::UnknownNativeTarget(native_tx.target));
         }
 
-        let pubkey = bls::deserialize_pubkey(native_tx.bls_pubkey.as_slice())
+        let signer_did = bls::did_from_compressed_pubkey(native_tx.bls_pubkey.as_slice())
             .map_err(|e| ExecutionError::BlsVerification(format!("pubkey: {e}")))?;
-        let signer_did = bls::did_from_bls_pubkey(&pubkey)
-            .map_err(|e| ExecutionError::BlsVerification(format!("DID: {e}")))?;
         self.admit_native(&PreValidatedNativeTx {
             signer_did,
             nonce: native_tx.nonce,
@@ -729,6 +727,51 @@ mod tests {
         let mut legacy_entry = MempoolValidator::new(MockStateDb::new(), test_config(), 0);
         legacy_entry.validate_tx(&wire).await.unwrap();
         assert!(legacy_entry.validate_tx(&wire).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn native_recheck_preserves_deployment_target_key_and_nonce_checks() {
+        let (key, public) = test_bls_keypair();
+        let wire = signed_native_tx(&key, &public, 0);
+        let original = NativeTx::decode_wire(&wire).unwrap();
+        let mut validator = MempoolValidator::new(MockStateDb::new(), test_config(), 0);
+        validator.validate_tx(&wire).await.unwrap();
+        validator.reset(MockStateDb::new(), NativeNonceStore::default());
+
+        let mut wrong_deployment = original.clone();
+        wrong_deployment.chain_id += 1;
+        assert!(matches!(
+            validator
+                .recheck_pending_tx(&wrong_deployment.encode_wire())
+                .await,
+            Err(ExecutionError::ChainIdMismatch { .. })
+        ));
+        let mut wrong_target = original.clone();
+        wrong_target.target = Address::ZERO;
+        assert!(matches!(
+            validator
+                .recheck_pending_tx(&wrong_target.encode_wire())
+                .await,
+            Err(ExecutionError::UnknownNativeTarget(_))
+        ));
+        let mut wrong_key = original;
+        wrong_key.bls_pubkey = FixedBytes::ZERO;
+        assert!(matches!(
+            validator.recheck_pending_tx(&wrong_key.encode_wire()).await,
+            Err(ExecutionError::BlsVerification(_))
+        ));
+
+        validator.recheck_pending_tx(&wire).await.unwrap();
+        assert!(matches!(
+            validator.recheck_pending_tx(&wire).await,
+            Err(ExecutionError::NonceMismatch {
+                expected: 1,
+                got: 0,
+                ..
+            })
+        ));
+        let next = signed_native_tx(&key, &public, 1);
+        assert_eq!(validator.validate_tx(&next).await.unwrap().nonce, 1);
     }
 
     // -- Empty tx tests --

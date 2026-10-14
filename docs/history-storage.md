@@ -32,7 +32,7 @@ writes using the child's recorded syscall stream and verify acknowledged data;
 the required fault interposer cannot silently fall back to a weaker model.
 This qualifies those Regolith backend scenarios. It does not model all of Vera's
 Commonware journals together or establish physical-device power-loss behavior.
-See [current qualification](native-qualification-20261013.md) for later source-bound
+See [current qualification](native-qualification-20261014.md) for later source-bound
 checks and measured behavior; changing a dependency pin does not extend an older
 run's scope.
 
@@ -79,7 +79,7 @@ The two-hour fixed-object run at `f3bbd7d2` recorded about 222 MiB of history
 block-cache usage and 61 MiB of live memtable data at the final diagnostic sample.
 The execution index stayed at 1,024 revisions and the proof caches at their
 configured entry limits. Diagnostics continued through historical verification
-and restart, beyond the timed workload's RSS series. Future resource configurations
+and restart, beyond the timed workload's RSS series. Current resource configurations
 record `started_at_unix_ms` alongside monotonic elapsed time to align those phases;
 the older recording cannot establish that alignment exactly.
 
