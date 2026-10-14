@@ -1,5 +1,8 @@
 # Performance measurements
 
+See the [measurement provenance and storage accounting](measurement-provenance-20261014.md)
+for the current source-bound measurement set, build recipes and raw artifacts.
+
 See the [October 14 growing-state and overload measurements](native-qualification-20261014.md)
 for 90,000 verified registrations, measured latency and memory curves, four-worker
 backlog recovery and the earlier recovery deadline that remains unexplained.

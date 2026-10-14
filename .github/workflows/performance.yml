@@ -182,6 +182,9 @@ jobs:
                 python3 tools/performance/archive_retention.py "$directory" || case_result=1
               fi
               "$RUNNER_TEMP/performance-python/bin/python" tools/performance/report.py "$directory" || case_result=1
+              if [[ "$SUSTAINED_MEMORY_ATTRIBUTION" == true ]]; then
+                python3 tools/performance/storage_summary.py "$directory" || case_result=1
+              fi
               if [[ "$controlled_arenas" == true ]]; then
                 echo "### Glibc arena selection: $arena" >> "$GITHUB_STEP_SUMMARY"
               fi

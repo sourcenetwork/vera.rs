@@ -60,6 +60,7 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_qualify_snapshots.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_record.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_heap_profile.py
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_storage_summary.py
 
       - name: Format
         run: cargo fmt -- --check

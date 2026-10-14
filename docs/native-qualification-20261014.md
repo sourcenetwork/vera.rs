@@ -63,8 +63,9 @@ glibc reported 451.31–459.45 MiB in arena allocations, 119.57–122.68 MiB in 
 mapped allocations and 200.15–237.70 MiB free inside its retained arenas. Those
 scopes overlap the storage and application measurements; they cannot be added
 together as independent parts of RSS. They also do not identify every allocation
-owner or prove a leak. Continued late RSS growth means a stable resource envelope
-remains unqualified. Reducing the history block-cache budget alone does not
+owner or prove a leak. Objects and signer records grow throughout this workload,
+so increasing RSS is expected; this run does not isolate avoidable retention or
+establish memory use for an arbitrarily large dataset. Reducing the history block-cache budget alone does not
 explain the observed memory use in this run.
 
 The last in-workload snapshot also recorded 179,498 ACP index keys and 89,747
