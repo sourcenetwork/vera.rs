@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn borsh_roundtrip_bulletin_actor() {
         use borsh::BorshDeserialize;
-        use identity::Did;
+        use vera_identity::Did;
 
         use crate::bulletin::types::BulletinActor;
 

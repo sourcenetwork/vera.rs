@@ -43,7 +43,7 @@ pub struct OperationRecord {
 
 /// Native ACP record key. Equivalent secp256k1 key encodings share one namespace.
 pub fn operation_key(actor: &str, id: OperationId) -> Result<Vec<u8>> {
-    identity::Did::new(actor).map_err(|error| AcpError::State(error.to_string()))?;
+    vera_identity::Did::new(actor).map_err(|error| AcpError::State(error.to_string()))?;
     let actor = if actor.starts_with("did:key:") {
         canonical_issuer(actor).map_err(|error| AcpError::State(error.to_string()))?
     } else {

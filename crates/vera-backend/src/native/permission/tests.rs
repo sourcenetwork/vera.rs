@@ -15,7 +15,7 @@ use vera_modules::{
 };
 use vera_permission::current::{MAX_KEY_BYTES, MAX_VALUE_BYTES, exclusion, membership};
 use vera_permission::{Actor, Object, Operation, PERMISSION_LIMITS, ReadCapture};
-use zanzibar::{Relationship, Subject};
+use vera_zanzibar::{Relationship, Subject};
 
 const POLICY: &str = "\
 name: documents

@@ -2,7 +2,7 @@
 
 use std::{path::PathBuf, time::Duration};
 
-use test_infra::ManagedProcess;
+use vera_test_infra::ManagedProcess;
 
 use super::health::{self, HealthCheckConfig};
 use crate::observe::{ClusterState, LogTracker, RpcPoller};
@@ -14,7 +14,7 @@ use crate::observe::{ClusterState, LogTracker, RpcPoller};
 pub struct TestCluster {
     pub(crate) nodes: Vec<TestNode>,
     pub(crate) chain_id: u64,
-    pub(crate) _run_dir: test_infra::TestRunDir,
+    pub(crate) _run_dir: vera_test_infra::TestRunDir,
 }
 
 impl std::fmt::Debug for TestCluster {

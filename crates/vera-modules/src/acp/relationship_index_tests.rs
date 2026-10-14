@@ -2,9 +2,9 @@ use super::super::types::{PolicyMarshalingType, RecordMetadata, RelationGenerati
 use super::*;
 use crate::kv_store::{InMemoryKvStore, ModuleKvStore};
 use crate::types::Timestamp;
-use acp::{Policy, Relationship, Subject};
-use identity::Did;
-use zanzibar::{Relation, Resource};
+use vera_acp::{Policy, Relationship, Subject};
+use vera_identity::Did;
+use vera_zanzibar::{Relation, Resource};
 
 const POLICY: &str = "policy-index-test";
 

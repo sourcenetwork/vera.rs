@@ -16,7 +16,7 @@ vera-overlay.workspace = true
 vera-traits.workspace = true
 vera-qmdb.workspace = true
 
-acp.workspace = true
+vera-acp.workspace = true
 commonware-codec.workspace = true
 commonware-parallel.workspace = true
 alloy-consensus.workspace = true
@@ -26,7 +26,7 @@ alloy-rlp.workspace = true
 alloy-sol-types.workspace = true
 futures.workspace = true
 hex.workspace = true
-identity.workspace = true
+vera-identity.workspace = true
 revm.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -696,11 +696,11 @@ async fn canonical_module_test() {
     );
 
     // D5.3. Set relationship via bearer token — grant bls_did "reader" on doc-bearer
-    let d5_rel = acp::Relationship::new(
+    let d5_rel = vera_acp::Relationship::new(
         "document",
         "doc-bearer",
         "reader",
-        acp::Subject::entity(identity::Did::new(&bls_did).expect("valid DID")),
+        vera_acp::Subject::entity(vera_identity::Did::new(&bls_did).expect("valid DID")),
     );
     let d5_set_cmd = vera_modules::acp::types::PolicyCmd::SetRelationship(d5_rel);
     let d5_set_bytes = serde_json::to_vec(&d5_set_cmd).expect("serialize PolicyCmd");

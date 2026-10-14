@@ -11,10 +11,10 @@ mod storage;
 /// Bulletin domain types.
 pub mod types;
 
-use acp::{Relationship, Subject};
 use error::BulletinError;
-use identity::Did;
 use types::{BulletinParams, Collaborator, Namespace, Post};
+use vera_acp::{Relationship, Subject};
+use vera_identity::Did;
 
 use crate::acp::types::{AccessRequest, Actor, Object, Operation, PolicyCmd, PolicyMarshalingType};
 use crate::kv_store::{InMemoryKvStore, ModuleKvStore};

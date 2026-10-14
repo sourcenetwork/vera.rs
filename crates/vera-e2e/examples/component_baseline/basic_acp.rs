@@ -1,5 +1,5 @@
-use identity::Did;
 use vera_client::BlsSigner;
+use vera_identity::Did;
 use vera_modules::{
     acp::{
         AcpModule,

@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use identity::Did;
 use vera_acp::{
     policy_yaml::{build_policy, parse_policy_yaml, validate_policy_expressions},
     MemoryZanzibarStore, PermissionEngine, Policy, Relationship, Subject, ZanzibarStore,
 };
+use vera_identity::Did;
 
 const POLICY: &str = "name: files\ndescription: documents\nmeta:\n  description: user metadata\nactor:\n  relations:\n    - name: member\n      doc: delegated members\n      types: [actor]\nresources:\n  - name: file\n    description: stored files\n    relations:\n      - name: reader\n        doc: reader grants\n        types: [actor, actor->member]\n    permissions:\n      - name: read\n        doc: read files\n        expr: reader\n";
 

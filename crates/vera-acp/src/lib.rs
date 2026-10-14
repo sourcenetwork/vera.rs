@@ -4,7 +4,7 @@
 //! the `DocumentACP` interface, policy YAML parsing, and zanzibar re-exports).
 //! The upstream crate additionally carries local/persistent stores, relation
 //! tuples, node ACP and the persistent zanzibar document ACP; vera implements
-//! its own on-chain ACP module and QMDB-backed store.
+//! its native ACP module and authenticated QMDB state.
 
 mod dac;
 pub mod error;
@@ -18,7 +18,7 @@ mod permission;
 pub use permission::DocumentPermission;
 
 // Re-export key zanzibar engine types from the standalone zanzibar crate
-pub use ::zanzibar::{
+pub use ::vera_zanzibar::{
     EvaluationStep, EvaluationTrace, MemoryZanzibarStore, PermissionCheckRequest, PermissionEngine,
     PermissionExplanation, Policy, Relation, RelationExpression, Relationship, Resource,
     StepResult, StorePolicyOptions, Subject, SubjectRestriction, ZanzibarStore,

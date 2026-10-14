@@ -151,11 +151,11 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
             resource: "ring_policy".into(),
             id: policy.clone(),
         }),
-        PolicyCmd::SetRelationship(acp::Relationship::with_entity(
+        PolicyCmd::SetRelationship(vera_acp::Relationship::with_entity(
             "ring_policy",
             &policy,
             "creator",
-            identity::Did::new(&actor).unwrap(),
+            vera_identity::Did::new(&actor).unwrap(),
         )),
     ] {
         execute(

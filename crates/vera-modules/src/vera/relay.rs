@@ -101,7 +101,7 @@ impl VeraModule {
             || claims.exp.saturating_sub(claims.iat) > MAX_RELAY_TOKEN_TTL
             || claims.nbf != claims.iat
             || !assertion.actor.starts_with("did:opk:")
-            || identity::Did::new(&assertion.actor).is_err()
+            || vera_identity::Did::new(&assertion.actor).is_err()
         {
             return Err(invalid("relay assertion exceeds its grant or operation"));
         }

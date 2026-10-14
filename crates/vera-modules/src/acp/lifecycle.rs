@@ -131,7 +131,7 @@ impl AcpModule {
             record.generations,
             &keys::relationship_storage_key(&record.relationship, record.incarnation),
         );
-        record.relationship.subject = acp::Subject::Entity(new_owner.clone());
+        record.relationship.subject = vera_acp::Subject::Entity(new_owner.clone());
         record.metadata.owner_did = new_owner.to_string();
         self.remove_relationship_key_with_budget(&old_key, budget)?;
         self.set_relationship_with_budget(&record, budget)?;

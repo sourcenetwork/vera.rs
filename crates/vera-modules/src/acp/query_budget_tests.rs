@@ -103,7 +103,7 @@ fn every_collection_query_accepts_exact_work_and_rejects_one_less_without_mutati
 fn empty_filtered_results_charge_all_inspected_metadata_and_preserve_page_continuation() {
     let (module, policy) = fixture(16, 60 << 10);
     let mut excluded = selector();
-    excluded.subject_selector = Some(SubjectSelector::Exact(acp::Subject::entity(
+    excluded.subject_selector = Some(SubjectSelector::Exact(vera_acp::Subject::entity(
         Did::new("did:key:absent").unwrap(),
     )));
     let budget = QueryBudget::new(u64::MAX);

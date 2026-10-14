@@ -1,6 +1,6 @@
 //! Policy and object lifecycle authorization, metadata and restoration.
-use acp::{Relationship, Subject};
-use identity::Did;
+use vera_acp::{Relationship, Subject};
+use vera_identity::Did;
 use vera_modules::{
     acp::{
         AcpModule,

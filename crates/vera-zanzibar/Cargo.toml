@@ -15,7 +15,7 @@ serde.workspace = true
 serde_json.workspace = true
 parking_lot.workspace = true
 tracing.workspace = true
-identity = { package = "vera-identity", path = "../vera-identity" }
+vera-identity = { path = "../vera-identity" }
 
 [dev-dependencies]
 tokio.workspace = true

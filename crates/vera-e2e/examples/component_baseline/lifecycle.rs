@@ -1,7 +1,7 @@
 //! Policy mutation costs; fixtures and invariant checks run outside measurement.
 
-use acp::{Relationship, Subject};
-use identity::Did;
+use vera_acp::{Relationship, Subject};
+use vera_identity::Did;
 use vera_modules::{
     acp::{
         AcpModule, keys,

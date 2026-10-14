@@ -71,10 +71,10 @@ All targets live in `crates/vera-e2e/tests/`:
 | `validator_bootstrap` | `validator_bootstrap`, `validator_registry_adversarial` | Validators configured in genesis are readable via the ValidatorRegistry precompile; add/remove/status-change/self-update writes work through EVM txs, and adversarial inputs are rejected. Tests serialize on the global lock above. |
 | `validator_epoch_transition` | `validator_epoch_transition` | Verifies ValidatorRegistry membership feeds resharing and that the engine actually enters the next epoch whose key material includes a newly registered validator. |
 
-The native node uses ordered Commonware module storage. `light_client` still
-exercises standalone JMT point/relation proofs and requires migration; those
-endpoints are unavailable on a native node. `native_permission` covers the native
-permission endpoint, without claiming historical proof availability or load qualification.
+The native node uses ordered Commonware module storage. `light_client` checks
+current record and permission evidence, missing-read rejection and finalized
+revisions. `native_permission` checks the native permission endpoint across
+replicas; these correctness fixtures do not establish load capacity.
 
 With both the binary and test built using `--features fault-injection`,
 `module_commit_crash` aborts after each of the four native module journals becomes

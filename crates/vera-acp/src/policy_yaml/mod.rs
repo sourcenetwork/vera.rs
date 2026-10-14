@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use zanzibar::{
+use vera_zanzibar::{
     Policy, PolicySpecification, Relation, RelationExpression, Resource, SubjectRestriction,
 };
 

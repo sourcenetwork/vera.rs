@@ -18,7 +18,6 @@ pub use journal::ModuleInspector;
 use journal::ModuleJournal;
 
 use alloy_primitives::{Address, B256, Bytes, Log};
-use identity::Did;
 use revm::{
     context::Cfg,
     context_interface::{Block, ContextTr, JournalTr, Transaction},
@@ -31,6 +30,7 @@ use revm::{
     primitives::AddressSet,
     primitives::hardfork::SpecId,
 };
+use vera_identity::Did;
 use vera_modules::acp::AcpModule;
 use vera_modules::bulletin::BulletinModule;
 use vera_modules::types::{BlockExecCtx, Timestamp, TxExecCtx};

@@ -16,7 +16,7 @@ use vera_modules::{
     },
     kv_store::ModuleKvStore,
 };
-use zanzibar::{
+use vera_zanzibar::{
     Relationship, Subject,
     error::{Error, Result},
 };

@@ -16,18 +16,21 @@ pub(super) struct CommandRecords<'a> {
 }
 
 impl RecordStore for CommandRecords<'_> {
-    fn read_record(&self, key: &[u8]) -> zanzibar::error::Result<Option<Vec<u8>>> {
+    fn read_record(&self, key: &[u8]) -> vera_zanzibar::error::Result<Option<Vec<u8>>> {
         let value = self.store.get_ref(key);
         self.budget
             .permissions
             .records
             .read(key, value)
-            .map_err(|error| zanzibar::error::Error::Serialization(error.to_string()))?;
+            .map_err(|error| vera_zanzibar::error::Error::Serialization(error.to_string()))?;
         Ok(value.map(<[u8]>::to_vec))
     }
 
-    fn scan_records(&self, _prefix: &[u8]) -> zanzibar::error::Result<Vec<(Vec<u8>, Vec<u8>)>> {
-        Err(zanzibar::error::Error::Serialization(
+    fn scan_records(
+        &self,
+        _prefix: &[u8],
+    ) -> vera_zanzibar::error::Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        Err(vera_zanzibar::error::Error::Serialization(
             "command storage requires point reads".into(),
         ))
     }
@@ -36,12 +39,12 @@ impl RecordStore for CommandRecords<'_> {
         &self,
         key: &[u8],
         value: Option<&[u8]>,
-    ) -> zanzibar::error::Result<RecordChange> {
+    ) -> vera_zanzibar::error::Result<RecordChange> {
         self.budget
             .permissions
             .records
             .write(key, value)
-            .map_err(|error| zanzibar::error::Error::Serialization(error.to_string()))?;
+            .map_err(|error| vera_zanzibar::error::Error::Serialization(error.to_string()))?;
         Ok((key.to_vec(), value.map(<[u8]>::to_vec)))
     }
 
@@ -49,17 +52,17 @@ impl RecordStore for CommandRecords<'_> {
         &self,
         key: &[u8],
         value: &T,
-    ) -> zanzibar::error::Result<RecordChange> {
+    ) -> vera_zanzibar::error::Result<RecordChange> {
         let encoded = self
             .budget
             .permissions
             .records
             .encode(key, value)
-            .map_err(|error| zanzibar::error::Error::Serialization(error.to_string()))?;
+            .map_err(|error| vera_zanzibar::error::Error::Serialization(error.to_string()))?;
         Ok((key.to_vec(), Some(encoded)))
     }
 
-    fn apply_records(&mut self, changes: Vec<RecordChange>) -> zanzibar::error::Result<()> {
+    fn apply_records(&mut self, changes: Vec<RecordChange>) -> vera_zanzibar::error::Result<()> {
         // Only the private central planners call this adapter with prepaid changes.
         // No fallible work or second reservation is allowed after publication starts.
         self.store.apply_records(changes)

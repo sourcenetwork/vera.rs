@@ -1,7 +1,7 @@
 //! Replays fixtures produced by tools/acp-oracle against acp_core v0.8.2.
-use acp::{Relationship, Subject};
-use identity::Did;
 use serde::{Deserialize, Serialize};
+use vera_acp::{Relationship, Subject};
+use vera_identity::Did;
 use vera_modules::{
     acp::{
         AcpModule,

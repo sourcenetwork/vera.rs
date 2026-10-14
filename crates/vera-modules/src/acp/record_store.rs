@@ -1,6 +1,6 @@
 //! Fallible record access for permission evaluation and proof-backed readers.
 
-use zanzibar::error::{Error, Result};
+use vera_zanzibar::error::{Error, Result};
 
 use crate::kv_store::ModuleKvStore;
 

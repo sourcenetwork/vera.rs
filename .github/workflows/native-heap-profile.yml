@@ -13,13 +13,6 @@ on:
         type: choice
         options: [startup, sustained, growing]
         default: startup
-  push:
-    branches: ['iverc/native-late-heap-attribution']
-    paths:
-      - .github/workflows/native-heap-profile.yml
-      - .github/scripts/profiled-verad.sh
-      - tools/performance/heap_profile.py
-      - tools/performance/test_heap_profile.py
 
 permissions:
   contents: read

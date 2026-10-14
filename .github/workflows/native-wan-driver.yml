@@ -2,13 +2,6 @@ name: WAN driver qualification
 
 on:
   workflow_dispatch:
-  push:
-    branches: ['iverc/qualify-wan-driver']
-    paths:
-      - crates/vera-e2e/examples/wan_baseline.rs
-      - crates/vera-e2e/examples/wan_baseline/**
-      - .github/scripts/test-wan-driver.sh
-      - .github/workflows/native-wan-driver.yml
 
 permissions:
   contents: read

@@ -3,11 +3,11 @@
 //! This trait defines the interface for document-level access control.
 
 use async_trait::async_trait;
-use identity::Did;
+use vera_identity::Did;
 /// Native-only vendoring: the upstream `corekv` bound reduces to `Send + Sync`.
 pub trait MaybeSendSync: Send + Sync {}
 impl<T: Send + Sync + ?Sized> MaybeSendSync for T {}
-use zanzibar::types::Subject;
+use vera_zanzibar::types::Subject;
 
 use crate::error::{Error, Result};
 use crate::identity::Identity;

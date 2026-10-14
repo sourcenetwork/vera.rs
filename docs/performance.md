@@ -554,7 +554,7 @@ change.
 The [PR performance workflow](../.github/workflows/performance-pr.yml) measures
 code-changing same-repository PRs on one hosted Linux runner. It checks out the
 exact PR head and base-tip revisions and builds both node binaries with Rust
-1.98.0 in the release profile with `regolith-history` enabled on both sides.
+1.98.0 in the release profile with Regolith history on both sides.
 One head-built `operation_baseline` drives both
 revisions, giving them identical workload generation and correctness checks.
 Before measurement, each node's `validator --help` is checked for

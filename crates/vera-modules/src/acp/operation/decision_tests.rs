@@ -6,7 +6,7 @@ use crate::acp::{
 
 fn fixture() -> (AcpModule, VeraModule, String, AccessRequest) {
     let mut acp = AcpModule::new();
-    let owner = identity::Did::new(issuer()).unwrap();
+    let owner = vera_identity::Did::new(issuer()).unwrap();
     let policy = acp.create_policy(&owner,
         "name: decisions\nresources:\n  - name: file\n    relations:\n      - name: reader\n    permissions:\n      - name: read\n        expr: reader\n", FORMAT).unwrap().policy.id;
     let object = Object {
@@ -15,11 +15,11 @@ fn fixture() -> (AcpModule, VeraModule, String, AccessRequest) {
     };
     acp.direct_policy_cmd(&owner, &policy, PolicyCmd::RegisterObject(object.clone()))
         .unwrap();
-    let target = identity::Did::new(format!("did:opk:{}", "cd".repeat(32))).unwrap();
+    let target = vera_identity::Did::new(format!("did:opk:{}", "cd".repeat(32))).unwrap();
     acp.direct_policy_cmd(
         &owner,
         &policy,
-        PolicyCmd::SetRelationship(acp::Relationship::with_entity(
+        PolicyCmd::SetRelationship(vera_acp::Relationship::with_entity(
             "file",
             "report",
             "reader",
@@ -71,7 +71,7 @@ fn decision_retries_preserve_issuance_across_workers_revocation_and_expiry() {
     };
     assert_eq!(original.id, expected.id().unwrap());
     acp.direct_policy_cmd(
-        &identity::Did::new(issuer()).unwrap(),
+        &vera_identity::Did::new(issuer()).unwrap(),
         &policy,
         PolicyCmd::ArchiveObject(request.operations[0].object.clone()),
     )

@@ -3,11 +3,10 @@ name = "verad"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "verad — SourceHub validator node"
+description = "Vera validator daemon"
 
 [features]
 fault-injection = ["vera-node/fault-injection"]
-regolith-history = ["vera-node/regolith-history"]
 
 [[bin]]
 name = "verad"

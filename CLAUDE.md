@@ -180,10 +180,10 @@ See `docs/receipt-commitments.md` for the canonical encoding.
 First boot records a durable initialization intent before changing journals, then
 publishes `native-genesis.bin` after all seven partitions are durable. Interrupted
 initialization can rewind and retry only with the same genesis configuration.
-Existing JMT directories or a legacy genesis record require an explicit migration;
-this node does not convert them. Missing genesis records alongside finalized
-history are rejected instead of resetting state.
-Native genesis predating receipt commitments also requires an explicit migration.
+Foreign state layouts and incompatible genesis records are rejected.
+Missing genesis records alongside finalized history are rejected instead of
+resetting state. A persisted native genesis must contain the expected receipt
+commitment.
 
 Seven authenticated peer resolvers serve bounded operation-log ranges. Fetches
 allow up to 64 operations, with eight-operation inspection batches and responses
@@ -377,6 +377,10 @@ cargo fmt                    # format
 ```
 
 ## Development Principles
+
+Vera has not been deployed live. Releases start with fresh state; do not retain
+obsolete APIs, build markers or migration scaffolding for development formats.
+Current backup/recovery support and malformed-state validation remain required.
 
 Use Regolith for finalized history and Commonware QMDB for authenticated state.
 Do not add RocksDB profiling, optimization or backend-selection work. Qualify the

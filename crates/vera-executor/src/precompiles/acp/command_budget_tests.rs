@@ -77,7 +77,7 @@ impl Fixture {
         (self.acp.store().serialize(), self.vera.store().serialize())
     }
     fn command(&self) -> PolicyCmd {
-        PolicyCmd::SetRelationship(acp::Relationship::with_entity(
+        PolicyCmd::SetRelationship(vera_acp::Relationship::with_entity(
             "file",
             "report",
             "reader",

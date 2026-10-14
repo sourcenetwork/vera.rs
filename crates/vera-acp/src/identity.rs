@@ -4,7 +4,7 @@
 //! context for ACP operations. Using an explicit enum is clearer than
 //! `Option<Did>` and prevents confusion about semantics.
 
-use identity::Did;
+use vera_identity::Did;
 
 /// Identity context for ACP operations.
 ///
@@ -57,12 +57,6 @@ impl Identity {
             Self::Anonymous => None,
             Self::Authenticated(did) => Some(did),
         }
-    }
-
-    /// Convert to Option<&Did> for compatibility with existing APIs.
-    #[deprecated(since = "0.1.0", note = "use did() instead")]
-    pub fn as_option(&self) -> Option<&Did> {
-        self.did()
     }
 }
 
@@ -155,18 +149,6 @@ mod tests {
 
         let id2: Identity = (None as Option<&Did>).into();
         assert!(id2.is_anonymous());
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn test_identity_as_option() {
-        let did = test_did();
-
-        let anon = Identity::anonymous();
-        assert_eq!(anon.as_option(), None);
-
-        let auth = Identity::authenticated(did.clone());
-        assert_eq!(auth.as_option(), Some(&did));
     }
 
     #[test]

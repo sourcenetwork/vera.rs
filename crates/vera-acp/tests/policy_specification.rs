@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use identity::Did;
 use vera_acp::{
     policy_yaml::{build_policy, parse_policy_yaml},
     MemoryZanzibarStore, PermissionEngine, Policy, Relationship, ZanzibarStore,
 };
+use vera_identity::Did;
 
 const DEFINITION: &str = "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n      - name: writer\n    permissions:\n      - name: read\n        expr: reader - writer\n      - name: write\n        expr: writer\n";
 

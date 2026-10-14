@@ -115,31 +115,33 @@ pub enum Error {
     },
 }
 
-impl From<zanzibar::error::Error> for Error {
-    fn from(e: zanzibar::error::Error) -> Self {
+impl From<vera_zanzibar::error::Error> for Error {
+    fn from(e: vera_zanzibar::error::Error) -> Self {
         match e {
-            zanzibar::error::Error::PolicyNotFound(s) => Error::PolicyNotFound(s),
-            zanzibar::error::Error::RelationNotFound { resource, relation } => {
+            vera_zanzibar::error::Error::PolicyNotFound(s) => Error::PolicyNotFound(s),
+            vera_zanzibar::error::Error::RelationNotFound { resource, relation } => {
                 Error::RelationNotFound { resource, relation }
             }
-            zanzibar::error::Error::ResourceNotFound(s) => Error::ResourceNotFound(s),
-            zanzibar::error::Error::InvalidExpression(s) => Error::InvalidExpression(s),
-            zanzibar::error::Error::InvalidPolicy(s) => Error::InvalidPolicy(s),
-            zanzibar::error::Error::Serialization(s) => Error::Serialization(s),
-            zanzibar::error::Error::InvalidDid(s) => Error::Storage(format!("invalid DID: {}", s)),
-            zanzibar::error::Error::InvalidEntitySetReference { resource, relation } => {
+            vera_zanzibar::error::Error::ResourceNotFound(s) => Error::ResourceNotFound(s),
+            vera_zanzibar::error::Error::InvalidExpression(s) => Error::InvalidExpression(s),
+            vera_zanzibar::error::Error::InvalidPolicy(s) => Error::InvalidPolicy(s),
+            vera_zanzibar::error::Error::Serialization(s) => Error::Serialization(s),
+            vera_zanzibar::error::Error::InvalidDid(s) => {
+                Error::Storage(format!("invalid DID: {}", s))
+            }
+            vera_zanzibar::error::Error::InvalidEntitySetReference { resource, relation } => {
                 Error::InvalidEntitySetReference { resource, relation }
             }
-            zanzibar::error::Error::SubjectRestrictionViolation { message } => {
+            vera_zanzibar::error::Error::SubjectRestrictionViolation { message } => {
                 Error::SubjectRestrictionViolation { message }
             }
-            zanzibar::error::Error::DpiMissingOwner { resource } => {
+            vera_zanzibar::error::Error::DpiMissingOwner { resource } => {
                 Error::DpiMissingOwner { resource }
             }
-            zanzibar::error::Error::DpiExpressionMissingOwner { resource, relation } => {
+            vera_zanzibar::error::Error::DpiExpressionMissingOwner { resource, relation } => {
                 Error::DpiExpressionMissingOwner { resource, relation }
             }
-            zanzibar::error::Error::DpiDisallowedOperation {
+            vera_zanzibar::error::Error::DpiDisallowedOperation {
                 resource,
                 relation,
                 operation,
@@ -148,9 +150,12 @@ impl From<zanzibar::error::Error> for Error {
                 relation,
                 operation,
             },
-            zanzibar::error::Error::InvalidRelationshipField { field, reason } => Error::Storage(
-                format!("invalid relationship field '{}': {}", field, reason),
-            ),
+            vera_zanzibar::error::Error::InvalidRelationshipField { field, reason } => {
+                Error::Storage(format!(
+                    "invalid relationship field '{}': {}",
+                    field, reason
+                ))
+            }
             _ => Error::Storage(e.to_string()),
         }
     }

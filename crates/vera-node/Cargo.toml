@@ -7,8 +7,6 @@ description = "Vera validator node assembly on commonware glue"
 
 [features]
 fault-injection = ["vera-app/fault-injection"]
-# Kept as an explicit build marker for native deployment manifests.
-regolith-history = []
 
 [lints]
 workspace = true

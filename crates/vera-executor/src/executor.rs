@@ -693,7 +693,7 @@ mod tests {
         let executor = test_executor();
         let mut modules = ModuleState::default();
         let issued = test_block_ctx();
-        let issuer = identity::Did::new("did:key:issuer").unwrap();
+        let issuer = vera_identity::Did::new("did:key:issuer").unwrap();
         for id in 0..257 {
             modules
                 .vera

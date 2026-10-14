@@ -74,7 +74,7 @@ impl AcpModule {
             )) != Some(&[])
             {
                 return Err(AcpError::State(
-                    "amendment policy index missing or corrupt; explicit migration required".into(),
+                    "amendment policy index missing or corrupt".into(),
                 ));
             }
         }

@@ -26,8 +26,8 @@ mod token_queries;
 pub mod types;
 
 use error::VeraError;
-use identity::Did;
 use types::{ChainConfig, JWSTokenRecord, JWSTokenStatus, VeraParams};
+use vera_identity::Did;
 
 use crate::kv_store::{InMemoryKvStore, ModuleKvStore};
 use crate::types::{BlockExecCtx, Timestamp, TxExecCtx};

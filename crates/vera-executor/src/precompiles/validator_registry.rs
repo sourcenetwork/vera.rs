@@ -7,9 +7,9 @@
 use alloy_primitives::{Address, B256, U256, keccak256};
 use alloy_sol_types::SolCall;
 use commonware_codec::ReadExt as _;
-use identity::Did;
 use revm::context_interface::{ContextTr, JournalTr};
 use revm::precompile::PrecompileError;
+use vera_identity::Did;
 use vera_modules::acp::AcpModule;
 use vera_modules::acp::types::{AccessRequest, Actor, Object, Operation};
 use vera_modules::types::TxExecCtx;

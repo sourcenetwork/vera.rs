@@ -36,4 +36,4 @@ commonware-p2p.workspace = true
 governor = "0.10.4"
 serde_json.workspace = true
 tempfile.workspace = true
-zanzibar.workspace = true
+vera-zanzibar.workspace = true

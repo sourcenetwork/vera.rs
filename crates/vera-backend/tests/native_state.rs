@@ -22,7 +22,7 @@ use vera_modules::{
     types::{BlockExecCtx, TxExecCtx},
     vera::types::ChainConfig,
 };
-use zanzibar::{Relationship, Subject};
+use vera_zanzibar::{Relationship, Subject};
 
 const OWNER: &str = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 const READER: &str = "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH";

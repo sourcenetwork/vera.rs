@@ -30,8 +30,8 @@ mod validation_tests;
 
 use alloy_primitives::{B256, Bytes};
 use alloy_sol_types::SolCall;
-use identity::Did;
 use revm::precompile::{PrecompileError, PrecompileOutput};
+use vera_identity::Did;
 use vera_modules::acp::abi::IAcp;
 use vera_modules::acp::types::{
     AccessRequest, AcpParams, Actor, Object, Operation, PolicyCmd, PolicyMarshalingType,
@@ -77,7 +77,7 @@ fn did_from_actor(actor: &str) -> Result<Did, PrecompileError> {
 
 /// Decode a structured subject — a `subjectKind` discriminant plus the discrete
 /// `subjectResource` / `subjectObjectId` / `subjectRelation` fields — into a
-/// [`acp::Subject`]. Subjects are never parsed from a single string: object IDs
+/// [`vera_acp::Subject`]. Subjects are never parsed from a single string: object IDs
 /// are path-like and may be quoted, so a string grammar would be fragile on this
 /// security boundary.
 ///
@@ -92,7 +92,7 @@ fn decode_subject(
     resource: &str,
     object_id: &str,
     relation: &str,
-) -> Result<acp::Subject, PrecompileError> {
+) -> Result<vera_acp::Subject, PrecompileError> {
     match kind {
         // Entity — DID in object_id; no cross-object fields.
         0 => {
@@ -106,14 +106,14 @@ fn decode_subject(
                     "entity takes no subjectResource/subjectRelation",
                 ));
             }
-            Ok(acp::Subject::entity(did_from_actor(object_id)?))
+            Ok(vera_acp::Subject::entity(did_from_actor(object_id)?))
         }
         // Wildcard — all-actors; no fields.
         1 => {
             if !resource.is_empty() || !object_id.is_empty() || !relation.is_empty() {
                 return Err(subject_field_error("wildcard takes no subject fields"));
             }
-            Ok(acp::Subject::wildcard())
+            Ok(vera_acp::Subject::wildcard())
         }
         // Object edge — resource:object_id, empty relation.
         2 => {
@@ -125,7 +125,7 @@ fn decode_subject(
             if !relation.is_empty() {
                 return Err(subject_field_error("object takes no subjectRelation"));
             }
-            Ok(acp::Subject::entity_set(resource, object_id, ""))
+            Ok(vera_acp::Subject::entity_set(resource, object_id, ""))
         }
         // Userset — resource:object_id#relation.
         3 => {
@@ -134,7 +134,7 @@ fn decode_subject(
                     "userset requires subjectResource, subjectObjectId and subjectRelation",
                 ));
             }
-            Ok(acp::Subject::entity_set(resource, object_id, relation))
+            Ok(vera_acp::Subject::entity_set(resource, object_id, relation))
         }
         // 4 is reserved for TypedWildcard (not yet supported).
         other => Err(subject_field_error(&format!(
@@ -632,7 +632,7 @@ fn build_relationship_selector(
         None
     } else {
         let actor_did = did_from_actor(actor)?;
-        Some(SubjectSelector::Exact(acp::Subject::entity(actor_did)))
+        Some(SubjectSelector::Exact(vera_acp::Subject::entity(actor_did)))
     };
 
     Ok(RelationshipSelector {
@@ -840,21 +840,21 @@ resources:
     #[test]
     fn decode_subject_entity() {
         let got = decode_subject(0, "", ALICE_DID, "").unwrap();
-        assert_eq!(got, acp::Subject::entity(Did::new(ALICE_DID).unwrap()));
+        assert_eq!(got, vera_acp::Subject::entity(Did::new(ALICE_DID).unwrap()));
     }
 
     #[test]
     fn decode_subject_wildcard() {
         assert_eq!(
             decode_subject(1, "", "", "").unwrap(),
-            acp::Subject::wildcard()
+            vera_acp::Subject::wildcard()
         );
     }
 
     #[test]
     fn decode_subject_object_edge_has_empty_relation() {
         let got = decode_subject(2, "collection", "col1", "").unwrap();
-        assert_eq!(got, acp::Subject::entity_set("collection", "col1", ""));
+        assert_eq!(got, vera_acp::Subject::entity_set("collection", "col1", ""));
     }
 
     #[test]
@@ -862,7 +862,7 @@ resources:
         let got = decode_subject(3, "collection", "col1", "reader").unwrap();
         assert_eq!(
             got,
-            acp::Subject::entity_set("collection", "col1", "reader")
+            vera_acp::Subject::entity_set("collection", "col1", "reader")
         );
     }
 
@@ -1012,7 +1012,7 @@ resources:
         assert_eq!(rels.len(), 1, "userset edge stored");
         assert_eq!(
             rels[0].relationship.subject,
-            acp::Subject::entity_set("collection", "col1", "reader"),
+            vera_acp::Subject::entity_set("collection", "col1", "reader"),
             "subject decoded to the userset EntitySet"
         );
 

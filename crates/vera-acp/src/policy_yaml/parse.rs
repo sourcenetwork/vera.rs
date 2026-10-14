@@ -1,5 +1,5 @@
 use serde::{Deserialize, Deserializer};
-use zanzibar::PolicySpecification;
+use vera_zanzibar::PolicySpecification;
 
 use super::ParsedPolicy;
 

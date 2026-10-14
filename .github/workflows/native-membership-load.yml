@@ -2,20 +2,6 @@ name: Native membership under load
 
 on:
   workflow_dispatch:
-  push:
-    branches: ['iverc/native-membership-load', 'iverc/certified-readiness']
-    paths:
-      - crates/vera-e2e/tests/native_membership.rs
-      - crates/vera-e2e/tests/support/membership_load.rs
-      - crates/vera-client/src/readiness.rs
-      - crates/vera-client/src/lib.rs
-      - bin/verad/src/probe.rs
-      - bin/verad/src/cli.rs
-      - bin/verad/src/main.rs
-      - bin/verad/Cargo.toml
-      - Cargo.lock
-      - .github/scripts/test-membership-load.sh
-      - .github/workflows/native-membership-load.yml
 
 permissions:
   contents: read

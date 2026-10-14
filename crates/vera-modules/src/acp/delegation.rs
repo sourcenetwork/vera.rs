@@ -1,6 +1,6 @@
-use identity::Did;
 use serde::{Serialize, de::DeserializeOwned};
 use vera_crypto::jwt::DelegationScope;
+use vera_identity::Did;
 
 use super::delegated_operation::DelegatedOperation;
 use super::operation::OperationRecord;

@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use zanzibar::error::{Error, Result};
+use vera_zanzibar::error::{Error, Result};
 
 use super::{PermissionBudget, record_store::RecordStore};
 use crate::kv_store::InMemoryKvStore;

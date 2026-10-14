@@ -6,7 +6,7 @@ use super::{
     relationship_index::{self, invalid},
     types::{RelationPair, RelationshipRecord},
 };
-use zanzibar::error::Result;
+use vera_zanzibar::error::Result;
 
 pub(super) fn policy_prefix(policy: &str) -> Vec<u8> {
     let mut prefix = relationship_index::policy_prefix(policy);

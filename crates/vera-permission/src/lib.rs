@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, sync::Mutex};
 use alloy_primitives::{B256, Bytes};
 use serde::{Deserialize, Serialize};
 use vera_modules::acp::{record_store::RecordStore, zanzibar_store::evaluate_access_request};
-use zanzibar::error::{Error as EvaluationError, Result as EvaluationResult};
+use vera_zanzibar::error::{Error as EvaluationError, Result as EvaluationResult};
 
 pub use vera_domain::ModuleId;
 

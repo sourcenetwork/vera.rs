@@ -7,8 +7,8 @@ repository.workspace = true
 description = "Access control policy types and policy YAML parsing"
 
 [dependencies]
-identity = { package = "vera-identity", path = "../vera-identity" }
-zanzibar = { package = "vera-zanzibar", path = "../vera-zanzibar" }
+vera-identity = { path = "../vera-identity" }
+vera-zanzibar = { path = "../vera-zanzibar" }
 async-trait.workspace = true
 thiserror.workspace = true
 serde.workspace = true

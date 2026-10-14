@@ -67,7 +67,7 @@ fn edge(relation: &str) -> Relationship {
         "file",
         "report",
         relation,
-        acp::Subject::entity_set("group", "staff", "member"),
+        vera_acp::Subject::entity_set("group", "staff", "member"),
     )
 }
 

@@ -9,7 +9,7 @@ use vera_modules::{
     kv_store::ModuleKvStore as _,
     types::{BlockExecCtx, Timestamp},
 };
-use zanzibar::{Did, Relationship};
+use vera_zanzibar::{Did, Relationship};
 
 const POLICY: &str = "name: hydration\nresources:\n  - name: file\n    relations:\n      - name: reader\n    permissions:\n      - name: read\n        expr: reader\n";
 const OLD_GRANTS: usize = 257;

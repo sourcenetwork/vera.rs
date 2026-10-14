@@ -91,10 +91,9 @@ them. Durable finalization precedes publication of query results.
 
 Every package under `crates/` uses the `vera-` prefix. `vera-acp`,
 `vera-zanzibar` and `vera-identity` originated in DefraDB; their original licenses
-and provenance remain in the repository. Cargo dependency aliases keep the short
-Rust imports `acp`, `zanzibar`, `identity` and `test_infra` within this workspace.
-Consumers selecting these packages directly must use their new package names;
-existing consumers pinned to earlier revisions keep those revisions' names.
+and provenance remain in the repository. Rust imports use `vera_acp`,
+`vera_zanzibar`, `vera_identity` and `vera_test_infra`. Vera has not been deployed
+live; the release starts with fresh state and uses these package names directly.
 
 | Location | Responsibility |
 | --- | --- |

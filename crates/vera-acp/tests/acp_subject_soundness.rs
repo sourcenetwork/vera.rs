@@ -8,8 +8,8 @@
 
 use vera_acp::policy_yaml::{build_policy, parse_policy_yaml};
 use vera_acp::{Policy, Relation, Relationship, Resource, Subject};
-use zanzibar::error::Error;
-use zanzibar::Did;
+use vera_zanzibar::error::Error;
+use vera_zanzibar::Did;
 
 fn test_did() -> Did {
     Did::new("did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK").unwrap()

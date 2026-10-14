@@ -42,7 +42,7 @@ fn required_specification_and_creation_metadata_survive_restore() {
     let mut request = PolicyCreation {
         policy: "name: files\nresources:\n  - name: file\n    permissions:\n      - name: read\n      - name: write\n".into(),
         marshal_type: PolicyMarshalingType::ShortYaml,
-        required_specification: Some(zanzibar::PolicySpecification::Defra),
+        required_specification: Some(vera_zanzibar::PolicySpecification::Defra),
         metadata: SuppliedMetadata { attributes: Default::default(), blob: vec![42] },
     };
     let block = BlockExecCtx {
@@ -62,13 +62,13 @@ fn required_specification_and_creation_metadata_survive_restore() {
         .unwrap();
     assert_eq!(
         record.policy.specification,
-        zanzibar::PolicySpecification::Defra
+        vera_zanzibar::PolicySpecification::Defra
     );
     assert_eq!(record.supplied_metadata, request.metadata);
     assert_eq!(record.metadata.creation_ts, block.timestamp);
     restored(&module).validate_restored_state().unwrap();
     request.policy = format!("spec: defra\n{}", request.policy);
-    request.required_specification = Some(zanzibar::PolicySpecification::None);
+    request.required_specification = Some(vera_zanzibar::PolicySpecification::None);
     let before = module.store().serialize();
     assert!(
         module

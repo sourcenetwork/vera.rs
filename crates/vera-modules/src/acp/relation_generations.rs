@@ -5,12 +5,12 @@ use std::{
     marker::PhantomData,
 };
 
-use acp::{Policy, Relationship, Subject};
 use serde::{
     Deserialize, Deserializer, Serialize,
     de::{MapAccess, Visitor},
 };
-use zanzibar::error::{Error, Result};
+use vera_acp::{Policy, Relationship, Subject};
+use vera_zanzibar::error::{Error, Result};
 
 /// The target and optional userset dependency of a stored relationship.
 #[derive(

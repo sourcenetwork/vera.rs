@@ -8,7 +8,7 @@ use super::{
     relationship_index::{self, invalid},
     types::{PolicyRecord, RelationPair, RelationshipRecord},
 };
-use zanzibar::error::{Error, Result};
+use vera_zanzibar::error::{Error, Result};
 
 pub(super) fn put<S: RecordStore>(store: &mut S, record: &RelationshipRecord) -> Result<()> {
     let changes = prepare_put(store, record)?;

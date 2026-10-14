@@ -19,10 +19,9 @@ bytes, mismatched token hashes or inconsistent deadlines fail execution. Ordinar
 record reads also validate the stored token hash against the requested key.
 Proposal-local failures cannot publish partially updated module state.
 
-Indexes persist with Vera state and recover with its snapshots. Existing stores
-require an explicit migration that builds indexes for active, expiring tokens;
-startup does not automatically migrate them. This change removes scans of token
-history from each revision. When more than 128 tokens are due, later revisions
+Indexes persist with Vera state and recover with its snapshots. Missing or
+inconsistent indexes fail restoration. The sweep reads the ordered deadline
+index rather than scanning token history. When more than 128 tokens are due, later revisions
 continue from the remaining ordered entries, including after restart. The stored
 status may await maintenance; authorization and usage checks still enforce the
 actual deadline. This does not cap retained history.

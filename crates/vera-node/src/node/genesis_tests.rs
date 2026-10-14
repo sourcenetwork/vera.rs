@@ -126,7 +126,7 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
                     .await
                     .unwrap_err()
                     .to_string()
-                    .contains("explicit migration")
+                    .contains("does not match this node")
             );
             assert_eq!(
                 fs::read(directory.join("native-genesis.bin")).unwrap(),
@@ -144,7 +144,7 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
                     .await
                     .unwrap_err()
                     .to_string()
-                    .contains("explicit migration")
+                    .contains("receipt commitment is invalid")
             );
             assert_eq!(
                 fs::read(directory.join("native-genesis.bin")).unwrap(),
@@ -322,7 +322,7 @@ fn pipeline_parameters_bind_the_genesis_identity_and_restart() {
                     .await
                     .unwrap_err()
                     .to_string()
-                    .contains("migration")
+                    .contains("does not match this node")
             );
         });
     }

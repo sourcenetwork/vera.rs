@@ -14,12 +14,12 @@ fn authorized_state() -> (MockStateDb, VeraExecutor) {
         &signer.credential().verifying_key().to_sec1_bytes(),
     )
     .unwrap()
-    .parse::<identity::Did>()
+    .parse::<vera_identity::Did>()
     .unwrap();
     authorized_actor(did)
 }
 
-fn authorized_actor(did: identity::Did) -> (MockStateDb, VeraExecutor) {
+fn authorized_actor(did: vera_identity::Did) -> (MockStateDb, VeraExecutor) {
     let mut modules = ModuleState::default();
     let policy = modules.acp.create_policy(&did,
         "name: membership\nresources:\n  - name: registry\n    relations:\n      - name: admin\n    permissions:\n      - name: manage\n        expr: admin\n",
@@ -41,11 +41,11 @@ fn authorized_actor(did: identity::Did) -> (MockStateDb, VeraExecutor) {
         .direct_policy_cmd(
             &did,
             &policy,
-            PolicyCmd::SetRelationship(acp::Relationship::new(
+            PolicyCmd::SetRelationship(vera_acp::Relationship::new(
                 "registry",
                 "registry",
                 "admin",
-                acp::Subject::entity(did.clone()),
+                vera_acp::Subject::entity(did.clone()),
             )),
         )
         .unwrap();
@@ -72,7 +72,7 @@ fn member_slot(address: Address) -> U256 {
     U256::from_be_bytes(keccak256(data).0)
 }
 
-fn native_member_call(sequence: u64, calldata: Vec<u8>) -> (Bytes, identity::Did) {
+fn native_member_call(sequence: u64, calldata: Vec<u8>) -> (Bytes, vera_identity::Did) {
     use ark_ec::{AffineRepr as _, CurveGroup as _};
     use ark_serialize::CanonicalSerialize as _;
     let key = ark_bls12_381::Fr::from(7u64);

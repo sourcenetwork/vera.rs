@@ -10,12 +10,12 @@ use crate::{
     types::Timestamp,
     vera::nodes::{NodeCommand, NodeInfo, NodeRequest, SignedNodeRequest},
 };
-use acp::Relationship;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use k256::ecdsa::{
     Signature, SigningKey,
     signature::{Signer as _, hazmat::PrehashSigner as _},
 };
+use vera_acp::Relationship;
 use vera_crypto::{
     jwt::JwtClaims,
     operation::{OperationClaim, OperationId},

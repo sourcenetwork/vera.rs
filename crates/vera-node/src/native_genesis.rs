@@ -36,7 +36,7 @@ pub(super) async fn load_or_create(
         let record = fs::read(&path)?;
         ensure!(
             record.get(..32) == Some(fingerprint.as_slice()),
-            "native genesis configuration or storage format differs; an explicit migration is required"
+            "native genesis configuration or storage format does not match this node"
         );
         let block = Block::decode_cfg(
             commonware_codec::Copying(&record[32..]),
@@ -48,14 +48,14 @@ pub(super) async fn load_or_create(
         );
         ensure!(
             block.receipt_commitment == Some(vera_executor::receipt_commitment(0, &[])),
-            "native genesis predates receipt commitments; an explicit migration is required"
+            "native genesis receipt commitment is invalid"
         );
         return Ok(block);
     }
     ensure!(
         !marker_exists(&data_dir.join("genesis_block.bin"))?
             && !marker_exists(&data_dir.join("state"))?,
-        "existing JMT state requires an explicit native-storage migration"
+        "unsupported state layout in node directory"
     );
     ensure!(
         !marker_exists(&data_dir.join("history"))?,

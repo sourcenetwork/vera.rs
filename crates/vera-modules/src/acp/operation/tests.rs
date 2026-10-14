@@ -108,7 +108,7 @@ fn workers_recover_the_original_outcome_after_edit_and_reopen() {
     assert_eq!(original.revision.seconds, 100);
     let edited = "name: changed\nresources:\n  - name: file\n";
     acp.edit_policy(
-        &identity::Did::new(issuer()).unwrap(),
+        &vera_identity::Did::new(issuer()).unwrap(),
         &created.policy.id,
         edited,
         FORMAT,
@@ -170,7 +170,7 @@ fn workers_recover_the_original_outcome_after_edit_and_reopen() {
     assert_eq!(reopened.store().serialize(), before);
     vera.revoke_delegation(
         &context(101),
-        &identity::Did::new(&second.signer).unwrap(),
+        &vera_identity::Did::new(&second.signer).unwrap(),
         &retry_token,
     )
     .unwrap();
@@ -209,7 +209,7 @@ fn workers_recover_the_original_outcome_after_edit_and_reopen() {
         .unwrap();
     reopened
         .direct_policy_cmd(
-            &identity::Did::new(issuer()).unwrap(),
+            &vera_identity::Did::new(issuer()).unwrap(),
             &created.policy.id,
             PolicyCmd::ArchiveObject(object),
         )
@@ -268,7 +268,7 @@ fn request_binding_and_expiry_precede_effects_and_survive_pruning() {
             assert!(
                 vera.revoke_delegation(
                     &context(100),
-                    &identity::Did::new(issuer()).unwrap(),
+                    &vera_identity::Did::new(issuer()).unwrap(),
                     &sign(&claims)
                 )
                 .is_err()
@@ -341,7 +341,7 @@ fn an_operation_identity_cannot_be_reused_for_different_arguments() {
 fn repeated_edit_returns_its_original_count_without_removing_new_relationships() {
     let mut acp = AcpModule::new();
     let mut vera = VeraModule::new();
-    let owner = identity::Did::new(issuer()).unwrap();
+    let owner = vera_identity::Did::new(issuer()).unwrap();
     let original =
         "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n";
     let policy = acp
@@ -355,7 +355,8 @@ fn repeated_edit_returns_its_original_count_without_removing_new_relationships()
     };
     acp.direct_policy_cmd(&owner, &policy, PolicyCmd::RegisterObject(object.clone()))
         .unwrap();
-    let relationship = acp::Relationship::with_entity("file", "first", "reader", owner.clone());
+    let relationship =
+        vera_acp::Relationship::with_entity("file", "first", "reader", owner.clone());
     acp.direct_policy_cmd(
         &owner,
         &policy,

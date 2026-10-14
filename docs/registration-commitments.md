@@ -54,18 +54,15 @@ hash is SHA-256 of `0x00 || leaf`; inner hashes use `0x01 || left || right`.
 Odd trailing nodes are promoted unchanged. Verification checks the leaf index,
 leaf count, 32-byte sibling hashes and exact number of consumed siblings.
 
-This encoding replaces the ambiguous concatenation used by the unfinished port.
-Old commitment proofs are incompatible. Deploy on fresh state or provide an
-explicit migration; this change does not repair existing owner records or
-zero-timestamp commitments in an older store. A migration from an earlier store
-must also populate expiry indexes for every unexpired commitment.
+This is the release's commitment encoding. All members and consumers use the
+same format, starting from fresh state.
 
 ## Commitment discovery
 
 Each commitment has a root index entry using
 `commitment/indexes/commitment/idx/ || root[32] || / || id_be[8]` with an empty value.
 The entry remains after expiry. It is maintained with the primary record and
-included in ACP snapshots. Older stores require explicit index population.
+included in ACP snapshots.
 
 `VeraClient::read_registration_commitment_ids` uses the existing certified native
 prefix-page endpoint. Supply the root, optional continuation, a limit from 1 to
@@ -109,10 +106,9 @@ events. Exceeding either limit returns an error rather than a partial history.
 Malformed records, mismatched identities and dangling indexes are errors.
 
 Native recovery requires a matching policy index for every retained amendment.
-Existing deployments with amendments created before this index require an
-explicit migration; startup does not rebuild it automatically. New index entries
-participate in the native state commitment, so this is a coordinated execution
-upgrade. The limits bound each query, not total retained history.
+Missing or inconsistent indexes fail restoration. Index entries participate in
+the native state commitment. The limits bound each query, not total retained
+history.
 
 `read_amendment_ids` discovers all amendment IDs for a policy through certified
 pages, including unflagged events. `read_amendment` binds the selected record to

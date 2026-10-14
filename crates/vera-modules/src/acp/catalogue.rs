@@ -68,7 +68,7 @@ impl AcpModule {
                 continue;
             };
             resource.object_ids.insert(relationship.object_id);
-            if let acp::Subject::Entity(actor) = relationship.subject {
+            if let vera_acp::Subject::Entity(actor) = relationship.subject {
                 actors.insert(actor.to_string());
             }
         }

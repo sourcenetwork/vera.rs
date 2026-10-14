@@ -22,7 +22,7 @@ fn fixture(count: usize) -> (AcpModule, String, RelationshipRecord) {
             "file",
             format!("item-{index:03}"),
             "reader",
-            acp::Subject::entity_set("group", "staff", "member"),
+            vera_acp::Subject::entity_set("group", "staff", "member"),
         );
         let record = RelationshipRecord {
             incarnation: 0,

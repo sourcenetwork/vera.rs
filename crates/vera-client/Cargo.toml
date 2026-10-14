@@ -17,8 +17,8 @@ vera-domain.workspace = true
 vera-permission.workspace = true
 vera-modules.workspace = true
 
-acp.workspace = true
-identity.workspace = true
+vera-acp.workspace = true
+vera-identity.workspace = true
 async-trait.workspace = true
 
 alloy-consensus = { workspace = true, features = ["k256"] }

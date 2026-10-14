@@ -40,7 +40,7 @@ use vera_modules::acp::{
     AcpModule, keys,
     types::{PolicyMarshalingType, PolicyRecord},
 };
-use zanzibar::{Relationship, Subject};
+use vera_zanzibar::{Relationship, Subject};
 
 type LogCodec = ((RangeCfg<usize>, ()), RangeCfg<usize>);
 

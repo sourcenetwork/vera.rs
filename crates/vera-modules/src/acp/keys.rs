@@ -33,7 +33,7 @@ pub fn policy_key(id: &str) -> Vec<u8> {
 }
 
 /// Canonical native key suffix, independent of the shared engine's storage format.
-pub fn relationship_storage_key(relationship: &acp::Relationship, incarnation: u64) -> String {
+pub fn relationship_storage_key(relationship: &vera_acp::Relationship, incarnation: u64) -> String {
     use sha2::{Digest, Sha256};
     let mut digest = Sha256::new();
     digest.update(b"vera/acp-subject/v1\0");
@@ -250,8 +250,12 @@ mod tests {
 
     #[test]
     fn native_relationship_key_format() {
-        let relationship =
-            acp::Relationship::new("file", "report/child", "reader", acp::Subject::Wildcard);
+        let relationship = vera_acp::Relationship::new(
+            "file",
+            "report/child",
+            "reader",
+            vera_acp::Subject::Wildcard,
+        );
         assert_eq!(
             relationship_storage_key(&relationship, 10),
             "v3/66696c65/7265706f72742f6368696c64/000000000000000a/726561646572/00414ab1420d5a968b2ab88ef68b22497b031cd04a26bf22380cb3f845fa18b1"
@@ -273,8 +277,12 @@ mod tests {
 
     #[test]
     fn relationship_incarnations_have_distinct_delimited_prefixes() {
-        let relationship =
-            acp::Relationship::new("file/雪", "report/child", "reader", acp::Subject::Wildcard);
+        let relationship = vera_acp::Relationship::new(
+            "file/雪",
+            "report/child",
+            "reader",
+            vera_acp::Subject::Wildcard,
+        );
         let first = relationship_storage_key(&relationship, 0);
         let next = relationship_storage_key(&relationship, 1);
         let last = relationship_storage_key(&relationship, u64::MAX);
@@ -411,7 +419,7 @@ mod tests {
     #[test]
     fn borsh_roundtrip_amendment_event() {
         use borsh::BorshDeserialize;
-        use identity::Did;
+        use vera_identity::Did;
 
         use crate::acp::types::{Actor, AmendmentEvent, Object, RecordMetadata};
         use crate::types::Timestamp;
