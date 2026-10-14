@@ -25,8 +25,48 @@ The sustained Regolith diagnostic in
 certified all 90,000 operations, checked four replicas and passed restart with
 zero receipt or state mismatches. Reporting then exceeded the previous
 two-minute deadline while rewriting decoded stacks. Its retained workload
-evidence does not include qualified allocation attribution. The growing profile below qualifies its allocation attribution. Fixed-state
-sustained attribution remains a separate gate.
+evidence does not include qualified allocation attribution. The growing profile
+below retains its earlier allocation attribution. The current
+five-minute fixed-state collection is qualified below; it does not turn that
+failed thirty-minute collection into a qualified allocation result.
+
+## Current fixed-state allocation attribution
+
+[Run 38584073194](https://github.com/sourcenetwork/vera.rs/actions/runs/38584073194)
+measured clean source `efc4beae51d301964ad80200dfd8e67bc66eed11`
+on October 14, 2026. It completed
+6,000 updates over 128 objects, offered at 20/s for five minutes. Certified
+permission reads, all four replicas and full restart inspection passed, with no
+receipt or state mismatches. Only member 3's first process was instrumented;
+this release build uses full debug symbols and frame pointers, with the default
+glibc arena setting. It is an allocation study, not a capacity measurement.
+
+Peak tracked allocations were **126.97 MiB**; **124.09 MiB** remained
+allocated when that first process exited after replica reconciliation. Reporting
+processed 109,298 weighted stacks and 16,375 distinct frames. The private compact spool
+retains every stack while avoiding an in-memory map of all stack combinations.
+Original and decoded allocation totals agree; category totals account for every
+retained byte. Unresolved allocations remain explicit: 73,728 bytes.
+
+| Innermost recorded caller | Retained MiB |
+| --- | ---: |
+| `commonware_runtime::iobuf::pool::BufferPoolInner (mod.rs)` | 54.01 |
+| `commonware_actor::mailbox::new_unreliable (mailbox.rs)` | 25.02 |
+| `commonware_cryptography::ed25519::scheme::PublicKey (channels.rs)` | 17.30 |
+| `regolith::engine::arena::Arena (arena.rs)` | 7.94 |
+| `commonware_runtime::iobuf::pool::class::SizeClassHandle (class.rs)` | 4.74 |
+| `commonware_actor::mailbox::new (mailbox.rs)` | 2.07 |
+
+These callers identify allocation paths, not unique owners or leaks. The trace
+covers the first process through final checks; its peak is not the normal-release
+RSS peak of the separate two-hour workload. Build, allocator, duration and source
+differences prevent adding these quantities to, or subtracting them from, those
+RSS measurements. The earlier growing-state trace below retains its earlier
+source and predates the compaction-cache change.
+
+The [resource envelope](storage-resource-envelope.md) and
+[measurement reconciliation](measurement-provenance-20261014.md#allocation-and-resident-memory-reconciliation)
+record the corresponding normal-release scopes.
 
 ## Growing-state allocation attribution
 
@@ -48,7 +88,7 @@ Peak tracked allocations were 654.34 MiB. The first process ended with 651.55 Mi
 
 Each allocation is charged once to its innermost recognized project caller. This attributes an allocation path, not necessarily a unique owning component. Buffers returned by an encoder may remain in records or journals; a storage wrapper may appear above allocator internals. Retention at process exit alone does not establish a leak. Only 91,424 bytes remain unresolved after Rust symbol decoding.
 
-The evidence identifies actor queues, ordered QMDB indexes, live ACP maps and encoded records, buffer pools and history as the next memory-review targets. It does not justify allocator replacement, weakened synchronous durability or a throughput claim. A fixed-state steady-load result and matched uninstrumented measurements are still needed to distinguish growing data, bounded caches and unwanted retention.
+This historical trace records allocation paths through actor queues, ordered QMDB indexes, live ACP maps and encoded records, buffer pools and history. It does not justify allocator replacement, weakened synchronous durability or a throughput claim. The current normal-release [resource envelope](storage-resource-envelope.md) supplies separate fixed and growing measurements; source and instrumentation differences prevent a direct heap-to-RSS comparison.
 
 [Allocation workflow and numeric artifact](https://github.com/sourcenetwork/vera.rs/actions/runs/38116457453) at source `68287c9016672908f17e3a664cfc40716e56f252`.
 

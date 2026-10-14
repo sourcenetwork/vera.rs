@@ -144,3 +144,47 @@ ceiling for arbitrary datasets or a maximum sustainable throughput.
 The [storage resource envelope](storage-resource-envelope.md) records the selected
 finite-profile regression budgets and their measured unused capacity. Its gate
 validates both retained artifacts and runs in future sustained selections.
+
+## Allocation and resident-memory reconciliation
+
+The separate [current allocation collection](heap-profiling.md#current-fixed-state-allocation-attribution)
+uses source `efc4beae51d301964ad80200dfd8e67bc66eed11`, artifact `11906637312` from
+[run 38584073194](https://github.com/sourcenetwork/vera.rs/actions/runs/38584073194).
+Its manifest records host CPU, build options, executable hashes and default
+allocator settings. The retained numeric artifact ZIP has SHA-256
+`28e560ecbe7db5e387935776e8bbd672af5aa54be0ac6f22a97c6acf6d5976b2`.
+It contains qualified `allocations.json`, verified
+`workload.json` and an explicitly unqualified pre-decoding checkpoint,
+`allocation-summary.json`. Raw stack frames, node logs and key files stay private.
+
+Normal-release fixed and growing runs remain the throughput/resource evidence:
+
+| Observation | Fixed 360k, two hours | Growing 90k, thirty minutes |
+| --- | ---: | ---: |
+| Completed verified workflows/s | 49.999 | 49.996 |
+| Receipt p50 / p95 / p99 | 172.048 / 294.069 / 331.431 ms | 162.980 / 275.807 / 292.985 ms |
+| Permission read p50 / p95 / p99 | 3.925 / 12.948 / 19.224 ms | 2.230 / 7.702 / 12.683 ms |
+| Peak sampled RSS/member | 415.91–461.62 MiB | 802.67–816.31 MiB |
+| Mean process CPU/member | 0.429–0.464 cores | 0.346–0.369 cores |
+| Retained allocated files/member | 322.98–324.33 MiB | 323.89–324.74 MiB |
+
+Every operation, all four replicas and restart agree. Complete one-second resource
+series contain 7,201 fixed and 1,801 growing samples per member. Fixed-workload RSS
+increased by 0.26–3.66 MiB per member in its last ten minutes, 24.58–34.82 MiB in
+its last thirty minutes and 51.12–65.98 MiB in its last hour. Those finite windows
+show continued changes rather than an indefinite plateau. The growing run adds
+live objects, policies and signer indexes throughout; its growth is not itself
+proof of a leak.
+
+The [qualified envelope](storage-resource-envelope.md) records the regression
+budgets and headroom for these profiles. Earlier pressure observations retain
+their source and verify a full 4,096-slot backlog, 1,200 rejected requests and
+quorum recovery. These are measured local workloads on one four-CPU host, not
+maximum capacity or independent-host/WAN performance.
+
+Reconcile these scopes separately: RSS includes allocator reservation and other
+resident mappings; tracked heap covers instrumented allocations; storage and
+allocator diagnostics overlap; caller attribution describes allocation paths.
+Their totals cannot be summed into a process-memory budget. The fixed workload's
+cache/compaction observations and growing workload's index counts explain
+recorded state and cache costs without assigning every residual RSS byte an owner.
