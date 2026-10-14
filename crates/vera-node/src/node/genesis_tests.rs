@@ -330,16 +330,23 @@ fn pipeline_parameters_bind_the_genesis_identity_and_restart() {
 }
 
 #[test]
-fn pre_pet_genesis_and_interrupted_initialization_are_rejected_unchanged() {
+fn incompatible_genesis_markers_are_rejected_unchanged() {
     let genesis = configured_genesis();
-    let mut bytes = b"vera/native-genesis/v2\0".to_vec();
-    bytes.extend_from_slice(&serde_json::to_vec(&genesis).unwrap());
-    let old_fingerprint = keccak256(bytes);
-    assert_ne!(old_fingerprint, fingerprint(&genesis).unwrap());
-    for marker in ["native-genesis.bin", "native-genesis.intent"] {
+    let mut incompatible_fingerprint = fingerprint(&genesis).unwrap();
+    incompatible_fingerprint[0] ^= 1;
+    for (marker, expected_error) in [
+        (
+            "native-genesis.bin",
+            "native genesis configuration or storage format does not match this node",
+        ),
+        (
+            "native-genesis.intent",
+            "interrupted genesis has different configuration",
+        ),
+    ] {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path();
-        persist(&path.join(marker), old_fingerprint.as_slice()).unwrap();
+        persist(&path.join(marker), incompatible_fingerprint.as_slice()).unwrap();
         let runtime = tokio::Config::new().with_storage_directory(path.join("commonware"));
         let genesis = &genesis;
         tokio::Runner::new(runtime).start(|context| async move {
@@ -347,13 +354,11 @@ fn pre_pet_genesis_and_interrupted_initialization_are_rejected_unchanged() {
             let error = load_or_create(&context, path, genesis, &cache)
                 .await
                 .unwrap_err();
-            assert!(
-                error.to_string().contains("different") || error.to_string().contains("differs")
-            );
+            assert_eq!(error.to_string(), expected_error);
         });
         assert_eq!(
             fs::read(path.join(marker)).unwrap(),
-            old_fingerprint.as_slice()
+            incompatible_fingerprint.as_slice()
         );
     }
 }
