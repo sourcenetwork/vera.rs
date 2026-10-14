@@ -1,9 +1,9 @@
 [package]
-name = "identity"
+name = "vera-identity"
 version = "0.5.0"
 edition = "2021"
 license = "Apache-2.0 OR MIT"
-repository = "https://github.com/sourcenetwork/defradb.rs"
+repository.workspace = true
 description = "DID identity types"
 
 [dependencies]

@@ -82,10 +82,59 @@ flowchart TB
     class QMDB,History,Views storage
 ```
 
-ACP is implemented in Rust through the local `acp`, `zanzibar`, and `identity`
+ACP is implemented in Rust through `vera-acp`, `vera-zanzibar`, and `vera-identity`
 crates. See [ACP v1 operations, authority and compatibility](acp-v1.md).
 All members re-execute proposals against isolated state before accepting
 them. Durable finalization precedes publication of query results.
+
+## Code boundaries
+
+Every package under `crates/` uses the `vera-` prefix. `vera-acp`,
+`vera-zanzibar` and `vera-identity` originated in DefraDB; their original licenses
+and provenance remain in the repository. Cargo dependency aliases keep the short
+Rust imports `acp`, `zanzibar`, `identity` and `test_infra` within this workspace.
+Consumers selecting these packages directly must use their new package names;
+existing consumers pinned to earlier revisions keep those revisions' names.
+
+| Location | Responsibility |
+| --- | --- |
+| [`vera-acp`](../crates/vera-acp/src/lib.rs) | Policy types, YAML compilation and document-authorization interfaces |
+| [`vera-zanzibar`](../crates/vera-zanzibar/src/lib.rs) | Relation-graph evaluation |
+| [`vera-identity`](../crates/vera-identity/src/lib.rs) | DID types and validation |
+| [`vera-modules/src/acp`](../crates/vera-modules/src/acp/mod.rs) | ACP commands, ownership, relationships, decisions and stored records |
+| [`vera-permission`](../crates/vera-permission/src/lib.rs) | Authenticate read evidence and replay the shared ACP evaluator for consumers |
+| [`vera-executor/src/precompiles/acp`](../crates/vera-executor/src/precompiles/acp.rs) | Decode commands, charge execution work, call ACP methods and encode outcomes |
+| [`vera-test-infra`](../crates/vera-test-infra/src/lib.rs) | Process, port and log helpers for tests |
+
+The `precompiles` directory name comes from the compatibility executor. Native
+signed requests also call its dispatch functions directly; disabling EVM
+transactions does not bypass this layer or remove its ABI and REVM types.
+`vera-permission` verifies authenticated records and evaluates the same rules as
+the service. It does not implement a separate policy-mutation engine. Record and
+prefix evidence there also serves identity and bulletin consumers.
+
+```mermaid
+flowchart LR
+    Request[Native signed request] --> Executor[vera-executor<br/>authentication and rollback]
+    Executor --> Dispatch[precompiles/acp<br/>decode and work budget]
+    Dispatch --> Module[vera-modules/acp<br/>business rules and records]
+    Module --> Engine[vera-zanzibar<br/>shared evaluator]
+    Evidence[vera-permission<br/>authenticated client evidence] --> Engine
+```
+
+Operator-managed membership is the PoA policy surrounding Commonware Simplex.
+[`vera/administration.rs`](../crates/vera-modules/src/vera/administration.rs)
+checks operator approvals and selects the membership ACP policy.
+[`precompiles/validator_registry.rs`](../crates/vera-executor/src/precompiles/validator_registry.rs)
+authorizes and executes registry changes; `vera-modules/validator_registry`
+provides its ABI, errors and record types. The executor records epoch rosters
+through [`vera/membership.rs`](../crates/vera-modules/src/vera/membership.rs).
+[`participants.rs`](../crates/vera-node/src/participants.rs) supplies finalized
+rosters to Commonware DKG/resharing, and
+[`node.rs`](../crates/vera-node/src/node.rs) starts the Simplex orchestrator.
+Successful resharing determines when a selected roster becomes the voting
+committee. See [consensus membership](consensus-membership.md) for the cutoff and
+effective-epoch rules.
 
 QMDB commits seven persistent partitions: accounts, storage, code, ACP, bulletin,
 Vera records, and native signer sequences. A coordinated commitment binds the

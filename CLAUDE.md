@@ -25,9 +25,9 @@ Related repositories are independent checkouts; discover their paths rather than
 
 | Component | Source repo | Used in vera.rs for |
 |-----------|-----------|-------------------|
-| Zanzibar engine (relation-tuple graph) | vendored `crates/zanzibar/` (from defradb.rs 8d34d9c) | ACP policy evaluation |
-| DID types, identity crate | vendored `crates/identity/` (from defradb.rs 8d34d9c) | DID resolution |
-| YAML policy parser, DocumentACP types | vendored `crates/acp/` (from defradb.rs 8d34d9c) | ACP policy creation |
+| Zanzibar engine (relation-tuple graph) | vendored `crates/vera-zanzibar/` (from defradb.rs 8d34d9c) | ACP policy evaluation |
+| DID types, identity crate | vendored `crates/vera-identity/` (from defradb.rs 8d34d9c) | DID resolution |
+| YAML policy parser, DocumentACP types | vendored `crates/vera-acp/` (from defradb.rs 8d34d9c) | ACP policy creation |
 | Simplex consensus, REVM executor, e2e harness | bankd-commonware | Consensus, EVM execution, testing |
 | BLS12-381 threshold crypto | commonware monorepo | Block signing, native tx verification |
 
@@ -357,7 +357,7 @@ vera.rs/
         vera-permission/        # Permission/record/prefix evidence types and verification
         vera-qmdb/              # Core QMDB abstractions and traits
         vera-traits/            # StateDb trait abstractions for storage/consensus
-        test-infra/            # Shared test primitives: process, ports, logs, binary resolver
+        vera-test-infra/            # Shared test primitives: process, ports, logs, binary resolver
         vera-verifier/          # C shared-library verifier for receipts, records, prefixes and policies
 ```
 

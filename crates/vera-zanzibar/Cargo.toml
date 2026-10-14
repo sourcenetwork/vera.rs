@@ -1,9 +1,9 @@
 [package]
-name = "zanzibar"
+name = "vera-zanzibar"
 version = "0.5.0"
 edition = "2021"
 license = "Apache-2.0 OR MIT"
-repository = "https://github.com/sourcenetwork/defradb.rs"
+repository.workspace = true
 description = "Zanzibar relation-tuple evaluation engine"
 
 [dependencies]
@@ -15,7 +15,7 @@ serde.workspace = true
 serde_json.workspace = true
 parking_lot.workspace = true
 tracing.workspace = true
-identity = { path = "../identity" }
+identity = { package = "vera-identity", path = "../vera-identity" }
 
 [dev-dependencies]
 tokio.workspace = true

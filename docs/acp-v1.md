@@ -1,7 +1,7 @@
 # ACP v1 in Vera
 
-Vera executes ACP in Rust. Policy compilation lives in `crates/acp`, graph
-evaluation in `crates/zanzibar`, and authenticated lifecycle operations in
+Vera executes ACP in Rust. Policy compilation lives in `crates/vera-acp`, graph
+evaluation in `crates/vera-zanzibar`, and authenticated lifecycle operations in
 `crates/vera-modules/src/acp`. The native client and optional EVM interface dispatch
 to the same module implementation. The Go engine is used only to generate test
 fixtures; it is not part of the node or its runtime dependencies.

@@ -8,7 +8,7 @@ license.workspace = true
 [dependencies]
 vera-cli.workspace = true
 vera-domain.workspace = true
-test-infra = { path = "../test-infra" }
+test-infra = { package = "vera-test-infra", path = "../vera-test-infra" }
 vera-node.workspace = true
 vera-modules.workspace = true
 

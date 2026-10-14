@@ -72,7 +72,7 @@ vera-permission = { path = "crates/vera-permission" }
 vera-executor = { path = "crates/vera-executor" }
 vera-genesis = { path = "crates/vera-genesis" }
 vera-harness = { path = "crates/vera-harness" }
-test-infra = { path = "crates/test-infra" }
+test-infra = { package = "vera-test-infra", path = "crates/vera-test-infra" }
 
 # Commonware (calver 2026.9.0)
 commonware-actor = { git = "https://github.com/iverc/commonware-upstream", rev = "4f5db3d0dc30900015fb13347e9ec20ae085b79a" }
@@ -91,9 +91,9 @@ commonware-glue = "2026.9.0"
 commonware-stream = "2026.9.0"
 
 # Shared Defra types and policy evaluation
-acp = { path = "crates/acp" }
-identity = { path = "crates/identity" }
-zanzibar = { path = "crates/zanzibar" }
+acp = { package = "vera-acp", path = "crates/vera-acp" }
+identity = { package = "vera-identity", path = "crates/vera-identity" }
+zanzibar = { package = "vera-zanzibar", path = "crates/vera-zanzibar" }
 
 # Alloy
 alloy-primitives = "1.7"
