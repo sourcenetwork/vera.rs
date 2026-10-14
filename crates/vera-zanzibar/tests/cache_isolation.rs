@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use zanzibar::{
+use vera_zanzibar::{
     store::{MemoryZanzibarStore, ZanzibarStore},
     Did, PermissionCheckRequest, PermissionEngine, Policy, Relation, Relationship, Resource,
 };

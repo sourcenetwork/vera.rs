@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use zanzibar::{
+use vera_zanzibar::{
     engine::{MAX_EVALUATION_DEPTH, MAX_EVALUATION_STEPS},
     error::Error,
     store::{MemoryZanzibarStore, ZanzibarStore},
@@ -90,10 +90,11 @@ async fn batches_share_work_limits_including_cached_checks() {
             .with_resource(Resource::new("group").with_relation(Relation::direct("member"))),
     );
     let actor = Did::new("did:key:actor").unwrap();
-    let requests = vec![
-        zanzibar::PermissionCheckRequest::new("p", "group", "0", "member", &actor);
-        MAX_EVALUATION_STEPS + 1
-    ];
+    let requests =
+        vec![
+            vera_zanzibar::PermissionCheckRequest::new("p", "group", "0", "member", &actor);
+            MAX_EVALUATION_STEPS + 1
+        ];
     let results = engine.check_many(&requests).await;
     assert!(results[..MAX_EVALUATION_STEPS]
         .iter()

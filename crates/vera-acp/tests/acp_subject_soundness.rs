@@ -6,8 +6,8 @@
 //! declared on a relation, so a relation never accepts a subject whose type the
 //! policy did not authorise.
 
-use acp::policy_yaml::{build_policy, parse_policy_yaml};
-use acp::{Policy, Relation, Relationship, Resource, Subject};
+use vera_acp::policy_yaml::{build_policy, parse_policy_yaml};
+use vera_acp::{Policy, Relation, Relationship, Resource, Subject};
 use zanzibar::error::Error;
 use zanzibar::Did;
 

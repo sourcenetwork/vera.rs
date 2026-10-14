@@ -2,7 +2,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
-use zanzibar::{
+use vera_zanzibar::{
     engine::EvaluationMeter,
     error::{Error, Result},
     store::MemoryZanzibarStore,

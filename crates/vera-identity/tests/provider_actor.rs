@@ -1,4 +1,4 @@
-use identity::Did;
+use vera_identity::Did;
 
 #[test]
 fn provider_actor_round_trips_without_becoming_a_signing_key() {

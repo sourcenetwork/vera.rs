@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use proptest::prelude::*;
-use zanzibar::{
+use vera_zanzibar::{
     store::{MemoryZanzibarStore, ZanzibarStore},
     Did, PermissionEngine, Policy, Relation, RelationExpression, Relationship, Resource,
 };
