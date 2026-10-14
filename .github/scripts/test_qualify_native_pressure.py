@@ -170,7 +170,7 @@ class CargoExecutableSelection(unittest.TestCase):
                                            '--output', str(output)]), self.assertRaises(ValueError):
                 runner.main()
             self.assertEqual(json.loads(output.read_text()),
-                             {'qualified': False, 'failure_stage': 'setup'})
+                             {'qualified': False, 'failure_stage': 'setup', 'case': pressure.CASE})
 
     def test_selects_the_reported_release_fixture_and_ignores_other_targets(self):
         with tempfile.TemporaryDirectory() as directory:

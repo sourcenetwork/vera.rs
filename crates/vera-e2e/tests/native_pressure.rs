@@ -90,6 +90,7 @@ fn read_error_kind(error: &ClientError) -> &'static str {
         ClientError::Permission(_) => "proof-invalid",
         ClientError::Finalization(_) => "finality-invalid",
         ClientError::Transport(error) if error.is_timeout() => "transport-timeout",
+        ClientError::ReceiptTimeout { .. } => "receipt-deadline",
         ClientError::Transport(_) => "transport",
         ClientError::Json(_) => "json",
         ClientError::ResponseTooLarge(_) => "response-limit",
@@ -204,6 +205,12 @@ async fn admission_recovers(workers: usize) {
                 )
                 .await;
                 if !matches!(&last, Ok(Ok(_))) {
+                    let kind = match &last {
+                        Err(_) => "client-deadline",
+                        Ok(Err(error)) => read_error_kind(error),
+                        Ok(Ok(_)) => unreachable!(),
+                    };
+                    eprintln!("recovery_rpc_failure phase=admission-backlog kind={kind} replica=0");
                     for index in 0..3 {
                         let client = VeraClient::new(cluster.node(index).rpc_url());
                         let nonce = tokio::time::timeout(
@@ -216,6 +223,20 @@ async fn admission_recovers(workers: usize) {
                         .map_or_else(|| "unavailable".to_owned(), |value| value.to_string());
                         eprintln!(
                             "native_admission_progress replica={index} nonce={nonce} elapsed_ms={} worker={worker}",
+                            recovery_started.elapsed().as_millis()
+                        );
+                        let status = tokio::time::timeout(Duration::from_secs(2), client.node_status())
+                            .await.ok().and_then(Result::ok);
+                        let number = |value: Option<u64>| value.map_or_else(
+                            || "unavailable".to_owned(), |value| value.to_string());
+                        let height = number(status.as_ref().and_then(|value| value.finalized_height));
+                        let epoch = number(status.as_ref().and_then(|value| value.finalized_epoch));
+                        let view = number(status.as_ref().and_then(|value| value.current_view));
+                        let peers = number(status.as_ref().and_then(|value| value.peer_count));
+                        let backfilling = status.as_ref().map_or_else(
+                            || "unavailable".to_owned(), |value| value.backfilling.to_string());
+                        eprintln!(
+                            "native_admission_state replica={index} worker={worker} height={height} epoch={epoch} view={view} peers={peers} backfilling={backfilling} elapsed_ms={}",
                             recovery_started.elapsed().as_millis()
                         );
                     }

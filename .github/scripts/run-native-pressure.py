@@ -35,7 +35,8 @@ def main():
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--case', choices=CASES, default=CASES[0])
     args = parser.parse_args()
-    args.output.write_text(json.dumps({'qualified': False, 'failure_stage': 'setup'}) + '\n')
+    args.output.write_text(json.dumps({'qualified': False, 'failure_stage': 'setup',
+                                      'case': args.case}) + '\n')
     workspace = Path.cwd().resolve()
     runner = executable(args.build_metadata, workspace)
     node = workspace / 'target/release/verad'
@@ -56,6 +57,7 @@ def main():
     if code:
         args.output.write_text(json.dumps({
             'qualified': False, 'failure_stage': 'process', 'runner_exit_code': code,
+            'case': args.case,
         }) + '\n')
         raise SystemExit(code)
     subprocess.run([

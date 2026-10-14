@@ -52,6 +52,40 @@ class SafeTestEvidence(unittest.TestCase):
                 'native_admission_progress replica=0 nonce=100 elapsed_ms=1\n')
             self.assertEqual(summary.summarize(root, {})['admission_progress'], [])
 
+    def test_worker_progress_retains_worker_without_accepting_private_suffixes(self):
+        evidence = self.collect(
+            'native_admission_progress replica=1 nonce=1024 elapsed_ms=120002 worker=3\n'
+            'native_admission_progress replica=2 nonce=unavailable elapsed_ms=120003 worker=0\n'
+            'native_admission_progress replica=1 nonce=1 elapsed_ms=1 worker=4\n'
+            'native_admission_progress replica=1 nonce=1 elapsed_ms=1 worker=0 private-key\n')
+        self.assertEqual(evidence['admission_progress'], [
+            {'replica': 1, 'worker': 3, 'native_nonce': 1024, 'elapsed_ms': 120002},
+            {'replica': 2, 'worker': 0, 'native_nonce': None, 'elapsed_ms': 120003}])
+        self.assertNotIn('private-key', json.dumps(evidence))
+
+    def test_admission_state_keeps_unknowns_and_rejects_invalid_or_private_fields(self):
+        valid = ('native_admission_state replica=2 worker=0 height=100 epoch=0 '
+                 'view=101 peers=2 backfilling=false elapsed_ms=120001\n')
+        unknown = ('native_admission_state replica=0 worker=3 height=unavailable epoch=unavailable '
+                   'view=unavailable peers=unavailable backfilling=unavailable elapsed_ms=120004\n')
+        evidence = self.collect(valid + unknown +
+            valid.replace('height=100', 'height=18446744073709551616') +
+            valid.replace('replica=2', 'replica=4') +
+            valid.replace('worker=0', 'worker=4') +
+            valid.replace('elapsed_ms=120001', 'elapsed_ms=900001') +
+            valid.replace('backfilling=false', 'backfilling=private-key') +
+            valid.rstrip() + ' private-key\n')
+        self.assertEqual(evidence['admission_state'], [
+            {'replica': 2, 'worker': 0, 'finalized_height': 100, 'finalized_epoch': 0,
+             'current_view': 101, 'peer_count': 2, 'backfilling': False, 'elapsed_ms': 120001},
+            {'replica': 0, 'worker': 3, 'finalized_height': None, 'finalized_epoch': None,
+             'current_view': None, 'peer_count': None, 'backfilling': None, 'elapsed_ms': 120004}])
+        with patch.object(summary, 'MAX_ADMISSION_SAMPLES', 1):
+            bounded = self.collect(valid + valid + unknown)
+        self.assertEqual(len(bounded['admission_state']), 1)
+        self.assertTrue(bounded['admission_state_limit_reached'])
+        self.assertNotIn('private-key', json.dumps(evidence))
+
     def test_cases_export_only_source_names_without_private_prefixes_or_reasons(self):
         evidence = self.collect('test private_actor::restores_revocations ... ok\n'
                                 'test rejected_proof ... FAILED\n'
