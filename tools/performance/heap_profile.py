@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 import tempfile
 import time
@@ -19,20 +20,20 @@ from record import allocator_environment, digest
 
 MAX_FRAME_BYTES = 32 * 1024 * 1024
 MAX_FRAMES = 65536
-MAX_STACKS = 262144
-MAX_STACK_REFERENCES = 4 * 1024 * 1024
+MAX_COMPACT_BYTES = 2 * 1024 * 1024 * 1024
 MAX_STACK_DEPTH = 1024
 MAX_STACK_LINE_BYTES = 2 * 1024 * 1024
 MAX_STACK_MEMO_BYTES = 8 * 1024 * 1024
 
 
-def stack_inventory(path, *, scan_timeout_seconds=120):
-    """Read the trace once, retaining bounded frame IDs and weighted unique stacks."""
+def stack_inventory(path, compact, *, scan_timeout_seconds=120):
+    """Intern frames once and stream weighted stack references to private storage."""
     deadline = time.monotonic() + scan_timeout_seconds
-    frames, frame_ids, stacks = [], {}, collections.Counter()
+    frames, frame_ids, locations, classes = [], {}, [], []
+    original_sites = collections.Counter()
     memo = collections.OrderedDict()
-    frame_bytes = references = memo_bytes = rows = 0
-    with path.open('rb') as stream:
+    frame_bytes = compact_bytes = memo_bytes = rows = 0
+    with path.open('rb') as stream, compact.open('wb') as output:
         for raw in iter(lambda: stream.readline(MAX_STACK_LINE_BYTES + 1), b''):
             if time.monotonic() >= deadline:
                 raise ValueError('allocation trace inventory exceeded its deadline')
@@ -40,10 +41,10 @@ def stack_inventory(path, *, scan_timeout_seconds=120):
                 raise ValueError('allocation stack exceeds its byte budget')
             stack, weight = raw.rstrip().rsplit(b' ', 1)
             amount = int(weight)
-            if amount < 0:
-                raise ValueError('negative allocation weight')
-            ids = memo.get(stack)
-            if ids is None:
+            if not 0 <= amount <= (1 << 64) - 1:
+                raise ValueError('invalid allocation weight')
+            entry = memo.get(stack)
+            if entry is None:
                 entries = [frame for frame in stack.split(b';') if frame]
                 if len(entries) > MAX_STACK_DEPTH:
                     raise ValueError('allocation stack exceeds its depth budget')
@@ -56,34 +57,57 @@ def stack_inventory(path, *, scan_timeout_seconds=120):
                         identifier = len(frames)
                         frame_ids[frame] = identifier
                         frames.append(frame.decode())
+                        location = source_location(frames[-1])
+                        locations.append(location)
+                        classes.append(bool(component_site(location)))
                         frame_bytes += len(frame)
                     selected.append(identifier)
-                ids = tuple(selected)
-                memo[stack] = ids
+                owned = next((locations[index] for index in reversed(selected) if classes[index]), None)
+                known = next((locations[index] for index in reversed(selected)
+                              if locations[index] != 'unresolved'), None)
+                site = owned or known or 'unresolved'
+                packed = struct.pack('<%dH' % len(selected), *selected)
+                entry = (len(selected), packed, site)
+                memo[stack] = entry
                 memo_bytes += len(stack)
                 while memo_bytes > MAX_STACK_MEMO_BYTES:
                     expired, _ = memo.popitem(last=False)
                     memo_bytes -= len(expired)
             else:
                 memo.move_to_end(stack)
-            if ids not in stacks:
-                references += len(ids)
-                if len(stacks) >= MAX_STACKS or references > MAX_STACK_REFERENCES:
-                    raise ValueError('allocation stacks exceed their inventory budget')
-            stacks[ids] += amount
+            count, packed, site = entry
+            compact_bytes += 10 + len(packed)
+            if compact_bytes > MAX_COMPACT_BYTES:
+                raise ValueError('allocation stack spool exceeds its byte budget')
+            output.write(struct.pack('<QH', amount, count))
+            output.write(packed)
+            original_sites[site] += amount
             rows += 1
     if not rows:
         raise ValueError('allocation trace is empty')
-    return frames, stacks, dict(input_rows=rows, unique_frames=len(frames),
-                               unique_stacks=len(stacks), frame_bytes=frame_bytes,
-                               stack_references=references)
+    return frames, original_sites, dict(input_rows=rows, unique_frames=len(frames),
+                                       frame_bytes=frame_bytes, compact_stack_bytes=compact_bytes)
+
+
+def weighted_stacks(path):
+    with path.open('rb') as stream:
+        while header := stream.read(10):
+            if len(header) != 10:
+                raise ValueError('truncated allocation stack header')
+            amount, count = struct.unpack('<QH', header)
+            if count > MAX_STACK_DEPTH:
+                raise ValueError('allocation stack exceeds its depth budget')
+            packed = stream.read(count * 2)
+            if len(packed) != count * 2:
+                raise ValueError('truncated allocation stack references')
+            yield struct.unpack('<%dH' % count, packed), amount
 
 
 def inventory_sites(frames, stacks, unresolved=None, attribution=None):
     locations = [source_location(frame) for frame in frames]
     classes = [bool(component_site(location)) for location in locations]
     sites = collections.Counter()
-    for ids, amount in stacks.items():
+    for ids, amount in stacks:
         owned = next((locations[index] for index in reversed(ids) if classes[index]), None)
         known = next((locations[index] for index in reversed(ids)
                       if locations[index] != 'unresolved'), None)
@@ -418,8 +442,8 @@ def main():
         if timeline[-1]['milliseconds'] < count / rate * 1000:
             raise ValueError('profile ended before the required workload duration')
         progress('inventory', 'started')
-        frames, weighted_stacks, processing = stack_inventory(stacks, scan_timeout_seconds=scan_timeout_seconds)
-        original_sites = inventory_sites(frames, weighted_stacks)
+        compact = private / 'weighted.stacks'
+        frames, original_sites, processing = stack_inventory(stacks, compact, scan_timeout_seconds=scan_timeout_seconds)
         progress('inventory', 'completed')
         (args.output / 'allocation-summary.json').write_text(json.dumps({
             'manifest': manifest, 'timeline': timeline, 'processing': processing,
@@ -433,7 +457,7 @@ def main():
         progress('symbolization', 'completed')
         unresolved = collections.Counter()
         attribution = collections.Counter()
-        sites = inventory_sites(decoded, weighted_stacks, unresolved, attribution)
+        sites = inventory_sites(decoded, weighted_stacks(compact), unresolved, attribution)
         if sum(original_sites.values()) != sum(sites.values()):
             raise ValueError('symbol decoding changed allocation accounting')
         if sum(attribution.values()) != sum(sites.values()):

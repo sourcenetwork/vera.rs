@@ -68,12 +68,12 @@ its PID and inherited RPC listener. Only member3's first process receives the
 Heaptrack preload library; the other validators, workload driver and restarted
 member run without it. The production allocator and runtime source are unchanged.
 
-The collector scans the folded trace once, interns distinct frames and aggregates
-weights for identical stacks. It decodes the frame dictionary rather than rewriting
-every allocation stack. Caller classification runs once per distinct frame;
+The collector scans the folded trace once, interns distinct frames and streams
+weighted frame references to a compact private file. It decodes the frame dictionary
+rather than rewriting every allocation stack. Caller classification runs once per distinct frame;
 weighted stack attribution preserves the original total and innermost-caller rule.
-Inventory limits cover frame bytes, frame count, stack depth, unique stacks and
-stored frame references. A byte-bounded memo speeds repeated-stack parsing.
+Inventory limits cover frame bytes, frame count, stack depth and spool bytes.
+Stack references stay on disk; a byte-bounded memo speeds repeated-stack parsing.
 
 Before symbol decoding, `allocation-summary.json` retains numeric heap samples,
 total retained bytes, inventory counts and original unresolved bytes. It explicitly
