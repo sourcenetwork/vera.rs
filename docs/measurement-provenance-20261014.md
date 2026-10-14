@@ -17,8 +17,8 @@ with four logical CPUs. None measures independent hosts or a WAN deployment.
 | [Mixed load, run 38461033855](https://github.com/sourcenetwork/vera.rs/actions/runs/38461033855), artifact `11848372514` | Actual merge `f27117bc7247477cdffa2a05bb9f28d787263397`; candidate `3f3f4673fc8ed44518e542c1ac37e2ae694390a4` | AMD EPYC 9V45 | 256 workflows at each offered rate 1/2/4/8 workflows/s; five sequential certified submissions and sixty permission checks per workflow |
 | [Paired Go/Rust, run 38146229649](https://github.com/sourcenetwork/vera.rs/actions/runs/38146229649), artifact `11705084908` | Go `ce83826bfeb4ce0fdc1751fc6a28cd4b9c7e7933`; Rust `44907d84a540da626e52e399ecc7e638800f6899` | AMD EPYC 9V74, recorded by the Rust manifest on the shared runner | Go/Rust/Rust/Go; 600 distinct registrations per deployment at 20/s |
 
-The pressure cases use a normal release daemon and a debug test fixture;
-the other capacity measurements use normal release binaries. Component timings run in-process and
+The pressure cases use a normal release daemon and release test fixture;
+the other capacity measurements also use normal release binaries. Component timings run in-process and
 exclude network consensus, durable publication and RPC. The eight paired native
 workloads total 4,800 verified completions. All named successful native workload
 cases retain replica reconciliation and hard-restart checks.
