@@ -161,6 +161,19 @@ def qualify(rows, case=CASE):
             'scope': 'Four local validators; two stable surviving processes sampled during admission saturation and recovery. Restored process memory is outside this series. Kernel dirtying is not physical-device write amplification. No maximum capacity, steady-state memory bound or WAN claim.'}
 
 
+def provenance(manifest, node, runner, case):
+    revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+    require(case in CASES and manifest['source'] == manifest['runner_source'] == revision
+            and manifest['dirty'] is False and manifest['runner_dirty'] is False
+            and manifest['history'] == 'regolith' and manifest['trace_span_close'] is False
+            and manifest['rust_log'] == 'warn,vera_storage=info', 'provenance')
+    require(manifest['arguments'] == [case, '--exact', '--nocapture', '--test-threads=1'], 'provenance')
+    require(manifest['node_sha256'] == mixed.digest(node)
+            and manifest['runner_sha256'] == mixed.digest(runner), 'provenance')
+    return {'source_revision': revision, 'node_sha256': manifest['node_sha256'],
+            'runner_sha256': manifest['runner_sha256'], 'hardware': mixed.hardware_manifest(manifest)}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--directory', type=Path, required=True)
@@ -172,18 +185,10 @@ def main():
     qualified = {'qualified': False, 'failure_stage': 'validation'}
     try:
         manifest = json.loads(mixed.read_bounded(args.directory / 'manifest.json', 65536))
-        revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-        require(manifest['exit_code'] == 0 and manifest['source'] == revision
-                and manifest['runner_source'] == revision and manifest['dirty'] is False
-                and manifest['runner_dirty'] is False and manifest['history'] == 'regolith'
-                and manifest['trace_span_close'] is False
-                and manifest['rust_log'] == 'warn,vera_storage=info', 'provenance')
-        require(manifest['arguments'] == [args.case, '--exact', '--nocapture', '--test-threads=1'], 'provenance')
-        require(manifest['node_sha256'] == mixed.digest(args.node)
-                and manifest['runner_sha256'] == mixed.digest(args.runner), 'provenance')
+        require(manifest['exit_code'] == 0, 'provenance')
+        identity = provenance(manifest, args.node, args.runner, args.case)
         result = qualify(records(mixed.read_bounded(args.directory / 'workload.jsonl', 8 * 1024 * 1024), args.case), args.case)
-        result.update(source_revision=revision, node_sha256=manifest['node_sha256'],
-                      runner_sha256=manifest['runner_sha256'], hardware=mixed.hardware_manifest(manifest))
+        result.update(identity)
         qualified = result
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
         pass
