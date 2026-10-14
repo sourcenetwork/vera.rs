@@ -7,12 +7,92 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from heap_profile import demangle_stacks, heap_timeline, profile_settings, profile_workload, qualify_outcomes, retained_sites, rust_demangler, source_location
+from heap_profile import decode_inventory, demangle_stacks, heap_timeline, inventory_sites, profile_settings, profile_workload, qualify_outcomes, retained_sites, rust_demangler, source_location, stack_inventory, weighted_stacks
 
 LAUNCHER = Path(__file__).resolve().parents[2] / '.github/scripts/profiled-verad.sh'
 
 
 class HeapEvidence(unittest.TestCase):
+    def test_compact_inventory_preserves_allocation_weights_and_caller_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'stacks'
+            rows = ['vera_node::history::write (function.rs);regolith::engine::Arena (arena.rs);alloc::alloc; 64\n',
+                    'std::alloc::System;??; 32\n', 'private_secret (/secret/key.rs:1); 16\n', ' 8\n']
+            path.write_text(''.join(rows * 2000))
+            compact = Path(directory) / 'compact'
+            frames, original, processing = stack_inventory(path, compact)
+            before, after = collections.Counter(), collections.Counter()
+            self.assertEqual(inventory_sites(frames, weighted_stacks(compact), attribution=after),
+                             retained_sites(path, attribution=before))
+            self.assertEqual(original, retained_sites(path))
+            self.assertEqual(after, before)
+            self.assertEqual(processing['input_rows'], 8000)
+            self.assertEqual(sum(amount for _, amount in weighted_stacks(compact)), 120 * 2000)
+            self.assertNotIn('/secret', json.dumps(inventory_sites(frames, weighted_stacks(compact))))
+
+    def test_decoding_unique_frames_preserves_sources_and_weighted_stacks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / 'stacks'
+            path.write_text(('_RNvC6_123foo3bar (foo.rs);_RNvC6_123foo3bar (bar.rs); 7\n') * 2000)
+            compact = root / 'compact'
+            frames, _, _ = stack_inventory(path, compact)
+            response = subprocess.CompletedProcess([], 0, stdout='commonware_storage::cache::Entry<[u8; 32]>\n')
+            with patch('heap_profile.subprocess.run', return_value=response) as run:
+                decoded = decode_inventory(frames, root, ['fixture-decoder'])
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(run.call_args.kwargs['input'], '_RNvC6_123foo3bar\n')
+            self.assertEqual(len(decoded), 2)
+            self.assertEqual(inventory_sites(decoded, weighted_stacks(compact)),
+                             {'commonware_storage::cache::Entry (bar.rs)': 14000})
+            self.assertLess((root / 'frames.stacks').stat().st_size, path.stat().st_size / 100)
+
+    def test_compact_inventory_limits_reject_before_unbounded_retention(self):
+        cases = [('MAX_STACK_LINE_BYTES', 8, 'vera_node::site; 1\n'),
+                 ('MAX_STACK_DEPTH', 1, 'vera_node::site;??; 1\n'),
+                 ('MAX_FRAMES', 1, 'vera_node::site;??; 1\n'),
+                 ('MAX_FRAME_BYTES', 8, 'vera_node::site; 1\n'),
+                 ('MAX_COMPACT_BYTES', 1, 'vera_node::site; 1\n')]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'stacks'
+            for name, maximum, content in cases:
+                with self.subTest(name=name), patch('heap_profile.' + name, maximum):
+                    path.write_text(content)
+                    with self.assertRaises(ValueError):
+                        stack_inventory(path, Path(directory) / 'compact')
+            path.write_text('vera_node::site; -1\n')
+            with self.assertRaisesRegex(ValueError, 'invalid allocation weight'):
+                stack_inventory(path, Path(directory) / 'compact')
+            path.write_text('')
+            with self.assertRaisesRegex(ValueError, 'trace is empty'):
+                stack_inventory(path, Path(directory) / 'compact')
+            path.write_text('vera_node::site; 1\n')
+            with patch('heap_profile.time.monotonic', side_effect=[0, 120]), \
+                    self.assertRaisesRegex(ValueError, 'inventory exceeded its deadline'):
+                stack_inventory(path, Path(directory) / 'compact')
+
+    def test_inventory_memo_eviction_does_not_drop_stacks_or_missing_frames(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'stacks'
+            path.write_text('vera_node::site; 1\n??; 2\nvera_node::site; 3\n 4\n')
+            with patch('heap_profile.MAX_STACK_MEMO_BYTES', 0):
+                compact = Path(directory) / 'compact'
+                frames, _, _ = stack_inventory(path, compact)
+            unresolved = collections.Counter()
+            self.assertEqual(inventory_sites(frames, weighted_stacks(compact), unresolved),
+                             {'vera_node::site': 4, 'unresolved': 6})
+            self.assertEqual(unresolved, {'missing_symbols': 2, 'missing_stack': 4})
+
+    def test_stack_spool_rejects_truncated_records(self):
+        import struct
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'compact'
+            for content in (b'\x00', struct.pack('<QH', 1, 2) + b'\x00\x00',
+                            struct.pack('<QH', 1, 1025)):
+                with self.subTest(content=content), self.assertRaises(ValueError):
+                    path.write_bytes(content)
+                    list(weighted_stacks(path))
+
     def test_sustained_profile_covers_the_measured_late_window(self):
         count, rate, deadline, arena, objects = profile_workload('sustained')
         self.assertEqual((count, rate, arena), (90000, 50, '2'))
