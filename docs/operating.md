@@ -217,7 +217,8 @@ rejected. Restore a complete compatible backup or use authenticated recovery.
 ## Resident memory and measured workloads
 
 The [qualified storage envelope](storage-resource-envelope.md) records the fixed
-and growing workload budgets, measured headroom and repeatable CI resource gate.
+and growing workload budgets, completion/latency gates, measured headroom and
+repeatable CI resource gate.
 
 Validators retain active module records and authenticated-state indexes in memory.
 

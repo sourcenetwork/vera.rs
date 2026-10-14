@@ -1,4 +1,4 @@
-# Qualified storage resource envelope
+# Qualified workload and storage envelope
 
 Vera uses Commonware QMDB for authenticated state and synchronous Regolith batches
 for finalized history. Two normal-release workloads qualify the finite storage
@@ -45,6 +45,28 @@ They were selected from the retained measurements to detect resource regressions
 They are not independently provisioned deployment capacity, cgroup limits or an
 assertion of unseen peaks. RSS sampling excludes setup and restart; file scans
 cover the validator's entire data directory immediately after the timed workload.
+
+The same gate checks completion rate, latency and certified recovery:
+
+| Gate | Budget | Fixed measured result | Growing measured result |
+| --- | ---: | ---: | ---: |
+| Completed workflows/s | At least 49 | 49.999 | 49.996 |
+| Scheduled arrival to certified receipt p95 | At most 400 ms | 294.069 ms | 275.807 ms |
+| Scheduled arrival to certified receipt p99 | At most 600 ms | 331.431 ms | 292.985 ms |
+| Verified permission read p95 | At most 25 ms | 12.948 ms | 7.702 ms |
+| Restart to observed certified probe | At most 30 s | 4.430 s | 9.842 s |
+
+The completion rate may be up to 2% below the offered 50/s after including final
+drain time; every operation must still complete and verify. Receipt and permission
+distributions must each cover all operations. The slower measured receipt p95
+leaves 26.48% of its latency budget unused; the slower permission p95 leaves
+48.21%. These are margins against selected regression budgets, not measured spare
+throughput above 50/s. Both historical artifacts pass the version 2 gate.
+
+Receipt latency includes scheduling, RPC, finalization, polling and verification;
+it is not an isolated consensus finality measurement. Restart timing includes
+observing the certified probe after RPC readiness. The gate does not change
+production request deadlines, batching, durability or admission limits.
 
 ## Storage and recovery coverage
 

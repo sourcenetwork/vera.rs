@@ -1,5 +1,11 @@
 # Performance measurements
 
+For the current local operating budgets and their measured margins, see
+[qualified workload and storage envelope](storage-resource-envelope.md).
+It combines completion, verified receipt/read latency, restart, sampled RSS and
+retained-file gates for the growing 90,000-operation and fixed 360,000-operation
+profiles. Historical measurements below keep their original sources and scopes.
+
 See the [measurement provenance and storage accounting](measurement-provenance-20261014.md)
 for the current source-bound measurement set, build recipes and raw artifacts.
 
