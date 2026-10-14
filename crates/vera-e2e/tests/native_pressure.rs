@@ -1,5 +1,9 @@
 //! Qualify native admission and finalization while validators cannot process work.
 
+#[cfg(unix)]
+#[path = "../examples/operation_baseline/resources.rs"]
+mod resources;
+
 #[cfg(target_os = "linux")]
 #[path = "native_pressure/stalled_validator.rs"]
 mod stalled_validator;
@@ -9,7 +13,7 @@ mod stalled_validator;
 mod delayed_validator;
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     time::{Duration, Instant},
 };
 
@@ -21,17 +25,54 @@ use vera_modules::bulletin::abi::IBulletin;
 const CAPACITY: u64 = 4_096;
 const POLL: Duration = Duration::from_millis(100);
 const PHASE_DEADLINE: Duration = Duration::from_secs(120);
+const PRESSURE_ROUNDS: usize = 300;
+const PRESSURE_CONCURRENCY: usize = 4;
+
+#[cfg(unix)]
+fn phase(started: tokio::time::Instant, name: &str) {
+    println!(
+        "{}",
+        serde_json::json!({"kind": "pressure_phase", "phase": name,
+            "elapsed_seconds": started.elapsed().as_secs_f64()})
+    );
+}
+
+async fn reject_full_queue(client: &VeraClient, wire: &[u8]) -> Vec<f64> {
+    tokio::time::timeout(PHASE_DEADLINE, async {
+        let mut samples = Vec::with_capacity(PRESSURE_ROUNDS * PRESSURE_CONCURRENCY);
+        let mut interval = tokio::time::interval(POLL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        for _ in 0..PRESSURE_ROUNDS {
+            interval.tick().await;
+            let attempts = (0..PRESSURE_CONCURRENCY).map(|_| async {
+                let started = Instant::now();
+                let error = client.send_native_tx(wire).await.unwrap_err();
+                assert!(matches!(error, ClientError::ResourceBusy(_)));
+                started.elapsed().as_secs_f64() * 1000.0
+            });
+            samples.extend(futures::future::join_all(attempts).await);
+        }
+        samples
+    })
+    .await
+    .expect("full queue rejection deadline")
+}
 
 fn namespace(index: u64) -> String {
     format!("admission/limit/{index:04}")
 }
 
+#[cfg(target_os = "linux")]
 fn signed_namespace(signer: &BlsSigner, sequence: u64) -> Vec<u8> {
+    signed_indexed_namespace(signer, sequence, sequence)
+}
+
+fn signed_indexed_namespace(signer: &BlsSigner, sequence: u64, index: u64) -> Vec<u8> {
     signer
         .sign_native_tx_with_sequence(
             BULLETIN_ADDRESS,
             IBulletin::registerNamespaceCall {
-                namespace: namespace(sequence),
+                namespace: namespace(index),
             }
             .abi_encode()
             .into(),
@@ -49,6 +90,7 @@ fn read_error_kind(error: &ClientError) -> &'static str {
         ClientError::Permission(_) => "proof-invalid",
         ClientError::Finalization(_) => "finality-invalid",
         ClientError::Transport(error) if error.is_timeout() => "transport-timeout",
+        ClientError::ReceiptTimeout { .. } => "receipt-deadline",
         ClientError::Transport(_) => "transport",
         ClientError::Json(_) => "json",
         ClientError::ResponseTooLarge(_) => "response-limit",
@@ -59,6 +101,23 @@ fn read_error_kind(error: &ClientError) -> &'static str {
 
 #[tokio::test]
 async fn pipelined_admission_preserves_work_when_quorum_recovers() {
+    admission_recovers(1).await;
+}
+
+#[tokio::test]
+async fn pipelined_multiworker_admission_preserves_each_sequence_when_quorum_recovers() {
+    admission_recovers(4).await;
+}
+
+#[derive(serde::Serialize)]
+struct WorkerRecovery {
+    worker: usize,
+    confirmed: u64,
+    backlog_tail_observed_ms: f64,
+}
+
+async fn admission_recovers(workers: usize) {
+    assert!(matches!(workers, 1 | 4));
     let deployment = 9083;
     let trusted = *KeySet::builder()
         .seed(deployment)
@@ -91,60 +150,110 @@ async fn pipelined_admission_preserves_work_when_quorum_recovers() {
         .await
         .unwrap();
     let origin = VeraClient::new(cluster.node(0).rpc_url());
-    let signer = BlsSigner::new(7u64.into(), deployment).unwrap();
+    let signers: Vec<_> = (0..workers)
+        .map(|worker| BlsSigner::new((7 + worker as u64).into(), deployment).unwrap())
+        .collect();
+    let per_worker = CAPACITY / workers as u64;
+    #[cfg(unix)]
+    resources::storage(&cluster, "before_pending").await;
+    #[cfg(unix)]
+    let (stop_resources, resource_task, resource_started) = resources::start(&cluster);
+    #[cfg(unix)]
+    phase(resource_started, "filling");
     cluster.kill_node(2);
     cluster.kill_node(3);
 
+    let mut pending_bytes = 0usize;
     let pending = tokio::time::timeout(PHASE_DEADLINE, async {
         let mut pending = Vec::with_capacity(CAPACITY as usize);
-        for sequence in 0..CAPACITY {
-            pending.push(
-                origin
-                    .send_native_tx(&signed_namespace(&signer, sequence))
-                    .await
-                    .unwrap(),
-            );
+        for index in 0..CAPACITY {
+            let worker = index as usize % workers;
+            let wire = signed_indexed_namespace(&signers[worker], index / workers as u64, index);
+            pending_bytes += wire.len();
+            pending.push(origin.send_native_tx(&wire).await.unwrap());
         }
         pending
     })
     .await
     .expect("pending queue fill deadline");
-    let rejected_wire = signed_namespace(&signer, CAPACITY);
-    for _ in 0..3 {
-        let error = origin.send_native_tx(&rejected_wire).await.unwrap_err();
-        assert!(matches!(error, ClientError::ResourceBusy(_)));
-    }
+    let rejected_wire = signed_indexed_namespace(&signers[0], per_worker, CAPACITY);
+    #[cfg(unix)]
+    phase(resource_started, "saturated");
+    let rejection_ms = reject_full_queue(&origin, &rejected_wire).await;
     for id in [pending[0], pending[CAPACITY as usize - 1]] {
         assert!(origin.read_receipt(id, &trusted).await.unwrap().is_none());
     }
-    assert_eq!(origin.get_native_nonce(signer.did()).await.unwrap(), 0);
-
-    cluster.restart_node(2).unwrap();
-    let recovery_started = Instant::now();
-    let last = tokio::time::timeout(
-        PHASE_DEADLINE,
-        origin.wait_for_receipt(*pending.last().unwrap(), POLL, 1_200),
-    )
-    .await;
-    if !matches!(&last, Ok(Ok(_))) {
-        for index in 0..3 {
-            let client = VeraClient::new(cluster.node(index).rpc_url());
-            let nonce = tokio::time::timeout(
-                Duration::from_secs(2),
-                client.get_native_nonce(signer.did()),
-            )
-            .await
-            .ok()
-            .and_then(Result::ok)
-            .map_or_else(|| "unavailable".to_owned(), |value| value.to_string());
-            eprintln!(
-                "native_admission_progress replica={index} nonce={nonce} elapsed_ms={}",
-                recovery_started.elapsed().as_millis()
-            );
-        }
+    for signer in &signers {
+        assert_eq!(origin.get_native_nonce(signer.did()).await.unwrap(), 0);
     }
-    let last = last.expect("admitted work recovery deadline").unwrap();
-    assert_eq!(last.status, 1);
+
+    #[cfg(unix)]
+    resources::storage(&cluster, "saturated").await;
+    #[cfg(unix)]
+    phase(resource_started, "recovering");
+    let recovery_started = Instant::now();
+    cluster.restart_node(2).unwrap();
+    let worker_recoveries = futures::future::join_all(signers.iter().enumerate().map(
+        |(worker, signer)| {
+            let origin = &origin;
+            let cluster = &cluster;
+            let id = pending[pending.len() - workers + worker];
+            async move {
+                let last = tokio::time::timeout(
+                    PHASE_DEADLINE,
+                    origin.wait_for_receipt(id, POLL, 1_200),
+                )
+                .await;
+                if !matches!(&last, Ok(Ok(_))) {
+                    let kind = match &last {
+                        Err(_) => "client-deadline",
+                        Ok(Err(error)) => read_error_kind(error),
+                        Ok(Ok(_)) => unreachable!(),
+                    };
+                    eprintln!("recovery_rpc_failure phase=admission-backlog kind={kind} replica=0");
+                    for index in 0..3 {
+                        let client = VeraClient::new(cluster.node(index).rpc_url());
+                        let nonce = tokio::time::timeout(
+                            Duration::from_secs(2),
+                            client.get_native_nonce(signer.did()),
+                        )
+                        .await
+                        .ok()
+                        .and_then(Result::ok)
+                        .map_or_else(|| "unavailable".to_owned(), |value| value.to_string());
+                        eprintln!(
+                            "native_admission_progress replica={index} nonce={nonce} elapsed_ms={} worker={worker}",
+                            recovery_started.elapsed().as_millis()
+                        );
+                        let status = tokio::time::timeout(Duration::from_secs(2), client.node_status())
+                            .await.ok().and_then(Result::ok);
+                        let number = |value: Option<u64>| value.map_or_else(
+                            || "unavailable".to_owned(), |value| value.to_string());
+                        let height = number(status.as_ref().and_then(|value| value.finalized_height));
+                        let epoch = number(status.as_ref().and_then(|value| value.finalized_epoch));
+                        let view = number(status.as_ref().and_then(|value| value.current_view));
+                        let peers = number(status.as_ref().and_then(|value| value.peer_count));
+                        let backfilling = status.as_ref().map_or_else(
+                            || "unavailable".to_owned(), |value| value.backfilling.to_string());
+                        eprintln!(
+                            "native_admission_state replica={index} worker={worker} height={height} epoch={epoch} view={view} peers={peers} backfilling={backfilling} elapsed_ms={}",
+                            recovery_started.elapsed().as_millis()
+                        );
+                    }
+                }
+                assert_eq!(last.expect("admitted work recovery deadline").unwrap().status, 1);
+                let backlog_tail_observed_ms = recovery_started.elapsed().as_secs_f64() * 1000.0;
+                let confirmed = origin.get_native_nonce(signer.did()).await.unwrap();
+                assert_eq!(confirmed, per_worker);
+                WorkerRecovery {
+                    worker,
+                    confirmed,
+                    backlog_tail_observed_ms,
+                }
+            }
+        },
+    ))
+    .await;
 
     let retry = tokio::time::timeout(PHASE_DEADLINE, async {
         loop {
@@ -169,8 +278,13 @@ async fn pipelined_admission_preserves_work_when_quorum_recovers() {
         .await
         .unwrap();
 
-    let expected: BTreeSet<_> = (0..=CAPACITY)
-        .map(|sequence| format!("bulletin/{}", namespace(sequence)))
+    let expected: BTreeMap<_, _> = (0..=CAPACITY)
+        .map(|index| {
+            (
+                format!("bulletin/{}", namespace(index)),
+                signers[index as usize % workers].did().to_owned(),
+            )
+        })
         .collect();
     tokio::time::timeout(PHASE_DEADLINE, async {
         for index in 0..4 {
@@ -199,7 +313,7 @@ async fn pipelined_admission_preserves_work_when_quorum_recovers() {
                 };
                 minimum = page.revision;
                 for record in page.records {
-                    assert_eq!(record.owner_did, signer.did());
+                    assert_eq!(&record.owner_did, expected.get(&record.id).unwrap());
                     assert!(
                         names.insert(record.id),
                         "duplicate namespace on replica {index}"
@@ -211,13 +325,15 @@ async fn pipelined_admission_preserves_work_when_quorum_recovers() {
                 }
             }
             assert_eq!(
-                names, expected,
+                names, expected.keys().cloned().collect::<BTreeSet<_>>(),
                 "admitted namespace loss on replica {index}"
             );
-            assert_eq!(
-                client.get_native_nonce(signer.did()).await.unwrap(),
-                CAPACITY + 1
-            );
+            for (worker, signer) in signers.iter().enumerate() {
+                assert_eq!(
+                    client.get_native_nonce(signer.did()).await.unwrap(),
+                    per_worker + u64::from(worker == 0)
+                );
+            }
             let receipt = loop {
                 match client.read_receipt(retry, &trusted).await {
                     Ok(Some(receipt)) => break receipt,
@@ -240,4 +356,22 @@ async fn pipelined_admission_preserves_work_when_quorum_recovers() {
     })
     .await
     .expect("certified replica reconciliation deadline");
+    let recovery_ms = recovery_started.elapsed().as_secs_f64() * 1000.0;
+    #[cfg(unix)]
+    {
+        phase(resource_started, "reconciled");
+        let _ = stop_resources.send(());
+        resource_task.await.expect("resource sampler completion");
+        resources::storage(&cluster, "after_reconciliation").await;
+    }
+    println!(
+        "{}",
+        serde_json::json!({"kind": "pressure_result", "admitted": pending.len(),
+            "workers": workers, "worker_recoveries": worker_recoveries,
+            "pending_wire_bytes": pending_bytes, "rejected": rejection_ms.len(),
+            "rejection_ms": rejection_ms,
+            "recovery_ms": recovery_ms,
+            "reconciled_replicas": 4, "confirmed": CAPACITY + 1,
+            "final_node_pids": (0..4).map(|index| cluster.node(index).process.id().unwrap()).collect::<Vec<_>>()})
+    );
 }

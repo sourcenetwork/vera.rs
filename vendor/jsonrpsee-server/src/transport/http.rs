@@ -94,6 +94,9 @@ where
 				Ok(r) => r,
 				Err(HttpError::TooLarge) => return response::too_large(max_request_size),
 				Err(HttpError::Malformed) => return response::malformed(),
+				Err(HttpError::Stream(e)) if e.is::<http_body_util::LengthLimitError>() => {
+					return response::too_large(max_request_size);
+				}
 				Err(HttpError::Stream(e)) => {
 					tracing::warn!(target: LOG_TARGET, "Internal error reading request body: {}", e);
 					return response::internal_error();

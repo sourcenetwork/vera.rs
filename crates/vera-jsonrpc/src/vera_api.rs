@@ -387,7 +387,7 @@ impl VeraApiServer for VeraApiImpl {
         key: Bytes,
         minimum_height: U64,
     ) -> RpcResult<RecordResponse> {
-        let _permit = self.state.proof_permit()?;
+        let _request = self.state.permission_read_permit()?;
         self.current_record_proof(module, &key, minimum_height.to())
             .await
     }
@@ -398,7 +398,7 @@ impl VeraApiServer for VeraApiImpl {
         prefix: Bytes,
         minimum_height: U64,
     ) -> RpcResult<PrefixResponse> {
-        let _permit = self.state.proof_permit()?;
+        let _request = self.state.permission_read_permit()?;
         self.current_prefix_proof(module, &prefix, minimum_height.to())
             .await
     }
@@ -408,7 +408,7 @@ impl VeraApiServer for VeraApiImpl {
         request: PrefixPageRequest,
         minimum_height: U64,
     ) -> RpcResult<PrefixPageResponse> {
-        let _permit = self.state.proof_permit()?;
+        let _request = self.state.permission_read_permit()?;
         self.current_prefix_page_proof(&request, minimum_height.to())
             .await
     }

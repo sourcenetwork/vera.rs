@@ -283,7 +283,7 @@ async fn main() {
     );
 
     resources::storage(&cluster, "before").await;
-    let (stop_resources, resource_task) = resources::start(&cluster);
+    let (stop_resources, resource_task, _) = resources::start(&cluster);
     let limit = Arc::new(Semaphore::new(outstanding));
     let mut tasks = JoinSet::new();
     let started = Instant::now();

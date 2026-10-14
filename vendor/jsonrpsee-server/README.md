@@ -16,6 +16,11 @@ socket has a one-second deadline so a non-reading peer cannot hold shutdown
 open indefinitely. The receive loop observes writer termination, including
 while dispatch is full, and releases the connection slot.
 
+The HTTP transport also maps the body's typed length-limit error to HTTP 413
+and JSON-RPC -32007. Streamed requests therefore report the same size rejection
+as requests rejected from Content-Length, before dispatching any batch member.
+The aggregate-body regression covers both encodings and subsequent small requests.
+
 Vera uses a direct path dependency so downstream Git builds retain this patch.
 The focused regression is vera-jsonrpc's websocket_dispatch_applies_backpressure.
 Remove this fork when upstream provides equivalent dispatch and task ownership

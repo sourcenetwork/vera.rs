@@ -474,6 +474,7 @@ jobs:
             tests: >-
               --test native_permission
               --test native_signed_operation
+              --test delegated_policy
               --test native_bulletin
               --test native_registration
               --test native_object_archive

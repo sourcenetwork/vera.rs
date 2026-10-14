@@ -67,26 +67,65 @@ fn publish(api: &VeraApiImpl, root: B256, height: u64) {
     api.state.notify_proof_progress();
 }
 
-async fn request(api: &VeraApiImpl, page: bool, minimum: u64) -> RpcResult<()> {
+#[derive(Clone, Copy)]
+enum ProofKind {
+    Record,
+    Prefix,
+    Page,
+    PolicyPrefix,
+    PolicyPage,
+}
+
+impl ProofKind {
+    const ALL: [Self; 5] = [
+        Self::Record,
+        Self::Prefix,
+        Self::Page,
+        Self::PolicyPrefix,
+        Self::PolicyPage,
+    ];
+
+    const fn deadline(self) -> &'static str {
+        match self {
+            Self::Record => "current record evidence deadline exceeded",
+            Self::Prefix => "current prefix evidence deadline exceeded",
+            Self::Page => "current page evidence deadline exceeded",
+            Self::PolicyPrefix | Self::PolicyPage => "current policy evidence deadline exceeded",
+        }
+    }
+}
+
+async fn request(api: &VeraApiImpl, kind: ProofKind, minimum: u64) -> RpcResult<()> {
     let policy = "ab".repeat(32);
     let prefix: Bytes = vera_modules::acp::keys::relationship_policy_prefix(&policy).into();
-    if page {
-        api.get_current_policy_prefix_page_proof(
-            policy,
-            PrefixPageRequest {
-                module: ModuleId::Acp,
-                start: prefix.clone(),
-                prefix,
-                limit: 1,
-            },
-            U64::from(minimum),
-        )
-        .await
-        .map(|_| ())
-    } else {
-        api.get_current_policy_prefix_proof(policy, prefix, U64::from(minimum))
+    let height = U64::from(minimum);
+    let page = PrefixPageRequest {
+        module: ModuleId::Acp,
+        start: prefix.clone(),
+        prefix: prefix.clone(),
+        limit: 1,
+    };
+    match kind {
+        ProofKind::Record => api
+            .get_current_record_proof(ModuleId::Acp, b"missing".as_slice().into(), height)
             .await
-            .map(|_| ())
+            .map(|_| ()),
+        ProofKind::Prefix => api
+            .get_current_prefix_proof(ModuleId::Acp, prefix, height)
+            .await
+            .map(|_| ()),
+        ProofKind::Page => api
+            .get_current_prefix_page_proof(page, height)
+            .await
+            .map(|_| ()),
+        ProofKind::PolicyPrefix => api
+            .get_current_policy_prefix_proof(policy, prefix, height)
+            .await
+            .map(|_| ()),
+        ProofKind::PolicyPage => api
+            .get_current_policy_prefix_page_proof(policy, page, height)
+            .await
+            .map(|_| ()),
     }
 }
 
@@ -119,21 +158,21 @@ async fn assert_writable(set: &NativeStateSet) {
 }
 
 #[test]
-fn future_policy_waiters_leave_proof_capacity_until_revision_is_eligible() {
+fn future_evidence_waiters_leave_proof_capacity_until_revision_is_eligible() {
     let directory = tempfile::tempdir().unwrap();
     runtime::Runner::new(runtime::Config::new().with_storage_directory(directory.path())).start(
         |context| async move {
             let (api, set, root) = fixture(context).await;
             let mut pending: Vec<_> = (0..8)
-                .map(|i| Box::pin(request(&api, i % 2 == 0, 2)))
+                .map(|i| Box::pin(request(&api, ProofKind::ALL[i % ProofKind::ALL.len()], 2)))
                 .collect();
             for future in &mut pending {
                 assert!(poll(future.as_mut()).is_pending());
             }
             assert_capacity(&api.state, 0, 8);
             assert_writable(&set).await;
-            for page in [false, true] {
-                assert_busy(request(&api, page, 2).await.unwrap_err());
+            for kind in ProofKind::ALL {
+                assert_busy(request(&api, kind, 2).await.unwrap_err());
             }
             // Publication wakes existing readers; evidence admission happens only now.
             let proofs: Vec<_> = (0..8).map(|_| api.state.proof_permit().unwrap()).collect();
@@ -151,26 +190,33 @@ fn future_policy_waiters_leave_proof_capacity_until_revision_is_eligible() {
 }
 
 #[test]
-fn policy_waiter_cancellation_and_deadline_release_admission() {
+fn evidence_waiter_cancellation_and_deadline_release_admission() {
     let directory = tempfile::tempdir().unwrap();
     runtime::Runner::new(runtime::Config::new().with_storage_directory(directory.path())).start(
         |context| async move {
             let (api, _, _) = fixture(context).await;
-            for page in [false, true] {
-                let mut cancelled = Box::pin(request(&api, page, 2));
+            for kind in ProofKind::ALL {
+                let mut cancelled = Box::pin(request(&api, kind, 2));
                 assert!(poll(cancelled.as_mut()).is_pending());
                 assert_capacity(&api.state, 7, 8);
                 drop(cancelled);
                 assert_capacity(&api.state, 8, 8);
             }
-            let (prefix, page) = tokio::time::timeout(Duration::from_secs(4), async {
-                tokio::join!(request(&api, false, 2), request(&api, true, 2))
+            let results = tokio::time::timeout(Duration::from_secs(4), async {
+                let (record, prefix, page, policy_prefix, policy_page) = tokio::join!(
+                    request(&api, ProofKind::Record, 2),
+                    request(&api, ProofKind::Prefix, 2),
+                    request(&api, ProofKind::Page, 2),
+                    request(&api, ProofKind::PolicyPrefix, 2),
+                    request(&api, ProofKind::PolicyPage, 2),
+                );
+                [record, prefix, page, policy_prefix, policy_page]
             })
             .await
             .unwrap();
-            for result in [prefix, page] {
+            for (kind, result) in ProofKind::ALL.into_iter().zip(results) {
                 let error = result.unwrap_err();
-                assert_eq!(error.message(), "current policy evidence deadline exceeded");
+                assert_eq!(error.message(), kind.deadline());
                 assert_busy(error);
             }
             assert_capacity(&api.state, 8, 8);
@@ -179,13 +225,13 @@ fn policy_waiter_cancellation_and_deadline_release_admission() {
 }
 
 #[test]
-fn captured_policy_evidence_holds_capacity_but_releases_storage_during_finality() {
+fn captured_evidence_holds_capacity_but_releases_storage_during_finality() {
     let directory = tempfile::tempdir().unwrap();
     runtime::Runner::new(runtime::Config::new().with_storage_directory(directory.path())).start(
         |context| async move {
             let (api, set, _) = fixture(context).await;
             let mut api = Arc::new(api);
-            for page in [false, true] {
+            for kind in ProofKind::ALL {
                 let entered = Arc::new(tokio::sync::Notify::new());
                 let signal = entered.clone();
                 Arc::get_mut(&mut api).unwrap().light_block_lookup = Some(Arc::new(move |_| {
@@ -193,7 +239,7 @@ fn captured_policy_evidence_holds_capacity_but_releases_storage_during_finality(
                     Err("finalization certificate not found".into())
                 }));
                 let running = api.clone();
-                let task = tokio::spawn(async move { request(&running, page, 1).await });
+                let task = tokio::spawn(async move { request(&running, kind, 1).await });
                 tokio::time::timeout(Duration::from_secs(3), entered.notified())
                     .await
                     .unwrap();

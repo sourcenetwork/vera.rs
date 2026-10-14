@@ -148,6 +148,16 @@ can recover after one false hint and reconstruct the correct stored value. This
 source-level test does not establish liveness under every adversarial peer
 selection or network partition.
 
+## Queued targets and completion
+
+An engine close to its target can hold a newer target until it reports reaching
+the current one. If the coordinator has already assigned the newer generation,
+the engine then releases that held update without waiting for another tip.
+A finish request received while the progress report waits for its consumer takes
+precedence over the held update. Standalone sync can still finish at a retained
+anchor and replay the finalized suffix. Query modules remain unpublished until
+all seven partitions converge, their roots validate and history handoff completes.
+
 ## Private DKG material
 
 Secret-store updates write a complete temporary file, sync its contents, replace

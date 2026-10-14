@@ -1,5 +1,12 @@
 # Performance measurements
 
+See [native admission saturation](native-pressure.md) for the focused queue-full
+resource and recovery fixture, separate from ordinary offered-load measurements.
+
+See the [October 13 two-hour compaction follow-up](native-qualification-20261013.md#two-hour-compaction-follow-up)
+for 360,000 verified operations, lower observed memory use, the measured chart
+and the remaining resource limits.
+
 See the [October 12 native candidate measurements](native-qualification-20261012.md)
 for the final Regolith source, 90,000-operation growing workload, recovery results
 and independently checked executable provenance.

@@ -16,20 +16,25 @@ manifests; omitting it selects the same Regolith implementation. The history
 implementation and module persistence no longer depend on RocksDB. Authenticated
 module state uses Commonware QMDB; the separate JMT/RocksDB store is removed.
 
-Regolith is pinned to `061846fc870389391f77b8c2a3cf370b6e69d95f`, which includes
-atomic compaction-manifest edit batches and batched WAL rewriting during recovery.
+The [node manifest](../crates/vera-node/Cargo.toml) selects the exact Regolith
+revision. It includes atomic compaction-manifest edit batches, batched WAL
+rewriting during recovery and compaction scans that bypass the foreground cache.
 History writes explicitly request synchronous WAL persistence; they do not use
 Regolith's default eventual durability. Execution, certificate and query-index
 updates share one batch.
 
-The pinned backend's [durability run](https://github.com/sourcenetwork/regolith/actions/runs/37856386632)
+The earlier backend revision `061846fc870389391f77b8c2a3cf370b6e69d95f`'s
+[durability run](https://github.com/sourcenetwork/regolith/actions/runs/37856386632)
 passed eight power-loss-model cases, including cuts during memtable flush,
 compaction, manifest append and recovery, plus its process-crash checks. The
-recorded checkout matches the pinned revision. These models discard unsynchronized
+recorded checkout matches that revision. These models discard unsynchronized
 writes using the child's recorded syscall stream and verify acknowledged data;
 the required fault interposer cannot silently fall back to a weaker model.
 This qualifies those Regolith backend scenarios. It does not model all of Vera's
 Commonware journals together or establish physical-device power-loss behavior.
+See [current qualification](native-qualification-20261013.md) for later source-bound
+checks and measured behavior; changing a dependency pin does not extend an older
+run's scope.
 
 Snapshots pin consistent reads and borrowed record values. Cursor reads check
 status separately from exhaustion so errors cannot appear as empty history.
@@ -63,6 +68,20 @@ Backend selection does not establish throughput, memory bounds, or power-loss
 durability. Numeric diagnostics report used and reserved memtable bytes, retired
 arena-pool bytes, block-cache usage and pinned table metadata separately. These
 counters are non-atomic and do not account for all validator allocations.
+
+Vera currently uses Regolith's default 512 MiB decompressed block-cache target
+and 64 MiB memtable flush threshold. The cache fills on reads; reaching the
+memtable threshold starts rotation and flushing. Large entries and write batches
+can exceed these targets, and readers can retain buffers after eviction. These
+values describe storage settings rather than a whole-validator memory ceiling.
+
+The two-hour fixed-object run at `f3bbd7d2` recorded about 222 MiB of history
+block-cache usage and 61 MiB of live memtable data at the final diagnostic sample.
+The execution index stayed at 1,024 revisions and the proof caches at their
+configured entry limits. Diagnostics continued through historical verification
+and restart, beyond the timed workload's RSS series. Future resource configurations
+record `started_at_unix_ms` alongside monotonic elapsed time to align those phases;
+the older recording cannot establish that alignment exactly.
 
 Linux recovery CI runs `disk_full_validator_recovers_acknowledged_operations`
 with Regolith history. Before startup, the fixture places one validator's

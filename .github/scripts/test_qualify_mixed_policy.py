@@ -225,6 +225,34 @@ class QualificationTests(unittest.TestCase):
             self.assertEqual(public['failure_stage'], 'provenance')
             self.assertNotIn('private', output.read_text())
 
+    def test_failed_curve_resources_cannot_publish_a_qualified_result(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            node, runner = root / 'node', root / 'runner'
+            node.write_bytes(b'node')
+            runner.write_bytes(b'runner')
+            manifest = dict(source='a' * 40, runner_source='a' * 40, dirty=False,
+                            runner_dirty=False, exit_code=0, history='regolith',
+                            arguments=['256', '1', '8', '1800'], trace_span_close=False,
+                            rust_log='warn', node_sha256=mixed.digest(node),
+                            runner_sha256=mixed.digest(runner), platform='Linux',
+                            architecture='x86_64', logical_cpus=4, cpu_model='fixture CPU')
+            (root / 'manifest.json').write_text(json.dumps(manifest))
+            records = complete_run()
+            records[0]['daemon'] = str(node.resolve())
+            (root / 'workload.jsonl').write_text('\n'.join(json.dumps(row) for row in records))
+            output = root / 'evidence.json'
+            arguments = ['gate', '--directory', str(root), '--node', str(node),
+                         '--runner', str(runner), '--profile', 'curve-1', '--output', str(output)]
+            with patch('sys.argv', arguments), \
+                    patch.object(mixed.subprocess, 'check_output', return_value='a' * 40), \
+                    patch.object(mixed, 'qualify', return_value={'qualified': True}), \
+                    patch.object(mixed, 'summarize_io', side_effect=ValueError('private fixture material')):
+                with self.assertRaises(SystemExit):
+                    mixed.main()
+            self.assertFalse(json.loads(output.read_text())['qualified'])
+            self.assertNotIn('private', output.read_text())
+
     def test_bounded_reader_rejects_symlinks_and_oversized_input(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)

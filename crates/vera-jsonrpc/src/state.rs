@@ -88,7 +88,7 @@ impl NodeState {
         acquire(&self.inner.light_lookups)
     }
 
-    /// Bound current-permission requests while publication may block storage reads.
+    /// Bound current-state evidence requests while publication may block storage reads.
     /// These requests also need a shared proof permit before allocating evidence.
     pub(crate) fn permission_read_permit(
         &self,
