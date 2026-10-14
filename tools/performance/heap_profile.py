@@ -17,6 +17,100 @@ import time
 
 from record import allocator_environment, digest
 
+MAX_FRAME_BYTES = 32 * 1024 * 1024
+MAX_FRAMES = 65536
+MAX_STACKS = 262144
+MAX_STACK_REFERENCES = 4 * 1024 * 1024
+MAX_STACK_DEPTH = 1024
+MAX_STACK_LINE_BYTES = 2 * 1024 * 1024
+MAX_STACK_MEMO_BYTES = 8 * 1024 * 1024
+
+
+def stack_inventory(path, *, scan_timeout_seconds=120):
+    """Read the trace once, retaining bounded frame IDs and weighted unique stacks."""
+    deadline = time.monotonic() + scan_timeout_seconds
+    frames, frame_ids, stacks = [], {}, collections.Counter()
+    memo = collections.OrderedDict()
+    frame_bytes = references = memo_bytes = rows = 0
+    with path.open('rb') as stream:
+        for raw in iter(lambda: stream.readline(MAX_STACK_LINE_BYTES + 1), b''):
+            if time.monotonic() >= deadline:
+                raise ValueError('allocation trace inventory exceeded its deadline')
+            if len(raw) > MAX_STACK_LINE_BYTES:
+                raise ValueError('allocation stack exceeds its byte budget')
+            stack, weight = raw.rstrip().rsplit(b' ', 1)
+            amount = int(weight)
+            if amount < 0:
+                raise ValueError('negative allocation weight')
+            ids = memo.get(stack)
+            if ids is None:
+                entries = [frame for frame in stack.split(b';') if frame]
+                if len(entries) > MAX_STACK_DEPTH:
+                    raise ValueError('allocation stack exceeds its depth budget')
+                selected = []
+                for frame in entries:
+                    identifier = frame_ids.get(frame)
+                    if identifier is None:
+                        if len(frames) >= MAX_FRAMES or frame_bytes + len(frame) > MAX_FRAME_BYTES:
+                            raise ValueError('allocation frames exceed their inventory budget')
+                        identifier = len(frames)
+                        frame_ids[frame] = identifier
+                        frames.append(frame.decode())
+                        frame_bytes += len(frame)
+                    selected.append(identifier)
+                ids = tuple(selected)
+                memo[stack] = ids
+                memo_bytes += len(stack)
+                while memo_bytes > MAX_STACK_MEMO_BYTES:
+                    expired, _ = memo.popitem(last=False)
+                    memo_bytes -= len(expired)
+            else:
+                memo.move_to_end(stack)
+            if ids not in stacks:
+                references += len(ids)
+                if len(stacks) >= MAX_STACKS or references > MAX_STACK_REFERENCES:
+                    raise ValueError('allocation stacks exceed their inventory budget')
+            stacks[ids] += amount
+            rows += 1
+    if not rows:
+        raise ValueError('allocation trace is empty')
+    return frames, stacks, dict(input_rows=rows, unique_frames=len(frames),
+                               unique_stacks=len(stacks), frame_bytes=frame_bytes,
+                               stack_references=references)
+
+
+def inventory_sites(frames, stacks, unresolved=None, attribution=None):
+    locations = [source_location(frame) for frame in frames]
+    classes = [bool(component_site(location)) for location in locations]
+    sites = collections.Counter()
+    for ids, amount in stacks.items():
+        owned = next((locations[index] for index in reversed(ids) if classes[index]), None)
+        known = next((locations[index] for index in reversed(ids)
+                      if locations[index] != 'unresolved'), None)
+        site = owned or known or 'unresolved'
+        sites[site] += amount
+        if attribution is not None:
+            attribution[attribution_class(site)] += amount
+        if site == 'unresolved' and unresolved is not None:
+            unresolved[unresolved_format([frames[index] for index in ids])] += amount
+    return sites
+
+
+def decode_inventory(frames, directory, command, *, scan_timeout_seconds=120):
+    source, destination = directory / 'frames.stacks', directory / 'frames.rust.stacks'
+    with source.open('w') as stream:
+        for frame in frames:
+            stream.write(frame + '; 1\n')
+    demangle_stacks(source, destination, command, scan_timeout_seconds=scan_timeout_seconds)
+    decoded = []
+    with destination.open() as stream:
+        for line in stream:
+            if not line.endswith('; 1\n'):
+                raise ValueError('allocation decoder changed frame boundaries')
+            decoded.append(line[:-4])
+    if len(decoded) != len(frames):
+        raise ValueError('allocation decoder changed frame coverage')
+    return decoded
 
 def progress(phase, state, exit_code=None):
     record = {'heap_profile_phase': phase, 'state': state}
@@ -323,19 +417,29 @@ def main():
         timeline = heap_timeline(massif)
         if timeline[-1]['milliseconds'] < count / rate * 1000:
             raise ValueError('profile ended before the required workload duration')
-        original_sites = retained_sites(stacks)
-        decoded = private / 'retained.rust.stacks'
+        progress('inventory', 'started')
+        frames, weighted_stacks, processing = stack_inventory(stacks, scan_timeout_seconds=scan_timeout_seconds)
+        original_sites = inventory_sites(frames, weighted_stacks)
+        progress('inventory', 'completed')
+        (args.output / 'allocation-summary.json').write_text(json.dumps({
+            'manifest': manifest, 'timeline': timeline, 'processing': processing,
+            'total_retained_bytes': sum(original_sites.values()),
+            'unresolved_before_bytes': original_sites['unresolved'],
+            'allocation_attribution_qualified': False,
+            'scope': 'Numeric trace checkpoint before Rust symbol decoding; not qualified caller attribution or a capacity result.'},
+            indent=2) + '\n')
         progress('symbolization', 'started')
-        demangle_stacks(stacks, decoded, demangler, scan_timeout_seconds=scan_timeout_seconds)
+        decoded = decode_inventory(frames, private, demangler, scan_timeout_seconds=scan_timeout_seconds)
         progress('symbolization', 'completed')
         unresolved = collections.Counter()
         attribution = collections.Counter()
-        sites = retained_sites(decoded, unresolved, attribution)
+        sites = inventory_sites(decoded, weighted_stacks, unresolved, attribution)
         if sum(original_sites.values()) != sum(sites.values()):
             raise ValueError('symbol decoding changed allocation accounting')
         if sum(attribution.values()) != sum(sites.values()):
             raise ValueError('allocation attribution changed accounting')
         evidence = {'manifest': manifest, 'outcomes': {key: value for key, value in records.items() if key != 'first_resources'},
+                    'processing': processing,
                     'timeline': timeline, 'total_retained_bytes': sum(sites.values()),
                     'retained_sites': dict(sites.most_common(50)),
                     'attribution_bytes': {kind: attribution[kind] for kind in

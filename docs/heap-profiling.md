@@ -13,8 +13,8 @@ updates cannot qualify a growing-data profile.
 Current profiles use Regolith history. Earlier RocksDB profiles below remain
 historical measurements.
 
-Startup profiles allow two minutes for each trace scan; sustained and growing
-profiles allow ten minutes per scan for their larger folded trace. Symbol decoding retains its
+Startup profiles allow two minutes for trace inventory; sustained and growing
+profiles allow ten minutes for their larger folded trace. Symbol decoding retains its
 separate two-minute deadline and bounded inventory. These reporting budgets do
 not change workload or production request deadlines. The selected scan budget is
 recorded in the profile manifest. A successful workload alone does not qualify
@@ -68,6 +68,19 @@ its PID and inherited RPC listener. Only member3's first process receives the
 Heaptrack preload library; the other validators, workload driver and restarted
 member run without it. The production allocator and runtime source are unchanged.
 
+The collector scans the folded trace once, interns distinct frames and aggregates
+weights for identical stacks. It decodes the frame dictionary rather than rewriting
+every allocation stack. Caller classification runs once per distinct frame;
+weighted stack attribution preserves the original total and innermost-caller rule.
+Inventory limits cover frame bytes, frame count, stack depth, unique stacks and
+stored frame references. A byte-bounded memo speeds repeated-stack parsing.
+
+Before symbol decoding, `allocation-summary.json` retains numeric heap samples,
+total retained bytes, inventory counts and original unresolved bytes. It explicitly
+marks caller attribution unqualified. A later decoder failure retains this
+checkpoint and the completed workload evidence; only `allocations.json` qualifies
+the completed caller analysis. Raw frames and stack identities remain private.
+
 The artifact records source/binary/tool provenance, operation outcomes, interval peak
 heap samples and the largest retained allocation callers. Each allocation is
 charged once to its innermost resolved Vera, Commonware or Regolith frame, or the
@@ -119,8 +132,9 @@ after decoding. The existing source-name filter still governs public callers. Un
 also retain weighted counts by fixed format categories: missing stack, missing
 symbols, residual mangled symbols, and unrecognized symbols. No raw symbol names or
 private paths are included in those categories.
-Symbol inventory, batch decoding and trace rewriting each have a separate
-two-minute deadline; work in one phase cannot consume the next phase's budget.
+Trace inventory and dictionary decoding have separate deadlines; work in one
+phase cannot consume the next phase's budget. The dictionary still uses bounded
+symbol batches and checks decoded frame coverage.
 Decoding and classification preserve allocation accounting. The diagnostic build
 settings affect the profiled binary, so comparisons must retain its manifest;
 the production allocator remains unchanged.
