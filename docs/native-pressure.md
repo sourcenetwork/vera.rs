@@ -80,3 +80,19 @@ processing admitted work, restarting the fourth replica and checking certified
 state; it is not ordinary write-confirmation latency. This one bounded run does
 not establish fairness between distinct workers, a long-run memory ceiling,
 large-payload saturation, maximum throughput or WAN behavior.
+
+## Pending-work rechecks
+
+After finalization, Vera resets the admission validator to committed worker
+sequences and rechecks retained requests in their original admission order.
+Their signatures were authenticated at admission. Rechecks still validate the
+deployment, target and public key before reserving the next worker sequence.
+The compressed-key path uses blst validation, including rejection of infinity
+and non-subgroup points, and derives the DID from the canonical key encoding.
+
+Component fixture version 6 measures the former Arkworks decode-and-identify
+path and the blst path against the same compressed key, with the same warmup and
+sample windows. These are local key-validation and identity costs, not full
+recheck, backlog-recovery or consensus latency. Full overload results retain
+their recorded source and executable hashes; a component improvement alone does
+not explain the earlier recovery deadline.

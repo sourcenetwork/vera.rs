@@ -139,6 +139,17 @@ pub fn did_from_bls_pubkey(pubkey: &G1Affine) -> Result<String, BlsError> {
     Ok(did_from_encoded_key(&pubkey_bytes))
 }
 
+/// Validate a compressed G1 public key and derive its canonical DID.
+/// Rejects infinity and non-subgroup points; does not verify a request signature.
+pub fn did_from_compressed_pubkey(bytes: &[u8]) -> Result<String, BlsError> {
+    if bytes.len() != 48 {
+        return Err(BlsError::Deserialize);
+    }
+    let key = blst::min_pk::PublicKey::from_bytes(bytes).map_err(|_| BlsError::Deserialize)?;
+    key.validate().map_err(|_| BlsError::InvalidPublicKey)?;
+    Ok(did_from_encoded_key(&key.to_bytes()))
+}
+
 fn did_from_encoded_key(pubkey: &[u8; 48]) -> String {
     let mut varint_buf = [0u8; 10];
     let varint = unsigned_varint::encode::u64(BLS_G1_MULTICODEC, &mut varint_buf);
@@ -264,6 +275,47 @@ mod tests {
         let did1 = did_from_bls_pubkey(&pk).expect("did1");
         let did2 = did_from_bls_pubkey(&pk).expect("did2");
         assert_eq!(did1, did2);
+    }
+
+    #[test]
+    fn compressed_did_derivation_matches_validated_arkworks_keys() {
+        for scalar in 1..=32_u64 {
+            let key = (G1Projective::from(G1Affine::generator()) * Fr::from(scalar)).into_affine();
+            let mut encoded = Vec::new();
+            key.serialize_compressed(&mut encoded).unwrap();
+            let decoded = deserialize_pubkey(&encoded).unwrap();
+            assert_eq!(
+                did_from_compressed_pubkey(&encoded).unwrap(),
+                did_from_bls_pubkey(&decoded).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn compressed_did_rejects_invalid_encoding_identity_and_torsion() {
+        let torsion =
+            G1Affine::new_unchecked(ark_bls12_381::Fq::from(0), ark_bls12_381::Fq::from(2));
+        assert!(torsion.is_on_curve());
+        assert!(!torsion.is_in_correct_subgroup_assuming_on_curve());
+        for key in [G1Affine::zero(), torsion] {
+            let mut encoded = Vec::new();
+            key.serialize_compressed(&mut encoded).unwrap();
+            assert!(did_from_compressed_pubkey(&encoded).is_err());
+        }
+        let mut valid = Vec::new();
+        G1Affine::generator()
+            .serialize_compressed(&mut valid)
+            .unwrap();
+        assert!(did_from_compressed_pubkey(&[]).is_err());
+        assert!(did_from_compressed_pubkey(&valid[..47]).is_err());
+        valid.push(0);
+        assert!(did_from_compressed_pubkey(&valid).is_err());
+        assert!(did_from_compressed_pubkey(&[0xff; 48]).is_err());
+        let mut uncompressed = Vec::new();
+        G1Affine::generator()
+            .serialize_uncompressed(&mut uncompressed)
+            .unwrap();
+        assert!(did_from_compressed_pubkey(&uncompressed).is_err());
     }
 
     #[test]
