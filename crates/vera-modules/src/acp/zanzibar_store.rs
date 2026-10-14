@@ -3,9 +3,9 @@
 use std::{borrow::Cow, sync::RwLock};
 
 use async_trait::async_trait;
-use identity::Did;
-use zanzibar::error::Result;
-use zanzibar::{ObjectRef, Policy, Relationship, Subject, ZanzibarStore};
+use vera_identity::Did;
+use vera_zanzibar::error::Result;
+use vera_zanzibar::{ObjectRef, Policy, Relationship, Subject, ZanzibarStore};
 
 use super::record_store::RecordStore;
 use super::types::{
@@ -45,8 +45,8 @@ pub fn evaluate_access_request<S: RecordStore>(
 pub(super) fn evaluation_engine<S: RecordStore>(
     store: S,
     policy_id: &str,
-    meter: Option<std::sync::Arc<dyn zanzibar::engine::EvaluationMeter>>,
-) -> Result<Option<zanzibar::PermissionEngine<QmdbZanzibarStore<S>>>> {
+    meter: Option<std::sync::Arc<dyn vera_zanzibar::engine::EvaluationMeter>>,
+) -> Result<Option<vera_zanzibar::PermissionEngine<QmdbZanzibarStore<S>>>> {
     let Some(record) = read_policy(&store, policy_id)? else {
         return Ok(None);
     };
@@ -56,15 +56,15 @@ pub(super) fn evaluation_engine<S: RecordStore>(
 pub(super) fn evaluation_engine_for_policy<S: RecordStore>(
     store: S,
     record: PolicyRecord,
-    meter: Option<std::sync::Arc<dyn zanzibar::engine::EvaluationMeter>>,
-) -> zanzibar::PermissionEngine<QmdbZanzibarStore<S>> {
+    meter: Option<std::sync::Arc<dyn vera_zanzibar::engine::EvaluationMeter>>,
+) -> vera_zanzibar::PermissionEngine<QmdbZanzibarStore<S>> {
     // This adapter never leaves the evaluation or receives mutations. The initial
     // policy point read remains part of captured and replayed proof evidence.
     let adapter = std::sync::Arc::new(QmdbZanzibarStore {
         store: RwLock::new(store),
         evaluation_policy: Some(record),
     });
-    let mut engine = zanzibar::PermissionEngine::new(adapter.clone());
+    let mut engine = vera_zanzibar::PermissionEngine::new(adapter.clone());
     engine.add_policy(
         &adapter
             .evaluation_policy
@@ -82,7 +82,7 @@ pub(super) fn evaluation_engine_for_policy<S: RecordStore>(
 ///
 /// Selects current relationship generation buckets and object incarnations using
 /// authenticated policy records, object points and subject directories, so
-/// [`zanzibar::PermissionEngine`] can evaluate permissions (including
+/// [`vera_zanzibar::PermissionEngine`] can evaluate permissions (including
 /// `TupleToUserset`) directly over committed module state instead of a
 /// divergent bespoke evaluator.
 ///
@@ -229,8 +229,8 @@ fn deleted_policy_key(policy: &str) -> Vec<u8> {
     [b"policy/adapter_deleted/".as_slice(), policy.as_bytes()].concat()
 }
 
-fn invalid(message: &str) -> zanzibar::error::Error {
-    zanzibar::error::Error::Serialization(message.into())
+fn invalid(message: &str) -> vera_zanzibar::error::Error {
+    vera_zanzibar::error::Error::Serialization(message.into())
 }
 
 fn default_metadata() -> RecordMetadata {
@@ -301,7 +301,7 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
             .read_record(keys::POLICY_COUNTER_KEY)?
             .map(|bytes| -> Result<u64> {
                 let bytes: [u8; 8] = bytes.as_slice().try_into().map_err(|_| {
-                    zanzibar::error::Error::Serialization(
+                    vera_zanzibar::error::Error::Serialization(
                         "policy counter must contain 8 bytes".into(),
                     )
                 })?;
@@ -310,7 +310,7 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
             .transpose()?
             .unwrap_or(0);
         let next = counter.checked_add(1).ok_or_else(|| {
-            zanzibar::error::Error::Serialization("policy counter exhausted".into())
+            vera_zanzibar::error::Error::Serialization("policy counter exhausted".into())
         })?;
         guard.write_record(keys::POLICY_COUNTER_KEY, next.to_be_bytes().to_vec())?;
         Ok(next)
@@ -537,7 +537,7 @@ mod tests {
     use std::sync::Arc;
 
     use futures::executor::block_on;
-    use zanzibar::{PermissionEngine, Relation, RelationExpression, Resource};
+    use vera_zanzibar::{PermissionEngine, Relation, RelationExpression, Resource};
 
     use super::*;
     use crate::kv_store::ModuleKvStore;

@@ -30,7 +30,7 @@ fn fixture() -> (AcpModule, String, RelationshipRecord) {
         "file",
         "report",
         "reader",
-        acp::Subject::entity_set("group", "staff", "member"),
+        vera_acp::Subject::entity_set("group", "staff", "member"),
     );
     let PolicyCmdResult::SetRelationship { record, .. } = module
         .direct_policy_cmd(&owner(), &policy, PolicyCmd::SetRelationship(relationship))

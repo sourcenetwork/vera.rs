@@ -1,7 +1,7 @@
 //! Canonical target-object incarnation points, independent of registration.
 
-use acp::Relationship;
-use zanzibar::error::{Error, Result};
+use vera_acp::Relationship;
+use vera_zanzibar::error::{Error, Result};
 
 use super::record_store::{RecordChange, RecordStore};
 use crate::kv_store::NATIVE_MAX_KEY_BYTES;

@@ -76,7 +76,7 @@ impl PermissionBudget {
         )
     }
 
-    pub(super) fn evaluation_error(&self, error: zanzibar::error::Error) -> AcpError {
+    pub(super) fn evaluation_error(&self, error: vera_zanzibar::error::Error) -> AcpError {
         if self.is_exhausted() {
             AcpError::PermissionBudgetExceeded
         } else {
@@ -85,11 +85,11 @@ impl PermissionBudget {
     }
 }
 
-impl zanzibar::engine::EvaluationMeter for PermissionBudget {
-    fn charge_step(&self) -> zanzibar::error::Result<()> {
+impl vera_zanzibar::engine::EvaluationMeter for PermissionBudget {
+    fn charge_step(&self) -> vera_zanzibar::error::Result<()> {
         self.records
             .pair()
-            .map_err(|error| zanzibar::error::Error::Serialization(error.to_string()))
+            .map_err(|error| vera_zanzibar::error::Error::Serialization(error.to_string()))
     }
 }
 

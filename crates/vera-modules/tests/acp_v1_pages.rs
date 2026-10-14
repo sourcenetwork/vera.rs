@@ -1,5 +1,5 @@
 //! Bounded policy and relationship pagination.
-use identity::Did;
+use vera_identity::Did;
 use vera_modules::{
     acp::{
         AcpModule,
@@ -65,7 +65,7 @@ fn enumeration_resumes_without_duplicates_and_bounds_empty_filtered_pages() {
         }
     }
     assert_eq!(ids.len(), 260);
-    request.selector.subject_selector = Some(SubjectSelector::Exact(acp::Subject::Entity(
+    request.selector.subject_selector = Some(SubjectSelector::Exact(vera_acp::Subject::Entity(
         Did::new("did:key:nobody").unwrap(),
     )));
     let page = module.query_relationships_page(policy, &request).unwrap();

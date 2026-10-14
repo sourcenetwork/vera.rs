@@ -173,11 +173,11 @@ fn generation_fixture() -> (
             PolicyMarshalingType::ShortYaml,
         )
         .unwrap();
-    let relationship = zanzibar::Relationship::new(
+    let relationship = vera_zanzibar::Relationship::new(
         "file",
         "report",
         "reader",
-        zanzibar::Subject::entity_set("group", "staff", "member"),
+        vera_zanzibar::Subject::entity_set("group", "staff", "member"),
     );
     let record = RelationshipRecord {
         incarnation: 0,

@@ -66,14 +66,14 @@ pub mod zanzibar_store;
 use imbl::OrdMap;
 use std::sync::Arc;
 
-use acp::policy_yaml;
-use acp::{Policy, Relationship};
 use error::AcpError;
-use identity::Did;
 use sha2::{Digest, Sha256};
+use vera_acp::policy_yaml;
+use vera_acp::{Policy, Relationship};
+use vera_identity::Did;
 #[cfg(test)]
-use zanzibar::PermissionEngine;
-use zanzibar::PolicySpecification;
+use vera_zanzibar::PermissionEngine;
+use vera_zanzibar::PolicySpecification;
 #[cfg(test)]
 use zanzibar_store::QmdbZanzibarStore;
 
@@ -125,7 +125,7 @@ pub struct AcpModule {
     zanzibar_policies: OrdMap<String, Arc<Policy>>,
 }
 
-fn relation_state_error(error: zanzibar::error::Error) -> AcpError {
+fn relation_state_error(error: vera_zanzibar::error::Error) -> AcpError {
     AcpError::State(error.to_string())
 }
 
@@ -1454,7 +1454,7 @@ mod registration_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use identity::Did;
+    use vera_identity::Did;
 
     fn alice() -> Did {
         Did::new("did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK").unwrap()
@@ -2144,7 +2144,7 @@ resources:
             "document",
             "docX",
             "reader",
-            acp::Subject::entity_set("group", "g1", "member"),
+            vera_acp::Subject::entity_set("group", "g1", "member"),
         );
         let err = module
             .direct_policy_cmd(&creator, policy_id, PolicyCmd::SetRelationship(rel))
@@ -2173,7 +2173,7 @@ resources:
             "document",
             "docX",
             "reader",
-            acp::Subject::entity_set("group", "g1", "member"),
+            vera_acp::Subject::entity_set("group", "g1", "member"),
         );
         let err = module
             .direct_policy_cmd(&creator, policy_id, PolicyCmd::SetRelationship(rel))

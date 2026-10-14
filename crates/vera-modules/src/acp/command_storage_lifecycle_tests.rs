@@ -283,7 +283,7 @@ fn archive_keeps_exact_bulk_semantics_and_only_meters_its_fixed_owner_rewrite() 
         let (mut module, policy) = fixture();
         let mut grant = record(&module, &policy);
         for i in 0..count {
-            grant.relationship.subject = acp::Subject::entity(did(&format!("reader-{i}")));
+            grant.relationship.subject = vera_acp::Subject::entity(did(&format!("reader-{i}")));
             module.set_relationship(&grant).unwrap();
         }
         let original = module.clone();

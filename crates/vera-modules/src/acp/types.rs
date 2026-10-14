@@ -1,9 +1,9 @@
 #![allow(missing_docs)]
 
-use acp::{Policy, Relationship, Subject};
 use borsh::{BorshDeserialize, BorshSerialize};
-use identity::Did;
 use serde::{Deserialize, Serialize};
+use vera_acp::{Policy, Relationship, Subject};
+use vera_identity::Did;
 
 pub use super::relation_generations::{RelationGenerations, RelationPair};
 use crate::types::{Duration, Timestamp};
@@ -156,7 +156,7 @@ pub struct PolicyCreation {
     pub policy: String,
     pub marshal_type: PolicyMarshalingType,
     #[serde(default)]
-    pub required_specification: Option<zanzibar::PolicySpecification>,
+    pub required_specification: Option<vera_zanzibar::PolicySpecification>,
     #[serde(default)]
     pub metadata: SuppliedMetadata,
 }

@@ -48,7 +48,7 @@ impl BulletinModule {
                 };
                 if key != expected {
                     return Err(BulletinError::State(
-                        "bulletin key does not match its record; explicit storage migration required".into(),
+                        "bulletin key does not match its record".into(),
                     ));
                 }
             }

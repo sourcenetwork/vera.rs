@@ -117,7 +117,7 @@ pub(super) fn dispatch(module: &AcpModule, input: &[u8], gas_limit: u64) -> Disp
                     call.relation,
                 )),
                 subject_selector: Some(vera_modules::acp::types::SubjectSelector::Exact(
-                    acp::Subject::entity(actor),
+                    vera_acp::Subject::entity(actor),
                 )),
             };
             output(

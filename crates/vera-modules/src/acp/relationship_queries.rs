@@ -434,7 +434,7 @@ mod tests {
             "file",
             "elsewhere",
             "reader",
-            acp::Subject::entity_set("file", "source", format!("g{subject}")),
+            vera_acp::Subject::entity_set("file", "source", format!("g{subject}")),
         );
         let record = RelationshipRecord {
             incarnation: 0,

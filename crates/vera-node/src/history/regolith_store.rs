@@ -26,7 +26,7 @@ impl HistoryDb {
                     let entry = entry?;
                     ensure!(
                         entry.file_name() == "regolith" && entry.file_type()?.is_dir(),
-                        "unrecognized history directory; explicit migration is required"
+                        "unrecognized history directory"
                     );
                 }
             }

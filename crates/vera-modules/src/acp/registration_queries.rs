@@ -127,7 +127,7 @@ impl AcpModule {
         }
         let record: RelationshipRecord = serde_json::from_slice(value)
             .map_err(|error| AcpError::State(format!("invalid object owner record: {error}")))?;
-        let acp::Subject::Entity(actor) = &record.relationship.subject else {
+        let vera_acp::Subject::Entity(actor) = &record.relationship.subject else {
             return Err(AcpError::State("object owner must be an actor".into()));
         };
         if record.generations

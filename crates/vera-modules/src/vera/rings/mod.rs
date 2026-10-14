@@ -18,7 +18,7 @@ use crate::{
     kv_store::ModuleKvStore as _,
     types::{BlockExecCtx, TxExecCtx},
 };
-use identity::Did;
+use vera_identity::Did;
 
 pub(super) fn invalid(error: impl std::fmt::Display) -> VeraError {
     VeraError::InvalidRingRequest {

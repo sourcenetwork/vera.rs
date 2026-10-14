@@ -1,5 +1,5 @@
-use identity::Did;
 use vera_crypto::jwt::{DelegationScope, JwtClaims, matches_issuer, verify_bearer_token};
+use vera_identity::Did;
 
 use super::{JWSTokenRecord, JWSTokenStatus, Result, VeraError, VeraModule};
 use crate::types::{BlockExecCtx, Timestamp};

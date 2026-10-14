@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use test_infra::{BinaryResolver, ManagedProcess, TestRunDir};
+use vera_test_infra::{BinaryResolver, ManagedProcess, TestRunDir};
 
 use super::{
     genesis::{GenesisBuilder, ValidatorConfig},
@@ -178,14 +178,15 @@ impl TestClusterBuilder {
         let mut rpc_listeners = if self.inherit_rpc_listener {
             (0..n)
                 .map(|_| {
-                    test_infra::ReservedTcpListener::bind("0.0.0.0:0".parse().unwrap()).map(Some)
+                    vera_test_infra::ReservedTcpListener::bind("0.0.0.0:0".parse().unwrap())
+                        .map(Some)
                 })
                 .collect::<std::io::Result<Vec<_>>>()?
         } else {
             Vec::new()
         };
         let all_ports =
-            test_infra::allocate_ports(n + if self.inherit_rpc_listener { 0 } else { n })?;
+            vera_test_infra::allocate_ports(n + if self.inherit_rpc_listener { 0 } else { n })?;
         let p2p_ports = &all_ports[..n];
         #[cfg(unix)]
         let rpc_ports = if self.inherit_rpc_listener {

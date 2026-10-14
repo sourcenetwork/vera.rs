@@ -32,11 +32,11 @@ impl Fixture {
                 resource: "file".into(),
                 id: "report".into(),
             }),
-            PolicyCmd::SetRelationship(acp::Relationship::new(
+            PolicyCmd::SetRelationship(vera_acp::Relationship::new(
                 "file",
                 "report",
                 "reader",
-                acp::Subject::entity(actor.clone()),
+                vera_acp::Subject::entity(actor.clone()),
             )),
         ] {
             acp.direct_policy_cmd(&actor, &policy, command).unwrap();

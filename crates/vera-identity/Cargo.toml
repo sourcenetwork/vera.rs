@@ -1,0 +1,13 @@
+[package]
+name = "vera-identity"
+version = "0.5.0"
+edition = "2021"
+license = "Apache-2.0 OR MIT"
+repository.workspace = true
+description = "DID identity types"
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true

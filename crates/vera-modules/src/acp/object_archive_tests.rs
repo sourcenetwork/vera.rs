@@ -82,7 +82,7 @@ fn archive_removes_only_outgoing_grants_and_retains_ownership() {
             "file",
             "report",
             "reader",
-            acp::Subject::entity_set("group", "staff", "member"),
+            vera_acp::Subject::entity_set("group", "staff", "member"),
         ),
     );
     let incoming = put(
@@ -92,7 +92,7 @@ fn archive_removes_only_outgoing_grants_and_retains_ownership() {
             "file",
             "other",
             "reader",
-            acp::Subject::entity_set("file", "report", "reader"),
+            vera_acp::Subject::entity_set("file", "report", "reader"),
         ),
     );
     let unrelated = put(
@@ -166,7 +166,7 @@ fn archive_excludes_retired_pairs_without_reviving_them_on_unarchive() {
                 "file",
                 "report",
                 "reader",
-                acp::Subject::entity_set("group", "staff", "member"),
+                vera_acp::Subject::entity_set("group", "staff", "member"),
             ),
             without_member,
         ),

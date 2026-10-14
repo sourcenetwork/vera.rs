@@ -23,6 +23,31 @@ class SafeTestEvidence(unittest.TestCase):
             (root / 'test-output.log').write_text(content)
             return summary.summarize(root, {'crates/vera-e2e/tests/case.rs': 100}, function_names)
 
+    def test_netem_coverage_keeps_bounded_counts_without_private_suffixes(self):
+        evidence = self.collect(
+            'netem_coverage active=3 installed=4 uncovered=1\n'
+            'netem_coverage active=3 installed=4 uncovered=1\n'
+            'netem_coverage active=2 installed=4 uncovered=3\n'
+            'netem_coverage active=4097 installed=4 uncovered=1\n'
+            'netem_coverage active=3 installed=0 uncovered=1\n'
+            'netem_coverage active=3 installed=4 uncovered=1 private-key\n')
+        self.assertEqual(evidence['netem_coverage'], [{'active': 3, 'installed': 4, 'uncovered': 1}])
+        self.assertNotIn('private-key', json.dumps(evidence))
+
+    def test_netem_coverage_is_limited_and_excludes_node_log_text(self):
+        evidence = self.collect(''.join(
+            f'netem_coverage active={i + 1} installed=4 uncovered=1\n'
+            for i in range(summary.MAX_NETEM_SAMPLES + 1)))
+        self.assertEqual(len(evidence['netem_coverage']), summary.MAX_NETEM_SAMPLES)
+        self.assertTrue(evidence['netem_coverage_limit_reached'])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'test-output.log').write_text('')
+            logs = root / 'node0/logs'
+            logs.mkdir(parents=True)
+            (logs / 'stderr.log').write_text('netem_coverage active=3 installed=4 uncovered=1\n')
+            self.assertEqual(summary.summarize(root, {})['netem_coverage'], [])
+
     def test_admission_progress_retains_only_bounded_numeric_runner_samples(self):
         evidence = self.collect(
             'native_admission_progress replica=0 nonce=2048 elapsed_ms=120001\n'

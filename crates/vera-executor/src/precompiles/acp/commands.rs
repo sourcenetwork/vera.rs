@@ -143,11 +143,11 @@ fn run(
             let creator = did_from_signer(&tx_ctx.signer)?;
             let policy_id = policy_id_to_string(&call.policyId);
             let actor_did = did_from_actor(&call.actor)?;
-            let cmd = PolicyCmd::SetRelationship(acp::Relationship::new(
+            let cmd = PolicyCmd::SetRelationship(vera_acp::Relationship::new(
                 &call.resource,
                 &call.objectId,
                 &call.relation,
-                acp::Subject::entity(actor_did),
+                vera_acp::Subject::entity(actor_did),
             ));
 
             let result = match module.execute_policy_cmd_with_budget(
@@ -188,11 +188,11 @@ fn run(
             let creator = did_from_signer(&tx_ctx.signer)?;
             let policy_id = policy_id_to_string(&call.policyId);
             let actor_did = did_from_actor(&call.actor)?;
-            let cmd = PolicyCmd::DeleteRelationship(acp::Relationship::new(
+            let cmd = PolicyCmd::DeleteRelationship(vera_acp::Relationship::new(
                 &call.resource,
                 &call.objectId,
                 &call.relation,
-                acp::Subject::entity(actor_did),
+                vera_acp::Subject::entity(actor_did),
             ));
 
             let result = match module.execute_policy_cmd_with_budget(
@@ -234,7 +234,7 @@ fn run(
                 &call.subjectObjectId,
                 &call.subjectRelation,
             )?;
-            let cmd = PolicyCmd::SetRelationship(acp::Relationship::new(
+            let cmd = PolicyCmd::SetRelationship(vera_acp::Relationship::new(
                 &call.resource,
                 &call.objectId,
                 &call.relation,
@@ -290,7 +290,7 @@ fn run(
                 &call.subjectObjectId,
                 &call.subjectRelation,
             )?;
-            let cmd = PolicyCmd::DeleteRelationship(acp::Relationship::new(
+            let cmd = PolicyCmd::DeleteRelationship(vera_acp::Relationship::new(
                 &call.resource,
                 &call.objectId,
                 &call.relation,

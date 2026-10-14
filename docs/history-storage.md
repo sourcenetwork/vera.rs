@@ -11,10 +11,8 @@ All builds use Regolith in the node's `history/regolith` directory:
 cargo build --frozen -p verad
 ```
 
-`regolith-history` remains an accepted build marker for existing deployment
-manifests; omitting it selects the same Regolith implementation. The history
-implementation and module persistence no longer depend on RocksDB. Authenticated
-module state uses Commonware QMDB; the separate JMT/RocksDB store is removed.
+History always uses Regolith; there is no backend-selection feature.
+Authenticated module state uses Commonware QMDB.
 
 The [node manifest](../crates/vera-node/Cargo.toml) selects the exact Regolith
 revision. It includes atomic compaction-manifest edit batches, batched WAL
@@ -43,10 +41,8 @@ estimate for the Regolith batch.
 
 Compaction removes its input tables and installs replacement tables in one
 checksummed manifest frame. Recovery retains or discards the complete edit batch,
-and uncertain manifest writes stop further edits until reopening. The reader
-accepts legacy manifests; new manifests use format V1, which older Regolith
-readers reject. Rollback requires a complete stopped backup from before upgrading,
-rather than opening upgraded history with an older node.
+and uncertain manifest writes stop further edits until reopening. Use the same
+qualified node build when restoring a stopped backup.
 
 A history-write error stops finalization before updating the in-memory head or
 acknowledging execution. An error does not establish that the batch is absent:
@@ -59,10 +55,10 @@ Archived receipt polling returns pending while the receipt's revision is ahead
 of the live published index. This prevents a receipt from becoming available in
 the interval between its durable history write and publication of query state.
 
-Startup rejects foreign history layouts before creating storage files. There is
-no automatic conversion from RocksDB history. Use a separate node directory and
-authenticated snapshot recovery to populate Regolith history. Copying files
-between storage layouts is not a migration.
+Startup rejects foreign history layouts before creating storage files. Vera
+releases start with fresh state; development data from incompatible builds is
+unsupported. Existing members recover through the documented backup and
+authenticated synchronization paths.
 
 Backend selection does not establish throughput, memory bounds, or power-loss
 durability. Numeric diagnostics report used and reserved memtable bytes, retired

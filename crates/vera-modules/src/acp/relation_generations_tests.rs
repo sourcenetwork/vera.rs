@@ -1,5 +1,5 @@
 use super::*;
-use zanzibar::{Relation, RelationExpression, Resource};
+use vera_zanzibar::{Relation, RelationExpression, Resource};
 
 fn policy() -> Policy {
     let mut policy = Policy::new("policy", "generations")
@@ -66,7 +66,7 @@ fn owner_generations_and_surviving_names_are_stable() {
         .unwrap();
     file.relations[1] = Relation::computed("reader", RelationExpression::computed_userset("owner"))
         .with_manages(vec!["owner"])
-        .with_restriction(zanzibar::SubjectRestriction::Actor);
+        .with_restriction(vera_zanzibar::SubjectRestriction::Actor);
     changed
         .resources
         .push(Resource::new("extra").with_relation(Relation::direct("owner")));

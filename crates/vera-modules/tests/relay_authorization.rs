@@ -1,12 +1,12 @@
 //! Relay authority, actor attribution and revocation across serialized state.
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use identity::Did;
 use k256::ecdsa::{
     Signature, SigningKey,
     signature::{Signer as _, hazmat::PrehashSigner as _},
 };
 use vera_crypto::jwt::{DelegationScope, JwtClaims, RelayAssertion};
+use vera_identity::Did;
 use vera_modules::{
     acp::{
         AcpModule,

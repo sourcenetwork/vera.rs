@@ -1,8 +1,8 @@
 use super::*;
 use crate::acp::{AcpModule, PolicyMarshalingType, relationship_mutations};
 use crate::kv_store::{InMemoryKvStore, ModuleKvStore, NATIVE_MAX_KEY_BYTES};
-use acp::Relationship;
-use identity::Did;
+use vera_acp::Relationship;
+use vera_identity::Did;
 
 fn fixture() -> (InMemoryKvStore, String, RelationshipRecord) {
     let mut module = AcpModule::new();
@@ -137,7 +137,7 @@ fn object_key_parsers_reject_noncanonical_boundaries_and_suffixes() {
 fn rewrites_and_grouped_removals_preserve_exact_object_counts() {
     let (mut store, _, mut first) = fixture();
     let mut second = first.clone();
-    second.relationship.subject = acp::Subject::Entity(Did::new("did:key:second").unwrap());
+    second.relationship.subject = vera_acp::Subject::Entity(Did::new("did:key:second").unwrap());
     let mut third = first.clone();
     third.relationship.object_id = "other".into();
     for record in [&first, &second, &third] {
@@ -180,7 +180,8 @@ fn corrupt_object_counts_fail_before_rewrites_or_bulk_mutation() {
     for corruption in 0..4 {
         let (mut store, _, first) = fixture();
         let mut second = first.clone();
-        second.relationship.subject = acp::Subject::Entity(Did::new("did:key:second").unwrap());
+        second.relationship.subject =
+            vera_acp::Subject::Entity(Did::new("did:key:second").unwrap());
         relationship_mutations::put(&mut store, &first).unwrap();
         relationship_mutations::put(&mut store, &second).unwrap();
         match corruption {
@@ -210,7 +211,7 @@ fn overflow_and_late_object_count_corruption_leave_all_records_unchanged() {
     store.put(&key(&first), u64::MAX.to_be_bytes().to_vec());
     let before = store.serialize();
     let mut second = first.clone();
-    second.relationship.subject = acp::Subject::Entity(Did::new("did:key:second").unwrap());
+    second.relationship.subject = vera_acp::Subject::Entity(Did::new("did:key:second").unwrap());
     assert!(relationship_mutations::put(&mut store, &second).is_err());
     assert_eq!(store.serialize(), before);
 

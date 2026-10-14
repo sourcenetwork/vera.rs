@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use identity::Did;
+use vera_identity::Did;
 use vera_modules::{
     acp::{
         AcpModule, keys,
@@ -17,7 +17,7 @@ use vera_modules::{
     },
     kv_store::{InMemoryKvStore, ModuleKvStore},
 };
-use zanzibar::{
+use vera_zanzibar::{
     Policy, Relation, RelationExpression, Relationship, Resource, Subject, ZanzibarStore,
     error::{Error, Result},
 };

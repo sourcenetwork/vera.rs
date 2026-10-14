@@ -3,7 +3,7 @@ use vera_modules::acp::{
     keys,
     types::{RelationPair, RelationshipRecord},
 };
-use zanzibar::{Relationship, Subject};
+use vera_zanzibar::{Relationship, Subject};
 
 use crate::{
     Actor, Object, PERMISSION_LIMITS, PermissionError, PolicyPrefixResponse, RECORD_PROOF_BYTES,

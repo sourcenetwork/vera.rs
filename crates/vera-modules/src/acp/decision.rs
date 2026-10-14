@@ -134,7 +134,7 @@ impl AccessDecision {
                 "access decision ID differs from the requested record",
             ));
         }
-        identity::Did::new(&self.creator).map_err(|_| invalid("invalid decision creator"))?;
+        vera_identity::Did::new(&self.creator).map_err(|_| invalid("invalid decision creator"))?;
         let expected = DecisionRequest {
             deployment_id,
             policy_id: self.policy_id.clone(),

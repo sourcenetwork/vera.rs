@@ -8,7 +8,7 @@ use vera_modules::acp::{
     delegated_operation::DelegatedOperation,
     types::{Object, PolicyCmd},
 };
-use zanzibar::{Relationship, Subject};
+use vera_zanzibar::{Relationship, Subject};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let policy_id = "ab".repeat(32);
@@ -22,8 +22,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         PolicyCmd::UnarchiveObject(object.clone()),
     ];
     for subject in [
-        Subject::entity(identity::Did::new(format!("did:opk:{}", "cd".repeat(32)))?),
-        Subject::entity(identity::Did::new("did:key:zExample\\u2028<>&\u{2028}")?),
+        Subject::entity(vera_identity::Did::new(format!(
+            "did:opk:{}",
+            "cd".repeat(32)
+        ))?),
+        Subject::entity(vera_identity::Did::new(
+            "did:key:zExample\\u2028<>&\u{2028}",
+        )?),
         Subject::entity_set("group", "staff-雪", "member"),
         Subject::typed_wildcard("user"),
         Subject::wildcard(),

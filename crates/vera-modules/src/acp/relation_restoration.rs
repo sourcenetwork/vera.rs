@@ -7,8 +7,8 @@ use super::relation_cleanup::{
 use super::relation_edits::{self as edits, RetiredRelation};
 use super::retirement_cleanup::record_size;
 use super::*;
-use acp::Subject;
 use std::collections::{BTreeMap, BTreeSet};
+use vera_acp::Subject;
 
 type Catalogs = BTreeMap<String, (RelationGenerations, bool)>;
 type Descriptors = BTreeMap<(String, u64), RetiredRelation>;

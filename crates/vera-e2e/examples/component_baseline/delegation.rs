@@ -1,4 +1,3 @@
-use identity::Did;
 use k256::ecdsa::SigningKey;
 use std::hint::black_box;
 use vera_client::{BlsSigner, create_operation_token};
@@ -6,6 +5,7 @@ use vera_crypto::{
     jwt::{DelegationScope, JwtClaims},
     operation::{OperationClaim, OperationId},
 };
+use vera_identity::Did;
 use vera_modules::{
     acp::{
         AcpModule,

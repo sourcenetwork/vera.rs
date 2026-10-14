@@ -264,14 +264,10 @@ application protocol represented by those bytes.
 
 Bulletin composite keys escape `%` as `%25` and literal `|` as `%7C`, then map
 `/` to `|`. Thus `a/b`, `a|b` and `a%7Cb` occupy different post and collaborator
-prefixes. Keys without literal pipes or percent signs retain their previous
-encoding. Namespace record keys and payload-derived post identifiers do not
-change.
+prefixes. Namespace record keys and payload-derived post identifiers use their
+documented encodings.
 
 Native state hydration checks composite keys against the identifiers stored in
-each record. An affected legacy key or corrupt identity stops startup/recovery
-with a storage error; records are never silently rekeyed. Deployments containing
-old records with literal pipes or percent signs require an explicit migration
-from verified source records. Earlier collisions may already have overwritten
-records, so the retained state alone may not recover every original grant.
+each record. A mismatched key or corrupt identity stops startup/recovery with a
+storage error; records are never silently rekeyed.
 All consensus members and bulletin clients must use the same encoding version.

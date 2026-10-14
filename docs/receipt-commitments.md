@@ -121,8 +121,8 @@ truncated encodings are rejected.
 
 Fresh native genesis uses the empty receipt list with gas limit zero because
 genesis has no executed operations. Native startup rejects a persisted genesis
-from before receipt commitments and preserves its files. There is no automatic
-conversion of existing native history; these data require an explicit migration.
+with missing or invalid receipt commitments and preserves its files. Releases
+start with fresh state; incompatible development history is unsupported.
 Legacy library execution and history can still read revisions without native
 targets or receipt commitments, but those receipts have no authenticated
 commitment.

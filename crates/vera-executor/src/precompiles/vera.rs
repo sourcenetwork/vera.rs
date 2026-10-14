@@ -2,8 +2,8 @@
 
 use alloy_primitives::Bytes;
 use alloy_sol_types::SolCall;
-use identity::Did;
 use revm::precompile::PrecompileError;
+use vera_identity::Did;
 use vera_modules::acp::AcpModule;
 use vera_modules::types::{BlockExecCtx, TxExecCtx};
 use vera_modules::vera::VeraModule;

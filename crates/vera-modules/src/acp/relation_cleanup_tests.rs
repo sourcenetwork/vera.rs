@@ -1,6 +1,6 @@
 use super::super::retirement_cleanup::{MAX_BYTES, MAX_ITEMS};
 use super::*;
-use acp::Subject;
+use vera_acp::Subject;
 
 const ORIGINAL: &str = "name: generations\nresources:\n  - name: file\n    relations:\n      - name: reader\n      - name: viewer\n  - name: group\n    relations:\n      - name: member\n";
 const REMOVED: &str = "name: generations\nresources:\n  - name: file\n    relations:\n      - name: viewer\n  - name: group\n";

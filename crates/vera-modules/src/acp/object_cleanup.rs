@@ -36,7 +36,7 @@ pub(super) fn queue_key(sequence: u64) -> Vec<u8> {
     [QUEUE_PREFIX, &sequence.to_be_bytes()].concat()
 }
 
-pub(super) fn counter<S: RecordStore>(store: &S) -> zanzibar::error::Result<u64> {
+pub(super) fn counter<S: RecordStore>(store: &S) -> vera_zanzibar::error::Result<u64> {
     store
         .read_record(COUNTER_KEY)?
         .as_deref()
@@ -70,7 +70,7 @@ pub(super) fn prepare_job<S: RecordStore>(
     policy: &str,
     object: &Object,
     incarnation: u64,
-) -> zanzibar::error::Result<Vec<RecordChange>> {
+) -> vera_zanzibar::error::Result<Vec<RecordChange>> {
     let marker = marker_key(policy, object, incarnation);
     if store.read_record(&marker)?.is_some() {
         return Err(relationship_index::invalid(

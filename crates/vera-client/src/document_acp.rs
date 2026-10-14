@@ -1,9 +1,9 @@
 //! DocumentACP implementation backed by vera-client.
 
 use async_trait::async_trait;
-use identity::Did;
+use vera_identity::Did;
 
-use acp::{DocumentACP, DocumentPermission, Identity, Result};
+use vera_acp::{DocumentACP, DocumentPermission, Identity, Result};
 
 use crate::client::{VeraClient, parse_policy_id};
 use crate::error::ClientError;
@@ -38,8 +38,8 @@ impl VeraDocumentACP {
     }
 }
 
-fn client_err(e: ClientError) -> acp::Error {
-    acp::Error::Storage(format!("vera: {e}"))
+fn client_err(e: ClientError) -> vera_acp::Error {
+    vera_acp::Error::Storage(format!("vera: {e}"))
 }
 
 #[async_trait]

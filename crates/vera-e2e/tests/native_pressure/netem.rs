@@ -45,6 +45,13 @@ fn flows(text: &str, pid: u32, port: u16, peers: &[u16]) -> BTreeSet<(u16, u16)>
         .collect()
 }
 
+fn packet_pairs(flows: &BTreeSet<(u16, u16)>) -> BTreeSet<(u16, u16)> {
+    flows
+        .iter()
+        .flat_map(|&(source, destination)| [(source, destination), (destination, source)])
+        .collect()
+}
+
 /// Delay only the managed validator's established P2P flows, in both directions.
 pub(super) struct Delayed<'a> {
     node: &'a TestNode,
@@ -97,11 +104,7 @@ impl<'a> Delayed<'a> {
             "100ms", "rate", "20mbit", "limit", "1024",
         ])
         .unwrap();
-        let pairs: BTreeSet<_> = fault
-            .flows
-            .iter()
-            .flat_map(|&(a, b)| [(a, b), (b, a)])
-            .collect();
+        let pairs = packet_pairs(&fault.flows);
         for (index, (source, destination)) in pairs.into_iter().enumerate() {
             tc(&[
                 "filter",
@@ -148,11 +151,19 @@ impl<'a> Delayed<'a> {
     }
 
     pub(super) fn assert_active(&self) -> u64 {
-        assert_eq!(
-            self.connections(),
-            self.flows,
-            "P2P flows changed; impairment coverage is no longer complete"
-        );
+        let active = self.connections();
+        let filtered = packet_pairs(&self.flows);
+        let uncovered = active.difference(&filtered).count();
+        if uncovered != 0 {
+            eprintln!(
+                "netem_coverage active={} installed={} uncovered={}",
+                active.len(),
+                filtered.len(),
+                uncovered
+            );
+        }
+        // Closed sockets retain their filters; only new, unfiltered flows lose coverage.
+        assert_eq!(uncovered, 0, "P2P impairment coverage is incomplete");
         let queues: Vec<Value> =
             serde_json::from_slice(&tc(&["-s", "-j", "qdisc", "show", "dev", "lo"]).unwrap())
                 .unwrap();
@@ -169,6 +180,34 @@ impl<'a> Delayed<'a> {
         tc(&["qdisc", "del", "dev", "lo", "root", "handle", ROOT]).unwrap();
         self.owns_root = false;
     }
+}
+
+#[test]
+fn fault_filters_cover_closed_and_bidirectional_flows_but_reject_new_connections() {
+    let initial = flows(
+        "ESTAB 0 0 127.0.0.1:9003 127.0.0.1:42000 users:((\"verad\",pid=12,fd=1))\n\
+         ESTAB 0 0 127.0.0.1:42001 127.0.0.1:9001 users:((\"verad\",pid=12,fd=2))",
+        12,
+        9003,
+        &[9000, 9001, 9002],
+    );
+    let filters = packet_pairs(&initial);
+    assert_eq!(filters.len(), 4);
+    assert!(filters.contains(&(42000, 9003)));
+    let surviving = flows(
+        "ESTAB 0 0 127.0.0.1:42001 127.0.0.1:9001 users:((\"verad\",pid=12,fd=2))",
+        12,
+        9003,
+        &[9000, 9001, 9002],
+    );
+    assert_eq!(surviving.difference(&filters).count(), 0);
+    let new_connection = flows(
+        "ESTAB 0 0 127.0.0.1:42002 127.0.0.1:9001 users:((\"verad\",pid=12,fd=3))",
+        12,
+        9003,
+        &[9000, 9001, 9002],
+    );
+    assert_eq!(new_connection.difference(&filters).count(), 1);
 }
 
 impl Drop for Delayed<'_> {

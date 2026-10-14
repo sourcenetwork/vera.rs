@@ -122,14 +122,14 @@ async fn pipelined_object_archive_preserves_exact_counts_and_regrants_after_rest
         resource: "file".into(),
         id: "report".into(),
     };
-    let incoming = acp::Relationship::new(
+    let incoming = vera_acp::Relationship::new(
         "file",
         "child",
         "reader",
-        acp::Subject::entity_set("file", "report", "reader"),
+        vera_acp::Subject::entity_set("file", "report", "reader"),
     );
     let reader_grant =
-        acp::Relationship::with_entity("file", "report", "reader", reader.parse().unwrap());
+        vera_acp::Relationship::with_entity("file", "report", "reader", reader.parse().unwrap());
     let commands = [
         PolicyCmd::RegisterObject(object.clone()),
         PolicyCmd::RegisterObject(Object {
@@ -137,7 +137,7 @@ async fn pipelined_object_archive_preserves_exact_counts_and_regrants_after_rest
             id: "child".into(),
         }),
         PolicyCmd::SetRelationship(reader_grant.clone()),
-        PolicyCmd::SetRelationship(acp::Relationship::with_entity(
+        PolicyCmd::SetRelationship(vera_acp::Relationship::with_entity(
             "file",
             "report",
             "reader",

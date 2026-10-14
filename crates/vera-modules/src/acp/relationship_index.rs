@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use zanzibar::error::{Error, Result};
+use vera_zanzibar::error::{Error, Result};
 
 use super::{
     record_store::{RecordChange, RecordStore},

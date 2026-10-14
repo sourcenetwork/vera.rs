@@ -67,8 +67,8 @@ Checksums detect corruption; they do not authenticate the publisher.
 This artifact targets Linux x86-64 GNU on Ubuntu 24.04. It is dynamically linked;
 use a compatible runtime with the required system libraries. It does not include
 configuration, genesis, keys or validator state. Every node build uses Regolith
-history. Existing RocksDB history requires a separate data directory and
-authenticated synchronization; copying storage files does not convert it.
+history. Releases start with fresh state; incompatible development data is
+unsupported.
 Archive timestamps, owners and member ordering are fixed, so packaging the same
 binary and provenance produces the same bytes. Packaging alone does not establish
 reproducible compilation or qualify an older runtime environment.
@@ -181,7 +181,7 @@ media failure or power-loss behavior. Those require deployment-specific validati
 
 Do not delete `history/` or the genesis record to "reset" a node: existing
 JMT directories or a missing genesis record alongside finalized history are
-rejected and require an explicit migration decision, not silent reset.
+rejected. Restore a complete compatible backup or use authenticated recovery.
 
 ## Configuration knobs operators own
 
@@ -202,9 +202,9 @@ rejected and require an explicit migration decision, not silent reset.
   not currently trigger supervised recovery. A watchdog that accounts for the
   active voting quorum still requires implementation and qualification. Snapshot
   initialization has its separate deadline; supervised restart does not guarantee recovery.
-- **History backend**: Regolith with synchronous writes in every build. The
-  `regolith-history` feature remains an accepted deployment marker. Foreign
-  directory layouts are rejected before opening the store.
+- **History backend**: Regolith with synchronous writes in every build. There
+  is no backend-selection feature. Foreign directory layouts are rejected before
+  opening the store.
 - **RPC exposure**: bind `http_addr` to an internal interface for validator
   operation; expose only through the intended client path. With `--config`,
   startup uses that address and port; `--rpc-port` changes only its port, preserving
@@ -215,6 +215,9 @@ rejected and require an explicit migration decision, not silent reset.
   [permission-proofs.md](permission-proofs.md) for proof-path budgets).
 
 ## Resident memory and measured workloads
+
+The [qualified storage envelope](storage-resource-envelope.md) records the fixed
+and growing workload budgets, measured headroom and repeatable CI resource gate.
 
 Validators retain active module records and authenticated-state indexes in memory.
 
@@ -304,7 +307,7 @@ Linux transport case on an isolated hosted runner. It identifies the managed
 validator's established P2P sockets and applies a 100 ms packet delay and a
 shared 20 Mbit/s rate using [netem](https://man7.org/linux/man-pages/man8/tc-netem.8.html),
 with a 1,024-packet queue. Exact TCP flow filters cover both directions and leave
-RPC traffic unshaped. The test requires unchanged socket coverage and advancing
+RPC traffic unshaped. The test requires every active socket to remain covered and advancing
 fault-queue packet counters throughout its certified epoch-progress phase.
 It restores only its own queue, checks all replica records and requires the
 affected member for a subsequent quorum. This is local transport-fault coverage;
@@ -425,12 +428,12 @@ it does not require service-account funding or fee allowances. Each gateway inst
 needs distinct workers and journals. Orbis selects authorization and bulletin adapters
 through the existing traits; its normal native images exclude diagnostic features.
 
-The current native state and proof formats require a fresh deployment cutover.
+Vera has not been deployed live. The release starts with a fresh deployment.
 Provision a new deployment identity and root, matching consensus trust, fresh worker
-journals and the corresponding application state. Do not reuse old signed requests,
-pending submissions, ring state or ciphertexts as a migration mechanism. Restore an
-existing deployment only from its matching state, identities and journals, following
-the backup requirements above.
+journals and the corresponding application state. Signed requests, ring state and
+ciphertexts from development deployments are not release state. After deployment,
+restore only from matching state, identities and journals, following the backup
+requirements above.
 
 Current permission evidence is bounded by freshness and the consumer's observed
 revision. It cannot prove that the endpoint has disclosed every newer revocation.

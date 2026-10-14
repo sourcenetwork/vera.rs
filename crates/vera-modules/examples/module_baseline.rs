@@ -3,8 +3,8 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use acp::Relationship;
-use identity::Did;
+use vera_acp::Relationship;
+use vera_identity::Did;
 use vera_modules::{
     acp::{
         AcpModule,

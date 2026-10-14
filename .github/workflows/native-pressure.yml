@@ -76,6 +76,10 @@ jobs:
         run: >-
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover
           -s .github/scripts -p test_qualify_native_pressure.py
+      - name: Check P2P fault selection and coverage
+        run: >-
+          cargo test --release --frozen -p vera-e2e --test native_pressure
+          netem:: -- --test-threads=1
       - name: Run selected validator availability cases
         id: availability
         timeout-minutes: 15

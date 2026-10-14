@@ -150,7 +150,7 @@ pub(super) async fn verify_state(
 ) {
     for observation in &observations[..objects] {
         let request = &observation.request;
-        let relationship = acp::Relationship::with_entity(
+        let relationship = vera_acp::Relationship::with_entity(
             "file",
             &request.object_id,
             "owner",

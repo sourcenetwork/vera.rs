@@ -3,8 +3,8 @@
 #![allow(missing_docs)]
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use identity::Did;
 use serde::{Deserialize, Serialize};
+use vera_identity::Did;
 
 use crate::types::Timestamp;
 

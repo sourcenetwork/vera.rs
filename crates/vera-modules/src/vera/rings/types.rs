@@ -99,7 +99,7 @@ impl RingConfig {
     /// Bind the immutable identity to the deployment, creator and all creation parameters.
     pub fn id(&self, deployment_root: [u8; 32], creator: &str) -> Result<String> {
         self.validate()?;
-        identity::Did::new(creator).map_err(invalid)?;
+        vera_identity::Did::new(creator).map_err(invalid)?;
         let bytes = borsh::to_vec(&(deployment_root, creator, self)).map_err(invalid)?;
         if bytes.len() > MAX_RING_REQUEST_BYTES {
             return Err(invalid("ring configuration exceeds byte limit"));
@@ -202,7 +202,7 @@ impl RingRecord {
             }
             RingState::Active { keys } => keys.validate(self.config.requires_pet)?,
             RingState::Cancelled { by } => {
-                identity::Did::new(by).map_err(invalid)?;
+                vera_identity::Did::new(by).map_err(invalid)?;
             }
             RingState::Conflict {
                 first_keys,

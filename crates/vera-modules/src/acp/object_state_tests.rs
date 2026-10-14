@@ -118,7 +118,7 @@ impl RecordStore for Unavailable {
 
 #[test]
 fn owner_is_stable_and_missing_nonowner_proof_is_not_initial_state() {
-    let owner = Relationship::new("file", "one", "owner", acp::Subject::Wildcard);
+    let owner = Relationship::new("file", "one", "owner", vera_acp::Subject::Wildcard);
     assert_eq!(for_relationship(&Unavailable, "policy", &owner).unwrap(), 0);
     let mut grant = owner.clone();
     grant.relation = "reader".into();

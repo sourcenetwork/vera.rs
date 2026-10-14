@@ -1,0 +1,21 @@
+[package]
+name = "vera-acp"
+version = "0.5.0"
+edition = "2021"
+license = "Apache-2.0 OR MIT"
+repository.workspace = true
+description = "Access control policy types and policy YAML parsing"
+
+[dependencies]
+vera-identity = { path = "../vera-identity" }
+vera-zanzibar = { path = "../vera-zanzibar" }
+async-trait.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+serde_yaml.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio.workspace = true

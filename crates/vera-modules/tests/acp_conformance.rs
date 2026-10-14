@@ -1,8 +1,8 @@
 //! Ownership and revocation cases from Vera 205df1ad (acp_core v0.8.2).
 //! Reference: https://github.com/sourcenetwork/vera/tree/205df1ad/tests/integration/acp/suite
 
-use acp::Relationship;
-use identity::Did;
+use vera_acp::Relationship;
+use vera_identity::Did;
 use vera_modules::{
     acp::{
         AcpModule,
@@ -614,7 +614,7 @@ fn actor_roles_require_management_authority_without_object_registration() {
                 "file",
                 "report",
                 "reader",
-                acp::Subject::entity_set("actor", &actor.id, "member"),
+                vera_acp::Subject::entity_set("actor", &actor.id, "member"),
             )),
         )
         .unwrap();

@@ -236,7 +236,7 @@ impl EncryptedDocument {
 impl ObjectRecord {
     pub fn validate(&self, kind: ObjectKind, id: &str) -> Result<()> {
         self.object.validate()?;
-        identity::Did::new(&self.creator).map_err(invalid)?;
+        vera_identity::Did::new(&self.creator).map_err(invalid)?;
         if self.id != id
             || self.object.id()? != id
             || self.object.kind() != kind

@@ -44,7 +44,7 @@ fn fixture() -> (AcpModule, String) {
             "file",
             "report",
             "admin",
-            acp::Subject::entity_set("group", "admins", "member"),
+            vera_acp::Subject::entity_set("group", "admins", "member"),
         ),
         Relationship::with_entity("file", "report", "backup", did("backup")),
     ] {

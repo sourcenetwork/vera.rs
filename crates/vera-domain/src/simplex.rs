@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Shared consensus parameters for a pipelined deployment.
 ///
-/// Changing these parameters requires a new genesis or an explicit migration.
+/// These parameters are fixed by the deployment genesis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SimplexParameters {

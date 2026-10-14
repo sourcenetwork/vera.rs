@@ -186,13 +186,14 @@ impl VeraClient {
         actor: &str,
     ) -> Result<TransactionReceipt, ClientError> {
         let actor_did =
-            identity::Did::new(actor).map_err(|e| ClientError::AbiDecode(e.to_string()))?;
-        let cmd = vera_modules::acp::types::PolicyCmd::SetRelationship(acp::Relationship::new(
-            resource,
-            object_id,
-            relation,
-            acp::Subject::entity(actor_did),
-        ));
+            vera_identity::Did::new(actor).map_err(|e| ClientError::AbiDecode(e.to_string()))?;
+        let cmd =
+            vera_modules::acp::types::PolicyCmd::SetRelationship(vera_acp::Relationship::new(
+                resource,
+                object_id,
+                relation,
+                vera_acp::Subject::entity(actor_did),
+            ));
         self.send_bearer_cmd(signer, bearer_token, policy_id, &cmd)
             .await
     }
@@ -210,13 +211,14 @@ impl VeraClient {
         actor: &str,
     ) -> Result<TransactionReceipt, ClientError> {
         let actor_did =
-            identity::Did::new(actor).map_err(|e| ClientError::AbiDecode(e.to_string()))?;
-        let cmd = vera_modules::acp::types::PolicyCmd::DeleteRelationship(acp::Relationship::new(
-            resource,
-            object_id,
-            relation,
-            acp::Subject::entity(actor_did),
-        ));
+            vera_identity::Did::new(actor).map_err(|e| ClientError::AbiDecode(e.to_string()))?;
+        let cmd =
+            vera_modules::acp::types::PolicyCmd::DeleteRelationship(vera_acp::Relationship::new(
+                resource,
+                object_id,
+                relation,
+                vera_acp::Subject::entity(actor_did),
+            ));
         self.send_bearer_cmd(signer, bearer_token, policy_id, &cmd)
             .await
     }

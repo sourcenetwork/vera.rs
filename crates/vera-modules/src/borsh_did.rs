@@ -1,4 +1,4 @@
-//! Custom borsh serialization for `identity::Did`.
+//! Custom borsh serialization for `vera_identity::Did`.
 //!
 //! `Did` has no native borsh support. We serialize through the
 //! `String` representation and reconstruct on deserialization.
@@ -7,7 +7,7 @@
 
 use borsh::io::{Read, Write};
 use borsh::{BorshDeserialize, BorshSerialize};
-use identity::Did;
+use vera_identity::Did;
 
 pub(crate) fn serialize_did<W: Write>(did: &Did, writer: &mut W) -> borsh::io::Result<()> {
     let s: &str = did.as_ref();

@@ -26,7 +26,7 @@ vera-cli.workspace = true
 orbis-reporting = { git = "https://github.com/sourcenetwork/orbis-rs", rev = "74b5c8c7e74a3c2ade932a7c5ddfbe547a98e3ef" }
 blst = "0.3"
 tempfile.workspace = true
-acp.workspace = true
+vera-acp.workspace = true
 alloy-primitives.workspace = true
 alloy-sol-types.workspace = true
 commonware-codec.workspace = true
@@ -41,7 +41,7 @@ vera-domain.workspace = true
 vera-crypto.workspace = true
 vera-modules.workspace = true
 vera-permission.workspace = true
-identity.workspace = true
+vera-identity.workspace = true
 k256.workspace = true
 jsonrpsee.workspace = true
 jsonrpsee-server = { path = "../../vendor/jsonrpsee-server" }

@@ -213,7 +213,7 @@ fn incoming_userset_cleanup_combines_the_pair_without_touching_new_generations()
                 "file",
                 format!("item-{index:03}"),
                 "reader",
-                acp::Subject::entity_set("group", "staff", "member"),
+                vera_acp::Subject::entity_set("group", "staff", "member"),
             ),
         );
         first.get_or_insert(key);
@@ -238,7 +238,7 @@ fn incoming_userset_cleanup_combines_the_pair_without_touching_new_generations()
             "file",
             "item-000",
             "reader",
-            acp::Subject::entity_set("group", "staff", "member"),
+            vera_acp::Subject::entity_set("group", "staff", "member"),
         ),
     );
     assert_ne!(fresh, first);
