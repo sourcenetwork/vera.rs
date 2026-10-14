@@ -148,8 +148,8 @@ The newer Defra provider build selects Backbone SDK
 The different SDK and Defra revisions are explicit tested bindings, not a claim
 that all consumers use identical verifier or application source.
 
-These checks qualify their named workflows. New runtime changes, prolonged
-membership qualification, operating-resource limits and the final release review
+These checks qualify their named workflows. New runtime changes,
+operating-resource limits and the final release review
 remain separate; earlier results must not be relabeled as tests of a newer build.
 
 [Focused membership-churn run 38511427791](https://github.com/sourcenetwork/orbis-rs/actions/runs/38511427791)
@@ -161,6 +161,19 @@ exact test selection and runtime/image source bindings were verified. The
 scenario took 132.745 seconds on BLS and 136.377 seconds on Jubjub, excluding
 compilation and fixture preparation. This finite churn case is distinct from
 the fifteen-minute active threshold soak and multi-host qualification.
+
+[Threshold soak run 38516027171](https://github.com/sourcenetwork/orbis-rs/actions/runs/38516027171)
+passed on both curves with the same frozen Vera and normal Orbis runtime sources.
+BLS completed 392 authorization/signing/PRE cycles over 901 active seconds;
+Jubjub completed 493 over 900 seconds. Each case killed and restarted all three
+Orbis members at three boundaries, preserving identities and public polynomials.
+Revocation survived the final restart; regrant restored verified signing and
+stored/inline decryption through every member. Active time includes restart downtime.
+The exact test used zero retries. Both official numeric artifact checksums,
+source/image bindings and the Vera executable checksum were independently checked.
+This qualifies the finite lifecycle workload, not threshold capacity, a memory
+plateau or WAN behavior. Native provisioning and fresh-state cutover requirements
+are described in [operating instructions](operating.md#native-consumer-configuration).
 
 ## Admission overload and recovery
 

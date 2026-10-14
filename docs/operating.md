@@ -406,6 +406,37 @@ workloads and measurement boundaries.
   them receives retryable `-32002` errors and must back off, not reconnect
   harder.
 
+## Native consumer configuration
+
+Use the [qualified consumer versions](native-qualification-20261014.md#native-consumer-checks)
+together. The table records the validator, SDK, verifier and application sources
+actually tested; sharing a release name does not establish compatibility.
+Consensus trust must come from the operator's deployment configuration, independently
+of the RPC endpoint.
+
+| Service | Native selection | Required deployment material |
+| --- | --- | --- |
+| DefraDB | `--document-acp-type verars --vera-rs-address <url>` | `--vera-consensus-key <key>` and `--vera-deployment-id <id>`, with the configured keyring and persistent worker journal |
+| Go Trust API | Build with `vera_native` and set `native.enabled: true` | `native.trusted_key`, `native.genesis`, `native.deployment`, operator-authorized relay grants, encrypted relay keys and independently provisioned workers |
+| Orbis | Native-only build with `native,redb,iroh` and the selected curve; start with `--vera-config <file>` | `consensus_key`, `deployment_root`, `deployment_id`, controller public key, encrypted node database and persistent native worker journal |
+
+Trust remains a separate service. Its native provisioning uses `init-native-workers`;
+it does not require service-account funding or fee allowances. Each gateway instance
+needs distinct workers and journals. Orbis selects authorization and bulletin adapters
+through the existing traits; its normal native images exclude diagnostic features.
+
+The current native state and proof formats require a fresh deployment cutover.
+Provision a new deployment identity and root, matching consensus trust, fresh worker
+journals and the corresponding application state. Do not reuse old signed requests,
+pending submissions, ring state or ciphertexts as a migration mechanism. Restore an
+existing deployment only from its matching state, identities and journals, following
+the backup requirements above.
+
+Current permission evidence is bounded by freshness and the consumer's observed
+revision. It cannot prove that the endpoint has disclosed every newer revocation.
+Keep clocks accurate and configure the documented request and evidence-age limits;
+offline authorization changes belong to the separate ACP v2 design.
+
 ## Certified read check
 
 Use an independently provisioned consensus key, a known existing policy and a
