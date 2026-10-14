@@ -30,7 +30,8 @@ protocols and secrets remain separate from consensus.
 - [Operating a member](docs/operating.md), [storage](docs/history-storage.md), and [snapshot recovery](docs/snapshot-recovery.md)
 - [Performance reports and benchmark jobs](docs/performance.md)
 - [Native workload measurement](docs/native-workload.md)
-- [Current native qualification and tested versions](docs/native-qualification-20261013.md)
+- [Release qualification and operating limits](docs/release-qualification.md)
+- [Native consumer qualification and tested versions](docs/native-qualification-20261014.md)
 
 ## Development
 
@@ -44,9 +45,9 @@ See [CLAUDE.md](CLAUDE.md) for implementation structure and development conventi
 
 ## Qualification status
 
-Core, gateway and threshold workflows passed the named checks in the
-[current qualification record](docs/native-qualification-20261013.md), together
-with process recovery and reproducible Linux packaging. Production qualification
-remains in progress: steady-state resource bounds and multi-host/WAN measurements
-remain open. Earlier unexplained readiness deadlines retain their documented
-limits; passing subsequent checks does not establish their cause.
+The [release qualification record](docs/release-qualification.md) collects local
+workload limits, recovery/security coverage and the tested consumer versions.
+The fixed and growing resource profiles passed; their measurements do not imply
+a hard RAM ceiling for arbitrary datasets. The remaining deployment gate is the
+[four-host WAN test](docs/wan-gates.md). Earlier unexplained readiness/read failures
+retain their documented limits; later passing checks do not establish their cause.

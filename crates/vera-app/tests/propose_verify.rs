@@ -8,6 +8,7 @@ use alloy_primitives::{Address, U256, keccak256};
 use commonware_consensus::marshal::ancestry;
 use commonware_glue::stateful::{Application, Input, db::DatabaseSet as _};
 use commonware_runtime::{Runner as _, Supervisor as _, tokio};
+use futures::FutureExt as _;
 use k256::ecdsa::SigningKey;
 use vera_app::ordered_state::OrderedState;
 use vera_app::{NoopSink, ReshareInput, StatefulVeraApp};
@@ -134,7 +135,28 @@ fn competing_proposals_preserve_receipts() {
             (&block, &verified),
             (&competing.block, &competing.merkleized),
         ] {
-            let receipts = app
+            let mut capturer = StatefulVeraApp::<NoopSink>::new(
+                VeraExecutor::new(CHAIN_ID),
+                block.clone(),
+                InMemoryMempool::new(),
+                NoopSink,
+                100,
+                30_000_000,
+            );
+            let mut wrong = candidate.clone();
+            wrong.receipt_commitment = Some(alloy_primitives::B256::ZERO);
+            assert!(
+                std::panic::AssertUnwindSafe(capturer.capture(
+                    (context.child("wrong_receipts"), wrong.context.clone()),
+                    &wrong,
+                    batches,
+                    set.readers(),
+                ))
+                .catch_unwind()
+                .await
+                .is_err()
+            );
+            let receipts = capturer
                 .capture(
                     (context.child("capture"), candidate.context.clone()),
                     candidate,

@@ -13,7 +13,9 @@ use vera_backend::{
     native::{self, NativeConfig, NativeDb, NativeStateSet},
 };
 use vera_domain::Tx;
-use vera_executor::{BlockContext, ExecutionOutcome, ModuleSnapshot, VeraExecutor};
+use vera_executor::{
+    BlockContext, ExecutionOutcome, ExecutionReceipt, ModuleSnapshot, VeraExecutor,
+};
 
 use crate::{AppError, execute_block};
 
@@ -107,6 +109,7 @@ pub struct OrderedSealed {
     databases: Sealed,
     modules: ModuleSnapshot,
     height: u64,
+    pub(crate) receipts: Option<std::sync::Arc<[ExecutionReceipt]>>,
 }
 
 /// Ordered storage lifecycle for native execution, independent of application callbacks.
@@ -364,6 +367,7 @@ impl OrderedState {
                 ),
                 modules: executed.modules,
                 height: context.header.number,
+                receipts: None,
             },
             executed.outcome,
         ))
