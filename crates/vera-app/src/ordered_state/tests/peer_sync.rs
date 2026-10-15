@@ -162,9 +162,8 @@ fn all_partitions_sync_over_authenticated_peers_and_reopen() {
                     let sync_config = SyncEngineConfig {
                         fetch_batch_size: MAX_FETCH_OPS,
                         apply_batch_size: NZU64!(64),
-                        max_outstanding_requests: 2,
+                        max_outstanding_requests: commonware_utils::NZUsize!(2),
                         update_channel_size: NZUsize!(2),
-                        max_retained_roots: 2,
                     };
                     if version == 1 {
                         let failed = OrderedState::sync_checkpoint(

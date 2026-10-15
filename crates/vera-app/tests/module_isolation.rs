@@ -2,10 +2,8 @@
 
 #![recursion_limit = "256"]
 
-use std::sync::Arc;
-
 use alloy_sol_types::SolCall;
-use commonware_consensus::marshal::ancestry;
+use commonware_consensus::Handoff;
 use commonware_glue::stateful::{Application, Input, Proposed, db::DatabaseSet as _};
 use commonware_runtime::{Runner as _, Supervisor as _, tokio};
 use vera_app::ordered_state::{OrderedPending, OrderedState};
@@ -18,6 +16,7 @@ use vera_executor::VeraExecutor;
 use vera_genesis::GenesisState;
 use vera_modules::acp::abi::IAcp;
 mod support;
+use support::block_ancestry;
 
 const CHAIN_ID: u64 = 9001;
 
@@ -46,29 +45,44 @@ async fn propose(
     parent: &Block,
     batches: OrderedPending,
     tx: Option<Tx>,
+    handoff: bool,
 ) -> Proposed<StatefulVeraApp<NoopSink>, Ctx> {
     let provider = InMemoryMempool::new();
     if let Some(tx) = tx {
         assert!(provider.insert(tx));
     }
-    app.propose(
-        (context, Block::genesis_context()),
-        ancestry::from_iter([Arc::new(parent.clone())]),
-        batches,
-        Input {
-            upstream: ReshareInput {
-                upstream: (),
-                payload: None,
-            },
-            provider,
+    let context = (context, Block::genesis_context());
+    let ancestry = block_ancestry([parent.clone()]);
+    let input = Input {
+        upstream: ReshareInput {
+            upstream: (),
+            payload: None,
         },
-    )
-    .await
-    .expect("proposal")
+        provider,
+    };
+    if handoff {
+        match app.prepare(context, ancestry, batches, input).await {
+            Handoff::Stage(proposed) => proposed,
+            _ => panic!("native handoff must stage without voting on an uncertified parent"),
+        }
+    } else {
+        app.propose(context, ancestry, batches, input)
+            .await
+            .expect("proposal")
+    }
 }
 
 #[test]
 fn pending_branches_do_not_replace_query_state() {
+    check_pending_branches(false);
+}
+
+#[test]
+fn staged_handoffs_do_not_replace_query_state() {
+    check_pending_branches(true);
+}
+
+fn check_pending_branches(handoff: bool) {
     let dir = tempfile::tempdir().unwrap();
     let config = tokio::Config::default().with_storage_directory(dir.path().to_path_buf());
     tokio::Runner::new(config).start(|context| async move {
@@ -94,7 +108,8 @@ fn pending_branches_do_not_replace_query_state() {
             NoopSink,
             64,
             30_000_000,
-        );
+        )
+        .with_native_pipeline(handoff, std::time::Duration::ZERO);
         let alice = BlsSigner::new(1u64.into(), CHAIN_ID).unwrap();
         let bob = BlsSigner::new(2u64.into(), CHAIN_ID).unwrap();
 
@@ -104,6 +119,7 @@ fn pending_branches_do_not_replace_query_state() {
             &genesis,
             set.new_batches().await,
             Some(create_policy(&alice, "alice")),
+            handoff,
         )
         .await;
         let b = propose(
@@ -112,6 +128,7 @@ fn pending_branches_do_not_replace_query_state() {
             &genesis,
             set.new_batches().await,
             Some(create_policy(&bob, "bob")),
+            handoff,
         )
         .await;
         assert_ne!(a.block.module_state_root, b.block.module_state_root);
@@ -140,14 +157,16 @@ fn pending_branches_do_not_replace_query_state() {
                 context.child("child_a"),
                 &a.block,
                 OrderedState::fork_batches(&a.merkleized),
-                None
+                None,
+                handoff,
             ),
             propose(
                 &mut sibling,
                 context.child("child_b"),
                 &b.block,
                 OrderedState::fork_batches(&b.merkleized),
-                None
+                None,
+                handoff,
             ),
         );
         for child in [&child_a, &child_b] {

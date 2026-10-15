@@ -2,10 +2,7 @@
 
 #![recursion_limit = "256"]
 
-use std::sync::Arc;
-
 use alloy_primitives::{Address, U256, keccak256};
-use commonware_consensus::marshal::ancestry;
 use commonware_glue::stateful::{Application, Input, db::DatabaseSet as _};
 use commonware_runtime::{Runner as _, Supervisor as _, tokio};
 use futures::FutureExt as _;
@@ -17,6 +14,7 @@ use vera_domain::{Block, evm::Evm};
 use vera_executor::VeraExecutor;
 use vera_genesis::GenesisState;
 mod support;
+use support::block_ancestry;
 
 const CHAIN_ID: u64 = 9001;
 
@@ -71,7 +69,7 @@ fn competing_proposals_preserve_receipts() {
         let proposed = app
             .propose(
                 (context.child("propose"), consensus_context.clone()),
-                ancestry::from_iter([Arc::new(genesis.clone())]),
+                block_ancestry([genesis.clone()]),
                 set.new_batches().await,
                 Input {
                     upstream: ReshareInput {
@@ -92,7 +90,7 @@ fn competing_proposals_preserve_receipts() {
         let verified = app
             .verify(
                 (context.child("verify"), consensus_context),
-                ancestry::from_iter([Arc::new(block.clone()), Arc::new(genesis.clone())]),
+                block_ancestry([block.clone(), genesis.clone()]),
                 set.new_batches().await,
             )
             .await
@@ -116,7 +114,7 @@ fn competing_proposals_preserve_receipts() {
         let competing = verifier
             .propose(
                 (context.child("competing"), Block::genesis_context()),
-                ancestry::from_iter([Arc::new(genesis)]),
+                block_ancestry([genesis]),
                 set.new_batches().await,
                 Input {
                     upstream: ReshareInput {

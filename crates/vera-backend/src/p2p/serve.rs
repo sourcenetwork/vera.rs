@@ -79,7 +79,6 @@ fn checked<DB: Partition>(
     let valid = match &response {
         Response::Operations { operations, .. } => operations.iter().all(DB::accepts),
         Response::Boundary { op, .. } => DB::accepts(op),
-        Response::Pruned { .. } => true,
     };
     if !valid {
         return Err(qmdb::Error::DataCorrupted(

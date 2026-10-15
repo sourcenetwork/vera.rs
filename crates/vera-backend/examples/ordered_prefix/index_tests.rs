@@ -75,7 +75,7 @@ fn reopening_with_a_wider_index_preserves_committed_state() {
         for key in keys() {
             batch = batch.write(key, Some(Bytes::from_static(b"record")));
         }
-        let batch = batch.merkleize(&db, None).await.unwrap();
+        let batch = batch.merkleize(&db, None, &mut Proportional).await.unwrap();
         let (db, _) = db.apply_batch(batch).await.unwrap();
         db.commit().await.unwrap().root()
     });

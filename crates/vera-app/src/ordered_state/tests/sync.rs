@@ -140,9 +140,8 @@ fn sync_modules_before_suffix_execution(follow_tip: bool) {
                 SyncEngineConfig {
                     fetch_batch_size: NZU64!(16),
                     apply_batch_size: NZU64!(32),
-                    max_outstanding_requests: 2,
+                    max_outstanding_requests: commonware_utils::NZUsize!(2),
                     update_channel_size: NZUsize!(4),
-                    max_retained_roots: 4,
                 },
             );
             let advance = async {

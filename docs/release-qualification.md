@@ -100,10 +100,13 @@ independent trust provisioning.
 
 ## Security and release inputs
 
-The build pins Rust 1.98.0 and locked dependencies. Commonware is 2026.9.0 at
+The build qualified in PR #224 pins Rust 1.98.0 and locked dependencies. Commonware is 2026.9.0 at
 `4f5db3d0dc30900015fb13347e9ec20ae085b79a`; Regolith is pinned to
 `f6958cf0cea97f658dbdbc3572063a8122645101`. Their recovery and cache fixes retain
-the qualification recorded in the storage and recovery reports.
+the qualification recorded in the storage and recovery reports. Those measurements
+and artifact hashes remain tied to their recorded source versions. Current
+Commonware integration and its source pin are described in
+[snapshot recovery](snapshot-recovery.md#commonware-integration).
 
 The official RustSec database was reviewed through
 `caee11f41fab07d676c0a4655a2a5dd1f94da97c`. Rustls is updated to **0.23.46**,

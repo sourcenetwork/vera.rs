@@ -5,7 +5,7 @@ pub(super) async fn write(db: Store, entries: Vec<(Vec<u8>, Option<Bytes>)>) -> 
     for (key, value) in entries {
         batch = batch.write(key, value);
     }
-    let batch = batch.merkleize(&db, None).await.unwrap();
+    let batch = batch.merkleize(&db, None, &mut Proportional).await.unwrap();
     let (db, _) = db.apply_batch(batch).await.unwrap();
     db.commit().await.unwrap()
 }

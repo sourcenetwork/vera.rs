@@ -1,3 +1,5 @@
+use commonware_consensus::marshal::ancestry;
+use commonware_cryptography::{Digested, Digestible as _};
 use commonware_glue::stateful::db::DatabaseSet as _;
 use commonware_runtime::buffer::paged::CacheRef;
 use commonware_utils::{NZU16, NZUsize};
@@ -35,4 +37,11 @@ pub(super) async fn genesis(state: &OrderedState, allocation: &GenesisState) -> 
     }));
     block.receipt_commitment = Some(vera_executor::receipt_commitment(0, &[]));
     block
+}
+
+pub(super) fn block_ancestry<const N: usize>(blocks: [Block; N]) -> impl ancestry::Ancestry<Block> {
+    ancestry::from_iter(blocks.map(|block| {
+        let digest = block.digest();
+        Digested::precomputed(block, digest)
+    }))
 }

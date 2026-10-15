@@ -145,9 +145,8 @@ fn synchronized_permission_rpc_verifies_native_evidence_and_subsequent_denial() 
                         SyncEngineConfig {
                             fetch_batch_size: NZU64!(64),
                             apply_batch_size: NZU64!(64),
-                            max_outstanding_requests: 2,
+                            max_outstanding_requests: commonware_utils::NZUsize!(2),
                             update_channel_size: NZUsize!(2),
-                            max_retained_roots: 2,
                         },
                     )
                     .await

@@ -1,7 +1,12 @@
-use std::{collections::BTreeSet, io, net::SocketAddrV4, process::Command, time::Duration};
+use std::{collections::BTreeSet, io, process::Command, time::Duration};
 
 use serde_json::Value;
 use vera_e2e::cluster::TestNode;
+
+#[path = "netem_flows.rs"]
+mod selection;
+
+use selection::{Peer, complete_mesh, flows, packet_pairs};
 
 const ROOT: &str = "7eaa:";
 const CLASS: &str = "7eaa:3";
@@ -24,69 +29,47 @@ fn tc(args: &[&str]) -> io::Result<Vec<u8>> {
     Ok(output.stdout)
 }
 
-fn flows(text: &str, pid: u32, port: u16, peers: &[u16]) -> BTreeSet<(u16, u16)> {
-    let owner = format!("pid={pid},");
-    text.lines()
-        .filter(|line| line.contains(&owner))
-        .filter_map(|line| {
-            let mut fields = line.split_whitespace();
-            if fields.next()? != "ESTAB" {
-                return None;
-            }
-            fields.next()?;
-            fields.next()?;
-            let local: SocketAddrV4 = fields.next()?.parse().ok()?;
-            let remote: SocketAddrV4 = fields.next()?.parse().ok()?;
-            (local.ip().is_loopback()
-                && remote.ip().is_loopback()
-                && (local.port() == port || peers.contains(&remote.port())))
-            .then_some((local.port(), remote.port()))
-        })
-        .collect()
-}
-
-fn packet_pairs(flows: &BTreeSet<(u16, u16)>) -> BTreeSet<(u16, u16)> {
-    flows
-        .iter()
-        .flat_map(|&(source, destination)| [(source, destination), (destination, source)])
-        .collect()
-}
-
 /// Delay only the managed validator's established P2P flows, in both directions.
 pub(super) struct Delayed<'a> {
     node: &'a TestNode,
-    peers: Vec<u16>,
+    peers: Vec<Peer>,
     flows: BTreeSet<(u16, u16)>,
     owns_root: bool,
 }
 
 impl<'a> Delayed<'a> {
-    pub(super) async fn install(node: &'a TestNode, peers: Vec<u16>) -> Self {
+    pub(super) async fn install(node: &'a TestNode, peers: Vec<&TestNode>) -> Self {
         assert_eq!(std::env::var("VERA_E2E_NETEM").as_deref(), Ok("1"));
         let mut fault = Self {
             node,
-            peers,
+            peers: peers
+                .iter()
+                .map(|peer| Peer {
+                    pid: peer.process.id().unwrap(),
+                    port: peer.p2p_port,
+                })
+                .collect(),
             flows: BTreeSet::new(),
             owns_root: false,
         };
-        fault.flows = tokio::time::timeout(Duration::from_secs(10), async {
-            let mut previous = fault.connections();
+        fault.flows = tokio::time::timeout(Duration::from_secs(30), async {
+            let mut previous = fault.connections().0;
             let mut changed_at = tokio::time::Instant::now();
             loop {
                 tokio::time::sleep(Duration::from_millis(100)).await;
-                let current = fault.connections();
+                let (current, complete) = fault.connections();
                 assert!(current.len() <= 16, "validator P2P flow limit");
-                if current != previous {
+                if current != previous || !complete {
                     previous = current;
                     changed_at = tokio::time::Instant::now();
                 }
-                if !previous.is_empty() && changed_at.elapsed() >= Duration::from_secs(2) {
+                if complete && changed_at.elapsed() >= Duration::from_secs(2) {
                     break previous;
                 }
             }
         })
         .await
-        .expect("validator P2P topology did not stabilize before fault installation");
+        .expect("validator P2P mesh did not fully connect and stabilize before fault installation");
         let prior: Vec<Value> =
             serde_json::from_slice(&tc(&["-j", "qdisc", "show", "dev", "lo"]).unwrap()).unwrap();
         assert!(
@@ -138,20 +121,22 @@ impl<'a> Delayed<'a> {
         fault
     }
 
-    fn connections(&self) -> BTreeSet<(u16, u16)> {
+    fn connections(&self) -> (BTreeSet<(u16, u16)>, bool) {
         let output = Command::new("ss").args(["-Htnp"]).output().unwrap();
         assert!(output.status.success() && output.stdout.len() <= 256 * 1024);
         let text = std::str::from_utf8(&output.stdout).unwrap();
-        flows(
+        let active = flows(
             text,
             self.node.process.id().unwrap(),
             self.node.p2p_port,
-            &self.peers,
-        )
+            &self.peers.iter().map(|peer| peer.port).collect::<Vec<_>>(),
+        );
+        let complete = complete_mesh(text, &active, self.node.p2p_port, &self.peers);
+        (active, complete)
     }
 
     pub(super) fn assert_active(&self) -> u64 {
-        let active = self.connections();
+        let (active, _) = self.connections();
         let filtered = packet_pairs(&self.flows);
         let uncovered = active.difference(&filtered).count();
         if uncovered != 0 {
@@ -182,51 +167,10 @@ impl<'a> Delayed<'a> {
     }
 }
 
-#[test]
-fn fault_filters_cover_closed_and_bidirectional_flows_but_reject_new_connections() {
-    let initial = flows(
-        "ESTAB 0 0 127.0.0.1:9003 127.0.0.1:42000 users:((\"verad\",pid=12,fd=1))\n\
-         ESTAB 0 0 127.0.0.1:42001 127.0.0.1:9001 users:((\"verad\",pid=12,fd=2))",
-        12,
-        9003,
-        &[9000, 9001, 9002],
-    );
-    let filters = packet_pairs(&initial);
-    assert_eq!(filters.len(), 4);
-    assert!(filters.contains(&(42000, 9003)));
-    let surviving = flows(
-        "ESTAB 0 0 127.0.0.1:42001 127.0.0.1:9001 users:((\"verad\",pid=12,fd=2))",
-        12,
-        9003,
-        &[9000, 9001, 9002],
-    );
-    assert_eq!(surviving.difference(&filters).count(), 0);
-    let new_connection = flows(
-        "ESTAB 0 0 127.0.0.1:42002 127.0.0.1:9001 users:((\"verad\",pid=12,fd=3))",
-        12,
-        9003,
-        &[9000, 9001, 9002],
-    );
-    assert_eq!(new_connection.difference(&filters).count(), 1);
-}
-
 impl Drop for Delayed<'_> {
     fn drop(&mut self) {
         if self.owns_root {
             let _ = tc(&["qdisc", "del", "dev", "lo", "root", "handle", ROOT]);
         }
     }
-}
-
-#[test]
-fn flow_selection_excludes_rpc_and_other_processes_and_retains_outbound_peers() {
-    let text = "ESTAB 0 0 127.0.0.1:9003 127.0.0.1:42000 users:((\"verad\",pid=12,fd=1))\n\
-                ESTAB 0 0 127.0.0.1:42001 127.0.0.1:9001 users:((\"verad\",pid=12,fd=2))\n\
-                ESTAB 0 0 127.0.0.1:8545 127.0.0.1:42002 users:((\"verad\",pid=12,fd=3))\n\
-                ESTAB 0 0 127.0.0.1:9003 127.0.0.1:42003 users:((\"verad\",pid=123,fd=4))\n\
-                ESTAB 0 0 127.0.0.1:9003 10.0.0.1:42004 users:((\"verad\",pid=12,fd=5))";
-    assert_eq!(
-        flows(text, 12, 9003, &[9000, 9001, 9002]),
-        BTreeSet::from([(9003, 42000), (42001, 9001)])
-    );
 }

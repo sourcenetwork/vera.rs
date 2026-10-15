@@ -19,7 +19,7 @@ impl<R: ConsensusReporter<Activity = Update<Block>>> ConsensusReporter for Repor
             || tracing::enabled!(target: "vera_publication_diagnostics", tracing::Level::DEBUG))
         .then(|| match &activity {
             Update::Tip(round, height, _) => ("tip", height.get(), *round),
-            Update::Block(block, _) => ("block", block.height, block.context.round),
+            Update::Block(block, _) => ("block", block.inner().height, block.inner().context.round),
         });
         let feedback = self.0.report(activity);
         if let Some((stage, height, round)) = observed {
@@ -39,7 +39,7 @@ mod tests {
     use super::*;
     use alloy_primitives::B256;
     use commonware_consensus::types::Height;
-    use commonware_cryptography::sha256::Digest;
+    use commonware_cryptography::{Digested, Digestible as _, sha256::Digest};
     use commonware_utils::{Acknowledgement as _, acknowledgement::Exact};
     use futures::FutureExt as _;
     use std::sync::{Arc, Mutex};
@@ -92,6 +92,7 @@ mod tests {
             assert!(
                 matches!(updates.lock().unwrap().pop(), Some(Update::Tip(_, height, _)) if height.get() == 7)
             );
+            let block = Digested::precomputed(block.clone(), block.digest());
             let (acknowledgement, mut waiter) = Exact::handle();
             assert_eq!(
                 reporter.report(Update::Block(block.clone(), acknowledgement)),
@@ -102,7 +103,7 @@ mod tests {
             else {
                 panic!("missing original block delivery");
             };
-            assert!(Arc::ptr_eq(&block, &forwarded));
+            assert!(std::ptr::eq(block.inner(), forwarded.inner()));
             acknowledgement.acknowledge();
             waiter.await.unwrap();
 

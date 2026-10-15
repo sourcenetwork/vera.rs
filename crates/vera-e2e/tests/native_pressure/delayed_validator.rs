@@ -54,11 +54,8 @@ async fn qualify() {
     let signer = BlsSigner::new(7u64.into(), deployment).unwrap();
     let (first, _) = submit(&clients[0], &signer, 0, &trusted).await;
     certified_receipt(&clients[3], first, &trusted).await;
-    let fault = netem::Delayed::install(
-        cluster.node(3),
-        (0..3).map(|i| cluster.node(i).p2p_port).collect(),
-    )
-    .await;
+    let fault =
+        netem::Delayed::install(cluster.node(3), (0..3).map(|i| cluster.node(i)).collect()).await;
     let initial_packets = fault.assert_active();
     let checkpoint = certified_head(&clients[0], &trusted).await;
     let started = Instant::now();
