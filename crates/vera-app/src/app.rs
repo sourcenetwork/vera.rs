@@ -220,10 +220,9 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         if !self.native_pipeline {
             return Handoff::Wait;
         }
-        match self.propose(context, ancestry, batches, input).await {
-            Some(proposed) => Handoff::Stage(proposed),
-            None => Handoff::Wait,
-        }
+        self.propose(context, ancestry, batches, input)
+            .await
+            .map_or(Handoff::Wait, Handoff::Stage)
     }
 
     async fn propose(
