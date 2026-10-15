@@ -1576,7 +1576,7 @@ dependencies = [
 [[package]]
 name = "commonware-actor"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "cfg-if",
  "commonware-macros",
@@ -1589,7 +1589,7 @@ dependencies = [
 [[package]]
 name = "commonware-broadcast"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "commonware-actor",
  "commonware-codec",
@@ -1606,7 +1606,7 @@ dependencies = [
 [[package]]
 name = "commonware-codec"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -1620,7 +1620,7 @@ dependencies = [
 [[package]]
 name = "commonware-codec-macros"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -1631,7 +1631,7 @@ dependencies = [
 [[package]]
 name = "commonware-coding"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -1646,7 +1646,7 @@ dependencies = [
 [[package]]
 name = "commonware-consensus"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -1676,7 +1676,7 @@ dependencies = [
 [[package]]
 name = "commonware-cryptography"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "ahash",
  "anyhow",
@@ -1718,7 +1718,7 @@ dependencies = [
 [[package]]
 name = "commonware-formatting"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "commonware-macros",
  "const-hex",
@@ -1727,7 +1727,7 @@ dependencies = [
 [[package]]
 name = "commonware-glue"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "bytes",
  "commonware-actor",
@@ -1753,7 +1753,7 @@ dependencies = [
 [[package]]
 name = "commonware-macros"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "commonware-macros-impl",
  "tokio",
@@ -1762,7 +1762,7 @@ dependencies = [
 [[package]]
 name = "commonware-macros-impl"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -1774,7 +1774,7 @@ dependencies = [
 [[package]]
 name = "commonware-math"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -1787,7 +1787,7 @@ dependencies = [
 [[package]]
 name = "commonware-p2p"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "commonware-actor",
  "commonware-codec",
@@ -1813,7 +1813,7 @@ dependencies = [
 [[package]]
 name = "commonware-parallel"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "cfg-if",
  "commonware-macros",
@@ -1825,7 +1825,7 @@ dependencies = [
 [[package]]
 name = "commonware-resolver"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "bytes",
  "commonware-actor",
@@ -1846,7 +1846,7 @@ dependencies = [
 [[package]]
 name = "commonware-runtime"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "ahash",
  "axum",
@@ -1886,7 +1886,7 @@ dependencies = [
 [[package]]
 name = "commonware-runtime-macros"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -1897,7 +1897,7 @@ dependencies = [
 [[package]]
 name = "commonware-storage"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "ahash",
  "anyhow",
@@ -1921,7 +1921,7 @@ dependencies = [
 [[package]]
 name = "commonware-stream"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "commonware-codec",
  "commonware-cryptography",
@@ -1937,7 +1937,7 @@ dependencies = [
 [[package]]
 name = "commonware-utils"
 version = "2026.9.0"
-source = "git+https://github.com/iverc/commonware-upstream?rev=e8dc1633d2109d82d5ed9b40a8fb5576363376a2#e8dc1633d2109d82d5ed9b40a8fb5576363376a2"
+source = "git+https://github.com/iverc/commonware-upstream?rev=8323cbde9019f6c5c505ea0300cdb18ab182adb9#8323cbde9019f6c5c505ea0300cdb18ab182adb9"
 dependencies = [
  "ahash",
  "bytes",

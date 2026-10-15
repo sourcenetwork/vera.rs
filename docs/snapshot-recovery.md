@@ -79,7 +79,7 @@ pipelined term handoffs and the newer batched storage reads and journal replay.
 All Commonware packages use one immutable Git revision from `Cargo.toml` and
 `Cargo.lock`; the package version alone does not identify this source.
 
-The integration revision is `e8dc1633d2109d82d5ed9b40a8fb5576363376a2`.
+The integration revision is `8323cbde9019f6c5c505ea0300cdb18ab182adb9`.
 Only three fixes remain above that upstream base:
 
 - [Report a reached sync target](https://github.com/commonwarexyz/monorepo/pull/5264) before consuming a newer queued target, and
