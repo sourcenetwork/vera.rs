@@ -4,8 +4,17 @@ use commonware_consensus::{
     marshal::ancestry,
     types::{Epoch, Round, View},
 };
+use commonware_cryptography::{Digested, Digestible as _};
 use commonware_glue::stateful::{Application, Input};
 use vera_consensus::{Mempool as _, components::InMemoryMempool};
+use vera_domain::Block;
+
+fn block_ancestry<const N: usize>(blocks: [Block; N]) -> impl ancestry::Ancestry<Block> {
+    ancestry::from_iter(blocks.map(|block| {
+        let digest = block.digest();
+        Digested::precomputed(block, digest)
+    }))
+}
 
 #[test]
 fn discarded_native_proposals_release_receipts_before_finality_advances() {
@@ -41,7 +50,7 @@ fn discarded_native_proposals_release_receipts_before_finality_advances() {
                     let proposal = app
                         .propose(
                             (context.child("propose"), round),
-                            ancestry::from_iter([Arc::new(genesis.clone())]),
+                            block_ancestry([genesis.clone()]),
                             set.new_batches().await,
                             Input {
                                 upstream: ReshareInput {
@@ -113,7 +122,7 @@ fn native_proposals_bind_every_target_and_isolate_competing_execution() {
                 let proposal = app
                     .propose(
                         (context.child("propose"), proposal_context.clone()),
-                        ancestry::from_iter([Arc::new(genesis.clone())]),
+                        block_ancestry([genesis.clone()]),
                         set.new_batches().await,
                         Input {
                             upstream: ReshareInput {
@@ -156,7 +165,7 @@ fn native_proposals_bind_every_target_and_isolate_competing_execution() {
                     assert!(
                         app.verify(
                             (context.child("reject"), changed.context.clone()),
-                            ancestry::from_iter([Arc::new(changed), Arc::new(genesis.clone())]),
+                            block_ancestry([changed, genesis.clone()]),
                             set.new_batches().await,
                         )
                         .await
@@ -171,7 +180,7 @@ fn native_proposals_bind_every_target_and_isolate_competing_execution() {
                 let competing = app
                     .propose(
                         (context.child("competing"), proposal_context.clone()),
-                        ancestry::from_iter([Arc::new(genesis.clone())]),
+                        block_ancestry([genesis.clone()]),
                         set.new_batches().await,
                         Input {
                             upstream: ReshareInput {
@@ -190,7 +199,7 @@ fn native_proposals_bind_every_target_and_isolate_competing_execution() {
                 let verified = app
                     .verify(
                         (context.child("verify"), proposal.block.context.clone()),
-                        ancestry::from_iter([Arc::new(proposal.block.clone()), Arc::new(genesis)]),
+                        block_ancestry([proposal.block.clone(), genesis]),
                         set.new_batches().await,
                     )
                     .await

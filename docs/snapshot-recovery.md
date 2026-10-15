@@ -71,36 +71,44 @@ verify revision certificates and permission evidence independently.
 
 ## Commonware integration
 
-The pinned [runtime fork](https://github.com/iverc/commonware-upstream) follows
-upstream `39d04ee1057ee03046973391d26e7101e4a3ef41`, which includes
-[Commonware #5044](https://github.com/commonwarexyz/monorepo/pull/5044).
-Upstream preserves verified operations across target updates and keeps pinned
-nodes when the retention floor is unchanged. When the floor advances, it cancels
-requests at the new boundary so a new boundary request is scheduled immediately.
-Upstream MMR and MMB regressions cover delayed boundary responses, root eviction
-and verified operations retained above a moved floor.
+The pinned [integration branch](https://github.com/iverc/commonware-upstream/tree/iverc/vera-runtime-20261015)
+is based on official upstream `38dfb1a22089d5b876be78f21a933970f66ef5cf`.
+It includes [Commonware #5044](https://github.com/commonwarexyz/monorepo/pull/5044),
+in-flight request retention across target updates, buffered-boundary preservation,
+pipelined term handoffs and the newer batched storage reads and journal replay.
+All Commonware packages use one immutable Git revision from `Cargo.toml` and
+`Cargo.lock`; the package version alone does not identify this source.
 
-The fork's remaining changes cover bounded pruning retries, target convergence,
-the source response codec, peer acceptance of pruning responses and reshare
-boundary verification. `Pruned` is a fork wire extension, not an upstream
-response. An exhausted invalid source fails with upstream's `InvalidResponse`
-error; only explicit pruning hints receive bounded retries.
+The integration revision is `e8dc1633d2109d82d5ed9b40a8fb5576363376a2`.
+Only three fixes remain above that upstream base:
 
-Archive pruning also retires the translated-key lookup entries below the retained
-floor. Cleanup covers unique block hashes and collisions without changing journal
-formats or adding I/O. Retained values sharing a translated key survive, including
-backfilled records inserted out of order.
+- [Report a reached sync target](https://github.com/commonwarexyz/monorepo/pull/5264) before consuming a newer queued target, and
+  observe finish requests received while reporting progress.
+- [Retry temporarily pending DKG epoch information](https://github.com/commonwarexyz/monorepo/pull/5263) during boundary verification.
+- [Remove pruned archive lookup references](https://github.com/commonwarexyz/monorepo/pull/5262) using index records from the sections
+  being discarded, including colliding and backfilled records.
+
+These fixes preserve upstream request, response and storage encodings. There is
+no custom pruning response or near-tip target buffer. Upstream retains useful
+in-flight requests across target updates; each response is verified against the
+root that its request selected. When the lower bound advances, requests at or
+below it are retired so the new boundary can be fetched.
+
+Archive cleanup reads fixed-size index records before deleting their sections.
+It does not read block values or scan the complete in-memory lookup index.
+Only affected translated-key buckets are examined, and retained references in
+those buckets survive. Errors reading the discarded index records fail the
+mutable prune operation rather than claiming cleanup completed.
 
 Boundary verification retries a pending epoch-info response every 100 ms while
-the local DKG actor catches up. It still requires independently derived matching
-epoch information before accepting a boundary. Follower responses remain pending,
-and unavailable or mismatched artifacts are rejected. A temporarily early request
-must not leave certification suspended after the DKG state becomes available.
+the local DKG actor catches up. Independently derived epoch information must
+still match before accepting the boundary. Follower responses remain pending;
+unavailable or mismatched artifacts are rejected.
 
-Upstream [#5135](https://github.com/commonwarexyz/monorepo/pull/5135) moves batch
-verification to the signer's public-key type. Vera's reshare configuration uses
-that API instead of selecting a separate Ed25519 batch-verifier type. DKG signing
-domains and encoded epoch and share material are unchanged.
+Native deployments use scheduled leader election and stage incoming-term
+proposals without voting before their parent certifies. Recovery readiness gates
+both prepared and ordinary proposals. The compatibility execution mode keeps
+certificate-dependent election and declines speculative preparation.
 
 Recovery supplies the authenticated target when each database opens. Every
 partition must recover that target before the application verifies the combined
@@ -132,31 +140,34 @@ most 64 KiB of data per chunk. These are transfer and decoding bounds; extra
 buffers, caches and storage resources contribute to process memory. Aggregate
 serving capacity and sustained catch-up throughput still require qualification.
 
-## Pruning hints and retries
+## Unavailable data and retries
 
-A peer's `Pruned` response describes only that source's claimed retention. It is
-not proof that every peer lacks the target and cannot change the authenticated
-state root or operation range. The sync engine pauses new fetches for 100 ms,
-then retries even if the finalized target has not advanced. Further pruning
-hints during that pause cannot extend its deadline. Already outstanding fetches
-remain eligible; valid data clears the pause, and an advancing target can bypass
-it. The startup initialization deadline still bounds the overall attempt.
+When a peer cannot serve a request, including because its history was pruned,
+Commonware's resolver sends its existing generic error reply. Missing data is
+retried after the configured delay and affects peer selection, without treating
+the peer as malicious. A negative reply neither changes the authenticated target
+nor establishes that every other peer lacks it.
 
-The engine regression tests check retry timing, repeated hints and target
-advancement. Vera's `pruned_hint` integration test confirms that synchronization
-can recover after one false hint and reconstruct the correct stored value. This
-source-level test does not establish liveness under every adversarial peer
-selection or network partition.
+Vera's peer regression first serves from a database that has pruned the selected
+target, then makes a retained copy available without publishing a target update.
+Synchronization must retry and reconstruct the same authenticated state. Further
+cases cover cancellation, restart, invalid responses and advancing targets.
+
+If every source has deleted the required history, retrying cannot recreate it.
+The coordinator must select a newer certified target that peers retain, or obtain
+the required data from another retained source. The startup initialization
+deadline bounds the overall attempt.
 
 ## Queued targets and completion
 
-An engine close to its target can hold a newer target until it reports reaching
-the current one. If the coordinator has already assigned the newer generation,
-the engine then releases that held update without waiting for another tip.
-A finish request received while the progress report waits for its consumer takes
-precedence over the held update. Standalone sync can still finish at a retained
-anchor and replay the finalized suffix. Query modules remain unpublished until
-all seven partitions converge, their roots validate and history handoff completes.
+An engine reports reaching its selected target before applying queued updates.
+The coordinator can therefore observe a common completed anchor even when newer
+targets arrive continuously. A finish request delivered during a backpressured
+progress report takes precedence over advancing the engine again. Otherwise,
+queued updates remain eligible; no separate target buffer delays them.
+
+Query modules remain unpublished until all seven partitions converge, their roots
+validate and history handoff completes.
 
 ## Private DKG material
 

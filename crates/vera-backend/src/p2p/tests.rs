@@ -112,8 +112,13 @@ async fn feedback_translation_preserves_verdicts_and_cancels_candidates() {
         let (verdict, second) = oneshot::channel();
         candidates
             .send((
-                Response::Pruned {
-                    frontier: commonware_storage::merkle::Location::new(7),
+                Response::Operations {
+                    proof: commonware_storage::merkle::Proof {
+                        leaves: commonware_storage::merkle::Location::new(7),
+                        inactive_peaks: 0,
+                        digests: Vec::new(),
+                    },
+                    operations: Vec::new(),
                 },
                 verdict,
             ))
@@ -121,7 +126,10 @@ async fn feedback_translation_preserves_verdicts_and_cancels_candidates() {
             .unwrap();
         let (response, feedback) = feedback.reject().await.unwrap();
         assert!(!first.await.unwrap());
-        assert!(matches!(response, Response::Pruned { frontier } if *frontier == 7));
+        assert!(
+            matches!(response, Response::Operations { proof, operations }
+            if *proof.leaves == 7 && operations.is_empty())
+        );
         feedback.accept();
         assert!(second.await.unwrap());
         candidates.closed().await;

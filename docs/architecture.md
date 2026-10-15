@@ -221,6 +221,19 @@ authorization during execution. Stored access decisions have explicit issuance
 and expiry semantics. See [permission proofs](permission-proofs.md) and
 [access decisions](access-decisions.md).
 
+## Pipelined term handoffs
+
+Native deployments use Commonware's scheduled round-robin elector with bounded
+leader terms. The incoming leader may prepare and relay a candidate before its
+parent certifies. Vera returns `Handoff::Stage`, so its notarize vote still waits
+for the parent certificate. Preparing a block uses isolated execution batches;
+its policies, receipts and worker sequences remain unpublished until finalization.
+
+The startup readiness guard covers both preparation and ordinary proposals. The
+Commonware reshare wrapper leaves epoch boundaries and reserved dealer-log
+inclusion to ordinary proposals. Compatibility execution uses certificate-dependent
+VRF election and declines speculative preparation.
+
 ## Operator-managed membership (PoA)
 
 PoA describes who may join the consensus group. Commonware Simplex supplies

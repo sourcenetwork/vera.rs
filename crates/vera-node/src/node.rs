@@ -21,7 +21,7 @@ use commonware_consensus::{
     types::{Epoch, FixedEpocher, Height, ViewDelta},
 };
 use commonware_cryptography::ChaCha20Poly1305;
-use commonware_cryptography::{Digestible as _, Signer as _};
+use commonware_cryptography::{Digested, Digestible as _, Signer as _};
 use commonware_glue::{
     dkg::{
         SecretStore as _,
@@ -88,6 +88,25 @@ pub async fn run_node_with_rpc_listener(
     settings: NodeSettings,
     rpc_listener: Option<std::net::TcpListener>,
 ) -> anyhow::Result<()> {
+    if let Some(parameters) = settings.genesis.simplex {
+        parameters.validate().map_err(anyhow::Error::msg)?;
+        run_node_with_elector(context, settings, rpc_listener, move |_| {
+            crate::vrf_elector::pipelined_elector(parameters)
+        })
+        .await
+    } else {
+        run_node_with_elector(context, settings, rpc_listener, VrfElectorConfig::new).await
+    }
+}
+
+async fn run_node_with_elector<
+    L: commonware_consensus::simplex::elector::Config<ConsensusScheme>,
+>(
+    context: tokio::Context,
+    settings: NodeSettings,
+    rpc_listener: Option<std::net::TcpListener>,
+    make_elector: impl FnOnce(vera_app::VrfSeedCache) -> L + Send,
+) -> anyhow::Result<()> {
     if let Some(listener) = &rpc_listener {
         anyhow::ensure!(
             listener.local_addr()? == settings.rpc_addr,
@@ -119,9 +138,6 @@ pub async fn run_node_with_rpc_listener(
             && snapshot.logs > 0,
         "snapshot byte limit, log limit and deadlines must be positive"
     );
-    if let Some(parameters) = genesis.simplex {
-        parameters.validate().map_err(anyhow::Error::msg)?;
-    }
     let term_length = std::num::NonZeroU64::new(
         genesis
             .simplex
@@ -265,9 +281,10 @@ pub async fn run_node_with_rpc_listener(
     let verification_threads = std::thread::available_parallelism()
         .unwrap_or(NZUsize!(1))
         .min(NZUsize!(4));
+    let verification_strategy = Rayon::new(verification_threads)?;
     let executor = VeraExecutor::new(chain_id)
         .with_membership_epochs(blocks_per_epoch, term_length)
-        .with_native_verification_strategy(Rayon::new(verification_threads)?);
+        .with_native_verification_strategy(verification_strategy.clone());
     let executor_spec = executor.spec_id();
     #[cfg(feature = "fault-injection")]
     let executor = executor.with_crash_marker(config.data_dir.join("module-commit-crash"));
@@ -302,6 +319,7 @@ pub async fn run_node_with_rpc_listener(
             priority: false,
             codec_config: block_cfg(),
             peer_provider: oracle.clone(),
+            strategy: verification_strategy.clone(),
         },
     );
     let broadcast_handle = broadcast_engine.start(broadcast_network);
@@ -424,7 +442,9 @@ pub async fn run_node_with_rpc_listener(
         marshal::Config {
             provider: provider.clone(),
             epocher: FixedEpocher::new(blocks_per_epoch),
-            start: plan.marshal_start(Arc::new(genesis_block.clone())),
+            start: plan.marshal_start(
+                Digested::compute(genesis_block.clone(), &verification_strategy).await,
+            ),
             partition_prefix: PARTITION_PREFIX.to_string(),
             mailbox_size: MAILBOX_SIZE,
             view_retention: ViewDelta::new(10),
@@ -595,7 +615,7 @@ pub async fn run_node_with_rpc_listener(
         genesis.simplex.is_some(),
         (leader_timeout / 4).min(Duration::from_millis(100)),
     );
-    let vrf_elector = VrfElectorConfig::new(application.vrf_seed_cache(), genesis.simplex);
+    let vrf_elector = make_elector(application.vrf_seed_cache());
 
     let snapshot_history = crate::history::SnapshotHistory {
         history: history.clone(),
@@ -621,6 +641,7 @@ pub async fn run_node_with_rpc_listener(
         context.child("stateful"),
         StatefulConfig {
             application,
+            strategy: verification_strategy.clone(),
             db_config: ordered_config(
                 state_set_config(PARTITION_PREFIX, page_cache.clone()),
                 native::state_config(PARTITION_PREFIX, page_cache.clone()),
@@ -628,13 +649,16 @@ pub async fn run_node_with_rpc_listener(
             )
             .recover_from_marshal()
             .with_sync_handoff(move |anchor| async move {
-                let selected: Arc<vera_domain::Block> = sync_marshal
+                let selected = sync_marshal
                     .get_block(Identifier::Height(anchor.height))
                     .await
                     .ok_or_else(|| "missing synchronized history anchor".to_string())?;
-                if selected.digest() != anchor.digest || selected.context.round != anchor.round {
+                if selected.digest() != anchor.digest
+                    || selected.inner().context.round != anchor.round
+                {
                     return Err("synchronized history anchor mismatch".into());
                 }
+                let selected = selected.inner();
                 let mut updates = sync_peers.subscribe().await;
                 let peers = updates
                     .recv()
@@ -648,7 +672,7 @@ pub async fn run_node_with_rpc_listener(
                     .collect();
                 let mut client = sync_history_peer.lock().await;
                 snapshot_history
-                    .recover(&mut client, &peers, &selected)
+                    .recover(&mut client, &peers, selected)
                     .await
                     .map_err(|e| e.to_string())?;
                 sync_status.set_snapshot_revision(anchor.height.get());
@@ -752,16 +776,16 @@ pub async fn run_node_with_rpc_listener(
         history
             .recover(
                 &genesis_block,
-                &recovered,
+                recovered.inner(),
                 &block_index,
                 &light_block_index,
                 &finalization_lookup,
             )
             .await?;
         node_state.record_finalized(
-            recovered.height,
-            recovered.context.round.epoch().get(),
-            recovered.context.round.view().get(),
+            recovered.inner().height,
+            recovered.inner().context.round.epoch().get(),
+            recovered.inner().context.round.view().get(),
         );
     }
     let reshare_handle = reshare_actor.start(dkg_network);
@@ -980,9 +1004,8 @@ const fn sync_config() -> SyncEngineConfig {
     SyncEngineConfig {
         fetch_batch_size: MAX_FETCH_OPS,
         apply_batch_size: NZU64!(64),
-        max_outstanding_requests: 8,
+        max_outstanding_requests: commonware_utils::NZUsize!(8),
         update_channel_size: NZUsize!(256),
-        max_retained_roots: 8,
     }
 }
 

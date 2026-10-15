@@ -53,9 +53,8 @@ fn sync_config() -> SyncEngineConfig {
     SyncEngineConfig {
         fetch_batch_size: NZU64!(16),
         apply_batch_size: NZU64!(16),
-        max_outstanding_requests: 1,
+        max_outstanding_requests: commonware_utils::NZUsize!(1),
         update_channel_size: NZUsize!(2),
-        max_retained_roots: 2,
     }
 }
 

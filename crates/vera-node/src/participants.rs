@@ -91,7 +91,7 @@ impl ParticipantsProvider for RegistryParticipants {
                     .get_block(Identifier::Height(Height::new(height)))
                     .await
                 {
-                    return crate::history::roster_from_boundary(&block, epoch, height)
+                    return crate::history::roster_from_boundary(block.inner(), epoch, height)
                         .expect("finalized consensus roster must be valid");
                 }
             }

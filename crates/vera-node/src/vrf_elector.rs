@@ -4,7 +4,7 @@ use alloy_primitives::B256;
 use commonware_codec::Encode as _;
 use commonware_consensus::{
     simplex::{
-        elector::{Config, Elector, RoundRobin, RoundRobinElector, Terms},
+        elector::{Config, Dynamic, Elector, RoundRobin, RoundRobinElector, Terms},
         scheme::bls12381_threshold::vrf::Certificate,
     },
     types::{Participant, Round, TermLength, ViewDelta},
@@ -15,17 +15,15 @@ use std::{num::NonZeroU32, time::Duration};
 use vera_app::{ConsensusScheme, VrfSeedCache};
 use vera_domain::{PublicKey, SimplexParameters};
 
-/// Genesis selects rotating leaders or bounded stable-leader terms.
-/// Only rotating deployments consume per-view VRF seeds.
+/// Rotating leader election that delivers certificate-derived EVM randomness.
 #[derive(Clone, Debug)]
 pub(crate) struct VrfElectorConfig {
     seeds: VrfSeedCache,
-    pipeline: Option<SimplexParameters>,
 }
 
 impl VrfElectorConfig {
-    pub(crate) const fn new(seeds: VrfSeedCache, pipeline: Option<SimplexParameters>) -> Self {
-        Self { seeds, pipeline }
+    pub(crate) const fn new(seeds: VrfSeedCache) -> Self {
+        Self { seeds }
     }
 }
 
@@ -33,48 +31,31 @@ impl Config<ConsensusScheme> for VrfElectorConfig {
     type Elector = VrfElector;
 
     fn build(self, participants: &Set<PublicKey>) -> Self::Elector {
-        let mut election = RoundRobin::<Sha256>::default();
-        if let Some(parameters) = self.pipeline {
-            parameters
-                .validate()
-                .expect("validated genesis Simplex parameters");
-            election = election.with_term(
-                TermLength::new(
-                    NonZeroU32::new(
-                        u32::try_from(parameters.term_length).expect("bounded term length"),
-                    )
-                    .unwrap(),
-                ),
-                Duration::from_millis(parameters.stall_timeout_ms),
-                ViewDelta::new(parameters.optimistic_views),
-            );
-        }
+        let election = RoundRobin::<Sha256>::default();
         let inner = <RoundRobin<Sha256> as Config<ConsensusScheme>>::build(election, participants);
         VrfElector {
             seeds: self.seeds,
-            pipeline: self.pipeline,
             inner,
         }
     }
 }
 
-/// Initialized elector used by each Simplex epoch.
+/// Initialized rotating elector for compatibility execution.
 #[derive(Clone, Debug)]
 pub(crate) struct VrfElector {
     seeds: VrfSeedCache,
-    pipeline: Option<SimplexParameters>,
     inner: RoundRobinElector<ConsensusScheme>,
 }
 
 impl Elector<ConsensusScheme> for VrfElector {
+    type Mode = Dynamic;
+
     fn terms(&self) -> Terms {
         self.inner.terms()
     }
 
     fn elect(&self, round: Round, certificate: Option<&Certificate<MinSig>>) -> Participant {
-        if self.pipeline.is_none()
-            && let Some(signature) = certificate.and_then(Certificate::get)
-        {
+        if let Some(signature) = certificate.and_then(Certificate::get) {
             // EVM exposes a 32-byte PREVRANDAO while the MinSig seed is a
             // canonical 48-byte G1 point. Hashing the encoding preserves all
             // of its entropy and gives every validator the same B256.
@@ -82,8 +63,23 @@ impl Elector<ConsensusScheme> for VrfElector {
             let digest = Sha256::hash(&[encoded.as_ref()]);
             self.seeds.insert(round, B256::from(digest.0));
         }
-        self.inner.elect(round, certificate)
+        self.inner.elect(round, ())
     }
+}
+
+/// Certificate-independent leader schedule for native pipelined deployments.
+pub(crate) fn pipelined_elector(parameters: SimplexParameters) -> RoundRobin<Sha256> {
+    parameters
+        .validate()
+        .expect("validated genesis Simplex parameters");
+    RoundRobin::default().with_term(
+        TermLength::new(
+            NonZeroU32::new(u32::try_from(parameters.term_length).expect("bounded term length"))
+                .unwrap(),
+        ),
+        Duration::from_millis(parameters.stall_timeout_ms),
+        ViewDelta::new(parameters.optimistic_views),
+    )
 }
 
 #[cfg(test)]
@@ -98,24 +94,23 @@ mod tests {
             (0..4).map(|seed| ed25519::PrivateKey::from_seed(seed).public_key()),
         );
         let parameters = SimplexParameters::default();
-        let elector =
-            VrfElectorConfig::new(VrfSeedCache::default(), Some(parameters)).build(&participants);
+        let elector = <RoundRobin<Sha256> as Config<ConsensusScheme>>::build(
+            pipelined_elector(parameters),
+            &participants,
+        );
         assert_eq!(
             elector.terms().optimistic_views().get(),
             parameters.optimistic_views
         );
         for epoch in 0..3 {
             let round = |view| Round::new(Epoch::new(epoch), View::new(view));
-            let first = elector.elect(round(1), None);
+            let first = elector.elect(round(1), ());
             for view in 2..=parameters.term_length {
-                assert_eq!(elector.elect(round(view), None), first);
+                assert_eq!(elector.elect(round(view), ()), first);
             }
-            assert_ne!(
-                elector.elect(round(parameters.term_length + 1), None),
-                first
-            );
+            assert_ne!(elector.elect(round(parameters.term_length + 1), ()), first);
         }
-        let legacy = VrfElectorConfig::new(VrfSeedCache::default(), None).build(&participants);
+        let legacy = VrfElectorConfig::new(VrfSeedCache::default()).build(&participants);
         assert_eq!(legacy.terms(), Terms::rotating());
     }
 }

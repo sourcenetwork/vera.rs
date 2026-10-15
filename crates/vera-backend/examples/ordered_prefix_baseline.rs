@@ -30,7 +30,9 @@ use commonware_cryptography::{Hasher as _, Sha256};
 use commonware_parallel::Sequential;
 use commonware_runtime::{Runner as _, buffer::paged::CacheRef, tokio};
 use commonware_storage::{
-    journal::contiguous::variable, merkle::full, qmdb::current::VariableConfig,
+    journal::contiguous::variable,
+    merkle::full,
+    qmdb::{current::VariableConfig, floor::Proportional},
     translator::Translator,
 };
 use commonware_utils::{NZU16, NZU64, NZUsize};
@@ -153,7 +155,7 @@ fn main() {
                 *buckets.entry(translator.transform(&key)).or_default() += 1;
                 batch = batch.write(key, Some(value.clone()));
             }
-            let batch = batch.merkleize(&db, None).await.unwrap();
+            let batch = batch.merkleize(&db, None, &mut Proportional).await.unwrap();
             (db, _) = db.apply_batch(batch).await.unwrap();
             db = db.commit().await.unwrap();
         }
@@ -170,7 +172,7 @@ fn main() {
                     *buckets.entry(translator.transform(&key)).or_default() += 1;
                     batch = batch.write(key, Some(value.clone()));
                 }
-                let batch = batch.merkleize(&db, None).await.unwrap();
+                let batch = batch.merkleize(&db, None, &mut Proportional).await.unwrap();
                 (db, _) = db.apply_batch(batch).await.unwrap();
                 db = db.commit().await.unwrap();
             }

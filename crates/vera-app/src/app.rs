@@ -9,8 +9,8 @@ use std::{
 use crate::{ApplicationState, VrfSeedCache, ordered_state::OrderedState};
 use alloy_consensus::Header;
 use alloy_primitives::{Address, B256};
-use commonware_consensus::marshal::ancestry::Ancestry;
 use commonware_consensus::types::Round;
+use commonware_consensus::{Handoff, marshal::ancestry::Ancestry};
 use commonware_cryptography::Digestible as _;
 use commonware_glue::stateful::{Application, Input, Proposed};
 use futures::StreamExt as _;
@@ -210,6 +210,22 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         self.genesis.clone()
     }
 
+    async fn prepare(
+        &mut self,
+        context: (Ctx, Self::Context),
+        ancestry: impl Ancestry<Self::Block>,
+        batches: D::Unmerkleized,
+        input: Input<Self::Input, Self::Provider>,
+    ) -> Handoff<Proposed<Self, Ctx>> {
+        if !self.native_pipeline {
+            return Handoff::Wait;
+        }
+        match self.propose(context, ancestry, batches, input).await {
+            Some(proposed) => Handoff::Stage(proposed),
+            None => Handoff::Wait,
+        }
+    }
+
     async fn propose(
         &mut self,
         context: (Ctx, Self::Context),
@@ -219,7 +235,7 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
     ) -> Option<Proposed<Self, Ctx>> {
         let start = Instant::now();
         let consensus_context = context.1;
-        let parent = ancestry.next().await?;
+        let parent = ancestry.next().await?.inner_shared();
         if !D::accepts(&parent) {
             return None;
         }
@@ -231,7 +247,7 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
                 .is_some_and(|block| block.height > finalized_height)
         {
             match ancestry.next().await {
-                Some(block) => pending.push(block),
+                Some(block) => pending.push(block.inner_shared()),
                 None => break,
             }
         }
@@ -331,14 +347,15 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
     ) -> Option<D::Merkleized> {
         let start = Instant::now();
         let block = ancestry.next().await?;
+        let digest = block.digest();
+        let block = block.inner_shared();
         if !block.fits_wire_limits() {
             return None;
         }
-        let parent = ancestry.next().await?;
+        let parent = ancestry.next().await?.inner_shared();
         if !D::accepts(&parent) {
             return None;
         }
-        let digest = block.digest();
         if block.context != context.1 {
             warn!(?digest, "block consensus context mismatch");
             return None;

@@ -167,9 +167,8 @@ fn checkpoint_rejects_bad_evidence_and_checks_rebuilt_state_before_publication()
                     SyncEngineConfig {
                         fetch_batch_size: NZU64!(16),
                         apply_batch_size: NZU64!(32),
-                        max_outstanding_requests: 2,
+                        max_outstanding_requests: commonware_utils::NZUsize!(2),
                         update_channel_size: NZUsize!(2),
-                        max_retained_roots: 2,
                     },
                 )
                 .await;
