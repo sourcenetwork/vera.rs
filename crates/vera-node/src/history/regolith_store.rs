@@ -35,10 +35,7 @@ impl HistoryDb {
         }
         let db = regolith::Db::open(
             path.join("regolith"),
-            regolith::Options {
-                statistics: statistics.clone(),
-                ..Default::default()
-            },
+            regolith::Options::default().statistics(statistics.clone()),
         )?;
         Ok(Self { db, statistics })
     }
@@ -88,6 +85,7 @@ impl HistoryDb {
     pub(super) fn compact_for_test(&self) -> std::io::Result<()> {
         self.db
             .compact_range(None, None)
+            .wait()
             .map_err(std::io::Error::other)
     }
 
@@ -99,12 +97,10 @@ impl HistoryDb {
         let statistics = Some(Arc::new(regolith::Statistics::new()));
         let db = regolith::Db::open(
             path.join("regolith"),
-            regolith::Options {
-                env,
-                max_background_compactions: 0,
-                statistics: statistics.clone(),
-                ..Default::default()
-            },
+            regolith::Options::default()
+                .env(env)
+                .max_background_compactions(0)
+                .statistics(statistics.clone()),
         )?;
         Ok(Self { db, statistics })
     }
@@ -202,8 +198,8 @@ mod tests {
         batch.put(b"k2", b"value2");
         db.write_sync(batch).unwrap();
         let written = db.write_statistics().unwrap();
-        // Regolith's batch ticker includes the four-byte column-family prefix per key.
-        assert_eq!(written.batch_input_bytes - before.batch_input_bytes, 24);
+        // The ticker counts committed user keys and values, excluding internal prefixes.
+        assert_eq!(written.batch_input_bytes - before.batch_input_bytes, 16);
         assert!(written.wal_bytes > before.wal_bytes);
         assert!(written.wal_syncs > before.wal_syncs);
         assert_eq!(db.get(b"k1").unwrap().unwrap(), b"value1");
