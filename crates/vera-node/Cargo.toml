@@ -52,7 +52,7 @@ bytes.workspace = true
 futures.workspace = true
 hex.workspace = true
 parking_lot.workspace = true
-regolith = { git = "https://github.com/sourcenetwork/regolith", rev = "f6958cf0cea97f658dbdbc3572063a8122645101" }
+regolith = { git = "https://github.com/sourcenetwork/regolith", rev = "e844baefe838f3af76403afd46c4b42f1a0b98a5" }
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

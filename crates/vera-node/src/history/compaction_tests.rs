@@ -1,9 +1,9 @@
 use super::*;
 use regolith::env::{
-    Capabilities, DirEntry, DiskSpace, Env, FileLock, FileMeta, JoinHandle, ReadFile, StdEnv,
+    Capabilities, DiskSpace, Env, FileLock, FileMeta, JoinHandle, ReadDir, ReadFile, StdEnv,
     WriteFile, WriteMode,
 };
-use std::{io, path::PathBuf, sync::atomic::AtomicBool, time::Duration};
+use std::{io, path::PathBuf, sync::atomic::AtomicBool};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
@@ -100,7 +100,7 @@ impl Env for FaultEnv {
         self.inner.create_dir_all(path)
     }
 
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
+    fn read_dir(&self, path: &Path) -> io::Result<ReadDir<'_>> {
         self.inner.read_dir(path)
     }
 
@@ -170,10 +170,6 @@ impl Env for FaultEnv {
         body: Box<dyn FnOnce() + Send + 'static>,
     ) -> io::Result<Box<dyn JoinHandle>> {
         self.inner.spawn(name, body)
-    }
-
-    fn sleep(&self, duration: Duration) {
-        self.inner.sleep(duration)
     }
 
     fn disk_space(&self, path: &Path) -> io::Result<Option<DiskSpace>> {

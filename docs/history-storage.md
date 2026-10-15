@@ -14,9 +14,19 @@ cargo build --frozen -p verad
 History always uses Regolith; there is no backend-selection feature.
 Authenticated module state uses Commonware QMDB.
 
-The [node manifest](../crates/vera-node/Cargo.toml) selects the exact Regolith
-revision. It includes atomic compaction-manifest edit batches, batched WAL
-rewriting during recovery and compaction scans that bypass the foreground cache.
+The [node manifest](../crates/vera-node/Cargo.toml) pins merged Regolith revision
+`e844baefe838f3af76403afd46c4b42f1a0b98a5`, including the compaction-cache fix in
+[Regolith #285](https://github.com/sourcenetwork/regolith/pull/285). The engine uses
+its current commit pipeline, read views and block cache, together with atomic
+compaction-manifest edit batches and crash-aware WAL recovery. Compaction scans
+bypass the foreground cache.
+
+This Git revision includes API and storage-format changes that are newer than
+the published `v0.1.9` release, despite sharing its crate version. Opening an older
+Regolith store rewrites its WAL in format 2; the previous engine cannot reopen
+that store. Keep backups paired with their node build and do not downgrade a
+written history directory. Vera releases continue to start with fresh state.
+
 History writes explicitly request synchronous WAL persistence; they do not use
 Regolith's default eventual durability. Execution, certificate and query-index
 updates share one batch.

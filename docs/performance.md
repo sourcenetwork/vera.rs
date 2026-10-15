@@ -346,11 +346,14 @@ Resource diagnostics also enable Regolith statistics at history-store opening.
 flush/compaction output bytes and admitted capacity-stall microseconds. These
 process-local counters are sampled independently; disabled statistics are
 unavailable rather than zero. In the selected backend, the batch input ticker
-counts put/delete key bytes and put values before commit, including column-family
-key prefixes. Range-delete endpoints are excluded. Failed submissions can enter
-that input count. Use byte differences only over successful-write intervals with
-a nonzero denominator, and exclude startup/reopening when estimating history
-write amplification. WAL/flush/compaction output is backend accounting, not
+counts committed put/delete user-key bytes and put values. Internal column-family
+prefixes, range-delete endpoints and failed writes are excluded. Vera's previous
+Regolith pin, `f6958cf0cea97f658dbdbc3572063a8122645101`, counted input before
+commit and included column-family prefixes. Historical amplification
+ratios retain that denominator and must not be compared directly with current
+ratios. Use byte differences over successful-write intervals with a nonzero
+denominator, and exclude startup/reopening when estimating history write
+amplification. WAL/flush/compaction output is backend accounting, not
 physical-device I/O, and does not include Commonware state journals. Capacity
 stall time covers admitted waits, not every blocked or failed write. Enabling
 backend statistics adds measurement overhead; it does not change synchronous
