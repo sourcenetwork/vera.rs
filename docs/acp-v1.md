@@ -64,8 +64,10 @@ without reviving those grants; physical removal runs under the cleanup budget.
 Definition edits invalidate both removed relations and grants whose usersets refer
 to them. Recreating a relation cannot resurrect those retained physical edges.
 Policy deletion atomically removes the active policy and its authorization
-visibility. Physical records are reclaimed as described below. Historical access
-decisions and finalized receipts remain audit records.
+visibility. Physical records are reclaimed as described below. Policy deletion
+does not itself delete access decisions or finalized receipts. Expired decisions
+are separately reclaimed by [bounded end-block cleanup](access-decisions.md#expired-record-cleanup);
+finalized receipts remain in history.
 
 Native policy creation records the actual actor, signer, submission and execution
 revision. Definition/metadata edits record their last-modified revision. Optional

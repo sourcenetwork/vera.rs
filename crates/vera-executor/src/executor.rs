@@ -710,13 +710,57 @@ mod tests {
                 )
                 .unwrap();
         }
+        use vera_modules::acp::types::{
+            AccessRequest, Actor, Object, Operation, PolicyCmd, PolicyMarshalingType,
+        };
+        let policy = modules
+            .acp
+            .create_policy(
+                &issuer,
+                "name: cleanup\nresources:\n  - name: file\n",
+                PolicyMarshalingType::ShortYaml,
+            )
+            .unwrap()
+            .policy
+            .id;
+        let object = Object {
+            resource: "file".into(),
+            id: "report".into(),
+        };
+        modules
+            .acp
+            .direct_policy_cmd(&issuer, &policy, PolicyCmd::RegisterObject(object.clone()))
+            .unwrap();
+        let request = AccessRequest {
+            actor: Actor(issuer.clone()),
+            operations: vec![Operation {
+                object,
+                permission: "owner".into(),
+            }],
+        };
+        for sequence in 0..129 {
+            modules
+                .acp
+                .check_access(
+                    &issuer,
+                    &policy,
+                    &request,
+                    &issued,
+                    &vera_modules::types::TxExecCtx {
+                        signer: issuer.to_string(),
+                        sequence,
+                        tx_hash: vec![1; 32],
+                    },
+                )
+                .unwrap();
+        }
         let mut parent = ModuleSnapshot { modules };
         let published = executor.snapshot().modules.serialize_stores();
         for (offset, remaining) in [129, 1, 0].into_iter().enumerate() {
             let before = parent.modules.serialize_stores();
             let context = BlockContext::new(
                 alloy_consensus::Header {
-                    number: offset as u64 + 2,
+                    number: offset as u64 + 101,
                     timestamp: issued.timestamp.seconds + offset as u64 + 2,
                     gas_limit: 30_000_000,
                     base_fee_per_gas: Some(0),
@@ -747,6 +791,14 @@ mod tests {
                     .count(),
                 remaining
             );
+            assert_eq!(
+                next.modules
+                    .acp
+                    .store()
+                    .prefix_iter(vera_modules::acp::keys::ACCESS_DECISION_PREFIX)
+                    .count(),
+                [65, 1, 0][offset],
+            );
             assert!(proposed.receipts.is_empty());
             assert_eq!(parent.modules.serialize_stores(), before);
             assert_eq!(executor.snapshot().modules.serialize_stores(), published);
@@ -758,6 +810,7 @@ mod tests {
                 modules: ModuleState::from_stores(stores),
             };
             parent.modules.vera.validate_restored_tokens().unwrap();
+            parent.modules.acp.validate_restored_state().unwrap();
         }
     }
 

@@ -42,6 +42,7 @@ impl AcpModule {
                 .map_err(|_| AcpError::State("invalid access decision key".into()))?;
             self.get_access_decision(id)?;
         }
+        self.decision_cleanup_cursor()?;
         self.get_params()?;
         self.validate_counter(
             keys::POLICY_COUNTER_KEY,
