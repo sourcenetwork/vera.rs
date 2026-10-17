@@ -49,6 +49,7 @@ mod retirement_cleanup;
 pub mod theorem;
 pub use registration_queries::{MAX_REGISTRATION_LEAF_BYTES, MAX_REGISTRATION_OBJECTS};
 pub mod decision;
+mod decision_cleanup;
 pub mod delegated_operation;
 mod delegation;
 /// ACP error types.
@@ -110,6 +111,7 @@ pub const MAX_POLICY_DEFINITION_BYTES: usize = 64 << 10;
 /// "relation_state/" + policy_id + "/" + index_key       → pair counts, current directories, retired names
 /// "relation_cleanup/queue/" + BE(sequence)             → RelationJob (serde_json)
 /// "access_decision/" + decision_id                     → AccessDecision (Borsh)
+/// "decision_cleanup/cursor"                           → last inspected decision key
 /// "commitment/objs/" + BE(id)                          → RegistrationsCommitment (Borsh)
 /// "commitment/counter/id"                              → u64 BE
 /// "amendment_event/objs/" + BE(id)                     → AmendmentEvent (Borsh)
@@ -584,13 +586,14 @@ impl AcpModule {
 
     // ── Lifecycle hooks ─────────────────────────────────────────────────
 
-    /// End-of-block hook: flag expired registration commitments.
+    /// End-of-block hook: expire commitments and collect retired or expired records.
     pub fn end_blocker(
         &mut self,
         block_ctx: &BlockExecCtx,
     ) -> Result<Vec<RegistrationsCommitment>> {
         let mut candidate = self.clone();
         candidate.prune_operations(block_ctx.timestamp.seconds)?;
+        candidate.prune_access_decisions(block_ctx)?;
         let expired = candidate.expire_commitments(&block_ctx.timestamp)?;
         let mut budget = retirement_cleanup::Budget::new();
         let collectors = [

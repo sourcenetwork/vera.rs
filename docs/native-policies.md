@@ -50,7 +50,8 @@ submits the command. These paths preserve damaged records for explicit recovery
 instead of treating them as absent or silently overwriting them.
 
 Native state loading validates retained policy and relationship encodings and key
-identities, and checks stored ACP parameters and access-decision encodings before
+identities, and checks stored ACP parameters, access-decision encodings and the
+bounded decision-cleanup cursor before
 publishing query state. A retained relationship, commitment or amendment must
 belong to a live policy or a recognized retirement job whose cleanup phase permits
 that record. Retirement markers, queue entries and counters must agree, and

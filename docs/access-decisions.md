@@ -40,5 +40,29 @@ usage; this method does not prove that an earlier permission remains granted.
 The module's decision lookup distinguishes missing keys from invalid records.
 Stored values must decode completely within 128 KiB and their decision ID must
 match the queried key. Corruption returns an error rather than absence. This
-lookup can return expired historical records; current validity requires the
+lookup can return expired records awaiting cleanup; current validity requires the
 request-bound verification described above.
+
+## Expired-record cleanup
+
+End-block maintenance inspects at most 64 access-decision records and 1 MiB of
+encoded keys and values per block. A persisted ordered cursor resumes the sweep
+across restarts and wraps at the end of the prefix. Decisions are removed at or
+after their exclusive expiry; live decisions are retained and revisited on later
+sweeps. Existing records require no new expiry index or bulk migration. Legacy
+zero-height placeholders have no trustworthy lifetime and remain for explicit
+migration rather than being silently deleted.
+
+Deletion can lag expiry by multiple blocks. The limits bound cleanup work, not
+retained state or RSS; sustained arrivals above reclamation capacity can still
+grow the backlog. Missing current-state records do not prove that a decision was
+never issued. Consumers needing an audit trail must retain their authenticated
+issuance evidence; this cleanup does not add historical decision-proof RPCs or
+prune finalized history or receipts.
+
+Malformed records encountered by the sweep reject the block's lifecycle work
+without publishing partial deletions or cursor advancement. Recovery validates
+cursor encoding before publishing query state. Cleanup changes execution roots
+and adds `decision_cleanup/cursor` to ACP state. All validators must coordinate
+this execution update; older binaries must not continue participating after it
+activates. The stored decision encoding and client verification rules are unchanged.
