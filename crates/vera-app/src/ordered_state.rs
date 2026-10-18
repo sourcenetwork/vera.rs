@@ -436,7 +436,8 @@ impl DatabaseSet<Ctx> for OrderedState {
 
     async fn apply(&self, batches: OrderedSealed) {
         let started = (tracing::enabled!(target: "vera_diagnostics", tracing::Level::DEBUG)
-            || tracing::enabled!(target: "vera_publication_diagnostics", tracing::Level::DEBUG))
+            || tracing::enabled!(target: "vera_publication_diagnostics", tracing::Level::DEBUG)
+            || tracing::enabled!(target: "vera_resource_diagnostics", tracing::Level::DEBUG))
         .then(std::time::Instant::now);
         #[cfg(feature = "fault-injection")]
         let changed = batches
@@ -452,6 +453,7 @@ impl DatabaseSet<Ctx> for OrderedState {
         self.executor.publish_snapshot(batches.modules);
         if let Some((started, applied)) = started.zip(applied) {
             let publication = started.elapsed() - applied;
+            self.durability_metrics.apply.observe(applied.as_secs_f64());
             *self.diagnostic_height.lock() = Some(batches.height);
             tracing::debug!(target: "vera_diagnostics", height = batches.height,
                 database_apply_us = applied.as_micros(),

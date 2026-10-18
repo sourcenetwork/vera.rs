@@ -153,7 +153,6 @@ fn peer_sync_preserves_roots_and_reports_rejected_responses() {
                     fetch_batch_size: NZU64!(64),
                     apply_batch_size: NZU64!(64),
                     max_outstanding_requests: commonware_utils::NZUsize!(2),
-                    update_channel_size: NZUsize!(1),
                 },
             )
             .await

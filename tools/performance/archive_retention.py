@@ -30,15 +30,24 @@ def audit(records, members=4, minimum_samples=4, minimum_finalized_span=512, max
         summary['maximum_height'] = max(summary['maximum_height'], height)
         for archive in ARCHIVES:
             prefix = 'runtime_metrics.' + archive + '_'
-            items = count(record, prefix + 'index_items')
-            keys = count(record, prefix + 'index_keys')
+            if prefix + 'keys_tracked' in record:
+                if any(prefix + name in record for name in ('index_items', 'index_keys')):
+                    raise ValueError('ambiguous archive metric schema')
+                schema = 'section_handles'
+                items = keys = count(record, prefix + 'keys_tracked')
+            else:
+                schema = 'translated_index'
+                items = count(record, prefix + 'index_items')
+                keys = count(record, prefix + 'index_keys')
             retained = count(record, prefix + 'items_tracked')
             # Gauges are read separately; tolerate one declared sync cadence of observation skew.
             if keys > items + max_excess or abs(items - retained) > max_excess:
                 raise ValueError('lookup entries differ from retained archive')
-            result = summary['archives'].setdefault(archive, {'maximum_items': 0,
+            result = summary['archives'].setdefault(archive, {'metric_schema': schema, 'maximum_items': 0,
                                                             'maximum_retained': 0,
                                                             'maximum_excess': 0})
+            if result['metric_schema'] != schema:
+                raise ValueError('archive metric schema changed within a member')
             result['maximum_items'] = max(result['maximum_items'], items)
             result['maximum_retained'] = max(result['maximum_retained'], retained)
             result['maximum_excess'] = max(result['maximum_excess'], items - retained)

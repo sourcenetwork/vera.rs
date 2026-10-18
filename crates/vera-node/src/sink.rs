@@ -63,6 +63,7 @@ pub struct NodeSink {
     mempool: InMemoryMempool,
     validator: SharedValidator,
     state: Arc<OnceLock<VeraStateSet>>,
+    metrics: Option<Arc<crate::finalization_metrics::FinalizationMetrics>>,
 }
 
 impl std::fmt::Debug for NodeSink {
@@ -110,6 +111,14 @@ impl std::fmt::Debug for SinkParts {
 }
 
 impl NodeSink {
+    pub(crate) fn with_metrics(
+        mut self,
+        metrics: Option<Arc<crate::finalization_metrics::FinalizationMetrics>>,
+    ) -> Self {
+        self.metrics = metrics;
+        self
+    }
+
     /// Build the sink from its parts.
     pub fn new(parts: SinkParts) -> Self {
         Self {
@@ -128,6 +137,7 @@ impl NodeSink {
             mempool: parts.mempool,
             validator: parts.validator,
             state: Arc::new(OnceLock::new()),
+            metrics: None,
         }
     }
 
@@ -148,13 +158,18 @@ impl FinalizedSink for NodeSink {
 
     async fn finalized(&self, block: &Block, receipts: Vec<ExecutionReceipt>) {
         let started = (tracing::enabled!(target: "vera_diagnostics", tracing::Level::DEBUG)
-            || tracing::enabled!(target: "vera_publication_diagnostics", tracing::Level::DEBUG))
+            || tracing::enabled!(target: "vera_publication_diagnostics", tracing::Level::DEBUG)
+            || self.metrics.is_some())
         .then(std::time::Instant::now);
         tracing::debug!(target: "vera_diagnostics", height = block.height, "finalized sink started");
         tracing::debug!(target: "vera_publication_diagnostics", height = block.height, "finalized sink started");
         let completed = || {
             if let Some(started) = started {
-                let total_us = started.elapsed().as_micros();
+                let elapsed = started.elapsed();
+                if let Some(metrics) = &self.metrics {
+                    metrics.callback.observe(elapsed.as_secs_f64());
+                }
+                let total_us = elapsed.as_micros();
                 tracing::debug!(target: "vera_diagnostics", height = block.height, total_us,
                     "finalized sink completed");
                 tracing::debug!(target: "vera_publication_diagnostics", height = block.height, total_us,
@@ -164,11 +179,27 @@ impl FinalizedSink for NodeSink {
         // Marshal serves lookups independently of the stateful callback.
         let artifacts = (self.finalization_lookup)(block.height).await;
         let lookup_elapsed = started.map(|started| started.elapsed());
+        if let Some((metrics, lookup_elapsed)) = self.metrics.as_ref().zip(lookup_elapsed) {
+            metrics.lookup.observe(lookup_elapsed.as_secs_f64());
+        }
         let history = self.history.clone();
         let persisted = block.clone();
         let gas_limit = self.gas_limit;
+        let metrics = self.metrics.clone();
+        let enqueued = metrics.as_ref().map(|_| std::time::Instant::now());
         let (receipts, artifacts) = ::tokio::task::spawn_blocking(move || {
+            if let Some((metrics, enqueued)) = metrics.as_ref().zip(enqueued) {
+                metrics
+                    .blocking_queue
+                    .observe(enqueued.elapsed().as_secs_f64());
+            }
+            let writing = metrics.as_ref().map(|_| std::time::Instant::now());
             history.append_finalized(&persisted, &receipts, gas_limit, artifacts.as_ref())?;
+            if let Some((metrics, writing)) = metrics.as_ref().zip(writing) {
+                metrics
+                    .history_append
+                    .observe(writing.elapsed().as_secs_f64());
+            }
             Ok::<_, anyhow::Error>((receipts, artifacts))
         })
         .await

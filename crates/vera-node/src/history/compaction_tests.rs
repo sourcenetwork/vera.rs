@@ -253,6 +253,7 @@ fn failed_compaction_preserves_history_receipts_and_durable_reopen() {
         let history = FinalizedHistory {
             db: DB::open_for_test(directory.path(), env).unwrap(),
             head: Mutex::new((0, genesis.id())),
+            metrics: None,
         };
         let mut records = Vec::new();
         let mut parent = genesis.id();

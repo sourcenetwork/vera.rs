@@ -22,6 +22,7 @@ pub use consts::*;
 
 mod diagnostics;
 mod finalization_diagnostics;
+mod finalization_metrics;
 
 mod finalize;
 pub use finalize::{index_finalized_block, subscription_data};

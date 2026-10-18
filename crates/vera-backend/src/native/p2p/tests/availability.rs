@@ -69,7 +69,6 @@ fn peer_sync_retries_after_pruning_without_a_target_update() {
                     fetch_batch_size: NZU64!(64),
                     apply_batch_size: NZU64!(64),
                     max_outstanding_requests: NZUsize!(1),
-                    update_channel_size: NZUsize!(1),
                 },
             );
             let restore = async {

@@ -761,3 +761,6 @@ async fn pruned_roster_selection_survives_history_and_module_reopen() {
             .is_err()
     );
 }
+
+#[path = "metrics_tests.rs"]
+mod metrics_tests;

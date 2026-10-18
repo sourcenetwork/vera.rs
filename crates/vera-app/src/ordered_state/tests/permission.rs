@@ -146,7 +146,6 @@ fn synchronized_permission_rpc_verifies_native_evidence_and_subsequent_denial() 
                             fetch_batch_size: NZU64!(64),
                             apply_batch_size: NZU64!(64),
                             max_outstanding_requests: commonware_utils::NZUsize!(2),
-                            update_channel_size: NZUsize!(2),
                         },
                     )
                     .await

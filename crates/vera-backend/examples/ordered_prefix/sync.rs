@@ -166,7 +166,6 @@ fn check_sync(burst: bool, prune: bool) {
                 fetch_batch_size: NZU64!(64),
                 apply_batch_size: NZU64!(128),
                 max_outstanding_requests: commonware_utils::NZUsize!(4),
-                update_channel_size: NZUsize!(4),
             },
         );
         let advance = async {

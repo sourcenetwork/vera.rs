@@ -27,6 +27,31 @@ class ArchiveRetention(unittest.TestCase):
         self.assertEqual(len(result['members']), 4)
         self.assertEqual(result['members']['node0']['archives']['finalized_blocks']['maximum_items'], 384)
 
+    def test_section_handle_metrics_bound_lookup_records(self):
+        rows = list(samples())
+        for row in rows:
+            for archive in retention.ARCHIVES:
+                prefix = 'runtime_metrics.' + archive + '_'
+                row[prefix + 'keys_tracked'] = row.pop(prefix + 'index_items')
+                del row[prefix + 'index_keys']
+        result = retention.audit(rows)
+        archive = result['members']['node0']['archives']['finalized_blocks']
+        self.assertEqual(archive['metric_schema'], 'section_handles')
+        self.assertEqual(archive['maximum_items'], 384)
+        rows[-1]['runtime_metrics.finalized_blocks_keys_tracked'] = 15000
+        with self.assertRaisesRegex(ValueError, 'lookup entries'):
+            retention.audit(rows)
+
+    def test_mixed_metric_schemas_are_rejected(self):
+        rows = list(samples())
+        rows[-1]['runtime_metrics.finalized_blocks_keys_tracked'] = 384
+        with self.assertRaisesRegex(ValueError, 'ambiguous archive'):
+            retention.audit(rows)
+        del rows[-1]['runtime_metrics.finalized_blocks_index_items']
+        del rows[-1]['runtime_metrics.finalized_blocks_index_keys']
+        with self.assertRaisesRegex(ValueError, 'schema changed'):
+            retention.audit(rows)
+
     def test_lookup_growth_is_rejected_even_when_primary_archive_is_bounded(self):
         rows = list(samples())
         rows[-1]['runtime_metrics.finalized_blocks_index_items'] = 15000

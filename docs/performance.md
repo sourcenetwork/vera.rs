@@ -939,6 +939,36 @@ backends, toolchains, and host classes; repeat runs before drawing conclusions.
 Load averages are context, not proof of exclusive CPU or storage access. There
 is no automatic percentage-regression gate on these shared hosts.
 
+## Finalization stage measurements
+
+With `RUST_LOG=warn,vera_resource_diagnostics=debug`, the node samples aggregate
+finalization histograms every 30 seconds without enabling per-revision events.
+The `finalization_*_seconds` series separate sink callback, certificate lookup,
+blocking-pool queue delay, history append, pre-lock preparation, head-lock wait
+and synchronous history batch time. Ordered state also records QMDB apply and
+durability wait/completion histograms. Disabled diagnostics do not start these
+history timers.
+
+Snapshots include `history_wal_statistics`: Regolith's cumulative WAL timing
+count, sum, minimum and maximum in microseconds. This includes append and
+synchronization work; it does not isolate the fsync syscall. Its observations
+can include recovery or other backend writes, so select the actual workload
+window and original member process IDs.
+
+After the existing workload report and snapshot extraction, run:
+
+```sh
+python3 tools/performance/finalization_summary.py /path/to/recorded-workload
+```
+
+`finalization-summary.json` requires in-workload coverage for every member and
+rejects missing/reset counters. It reports interval deltas and per-stage means.
+Nested and overlapping stages cannot be added as independent durations. A sink
+callback is per finalized revision, which can contain many operations; these
+means are not transaction latency or consensus finality measurements. Use these
+costs together with completed-load and queue/backlog observations when deciding
+whether a bounded persistence pipeline is justified.
+
 ## Live visualization
 
 A live view and a benchmark report answer different questions. The native RPC

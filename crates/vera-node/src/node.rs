@@ -356,10 +356,15 @@ async fn run_node_with_elector<
     });
     let probe_handle = probe_actor.start(dkg_probe_network);
 
-    let history = Arc::new(crate::FinalizedHistory::open(
-        config.data_dir.join("history"),
-        &genesis_block,
-    )?);
+    let finalization_metrics = crate::diagnostics::enabled().then(|| {
+        Arc::new(crate::finalization_metrics::FinalizationMetrics::register(
+            &context.child("finalization"),
+        ))
+    });
+    let history = Arc::new(
+        crate::FinalizedHistory::open(config.data_dir.join("history"), &genesis_block)?
+            .with_metrics(finalization_metrics.clone()),
+    );
     let completed_sync_height = plan.completed();
     let mut snapshot_sync = plan.should_sync(config.snapshot.is_some());
     let mut probe_artifact = None;
@@ -595,7 +600,8 @@ async fn run_node_with_elector<
         executor: executor.clone(),
         mempool: mempool.clone(),
         validator: validator.clone(),
-    });
+    })
+    .with_metrics(finalization_metrics);
     let participant_addresses = peers
         .participants
         .iter()
@@ -1005,7 +1011,6 @@ const fn sync_config() -> SyncEngineConfig {
         fetch_batch_size: MAX_FETCH_OPS,
         apply_batch_size: NZU64!(64),
         max_outstanding_requests: commonware_utils::NZUsize!(8),
-        update_channel_size: NZUsize!(256),
     }
 }
 

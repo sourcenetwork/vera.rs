@@ -109,9 +109,22 @@ impl Record {
 pub struct FinalizedHistory {
     db: DB,
     head: Mutex<(u64, BlockId)>,
+    metrics: Option<std::sync::Arc<crate::finalization_metrics::FinalizationMetrics>>,
 }
 
 impl FinalizedHistory {
+    pub(crate) fn with_metrics(
+        mut self,
+        metrics: Option<std::sync::Arc<crate::finalization_metrics::FinalizationMetrics>>,
+    ) -> Self {
+        self.metrics = metrics;
+        self
+    }
+
+    pub(crate) fn wal_statistics(&self) -> Option<regolith::HistogramSnapshot> {
+        self.db.wal_statistics()
+    }
+
     /// Independently sampled backend write counters, absent when statistics are disabled.
     pub(crate) fn write_statistics(&self) -> Option<HistoryWriteStatistics> {
         self.db.write_statistics()
@@ -173,6 +186,7 @@ impl FinalizedHistory {
         Ok(Self {
             db,
             head: Mutex::new((height, BlockId(hash.into()))),
+            metrics: None,
         })
     }
 
@@ -220,6 +234,7 @@ impl FinalizedHistory {
         mut batch: WriteBatch,
         persist: impl FnOnce(&DB, WriteBatch) -> Result<()>,
     ) -> Result<()> {
+        let started = self.metrics.as_ref().map(|_| std::time::Instant::now());
         ensure!(
             receipts.len() == block.txs.len(),
             "incomplete execution record"
@@ -241,7 +256,17 @@ impl FinalizedHistory {
                 .collect(),
         };
         let bytes = borsh::to_vec(&record)?;
+        let prepared = started.map(|started| started.elapsed());
+        let locking = self.metrics.as_ref().map(|_| std::time::Instant::now());
         let mut head = self.head.lock();
+        if let Some(((metrics, prepared), locking)) =
+            self.metrics.as_ref().zip(prepared).zip(locking)
+        {
+            metrics.history_prepare.observe(prepared.as_secs_f64());
+            metrics
+                .history_lock
+                .observe(locking.elapsed().as_secs_f64());
+        }
         ensure!(
             self.db.get(transfer::IMPORT)?.is_none(),
             "history import is pending"
@@ -277,7 +302,13 @@ impl FinalizedHistory {
         let head_bytes = borsh::to_vec(&(block.height, block.id().0.0))?;
         batch.put(HEAD, &head_bytes);
         batch.put(QUERY_HEAD, &head_bytes);
+        let writing = self.metrics.as_ref().map(|_| std::time::Instant::now());
         persist(&self.db, batch)?;
+        if let Some((metrics, writing)) = self.metrics.as_ref().zip(writing) {
+            metrics
+                .history_batch
+                .observe(writing.elapsed().as_secs_f64());
+        }
         *head = (block.height, block.id());
         Ok(())
     }

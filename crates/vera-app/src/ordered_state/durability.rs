@@ -10,11 +10,17 @@ use commonware_runtime::{
 pub(super) struct DurabilityMetrics {
     wait: Histogram,
     completion: Histogram,
+    pub(super) apply: Histogram,
 }
 
 impl DurabilityMetrics {
     pub(super) fn register(context: &impl Metrics) -> Self {
         Self {
+            apply: duration_histogram(
+                context,
+                "state_database_apply_seconds",
+                "Finalized QMDB apply elapsed time",
+            ),
             wait: duration_histogram(
                 context,
                 "state_durability_wait_seconds",
