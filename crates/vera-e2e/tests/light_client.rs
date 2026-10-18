@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use alloy_primitives::{Address, Bytes, FixedBytes};
+use alloy_primitives::{Address, B256, Bytes, FixedBytes};
 use alloy_sol_types::SolCall;
 
 use jsonrpsee::core::client::SubscriptionClientT;
@@ -27,6 +27,8 @@ use vera_modules::acp::abi::IAcp;
 mod decision;
 #[path = "light_client/permission.rs"]
 mod permission;
+#[path = "light_client/record.rs"]
+mod record;
 
 const HARDHAT_KEY_0: &str = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
@@ -228,6 +230,11 @@ async fn light_client_proof_verification() {
         .await
         .expect("vera_getLightBlock should succeed");
 
+    assert_eq!(
+        light_block.height, h1,
+        "RPC must return the requested revision"
+    );
+    assert_ne!(light_block.block_hash.parse::<B256>().unwrap(), B256::ZERO);
     let (_state_root, module_state_root) =
         verify_light_block(&light_block, &trusted_key).expect("light block should verify");
 
@@ -249,8 +256,10 @@ async fn light_client_proof_verification() {
         )
         .await
         .unwrap();
+    record::assert_policy(&response, policy_id_str, h1, &trusted_key);
+    let peer = VeraClient::new(cluster.node(1).rpc_url());
+    record::check_peer_and_absence(&peer, &response, policy_id_str, &trusted_key).await;
     let proof_1 = response.record;
-    assert!(proof_1.value.is_some());
     let request = permission::request();
     let empty_readers = permission::evidence(&client, policy_id_str, &request, h1).await;
     assert!(
@@ -327,7 +336,16 @@ async fn light_client_proof_verification() {
         )
         .await
         .unwrap();
+    record::assert_policy(&response, policy_id_str, h_invalidated, &trusted_key);
     let proof_2 = response.record;
+    assert!(
+        proof_2.value.is_some(),
+        "relationship mutation must retain the policy"
+    );
+    assert_eq!(
+        proof_2.value, proof_1.value,
+        "relationship mutation must not rewrite the policy"
+    );
     assert_ne!(proof_2.roots[0], proof_1.roots[0]);
     assert!(
         proof_1
