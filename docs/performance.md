@@ -941,6 +941,10 @@ is no automatic percentage-regression gate on these shared hosts.
 
 ## Finalization stage measurements
 
+The [October 19 history evaluation](history-finalization-20261019.md) records
+the refreshed dependency sources, measured stage costs and the decision to
+retain synchronous persistence, with a compact machine-readable result.
+
 With `RUST_LOG=warn,vera_resource_diagnostics=debug`, the node samples aggregate
 finalization histograms every 30 seconds without enabling per-revision events.
 The `finalization_*_seconds` series separate sink callback, certificate lookup,
