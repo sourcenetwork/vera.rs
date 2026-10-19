@@ -200,8 +200,7 @@ fn check_sync(burst: bool, prune: bool) {
             if burst {
                 assert_eq!(measured.operations.load(Ordering::Relaxed), initial_ops);
                 drop(pause);
-                while reached_rx.recv().await.unwrap() != last {
-                }
+                while reached_rx.recv().await.unwrap() != last {}
             }
             let delta_ops = measured.operations.load(Ordering::Relaxed) - initial_ops;
             let delta_bytes = measured.bytes.load(Ordering::Relaxed) - initial_bytes;
