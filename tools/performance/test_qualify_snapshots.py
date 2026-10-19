@@ -136,7 +136,17 @@ class Qualification(unittest.TestCase):
         with contextlib.redirect_stderr(errors):
             self.assertEqual(qualification.main(['--logs', str(self.logs), '--output', str(output)]), 1)
         self.assertFalse(output.exists())
-        self.assertEqual(errors.getvalue(), 'allocator snapshot qualification failed\n')
+        self.assertEqual(errors.getvalue(),
+                         'allocator snapshot qualification failed: member has no allocator snapshots\n')
+
+    def test_parser_failure_reason_does_not_export_input_or_paths(self):
+        self.log().write_text(allocator_snapshot().rstrip() + ' durable_height=private-value\n')
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            self.assertEqual(qualification.main([
+                '--logs', str(self.logs), '--output', str(self.root / 'evidence.json')]), 1)
+        self.assertEqual(errors.getvalue(),
+                         'allocator snapshot qualification failed: invalid or unavailable snapshot input\n')
 
 
 if __name__ == '__main__':

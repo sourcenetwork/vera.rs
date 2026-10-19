@@ -75,7 +75,7 @@ vera-harness = { path = "crates/vera-harness" }
 vera-test-infra = { path = "crates/vera-test-infra" }
 
 # Commonware (calver 2026.9.0)
-commonware-actor = { git = "https://github.com/iverc/commonware-upstream", rev = "8323cbde9019f6c5c505ea0300cdb18ab182adb9" }
+commonware-actor = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
 commonware-p2p = "2026.9.0"
 commonware-utils = "2026.9.0"
 commonware-codec = "2026.9.0"
@@ -177,20 +177,19 @@ libc = "0.2"
 tempfile = "3"
 rstest = "0.24"
 
-# Current upstream base: 38dfb1a22089d5b876be78f21a933970f66ef5cf.
-# Three regression-backed fixes are described in docs/snapshot-recovery.md.
-# See docs/snapshot-recovery.md for the retained changes and upgrade constraints.
+# Upstream base: 12772870feec3d7058fd38bcd2a1200a5624ee34.
+# The only local delta is the pending-epoch DKG retry; see docs/snapshot-recovery.md.
 [patch.crates-io]
-commonware-p2p = { git = "https://github.com/iverc/commonware-upstream", rev = "8323cbde9019f6c5c505ea0300cdb18ab182adb9" }
-commonware-utils = { git = "https://github.com/iverc/commonware-upstream", rev = "8323cbde9019f6c5c505ea0300cdb18ab182adb9" }
-commonware-codec = { git = "https://github.com/iverc/commonware-upstream", rev = "8323cbde9019f6c5c505ea0300cdb18ab182adb9" }
-commonware-runtime = { git = "https://github.com/iverc/commonware-upstream", rev = "8323cbde9019f6c5c505ea0300cdb18ab182adb9" }
-commonware-consensus = { git = "https://github.com/iverc/commonware-upstream", rev = "8323cbde9019f6c5c505ea0300cdb18ab182adb9" }
-commonware-cryptography = { git = "https://github.com/iverc/commonware-upstream", rev = "8323cbde9019f6c5c505ea0300cdb18ab182adb9" }
-commonware-parallel = { git = "https://github.com/iverc/commonware-upstream", rev = "8323cbde9019f6c5c505ea0300cdb18ab182adb9" }
-commonware-storage = { git = "https://github.com/iverc/commonware-upstream", rev = "8323cbde9019f6c5c505ea0300cdb18ab182adb9" }
-commonware-broadcast = { git = "https://github.com/iverc/commonware-upstream", rev = "8323cbde9019f6c5c505ea0300cdb18ab182adb9" }
-commonware-resolver = { git = "https://github.com/iverc/commonware-upstream", rev = "8323cbde9019f6c5c505ea0300cdb18ab182adb9" }
-commonware-macros = { git = "https://github.com/iverc/commonware-upstream", rev = "8323cbde9019f6c5c505ea0300cdb18ab182adb9" }
-commonware-glue = { git = "https://github.com/iverc/commonware-upstream", rev = "8323cbde9019f6c5c505ea0300cdb18ab182adb9" }
-commonware-stream = { git = "https://github.com/iverc/commonware-upstream", rev = "8323cbde9019f6c5c505ea0300cdb18ab182adb9" }
+commonware-p2p = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
+commonware-utils = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
+commonware-codec = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
+commonware-runtime = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
+commonware-consensus = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
+commonware-cryptography = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
+commonware-parallel = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
+commonware-storage = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
+commonware-broadcast = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
+commonware-resolver = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
+commonware-macros = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
+commonware-glue = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
+commonware-stream = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }

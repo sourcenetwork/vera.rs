@@ -64,6 +64,12 @@ impl HistoryDb {
         Ok(self.db.get_int_property(name))
     }
 
+    pub(super) fn wal_statistics(&self) -> Option<regolith::HistogramSnapshot> {
+        self.statistics
+            .as_ref()
+            .map(|statistics| statistics.get_histogram_snapshot(regolith::Histogram::WalWriteTime))
+    }
+
     pub(super) fn write_statistics(&self) -> Option<HistoryWriteStatistics> {
         self.statistics
             .as_deref()

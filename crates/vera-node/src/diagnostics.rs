@@ -34,22 +34,32 @@ pub(crate) async fn run(
                 proofs.stats(),
                 crate::allocator_memory::snapshot(),
                 history.write_statistics(),
+                history.wal_statistics(),
             ))
         })
         .await;
         match result {
-            Ok(Ok((metrics, memory, durable_height, index, proofs, allocator, statistics))) => {
+            Ok(Ok((
+                metrics,
+                memory,
+                durable_height,
+                index,
+                proofs,
+                allocator,
+                statistics,
+                wal,
+            ))) => {
                 if tracing::enabled!(target: "vera_resource_diagnostics", tracing::Level::DEBUG) {
                     tracing::debug!(target: "vera_resource_diagnostics", runtime_metrics = %metrics,
                     history_memory_bytes = ?memory, durable_height, index = ?index, proofs = ?proofs,
                     allocator_memory_bytes = ?allocator, process_id = std::process::id(),
-                    history_write_statistics = ?statistics,
+                    history_write_statistics = ?statistics, history_wal_statistics = ?wal,
                     "node resource snapshot");
                 } else {
                     tracing::debug!(target: "vera_diagnostics", runtime_metrics = %metrics,
                     history_memory_bytes = ?memory, durable_height, index = ?index, proofs = ?proofs,
                     allocator_memory_bytes = ?allocator, process_id = std::process::id(),
-                    history_write_statistics = ?statistics,
+                    history_write_statistics = ?statistics, history_wal_statistics = ?wal,
                     "node resource snapshot");
                 }
             }

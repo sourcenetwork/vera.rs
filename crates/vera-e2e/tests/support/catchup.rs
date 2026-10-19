@@ -216,6 +216,10 @@ async fn recover_replica_from(
         .chain_id(deployment)
         .genesis(genesis)
         .preset(ConsensusPreset::Normal)
+        .rust_log(format!(
+            "{},vera_storage=info",
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "warn".into())
+        ))
         .node_initializer(move |dir, _| {
             if pruning {
                 use std::io::Write as _;

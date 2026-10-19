@@ -5,7 +5,7 @@ use commonware_glue::stateful::db::{
 };
 use commonware_runtime::Supervisor as _;
 use commonware_storage::qmdb::sync::{Feedback, Request, Response, Source, source};
-use commonware_utils::channel::{mpsc, oneshot};
+use commonware_utils::channel::{mpsc, oneshot, ring};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU64, Ordering},
@@ -151,9 +151,9 @@ fn check_sync(burst: bool, prune: bool) {
             bytes: AtomicU64::new(0),
             tamper: Mutex::new(Some([bad_tx, good_tx])),
         });
-        let (updates_tx, updates_rx) = mpsc::channel(4);
+        let (updates_tx, updates_rx) = ring::channel(commonware_utils::NZUsize!(4));
         let (finish_tx, finish_rx) = mpsc::channel(1);
-        let (reached_tx, mut reached_rx) = mpsc::channel(16);
+        let (reached_tx, mut reached_rx) = ring::channel(commonware_utils::NZUsize!(16));
         let sync = Store::sync_db(
             context.child("replica"),
             destination(&context),
@@ -166,7 +166,6 @@ fn check_sync(burst: bool, prune: bool) {
                 fetch_batch_size: NZU64!(64),
                 apply_batch_size: NZU64!(128),
                 max_outstanding_requests: commonware_utils::NZUsize!(4),
-                update_channel_size: NZUsize!(4),
             },
         );
         let advance = async {
@@ -193,7 +192,7 @@ fn check_sync(burst: bool, prune: bool) {
                 source.apply(batch.merkleize().await.unwrap()).await;
                 assert!(source.finalize().await.durable().await);
                 last = source.committed_targets().await;
-                updates_tx.send(last.clone()).await.unwrap();
+                assert!(updates_tx.send_lossy(last.clone()));
                 if !burst {
                     assert_eq!(reached_rx.recv().await.unwrap(), last);
                 }
@@ -201,10 +200,7 @@ fn check_sync(burst: bool, prune: bool) {
             if burst {
                 assert_eq!(measured.operations.load(Ordering::Relaxed), initial_ops);
                 drop(pause);
-                while reached_rx.recv().await.unwrap() != last {
-                    // Coordinated sync parks at a reached target until the caller dispatches again.
-                    updates_tx.send(last.clone()).await.unwrap();
-                }
+                while reached_rx.recv().await.unwrap() != last {}
             }
             let delta_ops = measured.operations.load(Ordering::Relaxed) - initial_ops;
             let delta_bytes = measured.bytes.load(Ordering::Relaxed) - initial_bytes;

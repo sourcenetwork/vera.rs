@@ -56,7 +56,7 @@ fn peer_sync_retries_after_pruning_without_a_target_update() {
 
             let peers = network::Peers::start(&context);
             peers.resolvers[0].attach_database(pruned).await;
-            let (_updates, updates_rx) = mpsc::channel(1);
+            let (_updates, updates_rx) = ring::channel(NZUsize!(1));
             let sync = NativeDb::sync_db(
                 context.child("replica"),
                 state_config("replica", cache).0,
@@ -69,7 +69,6 @@ fn peer_sync_retries_after_pruning_without_a_target_update() {
                     fetch_batch_size: NZU64!(64),
                     apply_batch_size: NZU64!(64),
                     max_outstanding_requests: NZUsize!(1),
-                    update_channel_size: NZUsize!(1),
                 },
             );
             let restore = async {

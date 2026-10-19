@@ -30,6 +30,17 @@ def snapshot(second=0, labels=''):
 
 
 class SnapshotParser(unittest.TestCase):
+    def test_wal_timing_snapshots_preserve_count_and_microseconds(self):
+        record = metrics.parse_snapshot(snapshot().rstrip() +
+            ' history_wal_statistics=Some(HistogramSnapshot { count: 2, sum: 300, min: 100, max: 200 })\n')
+        self.assertEqual(record['history_wal_statistics.count'], 2)
+        self.assertEqual(record['history_wal_statistics.sum'], 300)
+        missing = metrics.parse_snapshot(snapshot().rstrip() + ' history_wal_statistics=None\n')
+        self.assertIsNone(missing['history_wal_statistics.sum'])
+        with self.assertRaisesRegex(ValueError, 'WAL timing'):
+            metrics.parse_snapshot(snapshot().rstrip() +
+                ' history_wal_statistics=Some(HistogramSnapshot { count: 2, sum: 300 })\n')
+
     def test_write_statistics_preserve_zero_and_full_width_counters(self):
         values = (0, 18446744073709551615, 2, 3, 4, 5)
         fields = ', '.join('%s: %d' % pair for pair in zip(metrics.WRITE_STATISTICS_FIELDS, values))

@@ -71,39 +71,40 @@ verify revision certificates and permission evidence independently.
 
 ## Commonware integration
 
-The pinned [integration branch](https://github.com/iverc/commonware-upstream/tree/iverc/vera-runtime-20261015)
-is based on official upstream `38dfb1a22089d5b876be78f21a933970f66ef5cf`.
-It includes [Commonware #5044](https://github.com/commonwarexyz/monorepo/pull/5044),
-in-flight request retention across target updates, buffered-boundary preservation,
-pipelined term handoffs and the newer batched storage reads and journal replay.
-All Commonware packages use one immutable Git revision from `Cargo.toml` and
-`Cargo.lock`; the package version alone does not identify this source.
+The pinned [integration branch](https://github.com/iverc/commonware-upstream/tree/iverc/upstream-dkg-only-20261018)
+is based on official upstream `12772870feec3d7058fd38bcd2a1200a5624ee34`.
+All Commonware packages select integration revision
+`b8bdee194ee8d4933d0c2867e1c104f229d94e96` in `Cargo.toml` and `Cargo.lock`;
+the package version alone does not identify this source.
 
-The integration revision is `8323cbde9019f6c5c505ea0300cdb18ab182adb9`.
-Only three fixes remain above that upstream base:
+The only changes above that base are the two-file
+[pending-epoch DKG retry](https://github.com/commonwarexyz/monorepo/pull/5263).
+Boundary verification retries pending epoch information every 100 ms while local
+finalized replay catches up. Independently derived information must still match
+before accepting the boundary. Follower responses remain pending; unavailable or
+mismatched artifacts are rejected.
 
-- [Report a reached sync target](https://github.com/commonwarexyz/monorepo/pull/5264) before consuming a newer queued target, and
-  observe finish requests received while reporting progress.
-- [Retry temporarily pending DKG epoch information](https://github.com/commonwarexyz/monorepo/pull/5263) during boundary verification.
-- [Remove pruned archive lookup references](https://github.com/commonwarexyz/monorepo/pull/5262) using index records from the sections
-  being discarded, including colliding and backfilled records.
+Upstream supplies the [archive rewrite](https://github.com/commonwarexyz/monorepo/pull/5268)
+and [sync progress and nonblocking channels](https://github.com/commonwarexyz/monorepo/pull/5282).
+Target updates and reached reports use bounded ring channels; a lagging receiver
+can skip intermediate values. Tuple coordination retains each database's latest
+report independently. Each reached target is reported before adopting a newer
+queued target. Vera's module-root commitment follows the same channel contract.
 
-These fixes preserve upstream request, response and storage encodings. There is
-no custom pruning response or near-tip target buffer. Upstream retains useful
-in-flight requests across target updates; each response is verified against the
-root that its request selected. When the lower bound advances, requests at or
-below it are retired so the new boundary can be fetched.
+Archive sections own their translated keys, and pruning removes their lookup
+handles in memory without reading discarded records or scanning the full index.
+`keys_tracked` reports indexed records; historical `index_*` metrics belong to the
+previous implementation. Vera's retention audit accepts each explicitly identified
+metric schema and rejects a schema change within one member's recording. Its
+single-record-per-height archives compare lookup records with retained heights.
+`items_per_section` is fixed for the lifetime of archive data; changing it can
+make initialization fail with `RecordCorrupted`.
 
-Archive cleanup reads fixed-size index records before deleting their sections.
-It does not read block values or scan the complete in-memory lookup index.
-Only affected translated-key buckets are examined, and retained references in
-those buckets survive. Errors reading the discarded index records fail the
-mutable prune operation rather than claiming cleanup completed.
-
-Boundary verification retries a pending epoch-info response every 100 ms while
-the local DKG actor catches up. Independently derived epoch information must
-still match before accepting the boundary. Follower responses remain pending;
-unavailable or mismatched artifacts are rejected.
+There is no custom pruning response or near-tip target buffer. Useful in-flight
+requests survive target updates and are verified against the root selected by
+their request. When the lower bound advances, requests at or below it are retired
+so the new boundary can be fetched. These retained DKG changes introduce no new
+wire or storage encoding.
 
 Native deployments use scheduled leader election and stage incoming-term
 proposals without voting before their parent certifies. Recovery readiness gates
