@@ -73,7 +73,7 @@ fn peer_sync_rejects_a_response_against_a_different_target_root() {
             target.root.0[0] ^= 1;
             let mut peers = network::Peers::start(&context);
             peers.resolvers[0].attach_database(source).await;
-            let (_updates, updates_rx) = mpsc::channel(1);
+            let (_updates, updates_rx) = ring::channel(NZUsize!(1));
             let sync = NativeDb::sync_db(
                 context.child("replica"), state_config("replica", cache).0,
                 peers.resolvers[1].clone(), target, updates_rx, None, None, sync_config(),
@@ -117,7 +117,7 @@ fn pruned_peer_sync_resumes_after_cancellation_and_converges_on_new_target() {
             let interrupted = PausedSource::new(peers.resolvers[1].clone(), 4);
             let replica_config = state_config("replica", cache).0;
             {
-                let (_updates, updates_rx) = mpsc::channel(1);
+                let (_updates, updates_rx) = ring::channel(NZUsize!(1));
                 let sync = NativeDb::sync_db(
                     context.child("interrupted"), replica_config.clone(), interrupted.clone(),
                     initial.clone(), updates_rx, None, None, sync_config(),
@@ -130,9 +130,9 @@ fn pruned_peer_sync_resumes_after_cancellation_and_converges_on_new_target() {
             assert_eq!(interrupted.served.load(Ordering::Relaxed), 4);
 
             let resumed = PausedSource::new(peers.resolvers[1].clone(), 0);
-            let (updates, updates_rx) = mpsc::channel(2);
+            let (updates, updates_rx) = ring::channel(NZUsize!(2));
             let (finish, finish_rx) = mpsc::channel(1);
-            let (reached, mut reached_rx) = mpsc::channel(4);
+            let (reached, mut reached_rx) = ring::channel(NZUsize!(4));
             let sync = NativeDb::sync_db(
                 context.child("resumed"), replica_config.clone(), resumed.clone(),
                 initial.clone(), updates_rx, Some(finish_rx), Some(reached), sync_config(),
@@ -146,7 +146,7 @@ fn pruned_peer_sync_resumes_after_cancellation_and_converges_on_new_target() {
                 source.apply(batch.merkleize().await.unwrap()).await;
                 assert!(source.finalize().await.durable().await);
                 let target = source.committed_targets().await;
-                updates.send(target.clone()).await.unwrap();
+                assert!(updates.send_lossy(target.clone()));
                 resumed.permits.add_permits(1024);
                 while reached_rx.recv().await.unwrap() != target {}
                 finish.send(()).await.unwrap();

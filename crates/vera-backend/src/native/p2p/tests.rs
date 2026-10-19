@@ -18,7 +18,10 @@ use commonware_storage::{
         sync::{Feedback, Request, Response, Source},
     },
 };
-use commonware_utils::{NZU16, NZU64, NZUsize, channel::mpsc};
+use commonware_utils::{
+    NZU16, NZU64, NZUsize,
+    channel::{mpsc, ring},
+};
 use std::{num::NonZeroU64, time::Duration};
 
 mod availability;
@@ -140,7 +143,7 @@ fn peer_sync_preserves_roots_and_reports_rejected_responses() {
 
             let mut peers = network::Peers::start(&context);
             peers.resolvers[0].attach_database(source.clone()).await;
-            let (_updates, updates_rx) = mpsc::channel(1);
+            let (_updates, updates_rx) = ring::channel(NZUsize!(1));
             let replica = NativeDb::sync_db(
                 context.child("replica"),
                 state_config("replica", cache).0,

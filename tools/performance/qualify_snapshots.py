@@ -15,6 +15,24 @@ MAX_CLUSTERS = 64
 MAX_MEMBERS = 16
 MAX_LOG_BYTES = 512 * 1024 * 1024
 MAX_SNAPSHOTS = 256
+FAILURE_REASONS = frozenset((
+    'snapshot directory must be a real directory',
+    'snapshot log is not a bounded regular file',
+    'snapshot process ID must be present',
+    'GNU/Linux allocator counters must be present',
+    'allocator arena accounting is inconsistent',
+    'snapshot sample limit exceeded',
+    'member has no allocator snapshots',
+    'retained member set is incomplete or oversized',
+    'snapshot cluster limit exceeded',
+    'missing allocator coverage from a four-member cluster',
+    'invalid runtime metric', 'non-finite runtime metric',
+    'duplicate runtime metric', 'missing runtime metrics',
+    'incomplete node resource snapshot', 'invalid snapshot process ID',
+    'incomplete allocator memory snapshot', 'partially supported allocator memory snapshot',
+    'incomplete WAL timing snapshot', 'invalid history write statistics',
+    'history write statistics exceed u64',
+))
 
 
 def directory(path):
@@ -87,8 +105,9 @@ def main(argv=None):
     args.output.unlink(missing_ok=True)
     try:
         result = qualify(args.logs, args.require_process_id)
-    except (OSError, KeyError, TypeError, ValueError):
-        print('allocator snapshot qualification failed', file=sys.stderr)
+    except (OSError, KeyError, TypeError, ValueError) as error:
+        reason = str(error) if str(error) in FAILURE_REASONS else 'invalid or unavailable snapshot input'
+        print('allocator snapshot qualification failed: ' + reason, file=sys.stderr)
         return 1
     args.output.write_text(json.dumps(result, sort_keys=True, indent=2) + '\n')
     print('%d clusters have checked allocator snapshots' % len(result['clusters']))
