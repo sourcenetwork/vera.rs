@@ -1353,3 +1353,10 @@ retirement. Actual pool occupancy and retaining ownership remain unmeasured;
 these observations do not prove that recycling accounts for the whole increase.
 The pool's source bound is not a bound on validator memory. Do not infer a leak,
 a whole-process memory bound or a backend default change from this checkpoint.
+
+### Local live status view
+
+See [the live status guide](live-status.md) for the read-only localhost collector,
+operator-provisioned finality verification, per-member failure states and optional
+recorded benchmark comparison. Deployment remains a separate operator action;
+revision progress is never substituted for client latency or sustainable capacity.

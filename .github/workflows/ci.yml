@@ -61,6 +61,7 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_record.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_heap_profile.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_storage_summary.py
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_live_status.py
 
       - name: Format
         run: cargo fmt -- --check
@@ -103,7 +104,9 @@ jobs:
         run: cargo fetch --locked
 
       - name: Unit tests
-        run: cargo test --frozen --workspace --exclude vera-e2e
+        run: |
+          cargo test --frozen --workspace --exclude vera-e2e
+          cargo test --frozen -p vera-domain --example verify_status
 
       - name: Build verad
         run: cargo build --frozen -p verad

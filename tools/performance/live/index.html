@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vera · observed network status</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body><header><span class="brand">VERA</span><h1>Observed network status</h1><p id="connection" role="status">Connecting to local collector…</p></header>
+<main><section><h2>Live member observations</h2><p id="scope">No observations yet.</p>
+<p>RPC reachability does not establish voting quorum. Peer connectivity is unknown when not reported.
+A verified certificate authenticates the revision, not endpoint identity, status fields or freshness.</p>
+<div id="members" class="grid"></div></section>
+<section><h2>Client measurements</h2><p>Live receipt latency, permission latency and completed workflow rate: unavailable without client observations.
+They are never inferred from revision progress. No simulated activity is shown.</p>
+<div id="benchmark"></div></section>
+<details><summary>Source and configuration provenance</summary><pre id="provenance"></pre></details>
+<footer>Times are collector observations. Revision intervals use the collector's monotonic clock and only adjacent observed revisions;
+polling gaps are not interpolated. Block clock offset is not latency. Reloading or restarting the collector starts a new window.</footer></main></body></html>
