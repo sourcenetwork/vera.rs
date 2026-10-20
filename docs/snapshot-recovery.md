@@ -71,18 +71,19 @@ verify revision certificates and permission evidence independently.
 
 ## Commonware integration
 
-The pinned [integration branch](https://github.com/iverc/commonware-upstream/tree/iverc/upstream-dkg-only-20261018)
-is based on official upstream `12772870feec3d7058fd38bcd2a1200a5624ee34`.
-All Commonware packages select integration revision
-`b8bdee194ee8d4933d0c2867e1c104f229d94e96` in `Cargo.toml` and `Cargo.lock`;
-the package version alone does not identify this source.
+All Commonware packages select official upstream
+[`96567b26e047a72ee3a8babbf63eac64c757a703`](https://github.com/commonwarexyz/monorepo/commit/96567b26e047a72ee3a8babbf63eac64c757a703)
+in `Cargo.toml` and `Cargo.lock`. No fork or local DKG retry patch is selected.
+The package version alone does not identify this source.
 
-The only changes above that base are the two-file
-[pending-epoch DKG retry](https://github.com/commonwarexyz/monorepo/pull/5263).
-Boundary verification retries pending epoch information every 100 ms while local
-finalized replay catches up. Independently derived information must still match
-before accepting the boundary. Follower responses remain pending; unavailable or
-mismatched artifacts are rejected.
+The [pending-epoch retry](https://github.com/commonwarexyz/monorepo/pull/5263)
+is deferred beyond the first release. During boundary verification, transient
+pending epoch information can remain unresolved until cancellation, even when
+finalized DKG replay subsequently catches up. Missing or mismatched information
+must never authorize a boundary. Snapshot startup remains bounded by
+`initialization_timeout_ms`; an operator can retry recovery from a fresh certified
+target. This is a release limitation, not equivalence to the earlier patched
+recovery behavior. See the [release scope](release-qualification.md#first-release-crates-and-daemon-artifacts).
 
 Upstream supplies the [archive rewrite](https://github.com/commonwarexyz/monorepo/pull/5268)
 and [sync progress and nonblocking channels](https://github.com/commonwarexyz/monorepo/pull/5282).

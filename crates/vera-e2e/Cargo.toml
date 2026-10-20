@@ -1,5 +1,6 @@
 [package]
 name = "vera-e2e"
+publish = false
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -23,7 +24,7 @@ vera-node.workspace = true
 
 [dev-dependencies]
 vera-cli.workspace = true
-orbis-reporting = { git = "https://github.com/sourcenetwork/orbis-rs", rev = "74b5c8c7e74a3c2ade932a7c5ddfbe547a98e3ef" }
+orbis-reporting.workspace = true
 blst = "0.3"
 tempfile.workspace = true
 vera-acp.workspace = true

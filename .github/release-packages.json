@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "roots": [
+    "vera-client",
+    "vera-verifier"
+  ],
+  "packages": [
+    "vera-acp",
+    "vera-client",
+    "vera-crypto",
+    "vera-domain",
+    "vera-identity",
+    "vera-modules",
+    "vera-permission",
+    "vera-verifier",
+    "vera-zanzibar"
+  ]
+}

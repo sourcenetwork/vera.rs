@@ -5,6 +5,15 @@ Native Rust implementation of Vera's access control, bulletin, identity and tran
 See [architecture and request flows](docs/architecture.md) for service boundaries,
 operator-managed membership, ACP, storage, threshold services, and recovery limits.
 
+## First-release scope
+
+Follow the [first-release checklist](docs/release-qualification.md#first-release-crates-and-daemon-artifacts)
+for crate publication and daemon release automation. The pending Commonware DKG
+boundary retry, unmerged Orbis service integration and four-host WAN qualification
+are follow-ups. Retain DKG bootstrap/resharing and existing verification checks.
+Do not reopen completed ACP v1, storage or measurement milestones to complete
+publishing. Record candidate-specific validation when changing dependencies.
+
 ## Related Repos
 
 Related repositories are independent checkouts; discover their paths rather than assuming a developer-specific directory layout:

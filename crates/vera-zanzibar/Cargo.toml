@@ -1,7 +1,9 @@
 [package]
 name = "vera-zanzibar"
-version = "0.5.0"
+publish = ["crates-io"]
+version.workspace = true
 edition = "2021"
+rust-version.workspace = true
 license = "Apache-2.0 OR MIT"
 repository.workspace = true
 description = "Zanzibar relation-tuple evaluation engine"
@@ -15,7 +17,7 @@ serde.workspace = true
 serde_json.workspace = true
 parking_lot.workspace = true
 tracing.workspace = true
-vera-identity = { path = "../vera-identity" }
+vera-identity = { path = "../vera-identity", version = "=0.1.0" }
 
 [dev-dependencies]
 tokio.workspace = true

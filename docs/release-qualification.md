@@ -3,8 +3,81 @@
 This record covers native ACP v1, bulletin, identity and operator-managed
 membership on pipelined Simplex, with QMDB authenticated state and synchronous
 Regolith history. Trust is a separate Go gateway; Orbis provides the separate
-application threshold protocols. The remaining deployment gate is the
-[four-host WAN qualification](wan-gates.md).
+application threshold protocols. The first-release scope below separates package
+publication from the later [four-host WAN qualification](wan-gates.md).
+
+## First release: crates and daemon artifacts
+
+The initial release targets native ACP v1, bulletin, identity, operator-managed
+membership, verified client APIs and the Regolith-backed daemon. ACP v2 remains
+future work. The four-host WAN test and the pending Commonware DKG boundary retry
+are follow-ups, not first-release acceptance gates. DKG itself remains part of
+consensus bootstrap and resharing; deferring the retry does not remove those
+protocols or weaken boundary verification.
+
+The unmerged Orbis service stack is outside this release's integration claim.
+Its signing, encryption and membership-churn qualification remains separate.
+Vera's bulletin, ring records and shared report formats remain supported code;
+packaging them must not require merging the entire Orbis service stack. Consumer
+qualification records must identify actual source revisions rather than assume
+that a passing branch has reached a repository's default branch.
+
+No crate or tagged release has been published from this repository yet. The
+remaining first-release work is:
+
+| Gate | Required result |
+| --- | --- |
+| Official Commonware source | Remove the fork from the release dependency set without waiting for the pending-epoch retry. Preserve the upstream archive and synchronization fixes. Qualify the selected unpatched source and document its boundary-recovery limitation. The release-preparation branch selects official `96567b26`; focused candidate qualification is in progress. |
+| Publishable crates | Version every packaged dependency, complete package metadata and verify the registry dependency graph without workspace patches. The nine-crate client/verifier closure now has explicit publication boundaries, versioned internal dependencies and package metadata. Their dependency closure includes the Git-only, unpublished `orbis-reporting` crate; resolve that shared-format packaging dependency independently of the service stack. |
+| Release automation | Validate versions and packages and produce tagged daemon assets with checksums and provenance from the same commit. The release workflow builds and compares two clean daemon artifacts and creates a draft GitHub release for an existing matching version tag. Keep crate uploads manual; CI needs no crates.io publishing credentials. |
+| Candidate validation | Run focused native authorization, membership, receipt and recovery checks affected by the dependency change. Verify the packaged client/verifier from a clean registry consumer, independent trust configuration, and the chosen daemon artifact. Reuse earlier source-bound evidence for unchanged code. |
+| Publication handoff | Record exact source, versions, dependencies, target and limitations. Provide package checksums and dependency-ordered commands for the maintainer to publish manually, followed by registry installation and download checks. Crate uploads belong to the maintainer, not the automated workflow. |
+
+The current source-distribution path is an exact official Commonware Git pin and
+SDK access from a qualified Vera Git commit. Native candidate and daemon
+qualification continues without waiting for a registry release. The upload gates
+below remain requirements for the maintainer's later crates.io publication.
+See [Git SDK access](manual-release.md#current-git-sdk-access).
+
+The existing `0.1.0` workspace version is the initial package-version candidate.
+The approved packaging scope is `vera-client`, `vera-verifier` and their seven
+required Vera libraries, plus daemon binaries. An installable `verad` crate, test
+harnesses and development tools are outside this first publication.
+Crates.io cannot reproduce Git-only or path-only dependencies from this checkout;
+adding version strings alone does not establish that the registry packages have
+the APIs or behavior qualified here. See Cargo's
+[published-dependency rules](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#multiple-locations).
+
+The pending retry is tracked in [#230](https://github.com/sourcenetwork/vera.rs/issues/230).
+It addresses epoch-boundary verification while finalized DKG replay is still
+catching up. The unpatched release must disclose that recovery limitation and
+check bounded cancellation; it must not claim the patched recovery result.
+WAN work remains tracked in [#234](https://github.com/sourcenetwork/vera.rs/issues/234),
+with its existing thresholds unchanged. Neither follow-up is marked completed.
+
+The [manual publication guide](manual-release.md) gives the dependency order,
+package verification commands and daemon tag/draft-release procedure. Crate
+uploads remain maintainer actions; no crates.io credentials are configured in CI.
+
+The release preflight is available as:
+
+```sh
+python3 .github/scripts/release-packages.py plan --output target/crate-release-plan.json
+python3 .github/scripts/release-packages.py check
+```
+
+`plan` records dependency order and unresolved blockers for review. `check` fails
+unless the complete client/verifier closure has matching package versions,
+explicit publication settings, complete metadata and registry-sourced runtime
+dependencies. Neither command uploads crates. CI retains the plan; a green
+metadata-report job does not mean `ready` is true.
+
+At this preparation revision, published Commonware `2026.9.0` predates the APIs
+used here. A registry-only `vera-domain` check fails with missing codec `Buf`
+and `Copying` APIs. The official Git revision compiles, but this does not make the
+SDK publishable against the older registry release. A compatible upstream crate
+release and a publishable shared `orbis-reporting` package remain prerequisites;
+changing version strings or silently using workspace patches does not satisfy them.
 
 ## Measured operating envelope
 
@@ -128,7 +201,7 @@ independent clean builds. The normal Linux CI also packages the daemon it
 exercised. Artifact provenance, key handling and process-crash tests are distinct
 from a physical-device power-loss guarantee.
 
-## Final deployment gate
+## Post-release WAN qualification
 
 The WAN recipe requires four isolated validator hosts, measured peer RTTs,
 independently provisioned trust, at least fifteen minutes at 20 offered writes/s,

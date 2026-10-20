@@ -52,48 +52,50 @@ strip = "symbols"
 
 [workspace.dependencies]
 # Core crates
-vera-backend = { path = "crates/vera-backend" }
-vera-modules = { path = "crates/vera-modules" }
-vera-cli = { path = "crates/vera-cli" }
-vera-config = { path = "crates/vera-config" }
-vera-consensus = { path = "crates/vera-consensus" }
-vera-crypto = { path = "crates/vera-crypto" }
-vera-domain = { path = "crates/vera-domain" }
-vera-indexer = { path = "crates/vera-indexer" }
-vera-overlay = { path = "crates/vera-overlay" }
-vera-qmdb = { path = "crates/vera-qmdb" }
-vera-jsonrpc = { path = "crates/vera-jsonrpc" }
-vera-traits = { path = "crates/vera-traits" }
+vera-backend = { path = "crates/vera-backend", version = "=0.1.0" }
+vera-modules = { path = "crates/vera-modules", version = "=0.1.0" }
+vera-cli = { path = "crates/vera-cli", version = "=0.1.0" }
+vera-config = { path = "crates/vera-config", version = "=0.1.0" }
+vera-consensus = { path = "crates/vera-consensus", version = "=0.1.0" }
+vera-crypto = { path = "crates/vera-crypto", version = "=0.1.0" }
+vera-domain = { path = "crates/vera-domain", version = "=0.1.0" }
+vera-indexer = { path = "crates/vera-indexer", version = "=0.1.0" }
+vera-overlay = { path = "crates/vera-overlay", version = "=0.1.0" }
+vera-qmdb = { path = "crates/vera-qmdb", version = "=0.1.0" }
+vera-jsonrpc = { path = "crates/vera-jsonrpc", version = "=0.1.0" }
+vera-traits = { path = "crates/vera-traits", version = "=0.1.0" }
 
-vera-app = { path = "crates/vera-app" }
-vera-node = { path = "crates/vera-node" }
-vera-client = { path = "crates/vera-client" }
-vera-permission = { path = "crates/vera-permission" }
-vera-executor = { path = "crates/vera-executor" }
-vera-genesis = { path = "crates/vera-genesis" }
-vera-harness = { path = "crates/vera-harness" }
-vera-test-infra = { path = "crates/vera-test-infra" }
+vera-app = { path = "crates/vera-app", version = "=0.1.0" }
+vera-node = { path = "crates/vera-node", version = "=0.1.0" }
+vera-client = { path = "crates/vera-client", version = "=0.1.0" }
+vera-permission = { path = "crates/vera-permission", version = "=0.1.0" }
+vera-executor = { path = "crates/vera-executor", version = "=0.1.0" }
+vera-genesis = { path = "crates/vera-genesis", version = "=0.1.0" }
+vera-harness = { path = "crates/vera-harness", version = "=0.1.0" }
+vera-test-infra = { path = "crates/vera-test-infra", version = "=0.1.0" }
 
 # Commonware (calver 2026.9.0)
-commonware-actor = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
-commonware-p2p = "2026.9.0"
-commonware-utils = "2026.9.0"
-commonware-codec = "2026.9.0"
-commonware-runtime = "2026.9.0"
-commonware-consensus = "2026.9.0"
-commonware-cryptography = "2026.9.0"
-commonware-parallel = "2026.9.0"
-commonware-storage = "2026.9.0"
-commonware-broadcast = "2026.9.0"
-commonware-resolver = "2026.9.0"
-commonware-macros = "2026.9.0"
-commonware-glue = "2026.9.0"
-commonware-stream = "2026.9.0"
+commonware-actor = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
+commonware-p2p = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
+commonware-utils = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
+commonware-codec = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
+commonware-runtime = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
+commonware-consensus = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
+commonware-cryptography = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
+commonware-parallel = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
+commonware-storage = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
+commonware-broadcast = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
+commonware-resolver = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
+commonware-macros = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
+commonware-glue = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
+commonware-stream = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
+
+orbis-reporting = { version = "=0.0.1", git = "https://github.com/sourcenetwork/orbis-rs", rev = "fd22c6402555fbba1e00a748e7354dec427de97d" }
 
 # Shared Defra types and policy evaluation
-vera-acp = { path = "crates/vera-acp" }
-vera-identity = { path = "crates/vera-identity" }
-vera-zanzibar = { path = "crates/vera-zanzibar" }
+vera-acp = { path = "crates/vera-acp", version = "=0.1.0" }
+vera-identity = { path = "crates/vera-identity", version = "=0.1.0" }
+vera-zanzibar = { path = "crates/vera-zanzibar", version = "=0.1.0" }
 
 # Alloy
 alloy-primitives = "1.7"
@@ -176,20 +178,3 @@ libc = "0.2"
 # Testing
 tempfile = "3"
 rstest = "0.24"
-
-# Upstream base: 12772870feec3d7058fd38bcd2a1200a5624ee34.
-# The only local delta is the pending-epoch DKG retry; see docs/snapshot-recovery.md.
-[patch.crates-io]
-commonware-p2p = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
-commonware-utils = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
-commonware-codec = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
-commonware-runtime = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
-commonware-consensus = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
-commonware-cryptography = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
-commonware-parallel = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
-commonware-storage = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
-commonware-broadcast = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
-commonware-resolver = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
-commonware-macros = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
-commonware-glue = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }
-commonware-stream = { git = "https://github.com/iverc/commonware-upstream", rev = "b8bdee194ee8d4933d0c2867e1c104f229d94e96" }

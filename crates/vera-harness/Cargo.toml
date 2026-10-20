@@ -1,5 +1,6 @@
 [package]
 name = "vera-harness"
+publish = false
 version = "0.1.0"
 description = "Vera.rs node manager, cluster builder, and observability"
 edition.workspace = true

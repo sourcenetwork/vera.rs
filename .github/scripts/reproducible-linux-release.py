@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build and compare independent normal Linux release bundles."""
 import argparse
+import difflib
 import gzip
 import hashlib
 import io
@@ -47,6 +48,13 @@ def validate_build_environment(environment):
             raise ValueError(f'release compilation has a build override: {key}')
 
 
+def validate_build_image(image):
+    if (not isinstance(image, str)
+            or not re.fullmatch(r'buildpack-deps:noble-curl@sha256:[0-9a-f]{64}', image)):
+        raise ValueError('release compilation requires a digest-pinned Ubuntu 24.04 build image')
+    return image
+
+
 def build(root, destination, source, member):
     validate_source(source)
     if member not in ('1', '2'):
@@ -56,10 +64,11 @@ def build(root, destination, source, member):
     if (root / 'target').exists():
         raise ValueError('clean compilation requires an absent target directory')
     validate_build_environment(os.environ)
+    image = validate_build_image(os.environ.get('RELEASE_BUILD_IMAGE'))
     package = runpy.run_path(str(root / '.github/scripts/package-linux-release.py'))
     environment = {
-        'runner_image': os.environ.get('ImageVersion'),
-        'runner_os': os.environ.get('ImageOS'),
+        'build_image': image,
+        'apt_snapshot': os.environ.get('APT_SNAPSHOT'),
         'os_release': Path('/etc/os-release').read_text(),
         'packages': output(['dpkg-query', '-W', '-f=${binary:Package}\t${Version}\n'], root),
         'gcc': output(['gcc', '--version'], root),
@@ -71,7 +80,15 @@ def build(root, destination, source, member):
     subprocess.run(package['BUILD_COMMAND'], cwd=root, check=True)
     metadata = package['provenance'](root)
     package['package'](root / 'target/release/verad', destination, metadata)
-    evidence = {'builder': member, 'environment': environment}
+    evidence = {
+        'builder': member, 'environment': environment,
+        'host': {'runner_image': os.environ.get('ImageVersion'),
+                 'image_os': os.environ.get('ImageOS'),
+                 'runner_os': os.environ.get('RUNNER_OS'),
+                 'runner_name': os.environ.get('RUNNER_NAME'),
+                 'run_id': os.environ.get('GITHUB_RUN_ID'),
+                 'run_attempt': os.environ.get('GITHUB_RUN_ATTEMPT')},
+    }
     (destination / 'compilation.json').write_text(json.dumps(evidence, sort_keys=True, indent=2) + '\n')
 
 
@@ -152,15 +169,31 @@ def compare(first, second, source):
     right, right_build, right_archive = bundle(second, source)
     if left_build['builder'] != '1' or right_build['builder'] != '2':
         raise ValueError('comparison requires both independent builders')
-    if left_build['environment'] != right_build['environment']:
-        raise ValueError('independent compilation environments differ')
+    left_environment, right_environment = left_build['environment'], right_build['environment']
+    for environment in (left_environment, right_environment):
+        validate_build_image(environment.get('build_image'))
+    if left_environment != right_environment:
+        fields = sorted(key for key in left_environment.keys() | right_environment.keys()
+                        if left_environment.get(key) != right_environment.get(key))
+        detail = 'independent compilation environments differ: ' + ', '.join(fields)
+        if 'packages' in fields:
+            difference = list(difflib.unified_diff(
+                left_environment.get('packages', '').splitlines(),
+                right_environment.get('packages', '').splitlines(),
+                fromfile='builder-1/packages', tofile='builder-2/packages', n=1, lineterm=''))
+            detail += '\n' + '\n'.join(difference[:24])
+            if len(difference) > 24:
+                detail += '\n(package diff truncated; see compilation.json in both build artifacts)'
+        raise ValueError(detail)
     if left != right or left_archive != right_archive:
         raise ValueError('independent release compilations differ')
     return {'source_commit': source, 'source_tree': left['source_tree'],
             'binary_sha256': left['binary_sha256'], 'archive_sha256': left_archive,
-            'builders': ['1', '2'], 'environment': left_build['environment'],
-            'scope': 'Two clean hosted builds at the same source path and recorded environment; '
-                     'does not establish cross-toolchain reproducibility or runtime correctness.'}
+            'builders': ['1', '2'], 'environment': left_environment,
+            'hosts': {'1': left_build.get('host'), '2': right_build.get('host')},
+            'scope': 'Two clean hosted builds in the same digest-pinned container and recorded '
+                     'userspace environment. Host runner metadata is recorded separately; '
+                     'this does not establish cross-toolchain reproducibility or runtime correctness.'}
 
 
 def main():
