@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build and compare independent normal Linux release bundles."""
 import argparse
+import difflib
 import gzip
 import hashlib
 import io
@@ -60,6 +61,7 @@ def build(root, destination, source, member):
     environment = {
         'runner_image': os.environ.get('ImageVersion'),
         'runner_os': os.environ.get('ImageOS'),
+        'apt_snapshot': os.environ.get('APT_SNAPSHOT'),
         'os_release': Path('/etc/os-release').read_text(),
         'packages': output(['dpkg-query', '-W', '-f=${binary:Package}\t${Version}\n'], root),
         'gcc': output(['gcc', '--version'], root),
@@ -152,8 +154,20 @@ def compare(first, second, source):
     right, right_build, right_archive = bundle(second, source)
     if left_build['builder'] != '1' or right_build['builder'] != '2':
         raise ValueError('comparison requires both independent builders')
-    if left_build['environment'] != right_build['environment']:
-        raise ValueError('independent compilation environments differ')
+    left_environment, right_environment = left_build['environment'], right_build['environment']
+    if left_environment != right_environment:
+        fields = sorted(key for key in left_environment.keys() | right_environment.keys()
+                        if left_environment.get(key) != right_environment.get(key))
+        detail = 'independent compilation environments differ: ' + ', '.join(fields)
+        if 'packages' in fields:
+            difference = list(difflib.unified_diff(
+                left_environment.get('packages', '').splitlines(),
+                right_environment.get('packages', '').splitlines(),
+                fromfile='builder-1/packages', tofile='builder-2/packages', n=1, lineterm=''))
+            detail += '\n' + '\n'.join(difference[:24])
+            if len(difference) > 24:
+                detail += '\n(package diff truncated; see compilation.json in both build artifacts)'
+        raise ValueError(detail)
     if left != right or left_archive != right_archive:
         raise ValueError('independent release compilations differ')
     return {'source_commit': source, 'source_tree': left['source_tree'],

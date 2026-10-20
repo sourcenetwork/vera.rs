@@ -86,6 +86,32 @@ class IndependentReleaseEvidence(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'independent builders'):
             reproduction.compare(first, duplicate, SOURCE)
 
+    def test_package_drift_names_the_changed_build_tool_without_relaxing_equality(self):
+        first = self.bundle('first', '1', environment={
+            'packages': 'libc6\t2.39\nprotobuf-compiler\t3.21.12-8.2ubuntu0.4',
+            'source_path': '/candidate',
+        })
+        second = self.bundle('second', '2', environment={
+            'packages': 'libc6\t2.39\nprotobuf-compiler\t3.21.12-8.2ubuntu0.3',
+            'source_path': '/candidate',
+        })
+        with self.assertRaises(ValueError) as failure:
+            reproduction.compare(first, second, SOURCE)
+        detail = str(failure.exception)
+        self.assertIn('environments differ: packages', detail)
+        self.assertIn('builder-1/packages', detail)
+        self.assertIn('builder-2/packages', detail)
+        self.assertIn('-protobuf-compiler\t3.21.12-8.2ubuntu0.4', detail)
+        self.assertIn('+protobuf-compiler\t3.21.12-8.2ubuntu0.3', detail)
+
+    def test_package_drift_output_is_bounded(self):
+        first = self.bundle('first', '1', environment={'packages': 'old\n' * 100})
+        second = self.bundle('second', '2', environment={'packages': 'new\n' * 100})
+        with self.assertRaises(ValueError) as failure:
+            reproduction.compare(first, second, SOURCE)
+        self.assertLessEqual(len(str(failure.exception).splitlines()), 26)
+        self.assertIn('package diff truncated', str(failure.exception))
+
     def test_changed_archive_or_claimed_binary_hash_fails(self):
         first = self.bundle('first', '1')
         (first / 'SHA256SUMS').write_text('0' * 64 + '  ' + reproduction.ARCHIVE + '\n')

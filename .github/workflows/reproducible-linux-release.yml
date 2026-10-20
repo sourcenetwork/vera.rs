@@ -62,6 +62,8 @@ jobs:
     env:
       CARGO_BUILD_JOBS: '2'
       PROTOC: /usr/bin/protoc
+      APT_SNAPSHOT: '20261020T163000Z'
+      PROTOBUF_VERSION: '3.21.12-8.2ubuntu0.4'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -78,8 +80,10 @@ jobs:
           toolchain: 1.98.0
       - name: Install normal release build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
+          sudo apt-get --snapshot "$APT_SNAPSHOT" update
+          sudo apt-get --snapshot "$APT_SNAPSHOT" install --no-install-recommends -y clang libclang-dev cmake pkg-config libssl-dev \
+            "protobuf-compiler=$PROTOBUF_VERSION" "libprotoc32t64=$PROTOBUF_VERSION" \
+            "libprotobuf32t64=$PROTOBUF_VERSION" "libprotobuf-lite32t64=$PROTOBUF_VERSION"
       - name: Fetch locked source dependencies
         working-directory: candidate
         env:
