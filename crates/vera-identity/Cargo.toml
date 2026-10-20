@@ -1,7 +1,9 @@
 [package]
 name = "vera-identity"
-version = "0.5.0"
+publish = ["crates-io"]
+version.workspace = true
 edition = "2021"
+rust-version.workspace = true
 license = "Apache-2.0 OR MIT"
 repository.workspace = true
 description = "DID identity types"

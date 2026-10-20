@@ -1,9 +1,13 @@
 [package]
 name = "vera-permission"
+publish = ["crates-io"]
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description = "Verified native permission requests and read evidence"
+
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 bytes.workspace = true

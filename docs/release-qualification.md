@@ -27,8 +27,8 @@ remaining first-release work is:
 
 | Gate | Required result |
 | --- | --- |
-| Official Commonware source | Remove the fork from the release dependency set without waiting for the pending-epoch retry. Preserve the upstream archive and synchronization fixes. Qualify the selected unpatched source and document its boundary-recovery limitation. Current `main` still contains the retry patch until that source change is made. |
-| Publishable crates | Version every packaged dependency, complete package metadata and verify the registry dependency graph without workspace patches. The client/verifier publication closure currently contains nine Vera crates. Their dependency closure includes the Git-only, unpublished `orbis-reporting` crate; resolve that shared-format packaging dependency independently of the service stack. |
+| Official Commonware source | Remove the fork from the release dependency set without waiting for the pending-epoch retry. Preserve the upstream archive and synchronization fixes. Qualify the selected unpatched source and document its boundary-recovery limitation. The release-preparation branch selects official `c18a6b9c`; focused candidate qualification is in progress. |
+| Publishable crates | Version every packaged dependency, complete package metadata and verify the registry dependency graph without workspace patches. The nine-crate client/verifier closure now has explicit publication boundaries, versioned internal dependencies and package metadata. Their dependency closure includes the Git-only, unpublished `orbis-reporting` crate; resolve that shared-format packaging dependency independently of the service stack. |
 | Release automation | Validate versions and packages and produce tagged daemon assets with checksums and provenance from the same commit. Existing workflows build and compare artifacts but do not create releases. Keep crate uploads manual; CI needs no crates.io publishing credentials. |
 | Candidate validation | Run focused native authorization, membership, receipt and recovery checks affected by the dependency change. Verify the packaged client/verifier from a clean registry consumer, independent trust configuration, and the chosen daemon artifact. Reuse earlier source-bound evidence for unchanged code. |
 | Publication handoff | Record exact source, versions, dependencies, target and limitations. Provide package checksums and dependency-ordered commands for the maintainer to publish manually, followed by registry installation and download checks. Crate uploads belong to the maintainer, not the automated workflow. |
@@ -48,6 +48,26 @@ catching up. The unpatched release must disclose that recovery limitation and
 check bounded cancellation; it must not claim the patched recovery result.
 WAN work remains tracked in [#234](https://github.com/sourcenetwork/vera.rs/issues/234),
 with its existing thresholds unchanged. Neither follow-up is marked completed.
+
+The release preflight is available as:
+
+```sh
+python3 .github/scripts/release-packages.py plan --output target/crate-release-plan.json
+python3 .github/scripts/release-packages.py check
+```
+
+`plan` records dependency order and unresolved blockers for review. `check` fails
+unless the complete client/verifier closure has matching package versions,
+explicit publication settings, complete metadata and registry-sourced runtime
+dependencies. Neither command uploads crates. CI retains the plan; a green
+metadata-report job does not mean `ready` is true.
+
+At this preparation revision, published Commonware `2026.9.0` predates the APIs
+used here. A registry-only `vera-domain` check fails with missing codec `Buf`
+and `Copying` APIs. The official Git revision compiles, but this does not make the
+SDK publishable against the older registry release. A compatible upstream crate
+release and a publishable shared `orbis-reporting` package remain prerequisites;
+changing version strings or silently using workspace patches does not satisfy them.
 
 ## Measured operating envelope
 

@@ -1,15 +1,19 @@
 [package]
 name = "vera-modules"
+publish = ["crates-io"]
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description = "Vera module implementations (ACP, Bulletin, Vera)"
 
+license.workspace = true
+repository.workspace = true
+
 [dependencies]
 vera-acp.workspace = true
 vera-crypto.workspace = true
 vera-identity.workspace = true
-orbis-reporting = { git = "https://github.com/sourcenetwork/orbis-rs", rev = "74b5c8c7e74a3c2ade932a7c5ddfbe547a98e3ef" }
+orbis-reporting = { version = "=0.0.1", git = "https://github.com/sourcenetwork/orbis-rs", rev = "74b5c8c7e74a3c2ade932a7c5ddfbe547a98e3ef" }
 vera-zanzibar.workspace = true
 
 alloy-sol-types.workspace = true
