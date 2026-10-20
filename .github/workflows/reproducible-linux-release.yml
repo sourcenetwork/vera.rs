@@ -52,6 +52,7 @@ jobs:
           python3 .github/scripts/prepare-daemon-release.py --source "$SOURCE_REF" --tag "$RELEASE_TAG" --root candidate validate
 
   clean-build:
+    name: clean-build (${{ matrix.member }})
     needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -59,12 +60,24 @@ jobs:
       fail-fast: false
       matrix:
         member: ['1', '2']
+        image: ['buildpack-deps:noble-curl@sha256:4b426bbaa943d4562f2a9652a71194876a48ada25766e03e02bb4bfa45317a06']
+    container:
+      image: ${{ matrix.image }}
     env:
       CARGO_BUILD_JOBS: '2'
       PROTOC: /usr/bin/protoc
       APT_SNAPSHOT: '20261020T163000Z'
       PROTOBUF_VERSION: '3.21.12-8.2ubuntu0.4'
+      RELEASE_BUILD_IMAGE: ${{ matrix.image }}
+      DEBIAN_FRONTEND: noninteractive
     steps:
+      - name: Install pinned build environment
+        run: |
+          apt-get --snapshot "$APT_SNAPSHOT" -o Acquire::Retries=3 update
+          apt-get --snapshot "$APT_SNAPSHOT" -o Acquire::Retries=3 install --no-install-recommends -y \
+            ca-certificates curl git python3 build-essential clang libclang-dev cmake pkg-config libssl-dev \
+            "protobuf-compiler=$PROTOBUF_VERSION" "libprotoc32t64=$PROTOBUF_VERSION" \
+            "libprotobuf32t64=$PROTOBUF_VERSION" "libprotobuf-lite32t64=$PROTOBUF_VERSION"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
@@ -78,12 +91,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@62ae3a85dbdd2bedbb5819da8ce45635129289a1 # 1.98.0
         with:
           toolchain: 1.98.0
-      - name: Install normal release build dependencies
-        run: |
-          sudo apt-get --snapshot "$APT_SNAPSHOT" update
-          sudo apt-get --snapshot "$APT_SNAPSHOT" install --no-install-recommends -y clang libclang-dev cmake pkg-config libssl-dev \
-            "protobuf-compiler=$PROTOBUF_VERSION" "libprotoc32t64=$PROTOBUF_VERSION" \
-            "libprotobuf32t64=$PROTOBUF_VERSION" "libprotobuf-lite32t64=$PROTOBUF_VERSION"
       - name: Fetch locked source dependencies
         working-directory: candidate
         env:
@@ -99,6 +106,8 @@ jobs:
           python3 .github/scripts/reproducible-linux-release.py --source "$SOURCE_REF" build
           --root "$GITHUB_WORKSPACE/candidate" --member "$BUILD_MEMBER"
           --output "$RUNNER_TEMP/clean-release"
+      - name: Smoke-test the compiled daemon
+        run: candidate/target/release/verad --help
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: clean-release-${{ matrix.member }}

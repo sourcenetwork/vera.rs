@@ -132,13 +132,17 @@ with independently configured finality trust before calling the release accepted
 ## Prepare daemon assets
 
 The [Reproducible Linux release workflow](../.github/workflows/reproducible-linux-release.yml)
-builds the selected commit twice from clean targets, compares the recorded
-compilation environments and binary/archive hashes, and retains the evidence.
+builds the selected commit twice from clean targets on separate hosted runners
+inside the same digest-pinned official `buildpack-deps:noble-curl` container
+(Ubuntu 24.04). It compares the complete recorded container environments and
+binary/archive hashes and retains the evidence.
+Outer runner metadata is recorded separately; job setup logs identify each host
+image version. GitHub can assign different host revisions during a rollout.
 Build dependencies use a dated [Ubuntu archive snapshot](https://snapshot.ubuntu.com/)
 and an exact Protobuf compiler/library version. The snapshot ID and installed
-package inventory are recorded in the compilation environment. Update those pins
-together when qualifying a new build environment; a rolling repository must not
-silently change one builder's code generator.
+package inventory are recorded in the compilation environment. Update the
+container digest and package pins together when qualifying a new build environment;
+a rolling repository must not silently change one builder's code generator.
 A `vMAJOR.MINOR.PATCH` tag additionally prepares a **draft** GitHub release; the
 maintainer reviews and publishes that draft. Crate uploads remain independent
 manual actions. A daemon draft alone does not satisfy the registry gates above.

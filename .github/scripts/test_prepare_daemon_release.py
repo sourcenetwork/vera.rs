@@ -66,7 +66,9 @@ class TaggedDaemonRelease(unittest.TestCase):
         destination = self.root / name
         package.package(binary, destination, metadata)
         (destination / 'compilation.json').write_text(json.dumps({
-            'builder': member, 'environment': {'source_path': '/candidate'},
+            'builder': member, 'environment': {
+                'build_image': 'buildpack-deps:noble-curl@sha256:' + '1' * 64,
+                'source_path': '/candidate'},
         }))
         return destination
 

@@ -19,6 +19,7 @@ def module(name, file):
 reproduction = module('reproduction', 'reproducible-linux-release.py')
 release = module('release', 'package-linux-release.py')
 SOURCE = 'a' * 40
+BUILD_IMAGE = 'buildpack-deps:noble-curl@sha256:' + '1' * 64
 ELF = b'\x7fELF\x02\x01' + bytes(12) + b'\x3e\x00' + bytes(44)
 METADATA = {
     'format_version': 1, 'source_commit': SOURCE, 'source_tree': 'b' * 40,
@@ -42,8 +43,9 @@ class IndependentReleaseEvidence(unittest.TestCase):
         release.package(binary, destination, METADATA if metadata is None else metadata)
         (destination / 'compilation.json').write_text(json.dumps({
             'builder': builder,
-            'environment': {'packages': 'libc6\t2.39', 'source_path': '/candidate'}
-            if environment is None else environment,
+            'environment': {'build_image': BUILD_IMAGE, **(
+                {'packages': 'libc6\t2.39', 'source_path': '/candidate'}
+                if environment is None else environment)},
         }))
         return destination
 
@@ -55,6 +57,49 @@ class IndependentReleaseEvidence(unittest.TestCase):
         self.assertEqual(result['source_commit'], SOURCE)
         self.assertEqual(result['source_tree'], METADATA['source_tree'])
         self.assertEqual(result['builders'], ['1', '2'])
+
+    def test_host_rollout_keeps_container_equality_and_records_both_hosts(self):
+        first, second = self.bundle('first', '1'), self.bundle('second', '2')
+        hosts = {'1': {'runner_image': 'old', 'runner_os': 'ubuntu24'},
+                 '2': {'runner_image': 'new', 'runner_os': 'ubuntu24'}}
+        for directory, member in ((first, '1'), (second, '2')):
+            path = directory / 'compilation.json'
+            record = json.loads(path.read_text())
+            record['host'] = hosts[member]
+            path.write_text(json.dumps(record))
+        result = reproduction.compare(first, second, SOURCE)
+        self.assertEqual(result['hosts'], hosts)
+        self.assertEqual(result['environment']['build_image'], BUILD_IMAGE)
+        self.assertEqual(result['binary_sha256'], hashlib.sha256(ELF).hexdigest())
+
+    def test_distinct_container_images_fail_even_for_identical_outputs(self):
+        first = self.bundle('first', '1')
+        second = self.bundle('second', '2', environment={
+            'build_image': 'buildpack-deps:noble-curl@sha256:' + '2' * 64,
+            'packages': 'libc6\t2.39', 'source_path': '/candidate',
+        })
+        with self.assertRaisesRegex(ValueError, 'environments differ: build_image'):
+            reproduction.compare(first, second, SOURCE)
+
+    def test_missing_or_mutable_build_images_fail_comparison(self):
+        first = self.bundle('first', '1')
+        second = self.bundle('second', '2')
+        path = second / 'compilation.json'
+        for image in (None, '', 'ubuntu:24.04', 'buildpack-deps:noble-curl@sha256:' + '1' * 63):
+            with self.subTest(image=image):
+                record = json.loads(path.read_text())
+                record['environment']['build_image'] = image
+                path.write_text(json.dumps(record))
+                with self.assertRaisesRegex(ValueError, 'digest-pinned'):
+                    reproduction.compare(first, second, SOURCE)
+
+    def test_compilation_rejects_unpinned_build_environment(self):
+        with patch.dict(reproduction.os.environ, {}, clear=True), \
+                patch.object(reproduction, 'output', return_value=SOURCE), \
+                patch.object(reproduction.subprocess, 'run') as compile_command:
+            with self.assertRaisesRegex(ValueError, 'digest-pinned'):
+                reproduction.build(self.root, self.root / 'out', SOURCE, '1')
+            compile_command.assert_not_called()
 
     def test_distinct_binary_or_build_provenance_fails(self):
         first = self.bundle('first', '1')
