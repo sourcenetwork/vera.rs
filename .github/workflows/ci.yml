@@ -481,6 +481,7 @@ jobs:
               --test delegated_policy
               --test native_bulletin
               --test native_registration
+              --test cross_endpoint_receipts
               --test native_object_archive
               --test native_membership
               --test quorum_recovery

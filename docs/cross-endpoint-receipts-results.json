@@ -1,0 +1,134 @@
+{
+  "base_revision": "897845be2b6523f9a07da4fbc6b3aafb43453868",
+  "environment": {
+    "placement": "four validators and client on one host",
+    "os": "macOS-27.0-arm64-arm-64bit",
+    "cpu": "Apple M5 Max",
+    "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+    "build_profile": "dev, debug=0",
+    "build_jobs": 4
+  },
+  "source_sha256": "885de117b492ba6b15e8ad81b4fc077f4127501b4c163d15c3359c464d53594a",
+  "lockfile_sha256": "9f97773a47104344ffb00f0afb55d21810d4eee76c602adacdfce02c46b11b8c",
+  "binary_sha256": "a8b82c5cd90f5f0f507b9265e6c05a2d87da2edf811caa3cac3840bfc381ace1",
+  "quantiles": "nearest rank, independently per run; no pooled percentiles",
+  "runs": [
+    {
+      "run": 1,
+      "role": "exploratory before final observer/lint edits",
+      "stdout_sha256": "4cee6802b41a6247501cd5d74759d4b3324f1462e1b3da032b391fb280445b12",
+      "observations": 24,
+      "ordered_endpoint_pairs": 12,
+      "verified_on_all_replicas": 24,
+      "errors": 0,
+      "metrics": {
+        "admission_ms": {
+          "count": 24,
+          "min": 2.9740830000000003,
+          "p50": 4.359832999999999,
+          "p95": 5.4121250000000005,
+          "max": 5.784542
+        },
+        "submission_to_observed_finality_ms": {
+          "count": 24,
+          "min": 447.790833,
+          "p50": 758.22,
+          "p95": 1347.566,
+          "max": 1506.060375
+        },
+        "submission_to_certified_receipt_ms": {
+          "count": 24,
+          "min": 437.45045799999997,
+          "p50": 750.386167,
+          "p95": 1338.944334,
+          "max": 1500.6906249999997
+        },
+        "observed_finality_to_receipt_ms": {
+          "count": 24,
+          "min": -15.033959000000095,
+          "p50": -10.261250000000018,
+          "p95": 3.3602919999999585,
+          "max": 4.782375000000002
+        }
+      }
+    },
+    {
+      "run": 2,
+      "role": "final-source qualification",
+      "stdout_sha256": "d4f45385d250244d17c70240899817b6a95385e230848b3eee279fcf75ecbee7",
+      "observations": 24,
+      "ordered_endpoint_pairs": 12,
+      "verified_on_all_replicas": 24,
+      "errors": 0,
+      "metrics": {
+        "admission_ms": {
+          "count": 24,
+          "min": 2.8545,
+          "p50": 4.458625,
+          "p95": 5.189,
+          "max": 5.7077919999999995
+        },
+        "submission_to_observed_finality_ms": {
+          "count": 24,
+          "min": 554.439834,
+          "p50": 722.611209,
+          "p95": 1364.412,
+          "max": 1368.3945410000001
+        },
+        "submission_to_certified_receipt_ms": {
+          "count": 24,
+          "min": 545.914792,
+          "p50": 762.703333,
+          "p95": 1355.7801670000001,
+          "max": 1358.481791
+        },
+        "observed_finality_to_receipt_ms": {
+          "count": 24,
+          "min": -15.659541999999988,
+          "p50": -9.042916999999989,
+          "p95": 45.45612500000004,
+          "max": 47.55124999999998
+        }
+      }
+    },
+    {
+      "run": 3,
+      "role": "final-source qualification",
+      "stdout_sha256": "d8e9bde3baca0d081465ebcdbbd4435017a8945c75abfd8b9caac8f42eaced2a",
+      "observations": 24,
+      "ordered_endpoint_pairs": 12,
+      "verified_on_all_replicas": 24,
+      "errors": 0,
+      "metrics": {
+        "admission_ms": {
+          "count": 24,
+          "min": 2.366458,
+          "p50": 4.620458,
+          "p95": 6.121125,
+          "max": 6.359375
+        },
+        "submission_to_observed_finality_ms": {
+          "count": 24,
+          "min": 405.942583,
+          "p50": 730.1179589999999,
+          "p95": 1587.695417,
+          "max": 1594.6921249999998
+        },
+        "submission_to_certified_receipt_ms": {
+          "count": 24,
+          "min": 395.80587499999996,
+          "p50": 721.206459,
+          "p95": 1574.762459,
+          "max": 1583.4828750000001
+        },
+        "observed_finality_to_receipt_ms": {
+          "count": 24,
+          "min": -49.79145799999992,
+          "p50": -10.515166000000022,
+          "p95": 5.887208000000101,
+          "max": 45.256834000000026
+        }
+      }
+    }
+  ]
+}
