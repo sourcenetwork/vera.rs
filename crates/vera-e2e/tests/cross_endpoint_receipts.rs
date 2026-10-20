@@ -118,7 +118,6 @@ async fn single_endpoint_submission_has_cross_endpoint_certified_receipts() {
         .seed(deployment)
         .chain_id(deployment)
         .preset(ConsensusPreset::Normal)
-        .rust_log("info,vera_node::finalize=debug")
         .build()
         .await
         .unwrap();
