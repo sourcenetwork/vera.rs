@@ -1,22 +1,58 @@
 name: Reproducible Linux release
 
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       source:
         description: Immutable Vera commit to compile twice
         required: true
         type: string
+      release_tag:
+        description: Existing version tag for a draft daemon release (empty builds evidence only)
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: reproducible-linux-release-${{ inputs.source }}
+  group: reproducible-linux-release-${{ inputs.source || github.sha }}
   cancel-in-progress: false
 
+env:
+  SOURCE_REF: ${{ inputs.source || github.sha }}
+  RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
+
 jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Validate immutable source
+        run: python3 .github/scripts/reproducible-linux-release.py --source "$SOURCE_REF" validate
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@62ae3a85dbdd2bedbb5819da8ce45635129289a1 # 1.98.0
+        with:
+          toolchain: 1.98.0
+      - name: Check tag, version and merged source before release builds
+        if: env.RELEASE_TAG != ''
+        run: |
+          git -C candidate merge-base --is-ancestor "$SOURCE_REF" origin/main
+          python3 .github/scripts/prepare-daemon-release.py --source "$SOURCE_REF" --tag "$RELEASE_TAG" --root candidate validate
+
   clean-build:
+    needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     strategy:
@@ -26,7 +62,6 @@ jobs:
     env:
       CARGO_BUILD_JOBS: '2'
       PROTOC: /usr/bin/protoc
-      SOURCE_REF: ${{ inputs.source }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -71,8 +106,6 @@ jobs:
     needs: clean-build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    env:
-      SOURCE_REF: ${{ inputs.source }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -95,3 +128,45 @@ jobs:
           path: ${{ runner.temp }}/reproducible-release.json
           if-no-files-found: error
           retention-days: 30
+
+  draft-release:
+    if: github.ref_type == 'tag' || inputs.release_tag != ''
+    needs: compare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@62ae3a85dbdd2bedbb5819da8ce45635129289a1 # 1.98.0
+        with:
+          toolchain: 1.98.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: clean-release-*
+          path: ${{ runner.temp }}/clean-releases
+      - name: Bind reproduced assets to the existing tag and checkout
+        run: >-
+          python3 .github/scripts/prepare-daemon-release.py --source "$SOURCE_REF"
+          --tag "$RELEASE_TAG" --root candidate prepare
+          --first "$RUNNER_TEMP/clean-releases/clean-release-1"
+          --second "$RUNNER_TEMP/clean-releases/clean-release-2"
+          --output "$RUNNER_TEMP/daemon-release"
+      - name: Create draft daemon release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$RELEASE_TAG" --verify-tag --draft --title "Vera $RELEASE_TAG" \
+            --notes-file "$RUNNER_TEMP/daemon-release/release-notes.md" \
+            "$RUNNER_TEMP/daemon-release/verad-x86_64-unknown-linux-gnu-regolith.tar.gz" \
+            "$RUNNER_TEMP/daemon-release/SHA256SUMS" \
+            "$RUNNER_TEMP/daemon-release/release.json"

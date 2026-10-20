@@ -57,6 +57,7 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_summarize_test_results.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_reproducible_linux_release.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_release_packages.py
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_prepare_daemon_release.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_worker_progress.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_qualify_snapshots.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_record.py
