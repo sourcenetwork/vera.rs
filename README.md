@@ -48,6 +48,10 @@ See [CLAUDE.md](CLAUDE.md) for implementation structure and development conventi
 The [release qualification record](docs/release-qualification.md) collects local
 workload limits, recovery/security coverage and the tested consumer versions.
 The fixed and growing resource profiles passed; their measurements do not imply
-a hard RAM ceiling for arbitrary datasets. The remaining deployment gate is the
-[four-host WAN test](docs/wan-gates.md). Earlier unexplained readiness/read failures
+a hard RAM ceiling for arbitrary datasets. The
+[first-release checklist](docs/release-qualification.md#first-release-crates-and-daemon-artifacts)
+covers package publication and automated releases. The pending Commonware DKG
+boundary retry, unmerged Orbis service qualification and
+[four-host WAN test](docs/wan-gates.md) are follow-up work.
+Earlier unexplained readiness/read failures
 retain their documented limits; later passing checks do not establish their cause.

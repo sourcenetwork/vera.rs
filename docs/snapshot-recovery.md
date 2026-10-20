@@ -71,6 +71,12 @@ verify revision certificates and permission evidence independently.
 
 ## Commonware integration
 
+This section describes the current patched development dependency. The
+[first-release scope](release-qualification.md#first-release-crates-and-daemon-artifacts)
+defers the pending-epoch retry and requires selecting and qualifying an official
+source without it. Until that dependency change lands, the pin and retry behavior
+below still describe this checkout.
+
 The pinned [integration branch](https://github.com/iverc/commonware-upstream/tree/iverc/upstream-dkg-only-20261018)
 is based on official upstream `12772870feec3d7058fd38bcd2a1200a5624ee34`.
 All Commonware packages select integration revision

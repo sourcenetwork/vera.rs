@@ -1,4 +1,7 @@
-# Wide-area release gates
+# Post-release wide-area qualification
+
+This qualification follows the first crate and daemon release; it does not block
+that publication. Its thresholds and evidence requirements remain unchanged.
 
 Multi-region validation of a deployed validator set: sustained throughput,
 certified-receipt latency, verified-read latency and cross-region consistency
