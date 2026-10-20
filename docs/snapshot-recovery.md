@@ -72,7 +72,7 @@ verify revision certificates and permission evidence independently.
 ## Commonware integration
 
 All Commonware packages select official upstream
-[`c18a6b9c47b8e55d0a6f2fdef3fa10a75d6641da`](https://github.com/commonwarexyz/monorepo/commit/c18a6b9c47b8e55d0a6f2fdef3fa10a75d6641da)
+[`96567b26e047a72ee3a8babbf63eac64c757a703`](https://github.com/commonwarexyz/monorepo/commit/96567b26e047a72ee3a8babbf63eac64c757a703)
 in `Cargo.toml` and `Cargo.lock`. No fork or local DKG retry patch is selected.
 The package version alone does not identify this source.
 

@@ -27,11 +27,17 @@ remaining first-release work is:
 
 | Gate | Required result |
 | --- | --- |
-| Official Commonware source | Remove the fork from the release dependency set without waiting for the pending-epoch retry. Preserve the upstream archive and synchronization fixes. Qualify the selected unpatched source and document its boundary-recovery limitation. The release-preparation branch selects official `c18a6b9c`; focused candidate qualification is in progress. |
+| Official Commonware source | Remove the fork from the release dependency set without waiting for the pending-epoch retry. Preserve the upstream archive and synchronization fixes. Qualify the selected unpatched source and document its boundary-recovery limitation. The release-preparation branch selects official `96567b26`; focused candidate qualification is in progress. |
 | Publishable crates | Version every packaged dependency, complete package metadata and verify the registry dependency graph without workspace patches. The nine-crate client/verifier closure now has explicit publication boundaries, versioned internal dependencies and package metadata. Their dependency closure includes the Git-only, unpublished `orbis-reporting` crate; resolve that shared-format packaging dependency independently of the service stack. |
 | Release automation | Validate versions and packages and produce tagged daemon assets with checksums and provenance from the same commit. The release workflow builds and compares two clean daemon artifacts and creates a draft GitHub release for an existing matching version tag. Keep crate uploads manual; CI needs no crates.io publishing credentials. |
 | Candidate validation | Run focused native authorization, membership, receipt and recovery checks affected by the dependency change. Verify the packaged client/verifier from a clean registry consumer, independent trust configuration, and the chosen daemon artifact. Reuse earlier source-bound evidence for unchanged code. |
 | Publication handoff | Record exact source, versions, dependencies, target and limitations. Provide package checksums and dependency-ordered commands for the maintainer to publish manually, followed by registry installation and download checks. Crate uploads belong to the maintainer, not the automated workflow. |
+
+The current source-distribution path is an exact official Commonware Git pin and
+SDK access from a qualified Vera Git commit. Native candidate and daemon
+qualification continues without waiting for a registry release. The upload gates
+below remain requirements for the maintainer's later crates.io publication.
+See [Git SDK access](manual-release.md#current-git-sdk-access).
 
 The existing `0.1.0` workspace version is the initial package-version candidate.
 The approved packaging scope is `vera-client`, `vera-verifier` and their seven

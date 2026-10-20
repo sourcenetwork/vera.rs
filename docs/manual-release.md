@@ -5,16 +5,33 @@ commit. CI validates the package boundary and prepares daemon artifacts; it has
 no crates.io upload step or publishing credentials. `verad`, the node internals,
 test harnesses and development tools are not published as crates.
 
+## Current Git SDK access
+
+Until compatible registry packages are available, use the client and verifier
+from one qualified Vera Git commit. Set `VERA_SDK_REV` to its full commit hash,
+then run this in the consuming project:
+
+```sh
+cargo add --git https://github.com/sourcenetwork/vera.rs --rev "$VERA_SDK_REV" vera-client vera-verifier
+```
+
+Commonware dependencies pin official upstream `96567b26` directly, so consumers
+do not need to copy this repository's workspace patches. CI checks a separate
+Git consumer's resolved Commonware sources against the qualified graph. The
+pending DKG retry is still excluded. Git-based SDK access and daemon artifacts
+can be qualified before crates.io publication; the registry prerequisites below
+still apply to uploads.
+
 ## Prerequisites
 
 Publication is currently blocked by dependencies, not by the deferred DKG fix:
 
 - Publish compatible official Commonware packages containing the APIs and fixes
-  qualified by Vera. The current Git source is `c18a6b9c`; published `2026.9.0`
+  qualified by Vera. The current Git source is `96567b26`; published `2026.9.0`
   is older and fails the registry-only SDK build. Update the registry versions
-  and lockfile, remove the Git patches and requalify that exact release.
+  and lockfile, replace the Git dependencies and requalify that exact release.
 - Publish the shared-format `orbis-reporting` package independently of the Orbis
-  service stack. Vera currently pins version `0.0.1` at source `74b5c8c7`. Its
+  service stack. Vera currently pins version `0.0.1` at source `fd22c640`. Its
   registry package must match the qualified formats. Replace the Git dependency
   with the verified registry release; a version field alongside a Git URL is
   insufficient.
@@ -117,6 +134,11 @@ with independently configured finality trust before calling the release accepted
 The [Reproducible Linux release workflow](../.github/workflows/reproducible-linux-release.yml)
 builds the selected commit twice from clean targets, compares the recorded
 compilation environments and binary/archive hashes, and retains the evidence.
+Build dependencies use a dated [Ubuntu archive snapshot](https://snapshot.ubuntu.com/)
+and an exact Protobuf compiler/library version. The snapshot ID and installed
+package inventory are recorded in the compilation environment. Update those pins
+together when qualifying a new build environment; a rolling repository must not
+silently change one builder's code generator.
 A `vMAJOR.MINOR.PATCH` tag additionally prepares a **draft** GitHub release; the
 maintainer reviews and publishes that draft. Crate uploads remain independent
 manual actions. A daemon draft alone does not satisfy the registry gates above.

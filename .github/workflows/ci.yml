@@ -65,6 +65,19 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_storage_summary.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_live_status.py
 
+      - name: Check independent Git SDK sources
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+        run: python3 .github/scripts/check-sdk-sources.py --output "$RUNNER_TEMP/sdk-source-qualification.json"
+      - name: Retain independent Git SDK source evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sdk-source-qualification
+          path: ${{ runner.temp }}/sdk-source-qualification.json
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Record manual package readiness
         run: python3 .github/scripts/release-packages.py plan --output "$RUNNER_TEMP/crate-release-plan.json"
       - name: Retain manual package readiness
