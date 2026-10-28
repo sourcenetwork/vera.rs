@@ -8,6 +8,9 @@ license.workspace = true
 repository.workspace = true
 description = "RPC server for vera nodes"
 
+[features]
+nuclei-rpc = ["dep:nuclei", "dep:tokio-util"]
+
 [lints]
 workspace = true
 
@@ -24,6 +27,8 @@ alloy-primitives = { workspace = true, features = ["serde"] }
 # Async
 tokio = { workspace = true, features = ["net", "sync"] }
 async-trait.workspace = true
+nuclei = { version = "=0.5.0", default-features = false, features = ["iouring", "epoll"], optional = true }
+tokio-util = { version = "0.7", features = ["compat"], optional = true }
 
 # Serialization
 serde.workspace = true

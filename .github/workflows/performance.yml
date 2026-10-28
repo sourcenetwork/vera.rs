@@ -3,6 +3,15 @@ name: Performance
 on:
   workflow_dispatch:
     inputs:
+      nuclei_rpc_comparison:
+        description: Compare Tokio and Nuclei RPC on the same runner
+        type: boolean
+        default: false
+      nuclei_rpc_backend:
+        description: Nuclei Linux I/O backend for the RPC comparison
+        type: choice
+        options: [epoll, io_uring]
+        default: epoll
       archive_retention:
         description: Verify lookup retention over 6,000 operations against 128 fixed objects
         type: boolean
@@ -50,7 +59,7 @@ concurrency:
 
 jobs:
   workload:
-    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    if: (github.event_name == 'workflow_dispatch' && !inputs.nuclei_rpc_comparison) || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.extended_fixed_state && 240 || github.event_name == 'workflow_dispatch' && (inputs.sustained_fixed_state || inputs.sustained_growing_state || inputs.allocator_comparison) && 180 || 60 }}
     strategy:
@@ -282,3 +291,64 @@ jobs:
       - name: Stop workload processes
         if: always()
         run: python3 .github/scripts/stop-test-nodes.py "$GITHUB_WORKSPACE/target/release/verad"
+
+  nuclei-rpc-comparison:
+    if: github.event_name == 'workflow_dispatch' && inputs.nuclei_rpc_comparison
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+      CARGO_TERM_COLOR: always
+      NUCLEI_BACKEND: ${{ inputs.nuclei_rpc_backend || 'epoll' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install build and reporting dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler python3-venv
+          python3 -m venv "$RUNNER_TEMP/performance-python"
+          "$RUNNER_TEMP/performance-python/bin/pip" install -r tools/performance/requirements.txt
+      - uses: dtolnay/rust-toolchain@ff7f6a3374ce205788da40198ec918bd5d67aea7 # 1.99.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: nuclei-rpc-performance-1.99
+      - name: Fetch locked dependencies
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
+        run: cargo +1.99.0 fetch --locked
+      - name: Build both daemons and the common workload driver
+        run: |
+          mkdir -p binaries/base binaries/head
+          cargo +1.99.0 build --frozen --release -p verad
+          cp target/release/verad binaries/base/verad
+          cargo +1.99.0 build --frozen --release -p verad --features nuclei-rpc
+          cp target/release/verad binaries/head/verad
+          cargo +1.99.0 build --frozen --release -p vera-e2e --example operation_baseline --example component_baseline
+          cp target/release/examples/operation_baseline binaries/head/operation_baseline
+          cp target/release/examples/component_baseline binaries/head/component_baseline
+          cp target/release/examples/component_baseline binaries/base/component_baseline
+          sha256sum binaries/{base,head}/verad binaries/head/operation_baseline > binaries/SHA256SUMS
+          printf '{"base":"Tokio RPC","head":"Nuclei RPC","nuclei_backend":"%s","rust":"1.99.0"}\n' "$NUCLEI_BACKEND" > binaries/comparison-configuration.json
+      - name: Compare native workloads
+        env:
+          VERA_E2E_DIR: ${{ runner.temp }}/nuclei-comparison-nodes
+          MPLCONFIGDIR: ${{ runner.temp }}/nuclei-matplotlib
+        run: |
+          "$RUNNER_TEMP/performance-python/bin/python" tools/performance/run_pr.py \
+            --head . --base . --binaries binaries --output nuclei-performance --consensus pipelined
+      - name: Retain comparison and source bindings
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nuclei-rpc-comparison
+          path: |
+            binaries/SHA256SUMS
+            binaries/comparison-configuration.json
+            nuclei-performance/
+          if-no-files-found: warn
+          retention-days: 14

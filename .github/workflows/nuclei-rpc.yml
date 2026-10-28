@@ -1,0 +1,53 @@
+name: Nuclei RPC
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/nuclei-rpc.yml'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'bin/verad/**'
+      - 'crates/vera-jsonrpc/**'
+      - 'crates/vera-node/**'
+      - 'vendor/jsonrpsee-server/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+
+jobs:
+  rpc:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
+      - uses: dtolnay/rust-toolchain@ff7f6a3374ce205788da40198ec918bd5d67aea7 # 1.99.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: nuclei-rpc-1.99
+      - name: Fetch locked dependencies
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
+        run: cargo +1.99.0 fetch --locked
+      - name: Test HTTP, WebSocket and shutdown
+        run: cargo +1.99.0 test --frozen -p vera-jsonrpc --features nuclei-rpc --lib nuclei_transport::tests -- --test-threads=1
+      - name: Build Nuclei RPC daemon
+        run: cargo +1.99.0 build --frozen -p verad --features nuclei-rpc
+      - name: Exercise the native cluster
+        env:
+          VERAD_BINARY: ${{ github.workspace }}/target/debug/verad
+          VERA_E2E_DEADLINE_SCALE: '4'
+        run: cargo +1.99.0 test --frozen -p vera-e2e --test vera_e2e_canonical -- --test-threads=1
