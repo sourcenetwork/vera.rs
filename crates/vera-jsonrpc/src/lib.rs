@@ -24,6 +24,9 @@ mod header_subscribe;
 mod vera_api;
 pub use vera_api::{LightBlockLookup, ReceiptProofLookup, VeraApiImpl, VeraApiServer};
 
+#[cfg(feature = "nuclei-rpc")]
+mod nuclei_transport;
+
 mod server;
 pub use server::{JsonRpcServer, RpcServer, RpcServerHandle, ServerError};
 

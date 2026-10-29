@@ -315,11 +315,16 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
                         .max_failures(2),
                 )
                 .build();
-            let builder = Server::builder().set_config(config);
-            let result = match listener {
-                Some(listener) => builder.build_from_tcp(listener),
-                None => builder.build(addr).await,
+            #[cfg(not(feature = "nuclei-rpc"))]
+            let result = {
+                let builder = Server::builder().set_config(config);
+                match listener {
+                    Some(listener) => builder.build_from_tcp(listener),
+                    None => builder.build(addr).await,
+                }
             };
+            #[cfg(feature = "nuclei-rpc")]
+            let result = crate::nuclei_transport::Server::bind(addr, listener, config);
             let server = match result {
                 Ok(s) => s,
                 Err(e) => {

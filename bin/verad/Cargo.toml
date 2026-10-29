@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "Vera validator daemon"
 
 [features]
+nuclei-rpc = ["vera-node/nuclei-rpc"]
 fault-injection = ["vera-node/fault-injection"]
 
 [[bin]]

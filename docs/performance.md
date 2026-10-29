@@ -27,6 +27,38 @@ and independently checked executable provenance.
 See the [matched Go/Rust and allocator measurements](performance-20261011.md)
 for the independently checked October 11 runs and their qualification limits.
 
+## Nuclei RPC comparison
+
+The optional `nuclei-rpc` feature runs the validator's HTTP and WebSocket
+JSON-RPC transport on Nuclei sockets. JSON-RPC request handling and Commonware's
+consensus runtime still use Tokio. Nuclei 0.5 requires Rust 1.99, while the
+standard build remains on the repository's pinned toolchain.
+
+```sh
+cargo +1.99.0 build --locked --release -p verad --features nuclei-rpc
+```
+
+The Performance workflow can compare this build against the ordinary Tokio RPC
+build on one Linux runner, using the same source, Rust version and native workload.
+Both binaries are built before the interleaved passes, and their checksums,
+backend selection, workload results and host details are retained as artifacts.
+
+[The October 29 epoll comparison](https://github.com/sourcenetwork/vera.rs/actions/runs/40759601379)
+ran two interleaved passes per variant at a fixed offered load. Registrations
+completed at about 19.9 workflows/s for both variants; p95 time to certified
+receipt was 220–221 ms with Tokio and 220–222 ms with Nuclei. This limited
+run does not establish a throughput ceiling or a performance advantage. It does
+not measure the io_uring backend or WAN behavior.
+
+```sh
+gh workflow run performance.yml --ref main \
+  -f nuclei_rpc_comparison=true -f nuclei_rpc_backend=epoll
+```
+
+Select `io_uring` to test that backend on a host that permits it. A forced
+unsupported backend fails; it does not silently fall back. The comparison
+measures the recorded offered workload, not maximum throughput or WAN behavior.
+
 Vera provides these workload drivers:
 
 - `operation_baseline`: four local members; certified native ACP writes,

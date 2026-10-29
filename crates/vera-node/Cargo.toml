@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "Vera validator node assembly on commonware glue"
 
 [features]
+nuclei-rpc = ["vera-jsonrpc/nuclei-rpc"]
 fault-injection = ["vera-app/fault-injection"]
 
 [lints]

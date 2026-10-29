@@ -42,8 +42,8 @@ Publication is currently blocked by dependencies, not by the deferred DKG fix:
 Do not downgrade Commonware to make packaging pass. After the dependency changes,
 merge and qualify one final release candidate. Record the exact Vera source,
 Commonware and Regolith versions, shared reporting dependency and actual
-Defra/Backbone consumer revisions. The unmerged Orbis service stack is excluded
-from this release's qualification claim.
+Defra/Backbone consumer revisions. The Orbis service stack has merged, but its
+qualification must identify and test the selected Vera and Orbis revisions.
 
 ## Validate the candidate
 
