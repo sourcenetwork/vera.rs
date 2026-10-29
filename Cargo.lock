@@ -4462,7 +4462,7 @@ dependencies = [
 [[package]]
 name = "orbis-reporting"
 version = "0.0.1"
-source = "git+https://github.com/sourcenetwork/orbis-rs?rev=fd22c6402555fbba1e00a748e7354dec427de97d#fd22c6402555fbba1e00a748e7354dec427de97d"
+source = "git+https://github.com/sourcenetwork/orbis-rs?rev=06cc2d86ade4e3eb5ddbc82baf60e5f1fdd663d6#06cc2d86ade4e3eb5ddbc82baf60e5f1fdd663d6"
 dependencies = [
  "hex",
  "serde",

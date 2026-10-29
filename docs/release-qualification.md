@@ -15,7 +15,8 @@ are follow-ups, not first-release acceptance gates. DKG itself remains part of
 consensus bootstrap and resharing; deferring the retry does not remove those
 protocols or weaken boundary verification.
 
-The unmerged Orbis service stack is outside this release's integration claim.
+The Orbis service stack has merged. Release qualification still requires testing
+the selected Vera and Orbis revisions together.
 Its signing, encryption and membership-churn qualification remains separate.
 Vera's bulletin, ring records and shared report formats remain supported code;
 packaging them must not require merging the entire Orbis service stack. Consumer

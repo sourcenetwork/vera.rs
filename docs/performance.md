@@ -43,6 +43,13 @@ build on one Linux runner, using the same source, Rust version and native worklo
 Both binaries are built before the interleaved passes, and their checksums,
 backend selection, workload results and host details are retained as artifacts.
 
+[The October 29 epoll comparison](https://github.com/sourcenetwork/vera.rs/actions/runs/40759601379)
+ran two interleaved passes per variant at a fixed offered load. Registrations
+completed at about 19.9 workflows/s for both variants; p95 time to certified
+receipt was 220–221 ms with Tokio and 220–222 ms with Nuclei. This limited
+run does not establish a throughput ceiling or a performance advantage. It does
+not measure the io_uring backend or WAN behavior.
+
 ```sh
 gh workflow run performance.yml --ref main \
   -f nuclei_rpc_comparison=true -f nuclei_rpc_backend=epoll
