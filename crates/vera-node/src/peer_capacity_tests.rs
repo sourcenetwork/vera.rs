@@ -33,6 +33,7 @@ fn network_config(
         Vec::new(),
         max_peers_per_set,
         crate::MAX_MESSAGE_SIZE,
+        commonware_utils::NZUsize!(1000),
     )
 }
 

@@ -10,8 +10,8 @@ use vera_executor::VeraExecutor;
 use vera_genesis::GenesisState;
 use vera_modules::module_state::combine_module_roots;
 
-pub(super) fn state_config(context: &Ctx, prefix: &str, executor: VeraExecutor) -> OrderedConfig {
-    let cache = CacheRef::from_pooler(context, NZU16!(4084), NZUsize!(128));
+pub(super) fn state_config(_context: &Ctx, prefix: &str, executor: VeraExecutor) -> OrderedConfig {
+    let cache = CacheRef::new(NZU16!(4084), NZUsize!(128));
     ordered_config(
         state_set_config(prefix, cache.clone()),
         native::state_config(prefix, cache),

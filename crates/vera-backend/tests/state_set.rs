@@ -29,8 +29,8 @@ const fn account(seed: u8) -> AccountValue {
     AccountValue([seed; AccountEncoding::SIZE])
 }
 
-fn page_cache(context: &tokio::Context) -> CacheRef {
-    CacheRef::from_pooler(context, NZU16!(4084), NZUsize!(64))
+fn page_cache(_context: &tokio::Context) -> CacheRef {
+    CacheRef::new(NZU16!(4084), NZUsize!(64))
 }
 
 async fn read_all(

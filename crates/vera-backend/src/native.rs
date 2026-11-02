@@ -12,7 +12,7 @@ use commonware_storage::{
     journal::contiguous::variable,
     merkle::{full, mmr},
     qmdb::current::{VariableConfig, ordered::variable::Db},
-    translator::Translator,
+    translator::{OrderedTranslator, Translator},
 };
 use commonware_utils::{NZU64, NZUsize, bitmap::Readable as _};
 use futures::{FutureExt as _, StreamExt as _};
@@ -58,6 +58,8 @@ impl Translator for KeyPrefix {
         prefix
     }
 }
+
+impl OrderedTranslator for KeyPrefix {}
 
 impl BuildHasher for KeyPrefix {
     type Hasher = <RandomState as BuildHasher>::Hasher;
@@ -174,8 +176,7 @@ where
     E: commonware_runtime::Spawner
         + commonware_runtime::Storage
         + commonware_runtime::Clock
-        + commonware_runtime::Metrics
-        + commonware_runtime::BufferPooler,
+        + commonware_runtime::Metrics,
 {
     for entries in &changes {
         if entries.iter().any(|(key, value)| {
@@ -208,8 +209,7 @@ where
     E: commonware_runtime::Spawner
         + commonware_runtime::Storage
         + commonware_runtime::Clock
-        + commonware_runtime::Metrics
-        + commonware_runtime::BufferPooler,
+        + commonware_runtime::Metrics,
 {
     for (key, value) in entries {
         batch = batch.write(key, value.map(Bytes::from));

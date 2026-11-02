@@ -18,7 +18,7 @@ fn proofs_bind_all_namespaces_and_commit_ranges_after_pruning() {
     let directory = tempfile::tempdir().unwrap();
     tokio::Runner::new(tokio::Config::new().with_storage_directory(directory.path())).start(
         |context| async move {
-            let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+            let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
             let set =
                 NativeStateSet::init(context.child("source"), state_config("source", cache), None)
                     .await;

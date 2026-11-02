@@ -135,6 +135,7 @@ fn peer_import_rejects_bad_records_and_resumes_after_cancellation() {
                     addresses[i],
                     NZUsize!(3),
                     crate::MAX_MESSAGE_SIZE,
+                    commonware_utils::NZUsize!(1000),
                 );
                 cfg.dial_frequency = Duration::from_millis(10);
                 cfg.peer_connection_cooldown = Duration::from_millis(10);

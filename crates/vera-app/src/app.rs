@@ -12,7 +12,7 @@ use alloy_primitives::{Address, B256};
 use commonware_consensus::types::Round;
 use commonware_consensus::{Handoff, marshal::ancestry::Ancestry};
 use commonware_cryptography::Digestible as _;
-use commonware_glue::stateful::{Application, Input, Proposed};
+use commonware_glue::stateful::{Application, Finality, Input, Proposed};
 use futures::StreamExt as _;
 use std::marker::PhantomData;
 use tracing::{info, warn};
@@ -338,16 +338,20 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         })
     }
 
-    async fn verify(
+    async fn process(
         &mut self,
         context: (Ctx, Self::Context),
         mut ancestry: impl Ancestry<Self::Block>,
         batches: D::Unmerkleized,
+        finality: Finality,
     ) -> Option<D::Merkleized> {
         let start = Instant::now();
         let block = ancestry.next().await?;
         let digest = block.digest();
         let block = block.inner_shared();
+        if finality == Finality::Finalized {
+            return self.re_execute(&block, batches).await.ok();
+        }
         if !block.fits_wire_limits() {
             return None;
         }
@@ -408,21 +412,6 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             }
             Err(e) => {
                 warn!(?digest, height = block.height, error = %e, "verification failed");
-                None
-            }
-        }
-    }
-
-    async fn apply(
-        &mut self,
-        _context: (Ctx, Self::Context),
-        block: &Self::Block,
-        batches: D::Unmerkleized,
-    ) -> Option<D::Merkleized> {
-        match self.re_execute(block, batches).await {
-            Ok(merkleized) => Some(merkleized),
-            Err(e) => {
-                warn!(height = block.height, error = %e, "apply failed");
                 None
             }
         }

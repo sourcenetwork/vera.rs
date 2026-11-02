@@ -24,7 +24,7 @@ pub type DkgSigner = ed25519::PrivateKey;
 pub type DkgDirectory = Unit;
 
 /// Reshare payload a block may carry for the DKG epoch transition.
-pub type DkgPayload = Payload<DkgVariant, DkgSigner, DkgDirectory>;
+pub type DkgPayload = Payload<DkgVariant, ed25519::PublicKey, DkgDirectory>;
 
 /// Maximum entries accepted in each DKG participant set.
 pub const MAX_DKG_PARTICIPANTS: NonZeroU32 = NZU32!(64);
@@ -265,7 +265,7 @@ impl Read for Block {
 
 impl commonware_glue::dkg::ReshareBlock for Block {
     type Variant = DkgVariant;
-    type Signer = DkgSigner;
+    type PublicKey = ed25519::PublicKey;
     type Directory = DkgDirectory;
 
     fn payload(&self) -> Option<DkgPayload> {

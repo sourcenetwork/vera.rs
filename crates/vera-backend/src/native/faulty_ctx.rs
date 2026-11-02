@@ -3,8 +3,7 @@
 //! every other runtime trait to tokio.
 
 use commonware_runtime::{
-    Blob, BlobVersion, BufferPool, BufferPooler, Clock, Error, Handle, IoBufs, IoBufsMut, Spawner,
-    Storage, Supervisor, tokio,
+    Blob, BlobVersion, Clock, Error, Handle, IoBufs, IoBufsMut, Spawner, Storage, Supervisor, tokio,
 };
 use std::future::Future;
 use std::sync::{Arc, Mutex};
@@ -194,16 +193,6 @@ impl Clock for FaultyCtx {
         async move {
             (*inner).sleep_until(deadline).await;
         }
-    }
-}
-
-impl BufferPooler for FaultyCtx {
-    fn network_buffer_pool(&self) -> &BufferPool {
-        (*self.inner).network_buffer_pool()
-    }
-
-    fn storage_buffer_pool(&self) -> &BufferPool {
-        (*self.inner).storage_buffer_pool()
     }
 }
 

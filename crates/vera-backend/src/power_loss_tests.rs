@@ -31,8 +31,8 @@ type Context = deterministic::Context;
 type Databases = Journals<Context>;
 type Sealed = <Databases as DatabaseSet<Context>>::Merkleized;
 
-fn config(context: &Context) -> <Databases as DatabaseSet<Context>>::Config {
-    let cache = CacheRef::from_pooler(context, NZU16!(4084), NZUsize!(4096));
+fn config(_context: &Context) -> <Databases as DatabaseSet<Context>>::Config {
+    let cache = CacheRef::new(NZU16!(4084), NZUsize!(4096));
     let execution = crate::state_set_config("power-loss", cache.clone());
     let native = native::state_config("power-loss", cache);
     let mut config = (

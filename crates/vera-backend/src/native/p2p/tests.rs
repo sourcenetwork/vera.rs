@@ -114,7 +114,7 @@ fn peer_sync_preserves_roots_and_reports_rejected_responses() {
     let config = tokio::Config::new().with_storage_directory(directory.path());
     tokio::Runner::new(config).start(|context| async move {
         ::tokio::time::timeout(Duration::from_secs(20), async {
-            let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+            let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
             let source = Shared::<NativeDb>::init(
                 context.child("source"),
                 state_config("source", cache.clone()).0,

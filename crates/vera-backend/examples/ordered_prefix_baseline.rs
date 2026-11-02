@@ -49,7 +49,7 @@ type LogCodec = ((RangeCfg<usize>, ()), RangeCfg<usize>);
 fn config<T: Translator + Default>(
     context: &tokio::Context,
 ) -> VariableConfig<T, LogCodec, Sequential> {
-    let cache = CacheRef::from_pooler(context, NZU16!(4096), NZUsize!(1024));
+    let cache = CacheRef::new(NZU16!(4096), NZUsize!(1024));
     VariableConfig {
         merkle_config: full::Config {
             journal_partition: "prefix-mmr".into(),

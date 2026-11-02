@@ -30,7 +30,7 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
                         .as_slice(),
                 )
                 .unwrap();
-                let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+                let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
                 let execution = VeraStateSet::init(
                     context.child("partial_execution"),
                     state_set_config(crate::node::PARTITION_PREFIX, cache.clone()),
@@ -65,7 +65,7 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
             });
         }
         let block = tokio::Runner::new(runtime.clone()).start(|context| async move {
-            let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+            let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
             let block = load_or_create(&context, directory, genesis, &cache)
                 .await
                 .unwrap();
@@ -97,7 +97,7 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
             expected = Some(block.clone());
         }
         tokio::Runner::new(runtime).start(|context| async move {
-            let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+            let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
             assert_eq!(
                 load_or_create(&context, directory, genesis, &cache)
                     .await
@@ -160,7 +160,7 @@ fn journals_without_initialization_intent_are_preserved() {
     let directory = directory.path();
     let runtime = tokio::Config::new().with_storage_directory(directory.join("commonware"));
     let expected = tokio::Runner::new(runtime.clone()).start(|context| async move {
-        let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+        let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
         let modules = NativeStateSet::init(
             context.child("existing"),
             native::state_config(crate::node::PARTITION_PREFIX, cache),
@@ -186,7 +186,7 @@ fn journals_without_initialization_intent_are_preserved() {
         modules.committed_targets().await
     });
     tokio::Runner::new(runtime).start(|context| async move {
-        let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+        let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
         assert!(
             load_or_create(&context, directory, &configured_genesis(), &cache)
                 .await
@@ -226,7 +226,7 @@ fn legacy_state_and_missing_genesis_with_history_require_recovery() {
             tokio::Config::new().with_storage_directory(directory.join("commonware")),
         )
         .start(|context| async move {
-            let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+            let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
             assert!(
                 load_or_create(&context, directory, genesis, &cache)
                     .await
@@ -256,7 +256,7 @@ fn inaccessible_genesis_markers_fail_before_initializing_journals() {
             let storage = directory.join("commonware");
             tokio::Runner::new(tokio::Config::new().with_storage_directory(&storage)).start(
                 |context| async move {
-                    let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+                    let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
                     let entries = || {
                         let mut names: Vec<_> = fs::read_dir(&storage)
                             .unwrap()
@@ -306,7 +306,7 @@ fn pipeline_parameters_bind_the_genesis_identity_and_restart() {
         let path = directory.path();
         let configured = &genesis;
         let block = tokio::Runner::new(runtime.clone()).start(|context| async move {
-            let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+            let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
             load_or_create(&context, path, configured, &cache)
                 .await
                 .unwrap()
@@ -316,7 +316,7 @@ fn pipeline_parameters_bind_the_genesis_identity_and_restart() {
         genesis.simplex.as_mut().unwrap().term_length += 1;
         let configured = &genesis;
         tokio::Runner::new(runtime).start(|context| async move {
-            let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+            let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
             assert!(
                 load_or_create(&context, path, configured, &cache)
                     .await
@@ -350,7 +350,7 @@ fn incompatible_genesis_markers_are_rejected_unchanged() {
         let runtime = tokio::Config::new().with_storage_directory(path.join("commonware"));
         let genesis = &genesis;
         tokio::Runner::new(runtime).start(|context| async move {
-            let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+            let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
             let error = load_or_create(&context, path, genesis, &cache)
                 .await
                 .unwrap_err();

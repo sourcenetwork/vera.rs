@@ -154,6 +154,12 @@ impl RegistrarTrait for Registrar {
                 participants,
                 sharing,
             } => Scheme::verifier(crate::NAMESPACE, participants, sharing),
+            SchemeInfo::Member {
+                participants,
+                sharing,
+                public_key,
+            } => Scheme::member(crate::NAMESPACE, participants, sharing, &public_key)
+                .expect("registered member must belong to the participant set"),
             SchemeInfo::Signer {
                 participants,
                 sharing,

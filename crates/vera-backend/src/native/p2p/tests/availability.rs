@@ -20,7 +20,7 @@ fn peer_sync_retries_after_pruning_without_a_target_update() {
     let config = tokio::Config::new().with_storage_directory(directory.path());
     tokio::Runner::new(config).start(|context| async move {
         ::tokio::time::timeout(Duration::from_secs(30), async {
-            let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+            let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
             let available = Shared::<NativeDb>::init(
                 context.child("available"),
                 state_config("available", cache.clone()).0,

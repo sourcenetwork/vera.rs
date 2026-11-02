@@ -163,10 +163,11 @@ fn native_proposals_bind_every_target_and_isolate_competing_execution() {
                         _ => unreachable!(),
                     }
                     assert!(
-                        app.verify(
+                        app.process(
                             (context.child("reject"), changed.context.clone()),
                             block_ancestry([changed, genesis.clone()]),
                             set.new_batches().await,
+                            commonware_glue::stateful::Finality::Candidate,
                         )
                         .await
                         .is_none()
@@ -197,10 +198,11 @@ fn native_proposals_bind_every_target_and_isolate_competing_execution() {
                     competing.block.module_state_root
                 );
                 let verified = app
-                    .verify(
+                    .process(
                         (context.child("verify"), proposal.block.context.clone()),
                         block_ancestry([proposal.block.clone(), genesis]),
                         set.new_batches().await,
+                        commonware_glue::stateful::Finality::Candidate,
                     )
                     .await
                     .unwrap();

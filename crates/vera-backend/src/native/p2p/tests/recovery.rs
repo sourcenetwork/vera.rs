@@ -63,7 +63,7 @@ fn peer_sync_rejects_a_response_against_a_different_target_root() {
     let config = tokio::Config::new().with_storage_directory(directory.path());
     tokio::Runner::new(config).start(|context| async move {
         ::tokio::time::timeout(Duration::from_secs(20), async {
-            let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+            let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
             let source = Shared::<NativeDb>::init(
                 context.child("source"), state_config("source", cache.clone()).0, None,).await;
             let batch = source.new_batches().await.write(b"key".to_vec(), Some(Bytes::from_static(b"value")));
@@ -94,7 +94,7 @@ fn pruned_peer_sync_resumes_after_cancellation_and_converges_on_new_target() {
     let config = tokio::Config::new().with_storage_directory(directory.path());
     tokio::Runner::new(config).start(|context| async move {
         ::tokio::time::timeout(Duration::from_secs(30), async {
-            let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+            let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
             let source = Shared::<NativeDb>::init(
                 context.child("source"), state_config("source", cache.clone()).0, None,).await;
             for revision in 0..11 {

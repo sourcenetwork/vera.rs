@@ -20,7 +20,7 @@ use vera_modules::{
 };
 
 async fn open(context: &tokio::Context) -> NativeStateSet {
-    let cache = CacheRef::from_pooler(context, NZU16!(4084), NZUsize!(64));
+    let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
     NativeStateSet::init(
         context.child("native"),
         native::state_config("hydrate", cache),
@@ -55,7 +55,7 @@ fn hydration_ignores_inactive_records_after_prune_delete_and_rewind() {
     let directory = tempfile::tempdir().unwrap();
     let runtime = tokio::Config::new().with_storage_directory(directory.path());
     let (records, target) = tokio::Runner::new(runtime.clone()).start(|context| async move {
-        let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+        let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
         let set = NativeStateSet::init(
             context.child("native"),
             native::state_config("hydrate", cache),
@@ -127,7 +127,7 @@ fn hydration_ignores_inactive_records_after_prune_delete_and_rewind() {
             ModuleState::default().serialize_stores()
         );
         drop(set);
-        let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+        let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
         let set = NativeStateSet::init(
             context.child("recovered"),
             native::state_config("hydrate", cache),
@@ -141,7 +141,7 @@ fn hydration_ignores_inactive_records_after_prune_delete_and_rewind() {
         (records, target)
     });
     tokio::Runner::new(runtime).start(|context| async move {
-        let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+        let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
         let set = NativeStateSet::init(
             context.child("native"),
             native::state_config("hydrate", cache),
@@ -161,7 +161,7 @@ fn hydration_rejects_orphaned_token_indexes() {
     let directory = tempfile::tempdir().unwrap();
     let runtime = tokio::Config::new().with_storage_directory(directory.path());
     tokio::Runner::new(runtime).start(|context| async move {
-        let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+        let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
         let set = NativeStateSet::init(
             context.child("native"),
             native::state_config("token-index", cache), None,)

@@ -88,10 +88,11 @@ fn competing_proposals_preserve_receipts() {
         assert_ne!(block.db_targets, genesis.db_targets);
 
         let verified = app
-            .verify(
+            .process(
                 (context.child("verify"), consensus_context),
                 block_ancestry([block.clone(), genesis.clone()]),
                 set.new_batches().await,
+                commonware_glue::stateful::Finality::Candidate,
             )
             .await
             .expect("verification");
