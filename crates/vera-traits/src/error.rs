@@ -4,7 +4,7 @@ use alloy_primitives::B256;
 use thiserror::Error;
 
 /// Error type for state database operations.
-#[derive(Debug, Error)]
+#[derive(Clone, Debug, Error)]
 pub enum StateDbError {
     /// Account not found.
     #[error("account not found: {0}")]

@@ -2,7 +2,7 @@
 //! and native BLS transaction support.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use crate::{
     BlockContext, BlockExecutor, ExecutionConfig, ExecutionError, ExecutionOutcome,
@@ -353,7 +353,8 @@ impl VeraExecutor {
         let building = !context.is_verification;
         let mut executed_indices: Vec<usize> = Vec::new();
 
-        let adapter = StateDbAdapter::new(state.clone());
+        let state_failure = Arc::new(Mutex::new(None));
+        let adapter = StateDbAdapter::new(state.clone()).track_failures(state_failure.clone());
         let db = State::builder().with_database_ref(adapter).build();
 
         type Db<S> = State<revm::database::WrapDatabaseRef<StateDbAdapter<S>>>;
@@ -392,7 +393,7 @@ impl VeraExecutor {
             if !gas_budget.admit(NATIVE_TX_GAS_LIMIT, building)? {
                 continue;
             }
-            let receipt = match authenticated.and_then(|authenticated| {
+            let execution = authenticated.and_then(|authenticated| {
                 self.execute_authenticated_native_tx(
                     authenticated,
                     &block_ctx,
@@ -402,7 +403,15 @@ impl VeraExecutor {
                     &mut modules.nonces,
                     &mut ctx,
                 )
-            }) {
+            });
+            if let Some(error) = state_failure
+                .lock()
+                .expect("state failure lock poisoned")
+                .take()
+            {
+                return Err(error.into());
+            }
+            let receipt = match execution {
                 Ok(r) => r,
                 Err(error @ ExecutionError::TxExecution(_)) => return Err(error),
                 Err(e) if building => {
@@ -480,6 +489,13 @@ impl VeraExecutor {
 
             evm.precompiles.begin_transaction();
             let execution = evm.inspect_tx(tx_env);
+            if let Some(error) = state_failure
+                .lock()
+                .expect("state failure lock poisoned")
+                .take()
+            {
+                return Err(error.into());
+            }
             evm.precompiles
                 .finish_transaction(execution.as_ref().is_ok_and(|r| r.result.is_success()));
             let result_and_state = match execution {
@@ -538,8 +554,15 @@ impl VeraExecutor {
                     ExecutionError::TxExecution("membership epoch overflow".into())
                 })?;
                 let keys =
-                    crate::precompiles::validator_registry::active_consensus_keys(&mut evm.ctx)
-                        .map_err(|error| ExecutionError::TxExecution(error.to_string()))?;
+                    crate::precompiles::validator_registry::active_consensus_keys(&mut evm.ctx);
+                if let Some(error) = state_failure
+                    .lock()
+                    .expect("state failure lock poisoned")
+                    .take()
+                {
+                    return Err(error.into());
+                }
+                let keys = keys.map_err(|error| ExecutionError::TxExecution(error.to_string()))?;
                 modules
                     .vera
                     .record_consensus_roster(epoch, &keys)

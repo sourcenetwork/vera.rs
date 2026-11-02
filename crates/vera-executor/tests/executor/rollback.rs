@@ -76,7 +76,7 @@ pub(super) fn execute_with_executor(
     try_execute_with_executor(state, to, input, executor).unwrap()
 }
 
-fn try_execute_with_executor(
+pub(super) fn try_execute_with_executor(
     state: &MockStateDb,
     to: TxKind,
     input: Bytes,
