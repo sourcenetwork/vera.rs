@@ -15,7 +15,7 @@ struct Meter(AtomicUsize);
 impl EvaluationMeter for Meter {
     fn charge_step(&self) -> Result<()> {
         self.0
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
             .map(|_| ())
             .map_err(|_| Error::EvaluationLimitExceeded("caller allowance"))
     }
