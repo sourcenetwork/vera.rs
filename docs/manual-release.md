@@ -27,11 +27,8 @@ Before publishing:
 
 - Qualify the selected `2026.10.0` Commonware registry packages, including the
   updated DKG boundary handling, against the actual release candidate.
-- Resolve the Orbis license discrepancy before publishing or distributing its
-  reporting crate: the Orbis README states Business Source License 1.1, while
-  its workspace package metadata declares `MIT OR Apache-2.0`. The reporting
-  crate inherits that metadata; Vera's workspace declares `MIT`. Confirm the
-  intended terms and correct the relevant metadata before release.
+- Merge the MIT license and package metadata for `orbis-reporting` from
+  [Orbis #343](https://github.com/sourcenetwork/orbis-rs/pull/343).
 - Publish the shared-format `orbis-reporting` package independently of the Orbis
   service stack. Vera currently pins version `0.0.1` at source `06cc2d86`. Its
   registry package must match the qualified formats. Replace the Git dependency
@@ -58,13 +55,12 @@ qualification must identify and test the selected Vera and Orbis revisions.
 Orbis develop at `2b7835774db9bc170b06da184f13804363b09d7b` has no changes
 in `crates/reporting` relative to Vera's pinned `06cc2d86` revision. From a
 clean Orbis checkout at that revision, offline locked packaging succeeded and
-all 48 reporting unit tests passed. This checks packaging and format tests; it does not resolve the
-license discrepancy or authorize publication. The package warns that repository
-metadata is missing.
+all 48 reporting unit tests passed. Orbis #343 adds the MIT license, repository metadata, and a license
+notice to the package. The maintainer must verify the final merged commit before
+publication.
 
-After the license and metadata are resolved, the maintainer can check the final
-reviewed Orbis commit, run its reporting tests, and create and inspect the
-package with:
+After the Orbis change is merged, check the reviewed commit, run its reporting
+tests, and create and inspect the package with:
 
 ```sh
 cargo test --locked -p orbis-reporting

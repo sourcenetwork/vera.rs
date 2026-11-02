@@ -77,9 +77,9 @@ The selected Commonware `2026.10.0` packages are available in the registry,
 but the changed dependency set still needs end-to-end qualification. A
 publishable shared `orbis-reporting` package remains a separate prerequisite;
 a Git dependency with a version string does not satisfy the registry gate.
-Orbis's README and package license metadata disagree, so the intended license
-and Vera's use of the shared crate must be resolved before publication. See the
-[manual release guide](manual-release.md#prepare-the-shared-reporting-crate).
+The MIT reporting package is prepared in [Orbis #343](https://github.com/sourcenetwork/orbis-rs/pull/343)
+and must be merged, published manually, and verified before switching Vera to
+its registry release. See the [manual release guide](manual-release.md#prepare-the-shared-reporting-crate).
 
 ## Measured operating envelope
 
@@ -154,6 +154,30 @@ unexplained; subsequent passing checks do not establish their cause. No current
 acknowledged-operation loss was reproduced in those recorded follow-ups.
 
 ## Consumer compatibility
+
+### Trust candidate checkpoint
+
+On a macOS arm64 host, Vera `3473e34e58668ae344df1f49b175450f559564c5`
+passed `native_go_workers_verify_policy_creation` and
+`native_go_gateway_verifies_pipelined_vera` against Trust API
+`be7d44749a33bdd81f646f9b7815dcad892b09cc`. The first selector used rotating
+consensus; the second used pipelined consensus and the Trust gateway fixture.
+Both ran four local validators and the Trust test binaries built with Go 1.26.9
+and the candidate's shared verifier, built with Rust 1.99.1. They exercised signed
+native policy commands, worker keys, verified reads and the gateway contract.
+
+The debug daemon SHA-256 was
+`bfdcbc2ef253831188f9d0bbc5b289a71f2925bcbea1abe31fc0d3642999a997`;
+the shared verifier SHA-256 was
+`f846e95c16a77a50f95ad26b3b3b0e4a64d4e0b38a0b9a51cb1913de3ac65df2`.
+The Trust client and gateway test binary hashes were
+`857a3f5e03c6875f62655faccd8161f34fd0c2ffb01263c6012e24192983c01e` and
+`ed9870fc0268f65641a39fd70ddb80482fcdbd859f7a014ca6574ab047cf52a8`,
+respectively. These are local test artifacts, not release builds. The gateway
+fixture did not use the Rust Defra sidecar, external gateway process, or Docker
+Orbis nodes. It does not replace the final release-set qualification.
+
+### Earlier checkpoints
 
 The [consumer qualification record](native-qualification-20261014.md#native-consumer-checks)
 retains the exact compatible versions. Its frozen Vera runtime is
