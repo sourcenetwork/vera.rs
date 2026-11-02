@@ -242,7 +242,14 @@ establish the memory safety of an unmaintained parser.
 The current runtime dependency check still reports RUSTSEC-2026-0387 for
 `crypto-bigint 0.5.5`, reached through the `elliptic-curve 0.13` dependency
 family. Its affected constant-time operations require a security fix; no
-exception is configured here. The
+exception is configured here. Native node, operator, ring and bearer signing use
+`k256 0.14`, but the legacy `EvmSigner` and EVM key commands still use
+`k256 0.13` through Alloy and handle private keys. Other paths include
+`revm-precompile`'s `p256 0.13`. Disabling legacy transactions in pipelined
+consensus does not remove those dependencies or make those signing commands
+safe from this advisory. Resolving the dependency finding requires compatible
+upstream upgrades or a separately reviewed replacement, followed by renewed
+security and compatibility checks. The
 compatible zstd dependencies are updated to `zstd 0.13.4` and `zstd-safe 7.4.0`
 to address RUSTSEC-2026-0391, 0398 and 0403. The check also continues to report
 unmaintained `derivative`, `paste` and `unsafe-libyaml` dependencies.
