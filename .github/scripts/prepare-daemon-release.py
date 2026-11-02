@@ -71,7 +71,7 @@ def prepare(root, source, tag, first, second, destination):
         'release.json records the two clean-build comparison.\n\n'
         'Client and verifier crates are published separately by the maintainer.\n\n'
         'This release excludes the pending DKG boundary-retry fix, four-host WAN '
-        'qualification and qualification of the unmerged Orbis service stack. '
+        'qualification and qualification of the selected Orbis service version. '
         'DKG bootstrap and resharing remain enabled; boundary recovery can require '
         'a restart from a fresh certified target.\n\n'
         f'[Scope, operating limits and recovery instructions](https://github.com/'
