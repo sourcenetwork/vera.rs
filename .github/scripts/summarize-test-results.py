@@ -16,6 +16,9 @@ MAX_RESULTS = 32
 MAX_CASES = 128
 MAX_ADMISSION_SAMPLES = 16
 MAX_NETEM_SAMPLES = 16
+DISK_FULL_EXIT = re.compile(
+    r'disk_full_exit enospc=(true|false) write_failed=(true|false) '
+    r'sync_failed=(true|false) state_failure=(true|false) panicked=(true|false)')
 NETEM_COVERAGE = re.compile(r'netem_coverage active=(\d{1,4}) installed=(\d{1,4}) uncovered=(\d{1,4})')
 ADMISSION_PROGRESS = re.compile(
     r'native_admission_progress replica=([0-3]) '
@@ -85,7 +88,8 @@ def summarize(root, inventory, function_names=frozenset()):
                 'test_cases': [], 'case_limit_reached': False,
                 'admission_progress': [], 'admission_progress_limit_reached': False,
                 'admission_state': [], 'admission_state_limit_reached': False,
-                'netem_coverage': [], 'netem_coverage_limit_reached': False}
+                'netem_coverage': [], 'netem_coverage_limit_reached': False,
+                'disk_full_exit': None}
     exit_path = root / 'test-exit-code'
     if exit_path.exists() or exit_path.is_symlink():
         try:
@@ -114,6 +118,11 @@ def summarize(root, inventory, function_names=frozenset()):
             if len(raw) > 16384:
                 continue
             line = ANSI.sub('', raw)
+            disk_exit = DISK_FULL_EXIT.fullmatch(line) if path == root / 'test-output.log' else None
+            if disk_exit is not None and evidence['disk_full_exit'] is None:
+                evidence['disk_full_exit'] = dict(zip(
+                    ('enospc', 'write_failed', 'sync_failed', 'state_failure', 'panicked'),
+                    (value == 'true' for value in disk_exit.groups())))
             coverage = NETEM_COVERAGE.fullmatch(line) if path == root / 'test-output.log' else None
             if coverage is not None:
                 active, installed, uncovered = map(int, coverage.groups())
