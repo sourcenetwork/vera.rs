@@ -350,7 +350,13 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         let digest = block.digest();
         let block = block.inner_shared();
         if finality == Finality::Finalized {
-            return self.re_execute(&block, batches).await.ok();
+            return match self.re_execute(&block, batches).await {
+                Ok(merkleized) => Some(merkleized),
+                Err(error) => {
+                    warn!(?digest, height = block.height, %error, "finalized block replay failed");
+                    None
+                }
+            };
         }
         if !block.fits_wire_limits() {
             return None;

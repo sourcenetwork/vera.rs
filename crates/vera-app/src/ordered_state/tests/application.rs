@@ -156,6 +156,18 @@ fn native_proposals_bind_every_target_and_isolate_competing_execution() {
                     &App::sync_targets(&proposal.block)
                 ));
                 drop(replayed);
+                let mut corrupt = proposal.block.clone();
+                corrupt.module_state_root.0[0] ^= 1;
+                assert!(
+                    app.process(
+                        (context.child("invalid_finalized"), corrupt.context.clone()),
+                        block_ancestry([corrupt]),
+                        set.new_batches().await,
+                        commonware_glue::stateful::Finality::Finalized,
+                    )
+                    .await
+                    .is_none()
+                );
                 assert_eq!(set.committed_targets().await, genesis_targets);
                 assert!(
                     executor
