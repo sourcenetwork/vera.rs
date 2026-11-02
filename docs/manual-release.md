@@ -34,12 +34,10 @@ Before publishing:
   registry package must match the qualified formats. Replace the Git dependency
   with the verified registry release; a version field alongside a Git URL is
   insufficient.
-- Confirm the intended license notices for every package. The nine package
-  manifests do not all declare the same license: `vera-identity`,
-  `vera-zanzibar`, and `vera-acp` declare `Apache-2.0 OR MIT`; the others
-  inherit `MIT`. Each vendored package includes the Apache 2.0 text from the
-  Defra revision it originated from. Confirm the remaining MIT notices and
-  package contents before publishing.
+- Inspect the license notices in every package. `vera-identity`,
+  `vera-zanzibar`, and `vera-acp` declare `Apache-2.0 OR MIT` and include the
+  Apache 2.0 text from their Defra source revision as well as the MIT notice.
+  The other packages declare `MIT` and include its notice.
 - Confirm ownership and publishing rights for all nine Vera names. Log in to
   crates.io locally with the maintainer account. Do not put publishing tokens
   in workflow secrets, release notes or repository files.
