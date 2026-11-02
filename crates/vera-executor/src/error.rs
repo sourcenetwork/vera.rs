@@ -74,6 +74,7 @@ impl ExecutionError {
             self,
             Self::State(
                 vera_traits::StateDbError::Storage(_)
+                    | vera_traits::StateDbError::CodeNotFound(_)
                     | vera_traits::StateDbError::LockPoisoned
                     | vera_traits::StateDbError::RootComputation(_)
             )

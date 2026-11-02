@@ -190,6 +190,31 @@ fn post_execution_database_failure_preserves_module_state() {
 }
 
 #[test]
+fn missing_contract_code_is_a_local_state_failure() {
+    let state = MockStateDb::new();
+    let address = Address::repeat_byte(0x22);
+    let code_hash = keccak256([0x00]);
+    state.insert_account(
+        address,
+        MockAccount {
+            code_hash,
+            ..Default::default()
+        },
+    );
+    let error = try_execute_with_executor(
+        &state,
+        TxKind::Call(address),
+        Bytes::new(),
+        VeraExecutor::new(9001),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, ExecutionError::State(StateDbError::CodeNotFound(hash)) if hash == code_hash)
+    );
+    assert!(error.is_local_state_failure());
+}
+
+#[test]
 fn nested_registry_read_failure_cannot_be_discarded_by_the_caller() {
     let state = MockStateDb {
         unreadable_storage: Some((VALIDATOR_REGISTRY_ADDRESS, U256::from(1))),
