@@ -2,7 +2,7 @@
 
 use clap::Subcommand;
 use k256::ecdsa::SigningKey;
-use vera_client::{BlsSigner, EvmSigner, create_bearer_token};
+use vera_client::{BlsSigner, EvmSigner, Secp256k1SigningKey, create_bearer_token};
 
 use super::context::ClientContext;
 
@@ -108,8 +108,21 @@ impl KeysCommand {
     }
 }
 
-fn parse_signing_key(hex_key: &str) -> eyre::Result<SigningKey> {
+fn parse_signing_key(hex_key: &str) -> eyre::Result<Secp256k1SigningKey> {
     let bytes = hex::decode(hex_key).map_err(|e| eyre::eyre!("invalid key hex: {e}"))?;
-    SigningKey::from_bytes(bytes.as_slice().into())
-        .map_err(|e| eyre::eyre!("invalid secp256k1 key: {e}"))
+    Secp256k1SigningKey::from_slice(&bytes).map_err(|e| eyre::eyre!("invalid secp256k1 key: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_signing_key;
+
+    #[test]
+    fn parses_native_signing_keys_and_rejects_invalid_lengths() {
+        let bytes = [7u8; 32];
+        let key = parse_signing_key(&hex::encode(bytes)).unwrap();
+        assert_eq!(&key.to_bytes()[..], &bytes);
+        assert!(parse_signing_key("01").is_err());
+        assert!(parse_signing_key(&hex::encode([0u8; 32])).is_err());
+    }
 }
