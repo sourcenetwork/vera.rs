@@ -372,6 +372,16 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         let block = ancestry.next().await?;
         let digest = block.digest();
         let block = block.inner_shared();
+        if self.native_pipeline
+            && block.txs.iter().any(|tx| {
+                !tx.bytes
+                    .first()
+                    .is_some_and(|byte| vera_domain::NativeTx::is_native_tx(*byte))
+            })
+        {
+            warn!(?digest, "legacy transaction in native-only block");
+            return None;
+        }
         if finality == Finality::Finalized {
             return match self.re_execute(&block, batches).await {
                 Ok(merkleized) => Some(merkleized),
@@ -503,7 +513,7 @@ mod processing_failure_tests {
         Application, Finality,
         db::{Barrier, DatabaseSet},
     };
-    use commonware_runtime::{Runner as _, tokio};
+    use commonware_runtime::{Runner as _, Supervisor as _, tokio};
     use futures::FutureExt as _;
     use vera_backend::Ctx;
     use vera_consensus::components::InMemoryMempool;
@@ -613,6 +623,59 @@ mod processing_failure_tests {
             );
         });
     }
+
+    #[test]
+    fn pipelined_candidate_rejects_legacy_transaction_before_execution() {
+        tokio::Runner::new(tokio::Config::default()).start(|context| async move {
+            let genesis = crate::genesis_block(
+                vera_domain::StateRoot(alloy_primitives::B256::ZERO),
+                vera_domain::DbTargets::default(),
+                alloy_primitives::B256::ZERO,
+            );
+            for (bytes, native_pipeline, reject) in [
+                (vec![0x02], true, true),
+                (vec![], true, true),
+                (vec![vera_domain::NATIVE_TX_TYPE], true, false),
+                (vec![0x02], false, false),
+            ] {
+                let mut candidate = genesis.clone();
+                candidate.height = 1;
+                candidate.parent = genesis.id();
+                candidate.txs.push(Tx::new(bytes.into()));
+                let block_context = candidate.context.clone();
+                let ancestry = ancestry::from_iter([candidate, genesis.clone()].map(|block| {
+                    let digest = block.digest();
+                    Digested::precomputed(block, digest)
+                }));
+                let mut app = StatefulVeraApp::<NoopSink, FailingState>::new(
+                    VeraExecutor::new(9001),
+                    genesis.clone(),
+                    InMemoryMempool::new(),
+                    NoopSink,
+                    64,
+                    30_000_000,
+                )
+                .with_native_pipeline(native_pipeline, std::time::Duration::ZERO);
+                let result = std::panic::AssertUnwindSafe(app.process(
+                    (context.child("block_validation"), block_context),
+                    ancestry,
+                    (),
+                    Finality::Candidate,
+                ))
+                .catch_unwind()
+                .await;
+                if reject {
+                    assert!(
+                        matches!(result, Ok(None)),
+                        "block must be rejected before execution"
+                    );
+                } else {
+                    assert!(result.is_err(), "block must reach execution");
+                }
+            }
+        });
+    }
+
     #[test]
     fn candidate_timestamp_waits_for_local_clock() {
         tokio::Runner::new(tokio::Config::default()).start(|context| async move {

@@ -101,6 +101,27 @@ fn competing_proposals_preserve_receipts() {
             &StatefulVeraApp::<NoopSink>::sync_targets(&block)
         ));
 
+        let mut pipeline = app
+            .clone()
+            .with_native_pipeline(true, std::time::Duration::ZERO);
+        for finality in [
+            commonware_glue::stateful::Finality::Candidate,
+            commonware_glue::stateful::Finality::Finalized,
+        ] {
+            assert!(
+                pipeline
+                    .process(
+                        (context.child("reject_legacy"), block.context.clone()),
+                        block_ancestry([block.clone(), genesis.clone()]),
+                        set.new_batches().await,
+                        finality,
+                    )
+                    .await
+                    .is_none(),
+                "pipelined execution must reject the valid legacy proposal"
+            );
+        }
+
         mempool.prune(&[block.txs[0].id()]);
         let competing_tx = Evm::sign_eip1559_transfer(
             &key,

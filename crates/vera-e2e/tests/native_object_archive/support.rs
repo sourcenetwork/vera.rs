@@ -83,7 +83,7 @@ pub(super) fn command(token: &str, policy: B256, command: &PolicyCmd) -> IAcp::b
 }
 
 pub(super) struct Controller {
-    pub key: k256::ecdsa::SigningKey,
+    pub key: vera_client::Secp256k1SigningKey,
     pub actor: String,
     pub token: String,
     pub issued: u64,

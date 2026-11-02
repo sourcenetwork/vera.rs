@@ -2,7 +2,7 @@
 
 use alloy_primitives::B256;
 use alloy_sol_types::SolCall as _;
-use k256::ecdsa::{Signature, SigningKey, signature::hazmat::PrehashSigner as _};
+use k256_native::ecdsa::{Signature, SigningKey, signature::hazmat::PrehashSigner as _};
 use vera_domain::ConsensusPublicKey;
 use vera_modules::vera::abi::IVera;
 pub use vera_modules::vera::nodes::{
@@ -111,5 +111,56 @@ impl VeraClient {
             timestamp: response.revision.timestamp,
             record,
         })
+    }
+}
+
+#[cfg(test)]
+mod signing_tests {
+    use super::*;
+    use k256::ecdsa::signature::hazmat::PrehashSigner as _;
+
+    #[test]
+    fn native_node_and_ring_signatures_match_previous_version() {
+        let secret = [31; 32];
+        let key = crate::Secp256k1SigningKey::from_slice(&secret).unwrap();
+        let legacy = k256::ecdsa::SigningKey::from_slice(&secret).unwrap();
+        let node_key = hex::encode(key.verifying_key().to_sec1_bytes());
+        let node = NodeRequest {
+            deployment_root: [1; 32],
+            deployment_id: 42,
+            node_key: node_key.clone(),
+            sequence: 1,
+            expires_at: 100,
+            command: NodeCommand::SetPeer("peer".into()),
+        };
+        let digest = node.signing_digest().unwrap();
+        let old: k256::ecdsa::Signature = legacy.sign_prehash(&digest).unwrap();
+        let signed = sign_node_request(node, &key).unwrap();
+        assert_eq!(signed.signature, hex::encode(old.to_bytes()));
+        vera_crypto::secp256k1::verify_digest(
+            &hex::decode(&signed.signer_key).unwrap(),
+            &digest,
+            &hex::decode(&signed.signature).unwrap(),
+        )
+        .unwrap();
+
+        let ring = crate::rings::RingParticipantRequest {
+            deployment_root: [1; 32],
+            deployment_id: 42,
+            ring_id: "ring".into(),
+            node_key,
+            command: crate::rings::RingParticipantCommand::Cancel,
+            expires_at: 100,
+        };
+        let digest = ring.signing_digest().unwrap();
+        let old: k256::ecdsa::Signature = legacy.sign_prehash(&digest).unwrap();
+        let signed = crate::rings::sign_ring_participant_request(ring, &key).unwrap();
+        assert_eq!(signed.signature, hex::encode(old.to_bytes()));
+        vera_crypto::secp256k1::verify_digest(
+            &hex::decode(&signed.request.node_key).unwrap(),
+            &digest,
+            &hex::decode(&signed.signature).unwrap(),
+        )
+        .unwrap();
     }
 }

@@ -641,10 +641,10 @@ async fn canonical_module_test() {
     // Account 1 is the "end user" — signs the JWT but never submits EVM txs.
     // Account 0 is the "defra node" — submits EVM txs containing the bearer token.
     let user_key =
-        k256::ecdsa::SigningKey::from_bytes((&hex::decode(HARDHAT_KEY_1).unwrap()[..]).into())
+        vera_client::Secp256k1SigningKey::from_slice(&hex::decode(HARDHAT_KEY_1).unwrap())
             .expect("valid signing key");
     let user_did = vera_crypto::secp256k1::did_from_secp256k1_pubkey(
-        user_key.verifying_key().to_encoded_point(true).as_bytes(),
+        user_key.verifying_key().to_sec1_point(true).as_bytes(),
     )
     .expect("valid DID");
 

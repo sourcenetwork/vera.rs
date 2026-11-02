@@ -55,6 +55,16 @@ the epoch midpoint sits out that epoch's resharing, reducing the available quoru
 WAN work remains tracked in [#234](https://github.com/sourcenetwork/vera.rs/issues/234),
 with its existing thresholds unchanged. Neither follow-up is marked completed.
 
+The [snapshot-catchup job](https://github.com/sourcenetwork/vera.rs/actions/runs/41436021931/job/125246396865)
+for PR #242 passed all three tests, including recovery from pruned peers and
+rejoining consensus. The fixture waits for a fresh epoch share, stops another
+validator, and requires the recovered replica for quorum through a subsequent
+epoch. Its retained `linux-snapshot-catchup-evidence` artifact records zero
+failures. The tested merge commit `251ebe87d45bbdf314684beac9614c99bfaf1d5f`
+and merged commit `c86f42516d9024e4514fe3d3ad59bb7a15aae588` have the same
+tree, `d7ff4317f8d6255d4fb8caad586d02b2f0717305`. This covers Vera's recovery
+integration; it does not reproduce the exact upstream epoch-boundary timing.
+
 The [manual publication guide](manual-release.md) gives the dependency order,
 package verification commands and daemon tag/draft-release procedure. Crate
 uploads remain maintainer actions; no crates.io credentials are configured in CI.
@@ -76,7 +86,7 @@ The selected Commonware `2026.10.0` packages are available in the registry,
 but the changed dependency set still needs end-to-end qualification. A
 publishable shared `orbis-reporting` package remains a separate prerequisite;
 a Git dependency with a version string does not satisfy the registry gate.
-The MIT reporting package is prepared in [Orbis #343](https://github.com/sourcenetwork/orbis-rs/pull/343)
+The reporting package is prepared in [Orbis #343](https://github.com/sourcenetwork/orbis-rs/pull/343)
 and must be merged, published manually, and verified before switching Vera to
 its registry release. See the [manual release guide](manual-release.md#prepare-the-shared-reporting-crate).
 
@@ -247,7 +257,10 @@ Never run cloned validator identities. See
 The [release workflow](../.github/workflows/reproducible-linux-release.yml)
 records immutable source, toolchain, features and checksums and compares two
 independent clean builds. The normal Linux CI also packages the daemon it
-exercised. Artifact provenance, key handling and process-crash tests are distinct
+exercised. The daemon archive includes Vera's MIT license. Before distribution,
+complete and verify the license and notice inventory for the bundled dependencies;
+the Vera license alone does not cover third-party notices. Artifact provenance,
+key handling and process-crash tests are distinct
 from a physical-device power-loss guarantee.
 
 ## Post-release WAN qualification

@@ -1,7 +1,7 @@
 //! Service-node authority, replay protection and certified recovery through native workers.
 
-use k256::ecdsa::SigningKey;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use vera_client::Secp256k1SigningKey as SigningKey;
 use vera_client::{
     BlsSigner, VeraClient,
     nodes::{NodeCommand, NodeInfo, NodeRequest, NodeTarget, SignedNodeRequest, sign_node_request},

@@ -1,6 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use k256::ecdsa::SigningKey;
+use vera_client::Secp256k1SigningKey as SigningKey;
 use vera_client::{
     VeraClient,
     administration::{

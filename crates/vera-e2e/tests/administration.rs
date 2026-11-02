@@ -5,7 +5,7 @@ mod support;
 
 use std::time::Duration;
 
-use k256::ecdsa::SigningKey;
+use vera_client::Secp256k1SigningKey as SigningKey;
 use vera_client::{
     BlsSigner, ClientError, EvmSigner, VeraClient,
     administration::{AdministrativeCommand, OperatorPolicy, approve_administration},

@@ -2,14 +2,13 @@
 
 use alloy_primitives::{Address, B256, Bytes};
 use alloy_sol_types::{SolCall as _, SolEvent as _};
-use k256::ecdsa::SigningKey;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use vera_client::threshold_objects::{
     EncryptedDocument, KeyDerivation, ObjectKind, ThresholdObject, encode_threshold_object,
 };
 use vera_client::{
-    ACP_ADDRESS, BlsSigner, DelegationScope, NativeReceipt, VERA_ADDRESS, VeraClient,
-    create_scoped_bearer_token,
+    ACP_ADDRESS, BlsSigner, DelegationScope, NativeReceipt, Secp256k1SigningKey as SigningKey,
+    VERA_ADDRESS, VeraClient, create_scoped_bearer_token,
     nodes::{NodeCommand, NodeInfo, NodeRequest, encode_node_request, sign_node_request},
     rings::*,
 };

@@ -83,7 +83,7 @@ impl BulletinCommand {
                         .await?
                 } else {
                     let signer = ctx.require_evm_signer()?;
-                    ctx.client.register_namespace(signer, &namespace).await?
+                    ctx.client.register_namespace(&signer, &namespace).await?
                 };
                 ctx.print_json(&receipt)?;
             }
@@ -105,7 +105,7 @@ impl BulletinCommand {
                 } else {
                     let signer = ctx.require_evm_signer()?;
                     ctx.client
-                        .add_collaborator(signer, &namespace, &did)
+                        .add_collaborator(&signer, &namespace, &did)
                         .await?
                 };
                 ctx.print_json(&receipt)?;
@@ -118,7 +118,7 @@ impl BulletinCommand {
                 } else {
                     let signer = ctx.require_evm_signer()?;
                     ctx.client
-                        .remove_collaborator(signer, &namespace, &did)
+                        .remove_collaborator(&signer, &namespace, &did)
                         .await?
                 };
                 ctx.print_json(&receipt)?;
@@ -149,7 +149,7 @@ impl BulletinCommand {
                 } else {
                     let signer = ctx.require_evm_signer()?;
                     ctx.client
-                        .create_post(signer, &namespace, &payload_bytes, &proof_bytes, &artifact)
+                        .create_post(&signer, &namespace, &payload_bytes, &proof_bytes, &artifact)
                         .await?
                 };
                 ctx.print_json(&receipt)?;

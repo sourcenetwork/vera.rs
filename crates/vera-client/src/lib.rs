@@ -66,6 +66,8 @@ pub use client::{
 };
 pub use document_acp::VeraDocumentACP;
 pub use error::ClientError;
+/// Signing key for native service and authorization requests.
+pub use k256_native::ecdsa::SigningKey as Secp256k1SigningKey;
 pub use readiness::{ReadinessError, VerifiedReadiness};
 pub use signer::EvmSigner;
 pub use subject::RelationshipSubject;

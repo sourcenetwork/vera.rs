@@ -113,6 +113,15 @@ class IndependentReleaseEvidence(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'compilations differ'):
                     reproduction.compare(first, second, SOURCE)
 
+    def test_different_license_text_fails_independent_comparison(self):
+        first = self.bundle('first', '1')
+        other_license = self.root / 'other-license'
+        other_license.write_text('different license text\n')
+        with patch.object(release, 'LICENSE', other_license):
+            second = self.bundle('second', '2')
+        with self.assertRaisesRegex(ValueError, 'compilations differ'):
+            reproduction.compare(first, second, SOURCE)
+
     def test_wrong_source_features_profile_and_command_fail(self):
         first = self.bundle('first', '1')
         for key, value in (('source_commit', 'f' * 40), ('features', ['fault-injection']),
@@ -213,10 +222,28 @@ class IndependentReleaseEvidence(unittest.TestCase):
                 with self.assertRaises((ValueError, tarfile.HeaderError)):
                     reproduction.release_members(archive)
 
+    def test_license_member_is_required_and_bounded(self):
+        first = self.bundle('license', '1')
+        archive = first / reproduction.ARCHIVE
+        pristine = gzip.decompress(archive.read_bytes())
+        with tarfile.open(archive) as bundle:
+            offset = bundle.getmember('LICENSE-MIT').offset
+        archive.write_bytes(gzip.compress(pristine[:offset] + bytes(tarfile.RECORDSIZE)))
+        with self.assertRaises(tarfile.HeaderError):
+            reproduction.release_members(archive)
+
+        entry = tarfile.TarInfo('LICENSE-MIT')
+        entry.mode = 0o644
+        entry.size = reproduction.MAX_LICENSE_BYTES + 1
+        archive.write_bytes(gzip.compress(pristine[:offset] + entry.tobuf(format=tarfile.USTAR_FORMAT)))
+        with self.assertRaisesRegex(ValueError, 'comparison bounds'):
+            reproduction.release_members(archive)
+
     def test_archive_size_is_checked_before_hashing_or_decompression(self):
         first = self.bundle('compressed-limit', '1')
         with patch.object(reproduction, 'MAX_BINARY_BYTES', 0), \
                 patch.object(reproduction, 'MAX_MANIFEST_BYTES', 0), \
+                patch.object(reproduction, 'MAX_LICENSE_BYTES', 0), \
                 patch.object(reproduction, 'digest') as hash_archive:
             with (first / reproduction.ARCHIVE).open('ab') as archive:
                 archive.write(bytes(1024 * 1024))

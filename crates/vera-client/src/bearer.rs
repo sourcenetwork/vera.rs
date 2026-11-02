@@ -2,7 +2,7 @@
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use k256::ecdsa::SigningKey;
+use k256_native::ecdsa::SigningKey;
 use sha2::{Digest, Sha256};
 use vera_crypto::jwt::DelegationScope;
 
@@ -43,7 +43,7 @@ pub fn create_scoped_bearer_token(
     }
     let compressed = signing_key
         .verifying_key()
-        .to_encoded_point(true)
+        .to_sec1_point(true)
         .as_bytes()
         .to_vec();
     let iss = vera_crypto::secp256k1::did_from_secp256k1_pubkey(&compressed)
@@ -67,10 +67,7 @@ pub fn create_operation_token(
     claims: &vera_crypto::jwt::JwtClaims,
 ) -> Result<String, ClientError> {
     let issuer = vera_crypto::secp256k1::did_from_secp256k1_pubkey(
-        signing_key
-            .verifying_key()
-            .to_encoded_point(true)
-            .as_bytes(),
+        signing_key.verifying_key().to_sec1_point(true).as_bytes(),
     )
     .map_err(|e| ClientError::Signing(e.to_string()))?;
     let request = claims
@@ -106,10 +103,7 @@ pub fn create_relay_token(
     claims: &vera_crypto::jwt::JwtClaims,
 ) -> Result<String, ClientError> {
     let issuer = vera_crypto::secp256k1::did_from_secp256k1_pubkey(
-        signing_key
-            .verifying_key()
-            .to_encoded_point(true)
-            .as_bytes(),
+        signing_key.verifying_key().to_sec1_point(true).as_bytes(),
     )
     .map_err(|error| ClientError::Signing(error.to_string()))?;
     if claims.iss != issuer
@@ -140,9 +134,7 @@ fn sign_payload(
     let signing_input = format!("{header_b64}.{payload_b64}");
     let digest = Sha256::digest(signing_input.as_bytes());
 
-    let (sig, _) = signing_key
-        .sign_prehash_recoverable(digest.as_ref())
-        .map_err(|e| ClientError::Signing(format!("ES256K sign: {e}")))?;
+    let (sig, _) = signing_key.sign_prehash_recoverable(digest.as_ref());
     let sig_b64 = URL_SAFE_NO_PAD.encode(sig.to_bytes());
 
     Ok(format!("{header_b64}.{payload_b64}.{sig_b64}"))
