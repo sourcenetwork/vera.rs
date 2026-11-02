@@ -13,7 +13,10 @@ use alloy_primitives::{B256, Bytes, U256, keccak256};
 use commonware_parallel::{Rayon, Sequential, Strategy};
 use revm::{
     Context, ExecuteCommitEvm, InspectEvm, Journal, MainBuilder,
-    context::{block::BlockEnv, result::ExecutionResult},
+    context::{
+        block::BlockEnv,
+        result::{EVMError, ExecutionResult},
+    },
     context_interface::{ContextTr, JournalTr},
     database::State,
     precompile::PrecompileError,
@@ -481,6 +484,9 @@ impl VeraExecutor {
                 .finish_transaction(execution.as_ref().is_ok_and(|r| r.result.is_success()));
             let result_and_state = match execution {
                 Ok(r) => r,
+                Err(EVMError::Database(
+                    revm::database_interface::bal::EvmDatabaseError::Database(error),
+                )) => return Err(error),
                 Err(e) if building => {
                     warn!(%tx_hash, ?e, "skipping tx: execution error");
                     continue;
