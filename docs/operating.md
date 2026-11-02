@@ -23,6 +23,11 @@ dialable address. Two paths produce that material:
   trusted-dealer material locally; see [wan-gates.md](wan-gates.md) for a
   worked multi-host example.
 
+The shared genesis `timestamp` is recorded in the genesis block. Nodes reject
+an existing genesis record whose timestamp differs from the configuration.
+Development data created by older builds with a nonzero configured timestamp
+must be regenerated because those builds wrote zero into the block.
+
 Run a node with:
 
 ```sh

@@ -13,6 +13,27 @@ fn configured_genesis() -> VeraGenesis {
 }
 
 #[test]
+fn native_genesis_uses_the_configured_timestamp_after_restart() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path();
+    let runtime = tokio::Config::new().with_storage_directory(path.join("commonware"));
+    let mut genesis = configured_genesis();
+    genesis.timestamp = 1_700_000_000;
+    for _ in 0..2 {
+        let block = tokio::Runner::new(runtime.clone()).start(|context| {
+            let genesis = &genesis;
+            async move {
+                let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
+                load_or_create(&context, path, genesis, &cache)
+                    .await
+                    .unwrap()
+            }
+        });
+        assert_eq!(block.timestamp, genesis.timestamp);
+    }
+}
+
+#[test]
 fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
     let mut expected = None;
     for stage in 0..=2 {
