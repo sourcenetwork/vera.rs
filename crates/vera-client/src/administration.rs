@@ -1,7 +1,7 @@
 //! Operator approvals and administrative submission.
 
 use alloy_sol_types::SolCall;
-use k256::ecdsa::{Signature, SigningKey, signature::hazmat::PrehashSigner as _};
+use k256_native::ecdsa::{Signature, SigningKey, signature::hazmat::PrehashSigner as _};
 use vera_modules::vera::abi::IVera;
 
 pub use vera_modules::vera::administration::{
@@ -166,6 +166,30 @@ impl VeraClient {
 #[cfg(test)]
 mod certified_tests {
     use super::*;
+    use k256::ecdsa::signature::hazmat::PrehashSigner as _;
+
+    #[test]
+    fn operator_signature_matches_previous_version() {
+        let secret = [3u8; 32];
+        let key = SigningKey::from_slice(&secret).unwrap();
+        let legacy = k256::ecdsa::SigningKey::from_slice(&secret).unwrap();
+        let request = AdministrativeRequest {
+            genesis_id: [1; 32],
+            sequence: 7,
+            expires_at: 100,
+            command: AdministrativeCommand::SetOperationBudget(1024),
+        };
+        let digest = request.signing_digest().unwrap();
+        let old: k256::ecdsa::Signature = legacy.sign_prehash(&digest).unwrap();
+        let approval = approve_administration(&request, 0, &key).unwrap();
+        assert_eq!(approval.signature, hex::encode(old.to_bytes()));
+        vera_crypto::secp256k1::verify_digest(
+            &key.verifying_key().to_sec1_bytes(),
+            &digest,
+            &hex::decode(&approval.signature).unwrap(),
+        )
+        .unwrap();
+    }
 
     #[test]
     fn certified_administration_rejects_malformed_policy_and_encoding() {

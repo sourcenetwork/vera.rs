@@ -1,5 +1,5 @@
-use k256::ecdsa::SigningKey;
 use std::hint::black_box;
+use vera_client::Secp256k1SigningKey as SigningKey;
 use vera_client::{BlsSigner, create_operation_token};
 use vera_crypto::{
     jwt::{DelegationScope, JwtClaims},
@@ -19,7 +19,7 @@ use vera_modules::{
 pub(super) fn run() {
     let key = SigningKey::from_bytes((&[42; 32]).into()).unwrap();
     let issuer = vera_crypto::secp256k1::did_from_secp256k1_pubkey(
-        key.verifying_key().to_encoded_point(true).as_bytes(),
+        key.verifying_key().to_sec1_point(true).as_bytes(),
     )
     .unwrap();
     let actor: Did = issuer.parse().unwrap();

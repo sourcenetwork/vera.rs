@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use alloy_primitives::{Address, B256, Bytes};
 use alloy_sol_types::SolCall;
-use k256::ecdsa::SigningKey;
+use vera_client::Secp256k1SigningKey as SigningKey;
 use vera_client::{
     ACP_ADDRESS, BlsSigner, EvmSigner, TransactionReceipt, VERA_ADDRESS, VeraClient,
 };

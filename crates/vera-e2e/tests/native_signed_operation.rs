@@ -1,8 +1,8 @@
 //! Direct actor signatures bind native commands and preserve identity across workers.
 
 use alloy_sol_types::SolCall;
-use k256::ecdsa::SigningKey;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use vera_client::Secp256k1SigningKey as SigningKey;
 use vera_client::{ACP_ADDRESS, BlsSigner, RECORD_PROOF_BYTES, VeraClient};
 use vera_crypto::{
     jwt::{DelegationScope, JwtClaims},

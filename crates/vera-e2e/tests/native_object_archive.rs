@@ -47,7 +47,7 @@ async fn pipelined_object_archive_preserves_exact_counts_and_regrants_after_rest
     support::publication(&cluster, 3).await;
     let client = VeraClient::new(cluster.node(0).rpc_url());
     let worker = BlsSigner::new(7u64.into(), DEPLOYMENT).unwrap();
-    let key = k256::ecdsa::SigningKey::from_bytes((&[43u8; 32]).into()).unwrap();
+    let key = vera_client::Secp256k1SigningKey::from_bytes((&[43u8; 32]).into()).unwrap();
     let issued = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()

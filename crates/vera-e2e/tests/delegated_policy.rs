@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use alloy_primitives::Address;
 use alloy_sol_types::{SolCall, SolEvent};
 use commonware_codec::Encode as _;
-use k256::ecdsa::SigningKey;
+use vera_client::Secp256k1SigningKey as SigningKey;
 use vera_client::{
     ACP_ADDRESS, BlsSigner, ClientError, DelegationScope, ModuleId, NativeReceipt,
     RECORD_PROOF_BYTES, VERA_ADDRESS, VeraClient, create_bearer_token, create_scoped_bearer_token,
@@ -150,7 +150,7 @@ async fn native_workers_preserve_policy_ownership_results_and_revocation() {
     let client = VeraClient::new(cluster.node(0).rpc_url());
     let actor_key = SigningKey::from_slice(&[42; 32]).unwrap();
     let owner = vera_crypto::secp256k1::did_from_secp256k1_pubkey(
-        actor_key.verifying_key().to_encoded_point(true).as_bytes(),
+        actor_key.verifying_key().to_sec1_point(true).as_bytes(),
     )
     .unwrap();
     let first = BlsSigner::new(7u64.into(), deployment).unwrap();
@@ -392,7 +392,7 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
         .unwrap();
     let key = SigningKey::from_slice(&[42; 32]).unwrap();
     let issuer = vera_crypto::secp256k1::did_from_secp256k1_pubkey(
-        key.verifying_key().to_encoded_point(true).as_bytes(),
+        key.verifying_key().to_sec1_point(true).as_bytes(),
     )
     .unwrap();
     assert!(

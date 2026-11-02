@@ -2,7 +2,7 @@
 
 use alloy_primitives::Bytes;
 use alloy_sol_types::SolCall as _;
-use k256::ecdsa::{Signature, SigningKey, signature::hazmat::PrehashSigner as _};
+use k256_native::ecdsa::{Signature, SigningKey, signature::hazmat::PrehashSigner as _};
 use vera_domain::ConsensusPublicKey;
 use vera_modules::vera::abi::IVera;
 pub use vera_modules::vera::rings::reports::{
