@@ -193,6 +193,13 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
+fn require_validity_decision(error: &AppError) {
+    assert!(
+        !error.is_local_state_failure(),
+        "local state failed while processing a candidate block: {error}"
+    );
+}
+
 impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp<S, D> {
     type SigningScheme = ConsensusScheme;
     type Context = ConsensusContext;
@@ -417,6 +424,7 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
                 Some(merkleized)
             }
             Err(e) => {
+                require_validity_decision(&e);
                 warn!(?digest, height = block.height, error = %e, "verification failed");
                 None
             }
@@ -450,5 +458,23 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         self.mempool.prune(&ids);
         self.sink.finalized(block, captured).await;
         self.vrf_seeds.finalized(block.context.round);
+    }
+}
+
+#[cfg(test)]
+mod processing_failure_tests {
+    use super::require_validity_decision;
+    use crate::AppError;
+
+    #[test]
+    fn local_storage_failure_stops_processing_instead_of_rejecting_the_block() {
+        let local = AppError::State(vera_backend::BackendError::Storage("disk error".into()));
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                require_validity_decision(&local);
+            }))
+            .is_err()
+        );
+        require_validity_decision(&AppError::RootMismatch("state root"));
     }
 }

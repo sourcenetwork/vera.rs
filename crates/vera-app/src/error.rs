@@ -19,6 +19,18 @@ pub enum AppError {
     RootMismatch(&'static str),
 }
 
+impl AppError {
+    pub(crate) const fn is_local_state_failure(&self) -> bool {
+        match self {
+            Self::Executor(error) => error.is_local_state_failure(),
+            Self::State(
+                vera_backend::BackendError::Storage(_) | vera_backend::BackendError::NotInitialized,
+            ) => true,
+            _ => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::AppError;
@@ -31,5 +43,21 @@ mod tests {
             error,
             AppError::Executor(ExecutionError::InvalidTx(_))
         ));
+    }
+
+    #[test]
+    fn backend_failures_are_distinct_from_invalid_evidence() {
+        assert!(
+            AppError::State(vera_backend::BackendError::Storage("disk error".into()))
+                .is_local_state_failure()
+        );
+        assert!(
+            AppError::State(vera_backend::BackendError::NotInitialized).is_local_state_failure()
+        );
+        assert!(!AppError::RootMismatch("root").is_local_state_failure());
+        assert!(
+            !AppError::Executor(ExecutionError::InvalidTx("invalid".into()))
+                .is_local_state_failure()
+        );
     }
 }

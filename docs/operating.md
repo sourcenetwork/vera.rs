@@ -183,6 +183,10 @@ media failure or power-loss behavior. Those require deployment-specific validati
   complete batch visible; startup reconciles stored history with the durable
   anchor. The [history storage qualification](history-storage.md) distinguishes
   reported errors from silent corruption, failed-device and power-loss behavior.
+- **Local state read failures** — a reported storage, poisoned-lock or state-root
+  computation failure during candidate processing stops the validator rather
+  than marking the candidate invalid. Inspect and repair the local storage before
+  restarting. Other execution errors still require separate classification.
 
 Do not delete `history/` or the genesis record to "reset" a node: existing
 JMT directories or a missing genesis record alongside finalized history are
