@@ -86,9 +86,9 @@ The selected Commonware `2026.10.0` packages are available in the registry,
 but the changed dependency set still needs end-to-end qualification. A
 publishable shared `orbis-reporting` package remains a separate prerequisite;
 a Git dependency with a version string does not satisfy the registry gate.
-The reporting package is prepared in [Orbis #343](https://github.com/sourcenetwork/orbis-rs/pull/343)
-and must be merged, published manually, and verified before switching Vera to
-its registry release. See the [manual release guide](manual-release.md#prepare-the-shared-reporting-crate).
+The reporting package metadata was merged in [Orbis #343](https://github.com/sourcenetwork/orbis-rs/pull/343).
+It must be published manually and verified before switching Vera to its registry
+release. See the [manual release guide](manual-release.md#prepare-the-shared-reporting-crate).
 
 ## Measured operating envelope
 
@@ -259,7 +259,11 @@ records immutable source, toolchain, features and checksums and compares two
 independent clean builds. The normal Linux CI also packages the daemon it
 exercised. The daemon archive includes Vera's MIT license. Before distribution,
 complete and verify the license and notice inventory for the bundled dependencies;
-the Vera license alone does not cover third-party notices. Artifact provenance,
+the Vera license alone does not cover third-party notices. For example, the
+`base256emoji 1.0.2` package declares MIT but neither its package nor its
+[source revision](https://github.com/Jorropo/base256emoji/tree/f7cf4ae2c15123376d6634ca7aed005034b396ec)
+contains a license text; resolve its attribution rather than using an unfilled
+template. Artifact provenance,
 key handling and process-crash tests are distinct
 from a physical-device power-loss guarantee.
 
