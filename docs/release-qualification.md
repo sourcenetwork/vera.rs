@@ -270,9 +270,12 @@ produced matching daemon SHA-256
 archive SHA-256
 `04b6ed84f2d3ceed889c2e55d5be67e05b0aa2dd2aa6436ec87a53d7f9854a9d`.
 The [build run](https://github.com/sourcenetwork/vera.rs/actions/runs/41493668230)
-records these artifacts. This evidence applies to that commit and environment;
-a later release candidate requires its own builds and runtime checks. The normal
-Linux CI also packages the daemon it exercised. The daemon archive includes Vera's MIT license. Before distribution,
+records these artifacts. The reproduced daemon passed focused tests covering
+node authorization across worker changes and restart, and native policy
+ownership and revocation, in the [artifact test run](https://github.com/sourcenetwork/vera.rs/actions/runs/41497337225).
+This evidence applies to that commit and environment; a later release candidate
+requires its own builds and runtime checks. The normal Linux CI also packages the
+daemon it exercised. The daemon archive includes Vera's MIT license. Before distribution,
 complete and verify the license and notice inventory for the bundled dependencies;
 the Vera license alone does not cover third-party notices. For example, the
 `base256emoji 1.0.2` package declares MIT but neither its package nor its
