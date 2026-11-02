@@ -80,6 +80,7 @@ pub fn genesis_block(
         height: 0,
         timestamp: 0,
         prevrandao: B256::ZERO,
+        randomness: None,
         state_root,
         module_state_root,
         txs: Vec::new(),

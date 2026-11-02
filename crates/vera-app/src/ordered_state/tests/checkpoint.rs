@@ -34,6 +34,7 @@ pub(super) async fn block(source: &OrderedState, height: u64) -> Block {
         height,
         timestamp: 1000 + height,
         prevrandao: B256::ZERO,
+        randomness: None,
         state_root: StateRoot(vera_qmdb::StateRoot::compute(
             B256::from(db_targets.accounts.root.0),
             B256::from(db_targets.storage.root.0),

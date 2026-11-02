@@ -166,6 +166,7 @@ mod tests {
             height: 42,
             timestamp: 1_700_000_000,
             prevrandao: B256::repeat_byte(0xab),
+            randomness: None,
             state_root: StateRoot(B256::repeat_byte(0xcd)),
             module_state_root: B256::repeat_byte(0xef),
             txs: vec![Tx::new(Bytes::from_static(&[0xde, 0xad]))],

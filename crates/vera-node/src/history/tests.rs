@@ -21,6 +21,7 @@ pub(super) fn block(height: u64, parent: BlockId) -> Block {
         height,
         timestamp: height,
         prevrandao: B256::ZERO,
+        randomness: None,
         state_root: StateRoot(B256::ZERO),
         module_state_root: B256::ZERO,
         txs: Vec::new(),
