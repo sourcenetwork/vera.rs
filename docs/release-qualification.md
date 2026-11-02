@@ -49,9 +49,10 @@ adding version strings alone does not establish that the registry packages have
 the APIs or behavior qualified here. See Cargo's
 [published-dependency rules](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#multiple-locations).
 
-The upstream boundary-recovery change is included in `2026.10.0`; its Vera integration is tracked in [#230](https://github.com/sourcenetwork/vera.rs/issues/230).
+The upstream boundary-recovery retry is not included in `2026.10.0`; its later
+adoption is tracked in [#230](https://github.com/sourcenetwork/vera.rs/issues/230).
 It addresses epoch-boundary verification while finalized DKG replay is still
-catching up. The unpatched release must disclose that recovery limitation and
+catching up. The first release must disclose that recovery limitation and
 check bounded cancellation; it must not claim the patched recovery result.
 WAN work remains tracked in [#234](https://github.com/sourcenetwork/vera.rs/issues/234),
 with its existing thresholds unchanged. Neither follow-up is marked completed.
