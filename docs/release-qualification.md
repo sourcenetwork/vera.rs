@@ -76,7 +76,7 @@ The selected Commonware `2026.10.0` packages are available in the registry,
 but the changed dependency set still needs end-to-end qualification. A
 publishable shared `orbis-reporting` package remains a separate prerequisite;
 a Git dependency with a version string does not satisfy the registry gate.
-The MIT reporting package is prepared in [Orbis #343](https://github.com/sourcenetwork/orbis-rs/pull/343)
+The reporting package is prepared in [Orbis #343](https://github.com/sourcenetwork/orbis-rs/pull/343)
 and must be merged, published manually, and verified before switching Vera to
 its registry release. See the [manual release guide](manual-release.md#prepare-the-shared-reporting-crate).
 

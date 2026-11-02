@@ -27,7 +27,7 @@ Before publishing:
 
 - Qualify the selected `2026.10.0` Commonware registry packages, including the
   updated DKG boundary handling, against the actual release candidate.
-- Merge the MIT license and package metadata for `orbis-reporting` from
+- Merge the Orbis license and package metadata for `orbis-reporting` from
   [Orbis #343](https://github.com/sourcenetwork/orbis-rs/pull/343).
 - Publish the shared-format `orbis-reporting` package independently of the Orbis
   service stack. Vera currently pins version `0.0.1` at source `06cc2d86`. Its
@@ -53,9 +53,10 @@ qualification must identify and test the selected Vera and Orbis revisions.
 Orbis develop at `2b7835774db9bc170b06da184f13804363b09d7b` has no changes
 in `crates/reporting` relative to Vera's pinned `06cc2d86` revision. From a
 clean Orbis checkout at that revision, offline locked packaging succeeded and
-all 48 reporting unit tests passed. Orbis #343 adds the MIT license, repository metadata, and a license
-notice to the package. The maintainer must verify the final merged commit before
-publication.
+all 48 reporting unit tests passed. Orbis #343 applies the existing Business
+Source License 1.1, includes its Apache 2.0 change license, and adds repository
+metadata. Its terms restrict managed-service use and change to Apache 2.0 on
+March 13, 2030. The maintainer must verify the final merged commit before publication.
 
 After the Orbis change is merged, check the reviewed commit, run its reporting
 tests, and create and inspect the package with:
