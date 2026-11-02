@@ -34,6 +34,43 @@ fn native_genesis_uses_the_configured_timestamp_after_restart() {
 }
 
 #[test]
+fn native_genesis_rejects_a_persisted_timestamp_mismatch() {
+    use commonware_codec::Encode as _;
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path();
+    let runtime = tokio::Config::new().with_storage_directory(path.join("commonware"));
+    let mut genesis = configured_genesis();
+    genesis.timestamp = 1_700_000_000;
+    let mut block = tokio::Runner::new(runtime.clone()).start(|context| {
+        let genesis = &genesis;
+        async move {
+            let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
+            load_or_create(&context, path, genesis, &cache)
+                .await
+                .unwrap()
+        }
+    });
+    block.timestamp = 0;
+    let record_path = path.join("native-genesis.bin");
+    let record = std::fs::read(&record_path).unwrap();
+    let mut corrupted = record[..32].to_vec();
+    corrupted.extend_from_slice(&block.encode());
+    std::fs::write(record_path, corrupted).unwrap();
+    let error = tokio::Runner::new(runtime).start(|context| async move {
+        let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
+        load_or_create(&context, path, &genesis, &cache)
+            .await
+            .unwrap_err()
+    });
+    assert!(
+        error
+            .to_string()
+            .contains("native genesis timestamp does not match")
+    );
+}
+
+#[test]
 fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
     let mut expected = None;
     for stage in 0..=2 {
