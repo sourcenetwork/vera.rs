@@ -1,8 +1,9 @@
 //! Key generation and display subcommands.
 
 use clap::Subcommand;
-use k256::ecdsa::SigningKey;
-use vera_client::{BlsSigner, EvmSigner, create_bearer_token};
+use rand::RngCore;
+use vera_client::{BlsSigner, EvmSigner, Secp256k1SigningKey, create_bearer_token};
+use zeroize::Zeroizing;
 
 use super::context::ClientContext;
 
@@ -32,13 +33,23 @@ pub(crate) enum KeysCommand {
     },
 }
 
+fn generate_evm_key() -> Result<Secp256k1SigningKey, rand::Error> {
+    let mut secret = Zeroizing::new([0u8; 32]);
+    loop {
+        rand::rngs::OsRng.try_fill_bytes(&mut *secret)?;
+        if let Ok(key) = Secp256k1SigningKey::from_slice(&*secret) {
+            return Ok(key);
+        }
+    }
+}
+
 impl KeysCommand {
     pub(super) async fn run(self, ctx: &ClientContext) -> eyre::Result<()> {
         match self {
             Self::GenerateEvm => {
-                let key = SigningKey::random(&mut rand::thread_rng());
-                let signer = EvmSigner::new(key.clone(), 0);
+                let key = generate_evm_key()?;
                 let hex_key = hex::encode(key.to_bytes());
+                let signer = EvmSigner::from_native_key(key, 0);
                 ctx.print_json(&serde_json::json!({
                     "private_key": hex_key,
                     "address": format!("{:?}", signer.address()),
@@ -99,5 +110,19 @@ impl KeysCommand {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_evm_key_round_trips() {
+        let key = generate_evm_key().unwrap();
+        let expected = EvmSigner::from_native_key(key.clone(), 1);
+        let actual = EvmSigner::from_hex(&hex::encode(key.to_bytes()), 1).unwrap();
+        assert_eq!(actual.address(), expected.address());
+        assert_eq!(actual.did(), expected.did());
     }
 }

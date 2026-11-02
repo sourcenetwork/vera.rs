@@ -4,7 +4,7 @@ use alloy_consensus::{SignableTransaction as _, TxEip1559, TxEnvelope};
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Address, Bytes, Signature, TxKind, U256, keccak256};
 use k256::ecdsa::SigningKey;
-use sha3::{Digest as _, Keccak256};
+use k256_native::ecdsa::SigningKey as NativeSigningKey;
 
 use crate::Tx;
 
@@ -43,9 +43,16 @@ impl Evm {
             input: Bytes::new(),
         };
 
-        let digest = Keccak256::new_with_prefix(tx.encoded_for_signing());
-        let (sig, recid) = key.sign_digest_recoverable(digest).expect("sign tx");
-        let signature = Signature::from((sig, recid));
+        let native_key =
+            NativeSigningKey::from_slice(&key.to_bytes()).expect("valid secp256k1 key");
+        let (sig, recid) = native_key.sign_prehash_recoverable(tx.signature_hash().as_slice());
+        assert!(!recid.is_x_reduced(), "unsupported recovery identifier");
+        let bytes = sig.to_bytes();
+        let signature = Signature::new(
+            U256::from_be_slice(&bytes[..32]),
+            U256::from_be_slice(&bytes[32..]),
+            recid.is_y_odd(),
+        );
         let signed = tx.into_signed(signature);
         let envelope = TxEnvelope::from(signed);
         let mut raw_bytes = Vec::new();
@@ -189,6 +196,31 @@ mod tests {
         let tx2 = Evm::sign_eip1559_transfer(&key, 1, to, U256::ZERO, 1, 21000);
 
         assert_ne!(tx1.bytes, tx2.bytes);
+    }
+
+    #[test]
+    fn signed_transfer_matches_previous_signer() {
+        let key = signing_key_from_seed(5);
+        let to = Address::repeat_byte(0xef);
+        for nonce in [0, 1, 99, u64::MAX] {
+            let tx = TxEip1559 {
+                chain_id: 1,
+                nonce,
+                gas_limit: 21_000,
+                max_fee_per_gas: 0,
+                max_priority_fee_per_gas: 0,
+                to: TxKind::Call(to),
+                value: U256::from(500),
+                access_list: Default::default(),
+                input: Bytes::new(),
+            };
+            let (sig, recovery) = key
+                .sign_prehash_recoverable(tx.signature_hash().as_slice())
+                .unwrap();
+            let expected = TxEnvelope::from(tx.into_signed(Signature::from((sig, recovery))));
+            let actual = Evm::sign_eip1559_transfer(&key, 1, to, U256::from(500), nonce, 21_000);
+            assert_eq!(actual.bytes.as_ref(), expected.encoded_2718());
+        }
     }
 
     #[test]

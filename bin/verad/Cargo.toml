@@ -24,7 +24,6 @@ vera-jsonrpc.workspace = true
 vera-node.workspace = true
 
 alloy-primitives.workspace = true
-k256.workspace = true
 ark-bls12-381.workspace = true
 ark-ff.workspace = true
 
@@ -38,6 +37,7 @@ clap = { workspace = true, features = ["env"] }
 eyre.workspace = true
 hex.workspace = true
 rand.workspace = true
+zeroize = "1.8"
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

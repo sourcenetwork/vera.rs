@@ -27,8 +27,6 @@ Before publishing:
 
 - Qualify the selected `2026.10.0` Commonware registry packages, including the
   updated DKG boundary handling, against the actual release candidate.
-- Merge the Orbis license and package metadata for `orbis-reporting` from
-  [Orbis #343](https://github.com/sourcenetwork/orbis-rs/pull/343).
 - Publish the shared-format `orbis-reporting` package independently of the Orbis
   service stack. Vera currently pins version `0.0.1` at source `06cc2d86`. Its
   registry package must match the qualified formats. Replace the Git dependency
@@ -50,26 +48,36 @@ qualification must identify and test the selected Vera and Orbis revisions.
 
 ## Prepare the shared reporting crate
 
-Orbis develop at `2b7835774db9bc170b06da184f13804363b09d7b` has no changes
-in `crates/reporting` relative to Vera's pinned `06cc2d86` revision. From a
-clean Orbis checkout at that revision, offline locked packaging succeeded and
-all 48 reporting unit tests passed. Orbis #343 applies the existing Business
-Source License 1.1, includes its Apache 2.0 change license, and adds repository
-metadata. Its terms restrict managed-service use and change to Apache 2.0 on
-March 13, 2030. The maintainer must verify the final merged commit before publication.
+Merged Orbis commit `277019f5a15fd645bd0f1e866b2519e622d28a98` has the same
+`crates/reporting/src` as Vera's pinned `06cc2d86` revision. At that merged
+commit, all 48 reporting unit tests passed and locked offline packaging succeeded
+with Rust 1.99.1. The resulting archive has SHA-256
+`996617442e5ba5804850c4d71ec5b402371b4f7f8fbd5afe7442164b7503997e` and includes
+the Business Source License 1.1 and Apache 2.0 change license. Its terms restrict
+managed-service use and change to Apache 2.0 on March 13, 2030.
 
-After the Orbis change is merged, check the reviewed commit, run its reporting
-tests, and create and inspect the package with:
+From a clean checkout of the reviewed Orbis commit, run its reporting tests and
+create and inspect the package with:
 
 ```sh
-cargo test --locked -p orbis-reporting
-cargo package --locked --registry crates-io -p orbis-reporting
+git checkout --detach 277019f5a15fd645bd0f1e866b2519e622d28a98
+git status --short
+cargo +1.99.1 test --locked -p orbis-reporting
+cargo +1.99.1 package --locked --registry crates-io -p orbis-reporting
 shasum -a 256 target/package/orbis-reporting-0.0.1.crate
+tar -tzf target/package/orbis-reporting-0.0.1.crate
+tar -xOzf target/package/orbis-reporting-0.0.1.crate orbis-reporting-0.0.1/.cargo_vcs_info.json
 ```
 
-Record the final source revision and archive checksum, then publish it manually.
+Check `.cargo_vcs_info.json` and the license files in the archive. Record the
+source revision and archive checksum, then publish it manually:
+
+```sh
+cargo +1.99.1 publish --locked --registry crates-io -p orbis-reporting
+```
+
 Verify its registry contents before switching Vera to the registry dependency.
-A checksum from the earlier packaging check is not evidence for a later commit.
+A checksum from one checkout is not evidence for a later commit.
 
 ## Validate the candidate
 

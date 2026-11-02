@@ -86,9 +86,9 @@ The selected Commonware `2026.10.0` packages are available in the registry,
 but the changed dependency set still needs end-to-end qualification. A
 publishable shared `orbis-reporting` package remains a separate prerequisite;
 a Git dependency with a version string does not satisfy the registry gate.
-The reporting package is prepared in [Orbis #343](https://github.com/sourcenetwork/orbis-rs/pull/343)
-and must be merged, published manually, and verified before switching Vera to
-its registry release. See the [manual release guide](manual-release.md#prepare-the-shared-reporting-crate).
+The reporting package metadata was merged in [Orbis #343](https://github.com/sourcenetwork/orbis-rs/pull/343).
+It must be published manually and verified before switching Vera to its registry
+release. See the [manual release guide](manual-release.md#prepare-the-shared-reporting-crate).
 
 ## Measured operating envelope
 
@@ -242,7 +242,14 @@ establish the memory safety of an unmaintained parser.
 The current runtime dependency check still reports RUSTSEC-2026-0387 for
 `crypto-bigint 0.5.5`, reached through the `elliptic-curve 0.13` dependency
 family. Its affected constant-time operations require a security fix; no
-exception is configured here. The
+exception is configured here. Native node, operator, ring and bearer signing use
+`k256 0.14`. The legacy `EvmSigner` and EIP-1559 helper sign with the newer
+implementation, but their compatibility APIs accept `k256 0.13` keys. Other paths include
+Alloy and `revm-precompile`'s `p256 0.13`. Disabling legacy
+transactions in pipelined consensus does not remove those dependencies or
+resolve the advisory. Resolving the dependency finding requires compatible
+upstream upgrades or a separately reviewed replacement, followed by renewed
+security and compatibility checks. The
 compatible zstd dependencies are updated to `zstd 0.13.4` and `zstd-safe 7.4.0`
 to address RUSTSEC-2026-0391, 0398 and 0403. The check also continues to report
 unmaintained `derivative`, `paste` and `unsafe-libyaml` dependencies.
@@ -256,10 +263,27 @@ Never run cloned validator identities. See
 
 The [release workflow](../.github/workflows/reproducible-linux-release.yml)
 records immutable source, toolchain, features and checksums and compares two
-independent clean builds. The normal Linux CI also packages the daemon it
-exercised. The daemon archive includes Vera's MIT license. Before distribution,
+independent clean builds. Two builds of merged commit
+`696538b9e3be3be058ff159d93878264807a925d` in the pinned build environment
+produced matching daemon SHA-256
+`0c7e11e28fdeec79a59714e8624c6382915df82ca0e73ceaf85bec6c122a31e7` and
+archive SHA-256
+`04b6ed84f2d3ceed889c2e55d5be67e05b0aa2dd2aa6436ec87a53d7f9854a9d`.
+The [build run](https://github.com/sourcenetwork/vera.rs/actions/runs/41493668230)
+records these artifacts. The reproduced daemon passed focused tests covering
+node authorization across worker changes and restart, and native policy
+ownership and revocation, in the [artifact test run](https://github.com/sourcenetwork/vera.rs/actions/runs/41497337225).
+This evidence applies to that commit and environment; a later release candidate
+requires its own builds and runtime checks. The normal Linux CI also packages the
+daemon it exercised. The daemon archive includes Vera's MIT license. Before distribution,
 complete and verify the license and notice inventory for the bundled dependencies;
-the Vera license alone does not cover third-party notices. Artifact provenance,
+the Vera license alone does not cover third-party notices. For example, the
+`base256emoji 1.0.2` package declares MIT but neither its package nor its
+[source revision](https://github.com/Jorropo/base256emoji/tree/f7cf4ae2c15123376d6634ca7aed005034b396ec)
+contains a license text; resolve its attribution rather than using an unfilled
+template. The vendored `jsonrpsee-server 0.26.1` includes its upstream MIT
+notice from [source revision `bcc84901`](https://github.com/paritytech/jsonrpsee/blob/bcc84901f3c882f4233f293e5acf018643cbd412/LICENSE).
+Artifact provenance,
 key handling and process-crash tests are distinct
 from a physical-device power-loss guarantee.
 
