@@ -244,9 +244,8 @@ The current runtime dependency check still reports RUSTSEC-2026-0387 for
 family. Its affected constant-time operations require a security fix; no
 exception is configured here. Native node, operator, ring and bearer signing use
 `k256 0.14`. The legacy `EvmSigner` signs with the newer implementation, but
-its compatibility constructor accepts a `k256 0.13` key, and the EVM key
-commands still use the older implementation and handle private keys. Other
-paths include Alloy and `revm-precompile`'s `p256 0.13`. Disabling legacy
+its compatibility constructor accepts a `k256 0.13` key. Other paths include
+Alloy and `revm-precompile`'s `p256 0.13`. Disabling legacy
 transactions in pipelined consensus does not remove those dependencies or
 resolve the advisory. Resolving the dependency finding requires compatible
 upstream upgrades or a separately reviewed replacement, followed by renewed

@@ -7573,7 +7573,6 @@ dependencies = [
  "commonware-runtime",
  "eyre",
  "hex",
- "k256 0.13.4",
  "rand 0.8.8",
  "reqwest 0.12.28",
  "serde",
@@ -7589,6 +7588,7 @@ dependencies = [
  "vera-genesis",
  "vera-jsonrpc",
  "vera-node",
+ "zeroize",
 ]
 
 [[package]]
