@@ -139,6 +139,23 @@ fn native_proposals_bind_every_target_and_isolate_competing_execution() {
                     &proposal.merkleized,
                     &App::sync_targets(&proposal.block)
                 ));
+                let replayed = app
+                    .process(
+                        (
+                            context.child("finalized_replay"),
+                            proposal.block.context.clone(),
+                        ),
+                        block_ancestry([proposal.block.clone()]),
+                        set.new_batches().await,
+                        commonware_glue::stateful::Finality::Finalized,
+                    )
+                    .await
+                    .expect("finalized block must replay without its parent");
+                assert!(OrderedState::matches_sync_targets(
+                    &replayed,
+                    &App::sync_targets(&proposal.block)
+                ));
+                drop(replayed);
                 assert_eq!(set.committed_targets().await, genesis_targets);
                 assert!(
                     executor
