@@ -2,10 +2,9 @@
 
 use alloy_consensus::{SignableTransaction, TxLegacy};
 use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::{Address, Bytes, TxKind, U256};
-use alloy_signer::SignerSync;
-use alloy_signer_local::PrivateKeySigner;
+use alloy_primitives::{Address, Bytes, Signature, TxKind, U256, keccak256};
 use k256::ecdsa::SigningKey;
+use k256_native::ecdsa::SigningKey as NativeSigningKey;
 
 use crate::error::ClientError;
 
@@ -14,51 +13,53 @@ const GAS_LIMIT: u64 = 5_000_000;
 
 /// Secp256k1 signer for EVM transactions.
 ///
-/// Wraps a [`PrivateKeySigner`] with a chain ID. Used by write methods
-/// to construct, sign, and encode [`TxLegacy`] transactions.
+/// Used by write methods to construct, sign, and encode [`TxLegacy`] transactions.
 #[derive(Debug)]
 pub struct EvmSigner {
-    inner: PrivateKeySigner,
+    inner: NativeSigningKey,
+    address: Address,
     chain_id: u64,
 }
 
 impl EvmSigner {
     /// Create a signer from a secp256k1 signing key and chain ID.
     pub fn new(signing_key: SigningKey, chain_id: u64) -> Self {
+        let key =
+            NativeSigningKey::from_slice(&signing_key.to_bytes()).expect("valid secp256k1 key");
+        Self::from_native_key(key, chain_id)
+    }
+
+    /// Create a signer without converting through the legacy signing key type.
+    pub fn from_native_key(signing_key: NativeSigningKey, chain_id: u64) -> Self {
+        let point = signing_key.verifying_key().to_sec1_point(false);
+        let hash = keccak256(&point.as_bytes()[1..]);
         Self {
-            inner: PrivateKeySigner::from_signing_key(signing_key),
+            inner: signing_key,
+            address: Address::from_slice(&hash[12..]),
             chain_id,
         }
     }
 
     /// Parse a hex-encoded private key and create a signer.
     pub fn from_hex(hex: &str, chain_id: u64) -> Result<Self, ClientError> {
-        let signer: PrivateKeySigner =
-            hex.parse()
-                .map_err(|e: alloy_signer_local::LocalSignerError| {
-                    ClientError::Signing(e.to_string())
-                })?;
-        Ok(Self {
-            inner: signer,
-            chain_id,
-        })
+        let bytes = zeroize::Zeroizing::new(
+            hex::decode(hex.strip_prefix("0x").unwrap_or(hex))
+                .map_err(|e| ClientError::Signing(e.to_string()))?,
+        );
+        let key = NativeSigningKey::from_slice(&bytes)
+            .map_err(|e| ClientError::Signing(e.to_string()))?;
+        Ok(Self::from_native_key(key, chain_id))
     }
 
     /// Return the Ethereum address derived from this signer's key.
     pub const fn address(&self) -> Address {
-        self.inner.address()
+        self.address
     }
 
     /// Return the `did:key:` identifier derived from this signer's secp256k1 public key.
     pub fn did(&self) -> String {
-        let compressed = self
-            .inner
-            .credential()
-            .verifying_key()
-            .to_encoded_point(true)
-            .as_bytes()
-            .to_vec();
-        vera_crypto::secp256k1::did_from_secp256k1_pubkey(&compressed)
+        let point = self.inner.verifying_key().to_sec1_point(true);
+        vera_crypto::secp256k1::did_from_secp256k1_pubkey(point.as_bytes())
             .expect("valid DID from signer pubkey")
     }
 
@@ -84,10 +85,20 @@ impl EvmSigner {
             input: calldata,
         };
 
-        let sig = self
+        let (sig, recovery_id) = self
             .inner
-            .sign_hash_sync(&tx.signature_hash())
-            .map_err(|e| ClientError::Signing(e.to_string()))?;
+            .sign_prehash_recoverable(tx.signature_hash().as_slice());
+        if recovery_id.is_x_reduced() {
+            return Err(ClientError::Signing(
+                "unsupported recovery identifier".into(),
+            ));
+        }
+        let bytes = sig.to_bytes();
+        let sig = Signature::new(
+            U256::from_be_slice(&bytes[..32]),
+            U256::from_be_slice(&bytes[32..]),
+            recovery_id.is_y_odd(),
+        );
         let signed = tx.into_signed(sig);
         Ok(signed.encoded_2718())
     }
@@ -185,6 +196,32 @@ mod tests {
         let raw1 = signer.sign_tx(Address::ZERO, Bytes::new(), 0).unwrap();
         let raw2 = signer.sign_tx(Address::ZERO, Bytes::new(), 1).unwrap();
         assert_ne!(raw1, raw2);
+    }
+
+    #[test]
+    fn native_signing_matches_legacy_signer() {
+        use alloy_signer::SignerSync;
+        use alloy_signer_local::PrivateKeySigner;
+
+        let legacy = PrivateKeySigner::from_signing_key(test_key());
+        let signer = EvmSigner::new(test_key(), 1337);
+        assert_eq!(signer.address(), legacy.address());
+        for nonce in [0, 1, 99, u64::MAX] {
+            let to = Address::repeat_byte(0xab);
+            let input = Bytes::from(vec![0xde, 0xad]);
+            let tx = TxLegacy {
+                chain_id: Some(1337),
+                nonce,
+                gas_price: GAS_PRICE,
+                gas_limit: GAS_LIMIT,
+                to: TxKind::Call(to),
+                value: U256::ZERO,
+                input: input.clone(),
+            };
+            let signature = legacy.sign_hash_sync(&tx.signature_hash()).unwrap();
+            let expected = tx.into_signed(signature).encoded_2718();
+            assert_eq!(signer.sign_tx(to, input, nonce).unwrap(), expected);
+        }
     }
 
     #[test]

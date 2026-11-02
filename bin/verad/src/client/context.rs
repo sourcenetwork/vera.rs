@@ -48,9 +48,7 @@ impl ClientContext {
     /// Require an EVM signer, returning an error if `--key` was not provided.
     pub(super) fn require_evm_signer(&self) -> Result<EvmSigner, KeyError> {
         let key = self.signing_key.as_ref().ok_or(KeyError::Missing)?;
-        let key = k256::ecdsa::SigningKey::from_slice(&key.to_bytes())
-            .map_err(|_| KeyError::InvalidKey)?;
-        Ok(EvmSigner::new(key, self.chain_id))
+        Ok(EvmSigner::from_native_key(key.clone(), self.chain_id))
     }
 
     /// Print a serializable value as JSON to stdout.
