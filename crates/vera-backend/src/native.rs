@@ -61,6 +61,32 @@ impl Translator for KeyPrefix {
 
 impl OrderedTranslator for KeyPrefix {}
 
+#[cfg(test)]
+mod translator_tests {
+    use super::{INDEX_PREFIX_BYTES, KeyPrefix, Translator};
+
+    #[test]
+    fn translated_prefixes_preserve_order_and_allow_collisions() {
+        let translator = KeyPrefix::default();
+        let long = vec![1; INDEX_PREFIX_BYTES];
+        let mut longer = long.clone();
+        longer.push(1);
+        let keys = [vec![], vec![0], vec![0, 1], vec![1], long, longer];
+        for pair in keys.windows(2) {
+            assert!(pair[0] < pair[1]);
+            assert!(translator.transform(&pair[0]) <= translator.transform(&pair[1]));
+        }
+        assert_eq!(
+            translator.transform(&keys[0]),
+            translator.transform(&keys[1])
+        );
+        assert_eq!(
+            translator.transform(&keys[4]),
+            translator.transform(&keys[5])
+        );
+    }
+}
+
 impl BuildHasher for KeyPrefix {
     type Hasher = <RandomState as BuildHasher>::Hasher;
     fn build_hasher(&self) -> Self::Hasher {
