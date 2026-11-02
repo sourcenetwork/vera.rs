@@ -463,8 +463,69 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
 
 #[cfg(test)]
 mod processing_failure_tests {
-    use super::require_validity_decision;
-    use crate::AppError;
+    use super::{StatefulVeraApp, require_validity_decision};
+    use crate::{AppError, ApplicationState, NoopSink, StateExecution};
+    use commonware_consensus::marshal::ancestry;
+    use commonware_cryptography::{Digested, Digestible as _};
+    use commonware_glue::stateful::{
+        Application, Finality,
+        db::{Barrier, DatabaseSet},
+    };
+    use commonware_runtime::{Runner as _, tokio};
+    use futures::FutureExt as _;
+    use vera_backend::Ctx;
+    use vera_consensus::components::InMemoryMempool;
+    use vera_domain::{Block, Tx};
+    use vera_executor::{BlockContext, ExecutionReceipt, VeraExecutor};
+
+    #[derive(Clone)]
+    struct FailingState;
+
+    impl DatabaseSet<Ctx> for FailingState {
+        type Unmerkleized = ();
+        type Merkleized = ();
+        type Readers = ();
+        type Config = ();
+        type SyncTargets = ();
+
+        async fn init(_: Ctx, _: (), _: Option<()>) -> Self {
+            Self
+        }
+        fn initial_sync_targets() {}
+        async fn new_batches(&self) {}
+        fn fork_batches(_: &()) {}
+        fn matches_sync_targets(_: &(), _: &()) -> bool {
+            true
+        }
+        fn readers(&self) {}
+        async fn apply(&self, _: ()) {}
+        async fn finalize(&self) -> Barrier {
+            panic!("not used by this test")
+        }
+        async fn prune(&self, _: &()) {}
+        async fn committed_targets(&self) {}
+    }
+
+    impl ApplicationState for FailingState {
+        fn accepts(_: &Block) -> bool {
+            true
+        }
+        fn targets(_: &Block) {}
+        fn with_receipts(_: (), _: Vec<ExecutionReceipt>) {}
+        fn receipts(_: &()) -> &[ExecutionReceipt] {
+            &[]
+        }
+        async fn execute(
+            _: &VeraExecutor,
+            _: (),
+            _: &BlockContext,
+            _: &[Tx],
+        ) -> Result<StateExecution<Self>, AppError> {
+            Err(AppError::State(vera_backend::BackendError::Storage(
+                "injected read failure".into(),
+            )))
+        }
+    }
 
     #[test]
     fn local_storage_failure_stops_processing_instead_of_rejecting_the_block() {
@@ -476,5 +537,48 @@ mod processing_failure_tests {
             .is_err()
         );
         require_validity_decision(&AppError::RootMismatch("state root"));
+    }
+
+    #[test]
+    fn candidate_processing_fails_stopped_on_a_storage_error() {
+        tokio::Runner::new(tokio::Config::default()).start(|context| async move {
+            let genesis = crate::genesis_block(
+                vera_domain::StateRoot(alloy_primitives::B256::ZERO),
+                vera_domain::DbTargets::default(),
+                alloy_primitives::B256::ZERO,
+            );
+            let mut candidate = genesis.clone();
+            candidate.height = 1;
+            candidate.parent = genesis.id();
+            let block_context = candidate.context.clone();
+            let ancestry = ancestry::from_iter([candidate, genesis].map(|block| {
+                let digest = block.digest();
+                Digested::precomputed(block, digest)
+            }));
+            let mut app = StatefulVeraApp::<NoopSink, FailingState>::new(
+                VeraExecutor::new(9001),
+                crate::genesis_block(
+                    vera_domain::StateRoot(alloy_primitives::B256::ZERO),
+                    vera_domain::DbTargets::default(),
+                    alloy_primitives::B256::ZERO,
+                ),
+                InMemoryMempool::new(),
+                NoopSink,
+                64,
+                30_000_000,
+            );
+            let result = std::panic::AssertUnwindSafe(app.process(
+                (context, block_context),
+                ancestry,
+                (),
+                Finality::Candidate,
+            ))
+            .catch_unwind()
+            .await;
+            assert!(
+                result.is_err(),
+                "a local failure must not return an invalid-block decision"
+            );
+        });
     }
 }
