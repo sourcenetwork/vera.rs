@@ -214,6 +214,14 @@ which fixes RUSTSEC-2026-0346, 0347, 0348 and 0349. The newly listed `kuva` and
 `derivative`, `paste` and `unsafe-libyaml` remain disclosed; parser limits do not
 establish the memory safety of an unmaintained parser.
 
+The current runtime dependency check still reports RUSTSEC-2026-0387 for
+`crypto-bigint 0.5.5`, reached through the `elliptic-curve 0.13` dependency
+family. Its affected constant-time operations require a security fix; no
+exception is configured here. The
+compatible zstd dependencies are updated to `zstd 0.13.4` and `zstd-safe 7.4.0`
+to address RUSTSEC-2026-0391, 0398 and 0403. The check also continues to report
+unmaintained `derivative`, `paste` and `unsafe-libyaml` dependencies.
+
 Key provisioning/recovery requires independently supplied genesis trust,
 identity-bound shares and owner-only private files. Startup rejects unsafe file
 types and permissions. Preserve the latest durable signing journals when
