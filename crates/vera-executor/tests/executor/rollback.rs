@@ -189,6 +189,31 @@ fn post_execution_database_failure_preserves_module_state() {
     );
 }
 
+#[test]
+fn nested_registry_read_failure_cannot_be_discarded_by_the_caller() {
+    let state = MockStateDb {
+        unreadable_storage: Some((VALIDATOR_REGISTRY_ADDRESS, U256::from(1))),
+        ..Default::default()
+    };
+    let outer = Address::repeat_byte(0x22);
+    state.insert_account(VALIDATOR_REGISTRY_ADDRESS, MockAccount::default());
+    install(
+        &state,
+        outer,
+        forwarding_code(VALIDATOR_REGISTRY_ADDRESS, &[0x00], true),
+    );
+    let result = try_execute_with_executor(
+        &state,
+        TxKind::Call(outer),
+        IValidatorRegistry::getValidatorsCall {}.abi_encode().into(),
+        VeraExecutor::new(9001),
+    );
+    assert!(matches!(
+        result,
+        Err(ExecutionError::State(StateDbError::Storage(_)))
+    ));
+}
+
 #[rstest]
 #[case(false)]
 #[case(true)]
