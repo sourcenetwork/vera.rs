@@ -161,6 +161,12 @@ pub(crate) fn run(chain_id: u64, data_dir: PathBuf, args: &TestnetArgs) -> eyre:
     } else {
         VeraGenesis::devnet()
     };
+    if args.genesis.is_none() {
+        genesis.timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs();
+    }
+    genesis.validate_timestamp()?;
     let (epoch_info, shares) = vera_node::trusted_setup(seed, participants.iter().cloned())
         .map_err(crate::cli::anyhow_to_eyre)?;
     genesis.epoch_info = Some(vera_node::epoch_info_hex(&epoch_info));

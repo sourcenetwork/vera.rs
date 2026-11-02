@@ -10,10 +10,8 @@ publication from the later [four-host WAN qualification](wan-gates.md).
 
 The initial release targets native ACP v1, bulletin, identity, operator-managed
 membership, verified client APIs and the Regolith-backed daemon. ACP v2 remains
-future work. The four-host WAN test and the pending Commonware DKG boundary retry
-are follow-ups, not first-release acceptance gates. DKG itself remains part of
-consensus bootstrap and resharing; deferring the retry does not remove those
-protocols or weaken boundary verification.
+future work. The four-host WAN test is a follow-up, not a first-release
+acceptance gate. DKG remains part of consensus bootstrap and resharing.
 
 The Orbis service stack has merged. Release qualification still requires testing
 the selected Vera and Orbis revisions together.
@@ -28,15 +26,15 @@ remaining first-release work is:
 
 | Gate | Required result |
 | --- | --- |
-| Official Commonware source | Remove the fork from the release dependency set without waiting for the pending-epoch retry. Preserve the upstream archive and synchronization fixes. Qualify the selected unpatched source and document its boundary-recovery limitation. The release-preparation branch selects official `96567b26`; focused candidate qualification is in progress. |
+| Official Commonware source | Qualify the official `2026.10.0` registry release, including its upstream archive, synchronization and DKG boundary changes, against the selected Vera candidate. |
 | Publishable crates | Version every packaged dependency, complete package metadata and verify the registry dependency graph without workspace patches. The nine-crate client/verifier closure now has explicit publication boundaries, versioned internal dependencies and package metadata. Their dependency closure includes the Git-only, unpublished `orbis-reporting` crate; resolve that shared-format packaging dependency independently of the service stack. |
 | Release automation | Validate versions and packages and produce tagged daemon assets with checksums and provenance from the same commit. The release workflow builds and compares two clean daemon artifacts and creates a draft GitHub release for an existing matching version tag. Keep crate uploads manual; CI needs no crates.io publishing credentials. |
 | Candidate validation | Run focused native authorization, membership, receipt and recovery checks affected by the dependency change. Verify the packaged client/verifier from a clean registry consumer, independent trust configuration, and the chosen daemon artifact. Reuse earlier source-bound evidence for unchanged code. |
 | Publication handoff | Record exact source, versions, dependencies, target and limitations. Provide package checksums and dependency-ordered commands for the maintainer to publish manually, followed by registry installation and download checks. Crate uploads belong to the maintainer, not the automated workflow. |
 
-The current source-distribution path is an exact official Commonware Git pin and
-SDK access from a qualified Vera Git commit. Native candidate and daemon
-qualification continues without waiting for a registry release. The upload gates
+The candidate selects official Commonware `2026.10.0` registry packages and
+SDK access from a qualified Vera Git commit. The updated dependency set and
+daemon must be qualified at the selected candidate revision. The upload gates
 below remain requirements for the maintainer's later crates.io publication.
 See [Git SDK access](manual-release.md#current-git-sdk-access).
 
@@ -49,10 +47,11 @@ adding version strings alone does not establish that the registry packages have
 the APIs or behavior qualified here. See Cargo's
 [published-dependency rules](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#multiple-locations).
 
-The pending retry is tracked in [#230](https://github.com/sourcenetwork/vera.rs/issues/230).
-It addresses epoch-boundary verification while finalized DKG replay is still
-catching up. The unpatched release must disclose that recovery limitation and
-check bounded cancellation; it must not claim the patched recovery result.
+Commonware `2026.10.0` includes the upstream
+[epoch-boundary recovery fix](https://github.com/commonwarexyz/monorepo/pull/5328),
+which superseded the proposed retry. Vera must still qualify its integration with
+the selected release candidate. Upstream documents that a validator syncing past
+the epoch midpoint sits out that epoch's resharing, reducing the available quorum.
 WAN work remains tracked in [#234](https://github.com/sourcenetwork/vera.rs/issues/234),
 with its existing thresholds unchanged. Neither follow-up is marked completed.
 
@@ -73,12 +72,13 @@ explicit publication settings, complete metadata and registry-sourced runtime
 dependencies. Neither command uploads crates. CI retains the plan; a green
 metadata-report job does not mean `ready` is true.
 
-At this preparation revision, published Commonware `2026.9.0` predates the APIs
-used here. A registry-only `vera-domain` check fails with missing codec `Buf`
-and `Copying` APIs. The official Git revision compiles, but this does not make the
-SDK publishable against the older registry release. A compatible upstream crate
-release and a publishable shared `orbis-reporting` package remain prerequisites;
-changing version strings or silently using workspace patches does not satisfy them.
+The selected Commonware `2026.10.0` packages are available in the registry,
+but the changed dependency set still needs end-to-end qualification. A
+publishable shared `orbis-reporting` package remains a separate prerequisite;
+a Git dependency with a version string does not satisfy the registry gate.
+The MIT reporting package is prepared in [Orbis #343](https://github.com/sourcenetwork/orbis-rs/pull/343)
+and must be merged, published manually, and verified before switching Vera to
+its registry release. See the [manual release guide](manual-release.md#prepare-the-shared-reporting-crate).
 
 ## Measured operating envelope
 
@@ -154,6 +154,46 @@ acknowledged-operation loss was reproduced in those recorded follow-ups.
 
 ## Consumer compatibility
 
+### Trust candidate checkpoint
+
+On a macOS arm64 host, Vera `3473e34e58668ae344df1f49b175450f559564c5`
+passed `native_go_workers_verify_policy_creation` and
+`native_go_gateway_verifies_pipelined_vera` against Trust API
+`be7d44749a33bdd81f646f9b7815dcad892b09cc`. The first selector used rotating
+consensus; the second used pipelined consensus and the Trust gateway fixture.
+Both ran four local validators and the Trust test binaries built with Go 1.26.9
+and the candidate's shared verifier, built with Rust 1.99.1. They exercised signed
+native policy commands, worker keys, verified reads and the gateway contract.
+
+The debug daemon SHA-256 was
+`bfdcbc2ef253831188f9d0bbc5b289a71f2925bcbea1abe31fc0d3642999a997`;
+the shared verifier SHA-256 was
+`f846e95c16a77a50f95ad26b3b3b0e4a64d4e0b38a0b9a51cb1913de3ac65df2`.
+The Trust client and gateway test binary hashes were
+`857a3f5e03c6875f62655faccd8161f34fd0c2ffb01263c6012e24192983c01e` and
+`ed9870fc0268f65641a39fd70ddb80482fcdbd859f7a014ca6574ab047cf52a8`,
+respectively. These are local test artifacts, not release builds. The gateway
+fixture did not use the Rust Defra sidecar, external gateway process, or Docker
+Orbis nodes. It does not replace the final release-set qualification.
+
+After the zstd update, the pipelined selector also passed against Vera
+`51e2ea9f86fed0c86e88f68e37e62464dc130cee`, Trust
+`be7d44749a33bdd81f646f9b7815dcad892b09cc`, and Defra
+`f0304032367a93a75aaad45903fa5bc31a3f8624` on macOS arm64. It used the
+current Rust Defra CLI as the remote identity-store sidecar, with node access
+control enabled, and exercised the shared-store gateway configuration. The Defra
+CLI was built without its `vera` feature; this checkpoint does not qualify
+Defra's direct Vera authorization integration or Orbis containers.
+
+The debug daemon, verifier and Defra sidecar SHA-256 values were, respectively,
+`c4333192d669a8ead0ae9ad2ad7213e09b069d2aaa7a5b9d5f0145d6f601814f`,
+`29b87ab7be998ff12d4f997d1802d897802b6cb1d4b582cc320cca095edc283d`, and
+`ce6ae72bb6a81486a1eda25319df8f41a7df631f8a9cef7ad279d22e8d1f9dcd`.
+The same Trust test binaries and toolchains listed above were used. These are
+local test artifacts, not release binaries.
+
+### Earlier checkpoints
+
 The [consumer qualification record](native-qualification-20261014.md#native-consumer-checks)
 retains the exact compatible versions. Its frozen Vera runtime is
 `e48e1d8f9f701da94554a176d913131e2e6a5277`:
@@ -188,6 +228,14 @@ which fixes RUSTSEC-2026-0346, 0347, 0348 and 0349. The newly listed `kuva` and
 `ruzstd` packages are absent from the lockfile. Existing maintenance notices for
 `derivative`, `paste` and `unsafe-libyaml` remain disclosed; parser limits do not
 establish the memory safety of an unmaintained parser.
+
+The current runtime dependency check still reports RUSTSEC-2026-0387 for
+`crypto-bigint 0.5.5`, reached through the `elliptic-curve 0.13` dependency
+family. Its affected constant-time operations require a security fix; no
+exception is configured here. The
+compatible zstd dependencies are updated to `zstd 0.13.4` and `zstd-safe 7.4.0`
+to address RUSTSEC-2026-0391, 0398 and 0403. The check also continues to report
+unmaintained `derivative`, `paste` and `unsafe-libyaml` dependencies.
 
 Key provisioning/recovery requires independently supplied genesis trust,
 identity-bound shares and owner-only private files. Startup rejects unsafe file

@@ -109,18 +109,18 @@ jobs:
           GIT_CONFIG_COUNT: '1'
           GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
           GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
-        run: cargo +1.98.0 fetch --locked
+        run: cargo +1.99.1 fetch --locked
 
       - name: Build release artifacts before measurement
         shell: bash
         run: |
           set -euo pipefail
-          cargo +1.98.0 build --frozen --release -p verad
+          cargo +1.99.1 build --frozen --release -p verad
           if [[ "$STORAGE_ATTRIBUTION" == true ]]; then
-            cargo +1.98.0 build --frozen --release -p vera-e2e --example mixed_policy_workload
+            cargo +1.99.1 build --frozen --release -p vera-e2e --example mixed_policy_workload
           else
-            cargo +1.98.0 build --frozen --release -p vera-e2e --example operation_baseline
-            cargo +1.98.0 build --frozen --release -p vera-e2e --example component_baseline
+            cargo +1.99.1 build --frozen --release -p vera-e2e --example operation_baseline
+            cargo +1.99.1 build --frozen --release -p vera-e2e --example component_baseline
           fi
           python3 -m unittest discover -s tools/performance -p 'test_*.py'
 
@@ -311,7 +311,7 @@ jobs:
           sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler python3-venv
           python3 -m venv "$RUNNER_TEMP/performance-python"
           "$RUNNER_TEMP/performance-python/bin/pip" install -r tools/performance/requirements.txt
-      - uses: dtolnay/rust-toolchain@ff7f6a3374ce205788da40198ec918bd5d67aea7 # 1.99.0
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: nuclei-rpc-performance-1.99
@@ -320,20 +320,20 @@ jobs:
           GIT_CONFIG_COUNT: '1'
           GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
           GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
-        run: cargo +1.99.0 fetch --locked
+        run: cargo +1.99.1 fetch --locked
       - name: Build both daemons and the common workload driver
         run: |
           mkdir -p binaries/base binaries/head
-          cargo +1.99.0 build --frozen --release -p verad
+          cargo +1.99.1 build --frozen --release -p verad
           cp target/release/verad binaries/base/verad
-          cargo +1.99.0 build --frozen --release -p verad --features nuclei-rpc
+          cargo +1.99.1 build --frozen --release -p verad --features nuclei-rpc
           cp target/release/verad binaries/head/verad
-          cargo +1.99.0 build --frozen --release -p vera-e2e --example operation_baseline --example component_baseline
+          cargo +1.99.1 build --frozen --release -p vera-e2e --example operation_baseline --example component_baseline
           cp target/release/examples/operation_baseline binaries/head/operation_baseline
           cp target/release/examples/component_baseline binaries/head/component_baseline
           cp target/release/examples/component_baseline binaries/base/component_baseline
           sha256sum binaries/{base,head}/verad binaries/head/operation_baseline > binaries/SHA256SUMS
-          printf '{"base":"Tokio RPC","head":"Nuclei RPC","nuclei_backend":"%s","rust":"1.99.0"}\n' "$NUCLEI_BACKEND" > binaries/comparison-configuration.json
+          printf '{"base":"Tokio RPC","head":"Nuclei RPC","nuclei_backend":"%s","rust":"1.99.1"}\n' "$NUCLEI_BACKEND" > binaries/comparison-configuration.json
       - name: Compare native workloads
         env:
           VERA_E2E_DIR: ${{ runner.temp }}/nuclei-comparison-nodes

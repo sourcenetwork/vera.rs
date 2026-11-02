@@ -72,6 +72,7 @@ fn light_fixture_with(seed: u64, configure: impl FnOnce(&mut Block)) -> LightBlo
         height: 100,
         timestamp: 1_700_000_000,
         prevrandao: B256::repeat_byte(0x55),
+        randomness: None,
         state_root: StateRoot(B256::repeat_byte(0x01)),
         module_state_root: B256::repeat_byte(0x02),
         txs: vec![crate::Tx::new(Bytes::from_static(b"light-block"))],

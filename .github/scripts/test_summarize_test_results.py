@@ -23,6 +23,20 @@ class SafeTestEvidence(unittest.TestCase):
             (root / 'test-output.log').write_text(content)
             return summary.summarize(root, {'crates/vera-e2e/tests/case.rs': 100}, function_names)
 
+    def test_disk_full_exit_exports_only_static_boolean_fields(self):
+        evidence = self.collect(
+            'disk_full_exit enospc=false write_failed=true sync_failed=false '
+            'state_failure=true panicked=true\n'
+            'disk_full_exit enospc=true write_failed=false sync_failed=false '
+            'state_failure=false panicked=false private-key\n')
+        self.assertEqual(evidence['disk_full_exit'], {
+            'enospc': False, 'write_failed': True, 'sync_failed': False,
+            'state_failure': True, 'panicked': True})
+        self.assertNotIn('private-key', json.dumps(evidence))
+        self.assertIsNone(self.collect(
+            'disk_full_exit enospc=true write_failed=false sync_failed=false '
+            'state_failure=false panicked=false private-key\n')['disk_full_exit'])
+
     def test_netem_coverage_keeps_bounded_counts_without_private_suffixes(self):
         evidence = self.collect(
             'netem_coverage active=3 installed=4 uncovered=1\n'

@@ -26,6 +26,7 @@ class RunPrTests(unittest.TestCase):
             source = self.root / side
             source.mkdir()
             (source / 'revision').write_text(side)
+            (source / 'Cargo.lock').write_text('[[package]]\nname = \"commonware-storage\"\nversion = \"2026.10.0\"\n')
             subprocess.run(['git', 'init', '-q', str(source)], check=True)
             self.write_schema(side, 'relationship/v5/')
             subprocess.run(['git', 'add', '.'], cwd=source, check=True)
@@ -178,6 +179,26 @@ print({help_text!r} if sys.argv[1:] == ['validator', '--help'] else {side!r})
                 directory = self.output / tag / f'objects-{objects}'
                 self.assertEqual(json.loads((directory / 'unavailable.json').read_text()), unavailable(identity, objects))
                 self.assertFalse((directory / 'manifest.json').exists())
+                self.assertFalse((directory / 'workload.jsonl').exists())
+        for tag in ('head1', 'head2'):
+            for objects in (0, 32):
+                self.assertTrue((self.output / tag / f'objects-{objects}' / 'manifest.json').exists())
+
+    def test_changed_storage_version_skips_unverified_base_proofs(self):
+        source = self.root / 'base'
+        (source / 'Cargo.lock').write_text('[[package]]\nname = "commonware-storage"\nversion = "2026.9.0"\n')
+        subprocess.run(['git', 'add', 'Cargo.lock'], cwd=source, check=True)
+        subprocess.run(['git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                        '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null',
+                        'commit', '-qm', 'storage'], cwd=source, check=True)
+        self.measure(workloads=4)
+        identity = json.loads((self.output / 'comparison.json').read_text())
+        self.assertEqual(identity['base']['storage_version'], '2026.9.0')
+        self.assertEqual(identity['head']['storage_version'], '2026.10.0')
+        for tag in ('base1', 'base2'):
+            for objects in (0, 32):
+                directory = self.output / tag / f'objects-{objects}'
+                self.assertEqual(json.loads((directory / 'unavailable.json').read_text()), unavailable(identity, objects))
                 self.assertFalse((directory / 'workload.jsonl').exists())
         for tag in ('head1', 'head2'):
             for objects in (0, 32):

@@ -8,9 +8,9 @@ operator-managed membership, ACP, storage, threshold services, and recovery limi
 ## First-release scope
 
 Follow the [first-release checklist](docs/release-qualification.md#first-release-crates-and-daemon-artifacts)
-for crate publication and daemon release automation. The pending Commonware DKG
-boundary retry, unmerged Orbis service integration and four-host WAN qualification
-are follow-ups. Retain DKG bootstrap/resharing and existing verification checks.
+for crate publication and daemon release automation. Qualify the selected Orbis
+service version; four-host WAN qualification is a follow-up. Retain DKG
+bootstrap/resharing and existing verification checks.
 Do not reopen completed ACP v1, storage or measurement milestones to complete
 publishing. Record candidate-specific validation when changing dependencies.
 
@@ -40,7 +40,7 @@ Related repositories are independent checkouts; discover their paths rather than
 | Simplex consensus, REVM executor, e2e harness | bankd-commonware | Consensus, EVM execution, testing |
 | BLS12-381 threshold crypto | commonware monorepo | Block signing, native tx verification |
 
-The development toolchain is pinned to Rust 1.98.0 in `rust-toolchain.toml`.
+The development toolchain is pinned to Rust 1.99.1 in `rust-toolchain.toml`.
 Linux native-service CI covers module/storage checks, native lifecycle and
 recovery, crash injection, and a normal release build.
 

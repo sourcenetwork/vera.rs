@@ -135,6 +135,7 @@ mod tests {
             height: 7,
             timestamp: 1_700_000_000,
             prevrandao: B256::from([0x55u8; 32]),
+            randomness: None,
             state_root: StateRoot(B256::from([0xBBu8; 32])),
             module_state_root: B256::ZERO,
             txs,

@@ -60,7 +60,7 @@ fn failed_reader(readers: &FaultyReaders, module: usize) -> &Reader<FaultyDb> {
 }
 
 async fn open(context: &FaultyCtx) -> FaultySet {
-    let cache = CacheRef::from_pooler(context, NZU16!(4084), NZUsize!(64));
+    let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
     FaultySet::init(context.child("native"), state_config("fault", cache), None).await
 }
 
@@ -201,7 +201,7 @@ fn injected_io_failures_are_fatal_and_recovery_republishes_the_anchor() {
         let config = tokio::Config::new().with_storage_directory(directory.path());
         tokio::Runner::new(config).start(|context| async move {
             let context = FaultyCtx::new(context);
-            let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+            let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
             let set = FaultySet::init(
                 context.child("recovered"),
                 state_config("fault", cache),

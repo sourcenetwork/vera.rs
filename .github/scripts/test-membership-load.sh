@@ -3,7 +3,7 @@ set -euo pipefail
 
 log=$(mktemp "${RUNNER_TEMP:?}/membership-load.XXXXXX")
 result=0
-cargo +1.98.0 test --frozen --release -p vera-e2e --test native_membership \
+cargo +1.99.1 test --frozen --release -p vera-e2e --test native_membership \
     -- pipelined_member_joins_without_bootstrap_share_and_sustains_quorum --exact --nocapture \
     > "$log" 2>&1 || result=$?
 python3 - "$log" "$result" <<'PY'

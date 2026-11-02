@@ -71,19 +71,11 @@ verify revision certificates and permission evidence independently.
 
 ## Commonware integration
 
-All Commonware packages select official upstream
-[`96567b26e047a72ee3a8babbf63eac64c757a703`](https://github.com/commonwarexyz/monorepo/commit/96567b26e047a72ee3a8babbf63eac64c757a703)
-in `Cargo.toml` and `Cargo.lock`. No fork or local DKG retry patch is selected.
-The package version alone does not identify this source.
-
-The [pending-epoch retry](https://github.com/commonwarexyz/monorepo/pull/5263)
-is deferred beyond the first release. During boundary verification, transient
-pending epoch information can remain unresolved until cancellation, even when
-finalized DKG replay subsequently catches up. Missing or mismatched information
-must never authorize a boundary. Snapshot startup remains bounded by
-`initialization_timeout_ms`; an operator can retry recovery from a fresh certified
-target. This is a release limitation, not equivalence to the earlier patched
-recovery behavior. See the [release scope](release-qualification.md#first-release-crates-and-daemon-artifacts).
+Commonware packages select the official `2026.10.0` registry release. It
+includes the upstream [epoch-boundary recovery change](https://github.com/commonwarexyz/monorepo/pull/5328).
+The updated integration still requires Vera's focused DKG and snapshot-recovery
+qualification; inclusion upstream alone does not establish the behavior of this
+Vera release candidate.
 
 Upstream supplies the [archive rewrite](https://github.com/commonwarexyz/monorepo/pull/5268)
 and [sync progress and nonblocking channels](https://github.com/commonwarexyz/monorepo/pull/5282).

@@ -499,21 +499,21 @@ impl DatabaseSet<Ctx> for OrderedState {
     }
 }
 
-impl<R: Send + 'static> StateSyncSet<Ctx, R, Digest> for OrderedState
+impl<R: Send + 'static> StateSyncSet<Ctx, R> for OrderedState
 where
-    OrderedDatabases: StateSyncSet<Ctx, R, Digest, Error = String>,
+    OrderedDatabases: StateSyncSet<Ctx, R, Error = String>,
 {
     type Error = String;
 
-    async fn sync(
+    async fn sync<H: commonware_cryptography::Digest>(
         context: Ctx,
         config: Self::Config,
         sources: R,
-        anchor: Anchor<Digest>,
+        anchor: Anchor<H>,
         targets: Self::SyncTargets,
-        tip_updates: ring::Receiver<TipUpdate<Digest, Self::SyncTargets>>,
+        tip_updates: ring::Receiver<TipUpdate<H, Self::SyncTargets>>,
         sync_config: SyncEngineConfig,
-    ) -> Result<(Self, Anchor<Digest>), String> {
+    ) -> Result<(Self, Anchor<H>), String> {
         tracing::debug!(target: "vera_diagnostics", height = %anchor.height,
             "snapshot database transfer started");
         let durability_metrics = durability::DurabilityMetrics::register(&context);
@@ -535,7 +535,17 @@ where
         if let Some(handoff) = config.sync_handoff {
             tracing::debug!(target: "vera_diagnostics", height = %anchor.height,
                 "snapshot history handoff started");
-            handoff(anchor).await?;
+            let digest = anchor
+                .digest
+                .as_ref()
+                .try_into()
+                .map_err(|_| "invalid anchor digest length")?;
+            handoff(Anchor {
+                height: anchor.height,
+                round: anchor.round,
+                digest: Digest(digest),
+            })
+            .await?;
             tracing::debug!(target: "vera_diagnostics", height = %anchor.height,
                 "snapshot history handoff completed");
         }

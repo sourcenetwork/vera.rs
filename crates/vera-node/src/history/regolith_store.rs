@@ -77,13 +77,12 @@ impl HistoryDb {
     }
 
     pub(super) fn write_sync(&self, batch: WriteBatch) -> Result<()> {
-        self.db.write_opt(
-            &regolith::WriteOptions {
-                sync: true,
-                ..Default::default()
-            },
-            batch.inner,
-        )?;
+        let options = regolith::WriteOptions {
+            sync: true,
+            ..Default::default()
+        };
+        // A stalled write consumes its batch without applying it; retain it for retry.
+        regolith::through_stalls(|| self.db.write_opt(&options, batch.inner.clone()))?;
         Ok(())
     }
 
@@ -189,6 +188,63 @@ impl WriteBatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn synchronous_batch_waits_for_write_stall_and_survives_restart() {
+        use std::{sync::mpsc, time::Duration};
+
+        let directory = tempfile::tempdir().unwrap();
+        let options = regolith::Options::default()
+            .write_buffer_size(4 * 1024)
+            .l0_compaction_trigger(1000)
+            .level0_slowdown_writes_trigger(0)
+            .level0_stop_writes_trigger(2)
+            .max_write_buffer_number(0);
+        let store = Arc::new(HistoryDb {
+            db: regolith::Db::open(directory.path().join("regolith"), options).unwrap(),
+            statistics: None,
+        });
+        for key in [b"fill1", b"fill2"] {
+            regolith::through_stalls(|| store.db.put(key, b"v")).unwrap();
+            store.db.flush().unwrap();
+        }
+        let probe = store.db.put(b"probe", b"not written");
+        assert!(matches!(
+            probe,
+            Err(regolith::Error::WouldBlock(regolith::WouldBlock::Stall(_)))
+        ));
+        assert_eq!(store.get(b"probe").unwrap(), None);
+
+        let (finished_tx, finished_rx) = mpsc::channel();
+        let writer = Arc::clone(&store);
+        let thread = std::thread::spawn(move || {
+            let mut batch = WriteBatch::default();
+            batch.put(b"key1", b"value1");
+            batch.put(b"key2", b"value2");
+            finished_tx.send(writer.write_sync(batch)).unwrap();
+        });
+        assert!(matches!(
+            finished_rx.recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        store.db.compact_range(None, None).wait().unwrap();
+        finished_rx
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        thread.join().unwrap();
+        drop(store);
+
+        let reopened = HistoryDb::open_default(directory.path()).unwrap();
+        assert_eq!(
+            reopened.get(b"key1").unwrap().as_deref(),
+            Some(b"value1".as_slice())
+        );
+        assert_eq!(
+            reopened.get(b"key2").unwrap().as_deref(),
+            Some(b"value2".as_slice())
+        );
+    }
 
     #[test]
     fn write_statistics_preserve_sync_batches_and_restart_accounting() {

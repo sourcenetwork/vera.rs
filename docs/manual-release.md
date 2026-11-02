@@ -15,26 +15,29 @@ then run this in the consuming project:
 cargo add --git https://github.com/sourcenetwork/vera.rs --rev "$VERA_SDK_REV" vera-client vera-verifier
 ```
 
-Commonware dependencies pin official upstream `96567b26` directly, so consumers
-do not need to copy this repository's workspace patches. CI checks a separate
-Git consumer's resolved Commonware sources against the qualified graph. The
-pending DKG retry is still excluded. Git-based SDK access and daemon artifacts
-can be qualified before crates.io publication; the registry prerequisites below
-still apply to uploads.
+Commonware dependencies select the official `2026.10.0` registry packages.
+CI checks an independent Git consumer's resolved Commonware sources against the
+workspace graph. Git-based SDK access and daemon artifacts require qualification
+at the selected Vera revision; the registry prerequisites below still apply to
+crate uploads.
 
 ## Prerequisites
 
-Publication is currently blocked by dependencies, not by the deferred DKG fix:
+Before publishing:
 
-- Publish compatible official Commonware packages containing the APIs and fixes
-  qualified by Vera. The current Git source is `96567b26`; published `2026.9.0`
-  is older and fails the registry-only SDK build. Update the registry versions
-  and lockfile, replace the Git dependencies and requalify that exact release.
+- Qualify the selected `2026.10.0` Commonware registry packages, including the
+  updated DKG boundary handling, against the actual release candidate.
+- Merge the MIT license and package metadata for `orbis-reporting` from
+  [Orbis #343](https://github.com/sourcenetwork/orbis-rs/pull/343).
 - Publish the shared-format `orbis-reporting` package independently of the Orbis
-  service stack. Vera currently pins version `0.0.1` at source `fd22c640`. Its
+  service stack. Vera currently pins version `0.0.1` at source `06cc2d86`. Its
   registry package must match the qualified formats. Replace the Git dependency
   with the verified registry release; a version field alongside a Git URL is
   insufficient.
+- Inspect the license notices in every package. `vera-identity`,
+  `vera-zanzibar`, and `vera-acp` declare `Apache-2.0 OR MIT` and include the
+  Apache 2.0 text from their Defra source revision as well as the MIT notice.
+  The other packages declare `MIT` and include its notice.
 - Confirm ownership and publishing rights for all nine Vera names. Log in to
   crates.io locally with the maintainer account. Do not put publishing tokens
   in workflow secrets, release notes or repository files.
@@ -44,6 +47,28 @@ merge and qualify one final release candidate. Record the exact Vera source,
 Commonware and Regolith versions, shared reporting dependency and actual
 Defra/Backbone consumer revisions. The Orbis service stack has merged, but its
 qualification must identify and test the selected Vera and Orbis revisions.
+
+## Prepare the shared reporting crate
+
+Orbis develop at `2b7835774db9bc170b06da184f13804363b09d7b` has no changes
+in `crates/reporting` relative to Vera's pinned `06cc2d86` revision. From a
+clean Orbis checkout at that revision, offline locked packaging succeeded and
+all 48 reporting unit tests passed. Orbis #343 adds the MIT license, repository metadata, and a license
+notice to the package. The maintainer must verify the final merged commit before
+publication.
+
+After the Orbis change is merged, check the reviewed commit, run its reporting
+tests, and create and inspect the package with:
+
+```sh
+cargo test --locked -p orbis-reporting
+cargo package --locked --registry crates-io -p orbis-reporting
+shasum -a 256 target/package/orbis-reporting-0.0.1.crate
+```
+
+Record the final source revision and archive checksum, then publish it manually.
+Verify its registry contents before switching Vera to the registry dependency.
+A checksum from the earlier packaging check is not evidence for a later commit.
 
 ## Validate the candidate
 
@@ -182,7 +207,7 @@ commit. To retry draft creation, dispatch with that same source and its existing
 inspect and remove an incomplete draft manually before retrying. Never delete or
 replace an already published release to make a rerun pass.
 
-The release notes disclose the unpatched DKG boundary-recovery limitation, the
+The release notes disclose the DKG midpoint recovery limitation, the
 post-release WAN qualification and the excluded Orbis service qualification.
 See [release qualification](release-qualification.md) for operating limits,
 key/backup handling, recovery evidence and the remaining acceptance gates.

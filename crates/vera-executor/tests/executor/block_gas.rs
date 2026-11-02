@@ -328,3 +328,24 @@ fn failed_native_leaves_only_remaining_gas_for_evm() {
     assert!(outcome.receipts[1].success());
     verify_selected(&executor, &state, &context, &txs, &outcome, &next);
 }
+
+#[test]
+fn evm_state_read_failure_is_not_skipped_or_flattened() {
+    let executor = VeraExecutor::new(9001);
+    let mut state = MockStateDb::new();
+    let (tx, sender) = transfer(&state, 0, 21_000);
+    state.unreadable_account = Some(sender);
+
+    for context in [context(100_000), context(100_000).with_verification()] {
+        let result = executor.execute_with_modules(
+            &state,
+            &context,
+            std::slice::from_ref(&tx),
+            executor.snapshot(),
+        );
+        assert!(matches!(
+            result,
+            Err(ExecutionError::State(StateDbError::Storage(_)))
+        ));
+    }
+}

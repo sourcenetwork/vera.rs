@@ -69,7 +69,7 @@ fn concurrent_duplicate_submissions_preserve_nonces_and_local_retry_tracking() {
     runtime::Runner::new(runtime::Config::new().with_storage_directory(directory.path())).start(
         |context| {
             Box::pin(async move {
-                let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+                let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
                 let databases = VeraStateSet::init(
                     context.child("admission_state"),
                     state_set_config("admission", cache),

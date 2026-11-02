@@ -231,8 +231,12 @@ its policies, receipts and worker sequences remain unpublished until finalizatio
 
 The startup readiness guard covers both preparation and ordinary proposals. The
 Commonware reshare wrapper leaves epoch boundaries and reserved dealer-log
-inclusion to ordinary proposals. Compatibility execution uses certificate-dependent
-VRF election and declines speculative preparation.
+inclusion to ordinary proposals. Compatibility execution uses rotating leaders
+and declines speculative preparation. Its blocks carry the prior-round threshold
+seed used for execution randomness. Validators verify that seed against the
+network's consensus public key and check its round before executing the block;
+verification therefore does not depend on a node having participated in the
+original leader election. The public key is retained across reshares.
 
 ## Operator-managed membership (PoA)
 

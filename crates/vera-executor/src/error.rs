@@ -66,6 +66,22 @@ pub enum ExecutionError {
 
 impl DBErrorMarker for ExecutionError {}
 
+impl ExecutionError {
+    /// Whether execution failed because local state could not be read reliably.
+    #[must_use]
+    pub const fn is_local_state_failure(&self) -> bool {
+        matches!(
+            self,
+            Self::State(
+                vera_traits::StateDbError::Storage(_)
+                    | vera_traits::StateDbError::CodeNotFound(_)
+                    | vera_traits::StateDbError::LockPoisoned
+                    | vera_traits::StateDbError::RootComputation(_)
+            )
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloy_primitives::Address;
@@ -85,6 +101,24 @@ mod tests {
         let inner = StateDbError::LockPoisoned;
         let err: ExecutionError = inner.into();
         assert!(matches!(err, ExecutionError::State(_)));
+    }
+
+    #[test]
+    fn local_state_failures_are_distinct_from_invalid_transactions() {
+        assert!(
+            ExecutionError::State(StateDbError::Storage("disk error".into()))
+                .is_local_state_failure()
+        );
+        assert!(ExecutionError::State(StateDbError::LockPoisoned).is_local_state_failure());
+        assert!(
+            ExecutionError::State(StateDbError::RootComputation("unavailable".into()))
+                .is_local_state_failure()
+        );
+        assert!(!ExecutionError::InvalidTx("bad nonce".into()).is_local_state_failure());
+        assert!(
+            !ExecutionError::State(StateDbError::AccountNotFound(Address::ZERO))
+                .is_local_state_failure()
+        );
     }
 
     #[test]

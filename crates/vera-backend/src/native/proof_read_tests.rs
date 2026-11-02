@@ -9,7 +9,7 @@ fn proof_readers_release_partial_guards_while_a_partition_is_busy() {
     let directory = tempfile::tempdir().unwrap();
     tokio::Runner::new(tokio::Config::new().with_storage_directory(directory.path())).start(
         |context| async move {
-            let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+            let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
             let set =
                 NativeStateSet::init(context.child("proof"), state_config("proof", cache), None)
                     .await;

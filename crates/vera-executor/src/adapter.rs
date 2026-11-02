@@ -3,6 +3,8 @@
 //! Note: REVM's `DatabaseRef` trait is synchronous, so we use `futures::executor::block_on`
 //! to bridge the async StateDb traits into the sync REVM interface.
 
+use std::sync::{Arc, Mutex};
+
 use alloy_primitives::{Address, B256, KECCAK256_EMPTY, U256};
 use revm::{bytecode::Bytecode, database_interface::DatabaseRef, state::AccountInfo};
 use vera_traits::{StateDbError, StateDbRead};
@@ -25,13 +27,38 @@ fn block_on<F: std::future::Future>(f: F) -> F::Output {
 #[derive(Clone, Debug)]
 pub struct StateDbAdapter<S> {
     state: S,
+    failures: Option<Arc<Mutex<Option<StateDbError>>>>,
 }
 
 impl<S> StateDbAdapter<S> {
     /// Create a new adapter wrapping the given state.
     #[must_use]
     pub const fn new(state: S) -> Self {
-        Self { state }
+        Self {
+            state,
+            failures: None,
+        }
+    }
+
+    pub(crate) fn track_failures(mut self, failures: Arc<Mutex<Option<StateDbError>>>) -> Self {
+        self.failures = Some(failures);
+        self
+    }
+
+    fn record<T>(&self, result: Result<T, StateDbError>) -> Result<T, StateDbError> {
+        if let Err(
+            error @ (StateDbError::Storage(_)
+            | StateDbError::LockPoisoned
+            | StateDbError::RootComputation(_)),
+        ) = &result
+            && let Some(failures) = &self.failures
+        {
+            let mut failures = failures.lock().expect("state failure lock poisoned");
+            if failures.is_none() {
+                *failures = Some(error.clone());
+            }
+        }
+        result
     }
 
     /// Get the underlying state reference.
@@ -45,10 +72,10 @@ impl<S: StateDbRead> DatabaseRef for StateDbAdapter<S> {
     type Error = ExecutionError;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        match block_on(self.state.nonce(&address)) {
+        match self.record(block_on(self.state.nonce(&address))) {
             Ok(nonce) => {
-                let balance = block_on(self.state.balance(&address))?;
-                let code_hash = block_on(self.state.code_hash(&address))?;
+                let balance = self.record(block_on(self.state.balance(&address)))?;
+                let code_hash = self.record(block_on(self.state.code_hash(&address)))?;
                 Ok(Some(AccountInfo {
                     nonce,
                     balance,
@@ -66,12 +93,12 @@ impl<S: StateDbRead> DatabaseRef for StateDbAdapter<S> {
         if code_hash == KECCAK256_EMPTY || code_hash == B256::ZERO {
             return Ok(Bytecode::default());
         }
-        let bytes = block_on(self.state.code(&code_hash))?;
+        let bytes = self.record(block_on(self.state.code(&code_hash)))?;
         Ok(Bytecode::new_raw(bytes))
     }
 
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        match block_on(self.state.storage(&address, &index)) {
+        match self.record(block_on(self.state.storage(&address, &index))) {
             Ok(value) => Ok(value),
             Err(StateDbError::AccountNotFound(_)) => Ok(U256::ZERO),
             Err(e) => Err(e.into()),

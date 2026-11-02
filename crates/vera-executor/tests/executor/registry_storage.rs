@@ -1,4 +1,7 @@
-use super::{rollback::execute_with_executor, *};
+use super::{
+    rollback::{execute_with_executor, try_execute_with_executor},
+    *,
+};
 use alloy_primitives::{TxKind, keccak256};
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::SolCall;
@@ -268,7 +271,7 @@ fn native_membership_storage_failure_aborts_the_proposal(#[case] building: bool)
         .unwrap_err();
     assert!(matches!(
         error,
-        vera_executor::ExecutionError::TxExecution(_)
+        vera_executor::ExecutionError::State(StateDbError::Storage(_))
     ));
     assert_eq!(
         state.accounts.read().unwrap()[&VALIDATOR_REGISTRY_ADDRESS]
@@ -464,13 +467,14 @@ fn registry_write_storage_failure_cannot_commit_partial_member(#[case] during_wr
         p2pAddr: "127.0.0.1:3000".into(),
     }
     .abi_encode();
-    let (outcome, _) = execute_with_executor(
+    let result = try_execute_with_executor(
         &state,
         TxKind::Call(VALIDATOR_REGISTRY_ADDRESS),
         calldata.into(),
         executor,
     );
     if during_write.is_none() {
+        let (outcome, _) = result.unwrap();
         assert_eq!(outcome.receipts.len(), 1);
         assert!(outcome.receipts[0].success());
         assert_eq!(
@@ -479,17 +483,17 @@ fn registry_write_storage_failure_cannot_commit_partial_member(#[case] during_wr
         );
         return;
     }
-    assert!(
-        outcome.receipts.iter().all(|receipt| !receipt.success()),
-        "failed storage access returned success"
-    );
-    assert!(
-        outcome
-            .changes
-            .accounts
-            .get(&VALIDATOR_REGISTRY_ADDRESS)
-            .is_none_or(|account| account.storage.is_empty()),
-        "failed operation retained registry writes"
+    assert!(matches!(
+        result,
+        Err(vera_executor::ExecutionError::State(StateDbError::Storage(
+            _
+        )))
+    ));
+    assert_eq!(
+        state.accounts.read().unwrap()[&VALIDATOR_REGISTRY_ADDRESS]
+            .storage
+            .len(),
+        1
     );
 }
 
@@ -511,13 +515,18 @@ fn registry_queries_do_not_treat_storage_failure_as_absence(#[case] single_membe
         )
     };
     state.unreadable_storage = Some((VALIDATOR_REGISTRY_ADDRESS, slot));
-    let (outcome, _) = execute_with_executor(
+    let result = try_execute_with_executor(
         &state,
         TxKind::Call(VALIDATOR_REGISTRY_ADDRESS),
         calldata.into(),
         executor,
     );
-    assert!(outcome.receipts.iter().all(|receipt| !receipt.success()));
+    assert!(matches!(
+        result,
+        Err(vera_executor::ExecutionError::State(StateDbError::Storage(
+            _
+        )))
+    ));
 }
 
 #[test]
@@ -809,4 +818,53 @@ fn membership_epoch_capacity_rejects_addition_and_both_reactivation_paths(
         state.accounts.read().unwrap()[&VALIDATOR_REGISTRY_ADDRESS].storage[&U256::from(1)],
         U256::from(if limited { 1 } else { 2 })
     );
+}
+
+#[rstest]
+#[case(false)]
+#[case(true)]
+fn native_membership_account_failure_is_a_local_state_error(#[case] verification: bool) {
+    let (request, actor) = native_member_call(0, native_registration());
+    let (mut state, executor) = authorized_actor(actor);
+    state.unreadable_account = Some(VALIDATOR_REGISTRY_ADDRESS);
+    let mut context = BlockContext::new(
+        Header {
+            number: 1,
+            gas_limit: 30_000_000,
+            ..Default::default()
+        },
+        B256::ZERO,
+        B256::ZERO,
+    );
+    context.is_verification = verification;
+    assert!(matches!(
+        executor.execute_with_modules(&state, &context, &[request], executor.snapshot()),
+        Err(vera_executor::ExecutionError::State(StateDbError::Storage(
+            _
+        )))
+    ));
+}
+
+#[test]
+fn epoch_roster_storage_failure_is_a_local_state_error() {
+    use std::num::NonZeroU64;
+    let (mut state, executor) = authorized_state();
+    state.unreadable_storage = Some((VALIDATOR_REGISTRY_ADDRESS, U256::from(1)));
+    let executor = executor.with_membership_epochs(NonZeroU64::new(10).unwrap(), NonZeroU64::MIN);
+    let context = BlockContext::new(
+        Header {
+            number: 9,
+            gas_limit: 30_000_000,
+            ..Default::default()
+        },
+        B256::ZERO,
+        B256::ZERO,
+    )
+    .with_verification();
+    assert!(matches!(
+        executor.execute_with_modules(&state, &context, &[], executor.snapshot()),
+        Err(vera_executor::ExecutionError::State(StateDbError::Storage(
+            _
+        )))
+    ));
 }

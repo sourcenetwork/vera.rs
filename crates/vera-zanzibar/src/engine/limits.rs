@@ -37,7 +37,7 @@ impl EvaluationBudget {
             meter.charge_step()?;
         }
         self.steps
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |steps| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |steps| {
                 (steps < MAX_EVALUATION_STEPS).then_some(steps + 1)
             })
             .map(|_| ())

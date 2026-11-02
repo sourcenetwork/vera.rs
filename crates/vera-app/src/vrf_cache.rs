@@ -1,15 +1,24 @@
 //! Proposal randomness retained until its round is behind finality.
 
 use alloy_primitives::B256;
-use commonware_consensus::types::Round;
+use commonware_codec::Encode as _;
+use commonware_consensus::{simplex::scheme::bls12381_threshold::vrf::Seed, types::Round};
+use commonware_cryptography::{Hasher as _, Sha256, bls12381::primitives::variant::MinSig};
 use std::{
     collections::BTreeMap,
     sync::{Arc, RwLock},
 };
 
+#[derive(Debug)]
+struct Entry {
+    #[cfg(test)]
+    digest: B256,
+    witness: Option<Seed<MinSig>>,
+}
+
 #[derive(Debug, Default)]
 struct Seeds {
-    rounds: BTreeMap<Round, B256>,
+    rounds: BTreeMap<Round, Entry>,
     finalized: Option<Round>,
 }
 
@@ -19,23 +28,52 @@ struct Seeds {
 pub struct VrfSeedCache(Arc<RwLock<Seeds>>);
 
 impl VrfSeedCache {
-    /// Record the randomness derived from a round's unlocking certificate.
-    pub fn insert(&self, round: Round, prevrandao: B256) {
+    #[cfg(test)]
+    pub(crate) fn insert(&self, round: Round, prevrandao: B256) {
         let mut seeds = self.0.write().expect("VRF seed cache lock poisoned");
         if seeds.finalized.is_none_or(|finalized| round >= finalized) {
-            seeds.rounds.insert(round, prevrandao);
+            seeds.rounds.insert(
+                round,
+                Entry {
+                    digest: prevrandao,
+                    witness: None,
+                },
+            );
         }
     }
 
-    /// Return the randomness to commit in this round's proposal.
-    #[must_use]
-    pub fn get(&self, round: Round) -> Option<B256> {
+    /// Record the verified seed used to unlock the proposal round.
+    pub fn insert_seed(&self, round: Round, seed: Seed<MinSig>) {
+        let mut seeds = self.0.write().expect("VRF seed cache lock poisoned");
+        if seeds.finalized.is_none_or(|finalized| round >= finalized) {
+            seeds.rounds.insert(
+                round,
+                Entry {
+                    #[cfg(test)]
+                    digest: seed_digest(&seed),
+                    witness: Some(seed),
+                },
+            );
+        }
+    }
+
+    pub(crate) fn witness(&self, round: Round) -> Option<Seed<MinSig>> {
         self.0
             .read()
             .expect("VRF seed cache lock poisoned")
             .rounds
             .get(&round)
-            .copied()
+            .and_then(|entry| entry.witness.clone())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn get(&self, round: Round) -> Option<B256> {
+        self.0
+            .read()
+            .expect("VRF seed cache lock poisoned")
+            .rounds
+            .get(&round)
+            .map(|entry| entry.digest)
     }
 
     /// Discard rounds that can no longer extend the finalized execution.
@@ -53,6 +91,11 @@ impl VrfSeedCache {
             seeds.rounds.pop_first();
         }
     }
+}
+
+pub(crate) fn seed_digest(seed: &Seed<MinSig>) -> B256 {
+    let encoded = seed.signature.encode();
+    B256::from(Sha256::hash(&[encoded.as_ref()]).0)
 }
 
 #[cfg(test)]

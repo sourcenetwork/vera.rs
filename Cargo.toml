@@ -6,27 +6,27 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.98"
+rust-version = "1.99"
 license = "MIT"
 repository = "https://github.com/sourcenetwork/vera.rs"
 
 [workspace.lints.rust]
-missing-debug-implementations = "warn"
-missing-docs = "warn"
-unreachable-pub = "warn"
-unused-must-use = "deny"
-rust-2018-idioms = "deny"
-unnameable-types = "warn"
+missing_debug_implementations = "warn"
+missing_docs = "warn"
+unreachable_pub = "warn"
+unused_must_use = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+unnameable_types = "warn"
 
 [workspace.lints.rustdoc]
 all = "warn"
 
 [workspace.lints.clippy]
 all = "warn"
-missing-const-for-fn = "warn"
-use-self = "warn"
-option-if-let-else = "warn"
-redundant-clone = "warn"
+missing_const_for_fn = "warn"
+use_self = "warn"
+option_if_let_else = "warn"
+redundant_clone = "warn"
 
 [profile.dev]
 debug = "line-tables-only"
@@ -75,20 +75,20 @@ vera-harness = { path = "crates/vera-harness", version = "=0.1.0" }
 vera-test-infra = { path = "crates/vera-test-infra", version = "=0.1.0" }
 
 # Commonware (calver 2026.9.0)
-commonware-actor = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
-commonware-p2p = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
-commonware-utils = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
-commonware-codec = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
-commonware-runtime = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
-commonware-consensus = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
-commonware-cryptography = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
-commonware-parallel = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
-commonware-storage = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
-commonware-broadcast = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
-commonware-resolver = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
-commonware-macros = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
-commonware-glue = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
-commonware-stream = { version = "2026.9.0", git = "https://github.com/commonwarexyz/monorepo", rev = "96567b26e047a72ee3a8babbf63eac64c757a703" }
+commonware-actor = { version = "=2026.10.0" }
+commonware-p2p = { version = "=2026.10.0" }
+commonware-utils = { version = "=2026.10.0" }
+commonware-codec = { version = "=2026.10.0" }
+commonware-runtime = { version = "=2026.10.0" }
+commonware-consensus = { version = "=2026.10.0" }
+commonware-cryptography = { version = "=2026.10.0" }
+commonware-parallel = { version = "=2026.10.0" }
+commonware-storage = { version = "=2026.10.0" }
+commonware-broadcast = { version = "=2026.10.0" }
+commonware-resolver = { version = "=2026.10.0" }
+commonware-macros = { version = "=2026.10.0" }
+commonware-glue = { version = "=2026.10.0" }
+commonware-stream = { version = "=2026.10.0" }
 
 orbis-reporting = { version = "=0.0.1", git = "https://github.com/sourcenetwork/orbis-rs", rev = "06cc2d86ade4e3eb5ddbc82baf60e5f1fdd663d6" }
 

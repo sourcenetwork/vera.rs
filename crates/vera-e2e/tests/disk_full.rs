@@ -67,6 +67,14 @@ async fn disk_full_validator_recovers_acknowledged_operations() {
         .into_iter()
         .map(|name| fs::read_to_string(log_dir.join(name)).unwrap())
         .collect::<String>();
+    println!(
+        "disk_full_exit enospc={} write_failed={} sync_failed={} state_failure={} panicked={}",
+        logs.contains("No space left on device") || logs.contains("os error 28"),
+        logs.contains("WriteFailed"),
+        logs.contains("SyncFailed"),
+        logs.contains("local state failed while processing a candidate block"),
+        logs.contains("panicked"),
+    );
     // Commonware's blob-header writes report WriteFailed without the underlying OS error.
     assert!(
         logs.contains("No space left on device")

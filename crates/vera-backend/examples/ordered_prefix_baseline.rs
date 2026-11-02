@@ -47,9 +47,9 @@ use vera_zanzibar::{Relationship, Subject};
 type LogCodec = ((RangeCfg<usize>, ()), RangeCfg<usize>);
 
 fn config<T: Translator + Default>(
-    context: &tokio::Context,
+    _context: &tokio::Context,
 ) -> VariableConfig<T, LogCodec, Sequential> {
-    let cache = CacheRef::from_pooler(context, NZU16!(4096), NZUsize!(1024));
+    let cache = CacheRef::new(NZU16!(4096), NZUsize!(1024));
     VariableConfig {
         merkle_config: full::Config {
             journal_partition: "prefix-mmr".into(),
@@ -156,7 +156,7 @@ fn main() {
                 batch = batch.write(key, Some(value.clone()));
             }
             let batch = batch.merkleize(&db, None, &mut Proportional).await.unwrap();
-            (db, _) = db.apply_batch(batch).await.unwrap();
+            db = db.apply_batch(batch).await.unwrap();
             db = db.commit().await.unwrap();
         }
         let prefix = prefix(0, layout, &policy);
@@ -173,7 +173,7 @@ fn main() {
                     batch = batch.write(key, Some(value.clone()));
                 }
                 let batch = batch.merkleize(&db, None, &mut Proportional).await.unwrap();
-                (db, _) = db.apply_batch(batch).await.unwrap();
+                db = db.apply_batch(batch).await.unwrap();
                 db = db.commit().await.unwrap();
             }
             previous = subjects;

@@ -23,11 +23,11 @@ mod sync;
 const DEPLOYMENT: u64 = 9001;
 
 fn config(
-    context: &Ctx,
+    _context: &Ctx,
     prefix: &str,
     executor: VeraExecutor,
 ) -> <OrderedState as DatabaseSet<Ctx>>::Config {
-    let cache = CacheRef::from_pooler(context, NZU16!(4084), NZUsize!(128));
+    let cache = CacheRef::new(NZU16!(4084), NZUsize!(128));
     ordered_config(
         state_set_config(prefix, cache.clone()),
         native::state_config(prefix, cache),

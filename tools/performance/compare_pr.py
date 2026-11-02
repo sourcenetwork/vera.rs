@@ -7,7 +7,7 @@ from pathlib import Path
 from statistics import median
 
 from report import load_run
-from protocol import baseline_incompatible, validate_unavailable
+from protocol import baseline_incompatible, incompatibility_reason, validate_unavailable
 
 TAGS = ('head1', 'base1', 'base2', 'head2')
 COMPONENTS = ('native_bls_verify', 'acp_owner_read_capture', 'consensus_certificate_verify')
@@ -132,8 +132,10 @@ def compare(directory):
             if incompatible:
                 for tag in ('base1', 'base2'):
                     validate_unavailable(directory / tag / f'objects-{objects}', identity, objects)
-                non_comparable.append({'workload': objects, 'reason': 'incompatible ACP proof schema',
+                non_comparable.append({'workload': objects, 'reason': incompatibility_reason(identity),
                                        'base': identity['base']['proof_schema'], 'head': identity['head']['proof_schema'],
+                                       'base_storage_version': identity['base'].get('storage_version'),
+                                       'head_storage_version': identity['head'].get('storage_version'),
                                        'head_passes': ['head1', 'head2'], 'baseline_status': 'not_run'})
                 prefix = 'registrations' if objects == 0 else 'fixed updates'
                 metrics = {f'{prefix}: completed workflows/s': lambda r: r[2]['completed_workflows_per_second']}
@@ -145,7 +147,7 @@ def compare(directory):
                     if any(not math.isfinite(value) or value <= 0 for value in values):
                         raise ValueError('expected positive finite head measurements')
                     rows.append({'metric': name, 'base': [], 'head': values, 'change_percent': None,
-                                 'verdict': 'incompatible proof schema; baseline not run; no delta'})
+                                 'verdict': 'proof compatibility not established; baseline not run; no delta'})
                 continue
             # Queue and protocol limits can change intentionally; show those changes
             # instead of attributing the resulting delta solely to execution speed.
@@ -201,7 +203,7 @@ def compare(directory):
         lines.append(f"| {item['metric']} | {span(item['base'])} | {span(item['head'])} | {delta} | {item['verdict']} |")
     lines += ['', 'Full-stack throughput is offered-load limited. Certificate verification is a local component cost, not consensus finality. ACP capture excludes authenticated storage proof construction. Policy lifecycle timings exclude fixture construction, fork setup, result disposal and restoration checks; they exclude consensus and durable storage. No maximum-capacity or WAN claim.', '']
     if non_comparable:
-        lines += ['Full-stack baseline not run: incompatible ACP proof schemas. Both head passes must still pass correctness, complete permission verification and recovery; their values above are head-only measurements, with no baseline success or regression claim.', '',
+        lines += ['Full-stack baseline not run: proof compatibility is not established. Both head passes must still pass correctness, complete permission verification and recovery; their values above are head-only measurements, with no baseline success or regression claim.', '',
                   '```json', json.dumps(non_comparable, indent=2), '```', '']
     if logical_edit_scaling:
         ratios = ', '.join(f'{tag} {value:.2f}×' for tag, value in logical_edit_scaling.items())

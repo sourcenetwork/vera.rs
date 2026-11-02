@@ -87,7 +87,7 @@ impl OrderedState {
         sync_config: SyncEngineConfig,
     ) -> Result<(Self, Anchor<Digest>), String>
     where
-        OrderedDatabases: StateSyncSet<Ctx, R, Digest, Error = String>,
+        OrderedDatabases: StateSyncSet<Ctx, R, Error = String>,
     {
         let (_updates, updates_rx) = ring::channel(NZUsize!(1));
         let durability_metrics = super::durability::DurabilityMetrics::register(&context);

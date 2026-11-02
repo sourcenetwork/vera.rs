@@ -302,7 +302,10 @@ impl GenesisBuilder {
             chain_id: self.chain_id,
             operators: self.operators.clone(),
             chain_name: self.chain_name,
-            timestamp: 0,
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock before unix epoch")
+                .as_secs(),
             allocations: self.allocations,
             native_mint: self.native_mint,
             validators: self.validators,
@@ -320,7 +323,10 @@ impl GenesisBuilder {
             chain_id: self.chain_id,
             operators: self.operators.clone(),
             chain_name: self.chain_name.clone(),
-            timestamp: 0,
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock before unix epoch")
+                .as_secs(),
             allocations: self.allocations.clone(),
             native_mint: self.native_mint.clone(),
             validators: self.validators.clone(),

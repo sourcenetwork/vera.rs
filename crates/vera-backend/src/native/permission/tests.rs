@@ -94,7 +94,7 @@ fn native_proof_decoders_bound_keys_values_and_merkle_paths() {
 }
 
 async fn init(context: &crate::Ctx) -> NativeStateSet {
-    let cache = CacheRef::from_pooler(context, NZU16!(4084), NZUsize!(64));
+    let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
     NativeStateSet::init(
         context.child("proof"),
         super::super::state_config("proof", cache),

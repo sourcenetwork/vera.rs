@@ -88,6 +88,7 @@ pub async fn run_node_with_rpc_listener(
     settings: NodeSettings,
     rpc_listener: Option<std::net::TcpListener>,
 ) -> anyhow::Result<()> {
+    settings.genesis.validate_timestamp()?;
     if let Some(parameters) = settings.genesis.simplex {
         parameters.validate().map_err(anyhow::Error::msg)?;
         run_node_with_elector(context, settings, rpc_listener, move |_| {
@@ -190,7 +191,7 @@ async fn run_node_with_elector<
         .dialable_addr
         .as_deref()
         .map_or(Ok(listen), str::parse)?;
-    let page_cache = CacheRef::from_pooler(&context, PAGE_SIZE, PAGE_CACHE_SIZE);
+    let page_cache = CacheRef::new(PAGE_SIZE, PAGE_CACHE_SIZE);
 
     // Network.
     let bootstrappers = peers
@@ -216,6 +217,7 @@ async fn run_node_with_elector<
         bootstrappers,
         max_peers_per_set,
         MAX_MESSAGE_SIZE,
+        MAILBOX_SIZE,
     );
     p2p_config.mailbox_size = MAILBOX_SIZE;
     let (mut p2p, oracle) = discovery::Network::new(context.child("network"), p2p_config);
@@ -239,8 +241,8 @@ async fn run_node_with_elector<
                     database: None::<Shared<WireDatabase<$db>>>,
                     mailbox_size: NZUsize!(16),
                     me: Some(local.clone()),
-                    timeout: Duration::from_secs(2),
-                    fetch_retry_timeout: Duration::from_millis(100),
+                    fetch_timeout: commonware_utils::NZDuration!(Duration::from_secs(2)),
+                    fetch_retry_delay: Duration::from_millis(100),
                     max_serve_ops: MAX_FETCH_OPS,
                     priority_requests: false,
                     priority_responses: false,
@@ -303,8 +305,8 @@ async fn run_node_with_elector<
             peer_provider: oracle.clone(),
             blocker: oracle.clone(),
             mailbox_size: MAILBOX_SIZE,
-            timeout: Duration::from_secs(2),
-            fetch_retry_timeout: Duration::from_millis(100),
+            fetch_timeout: commonware_utils::NZDuration!(Duration::from_secs(2)),
+            fetch_retry_delay: Duration::from_millis(100),
             priority_requests: false,
             priority_responses: false,
         },
@@ -467,9 +469,6 @@ async fn run_node_with_elector<
     .await;
 
     // DKG / reshare.
-    let fence_epoch = probe_artifact
-        .as_ref()
-        .map_or_else(Epoch::zero, |artifact| artifact.info.epoch);
     let state_sync = probe_artifact.map(|artifact| StateSync {
         info: artifact.info,
         floor: plan
@@ -487,7 +486,7 @@ async fn run_node_with_elector<
         state_sync,
     )
     .await;
-    let (fence, gate) = Fence::new(fence_epoch);
+    let (fence, gate) = Fence::new();
     let participants_provider = RegistryParticipants::new(
         modules.clone(),
         players.clone(),
@@ -516,7 +515,6 @@ async fn run_node_with_elector<
             page_cache: page_cache.clone(),
             write_buffer: IO_BUFFER_SIZE,
             replay_buffer: IO_BUFFER_SIZE,
-            muxer_size: 128,
             max_participants: MAX_PARTICIPANTS,
             blocks_per_epoch,
         },
@@ -617,6 +615,7 @@ async fn run_node_with_elector<
         gas_limit,
     )
     .with_participant_addresses(participant_addresses)
+    .with_consensus_key(*sharing.public())
     .with_native_pipeline(
         genesis.simplex.is_some(),
         (leader_timeout / 4).min(Duration::from_millis(100)),
@@ -732,7 +731,8 @@ async fn run_node_with_elector<
                 leader_timeout,
                 certification_timeout,
                 timeout_retry,
-                fetch_timeout: Duration::from_secs(2),
+                fetch_timeout: commonware_utils::NZDuration!(Duration::from_secs(2)),
+                fetch_retry_delay: Duration::from_millis(100),
                 view_retention: ViewDelta::new(10),
                 skip: SkipPolicy::Enabled {
                     timeout: skip_timeout,
@@ -744,7 +744,6 @@ async fn run_node_with_elector<
             gate,
             state_sync,
             blocks_per_epoch,
-            muxer_size: 128,
             mailbox_size: MAILBOX_SIZE,
             partition_prefix: format!("{PARTITION_PREFIX}-orchestrator"),
         },

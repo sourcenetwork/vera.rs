@@ -54,7 +54,7 @@ fn serving_rejects_code_records_outside_peer_limits() {
         runtime_tokio::Config::new().with_storage_directory(directory.path()),
     )
     .start(|context| async move {
-        let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+        let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
         let db = Shared::<CodeDb>::init(
             context.child("code"),
             state_set_config("code", cache).2,

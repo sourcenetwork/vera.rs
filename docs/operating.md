@@ -23,6 +23,17 @@ dialable address. Two paths produce that material:
   trusted-dealer material locally; see [wan-gates.md](wan-gates.md) for a
   worked multi-host example.
 
+Set the shared genesis `timestamp` to a nonzero Unix time near network launch.
+It is recorded in the genesis block and must remain unchanged for restarts.
+Nodes reject a zero timestamp or an existing genesis record that differs from
+the configuration. The local testnet and devnet commands set this timestamp
+when they create a network; devnet persists its generated configuration.
+
+A block timestamp must be at least its parent's and can advance by at most five
+seconds per block. A validator waits when a candidate is more than 15 seconds
+ahead of its local clock. After a long outage, block time may therefore take
+several blocks to catch up. Operators should synchronize validator clocks.
+
 Run a node with:
 
 ```sh
@@ -178,6 +189,10 @@ media failure or power-loss behavior. Those require deployment-specific validati
   complete batch visible; startup reconciles stored history with the durable
   anchor. The [history storage qualification](history-storage.md) distinguishes
   reported errors from silent corruption, failed-device and power-loss behavior.
+- **Local state read failures** — a reported storage, poisoned-lock or state-root
+  computation failure during candidate processing stops the validator rather
+  than marking the candidate invalid. Inspect and repair the local storage before
+  restarting. Other execution errors still require separate classification.
 
 Do not delete `history/` or the genesis record to "reset" a node: existing
 JMT directories or a missing genesis record alongside finalized history are

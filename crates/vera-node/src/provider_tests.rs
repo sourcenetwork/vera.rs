@@ -83,3 +83,44 @@ async fn registrar_rejects_a_valid_share_for_another_member() {
         .await;
     assert!(provider.scheme(epoch).is_some());
 }
+
+#[tokio::test]
+async fn registrar_binds_shareless_membership_to_the_local_identity() {
+    use commonware_cryptography::certificate::{Membership, Scheme as _};
+
+    let local = ed25519::PrivateKey::from_seed(0).public_key();
+    let other = ed25519::PrivateKey::from_seed(1).public_key();
+    let participants = (0..4).map(|seed| ed25519::PrivateKey::from_seed(seed).public_key());
+    let (info, _) = crate::trusted_setup(9033, participants).unwrap();
+    let provider = DynamicProvider::default();
+    let epoch = Epoch::new(8);
+    let foreign = SchemeInfo::Member {
+        participants: info.players.clone(),
+        sharing: info.output.public().clone(),
+        public_key: other,
+    };
+    let registrar = Registrar::new(provider.clone(), local.clone());
+    assert!(
+        tokio::spawn(async move { registrar.register(epoch, foreign).await })
+            .await
+            .unwrap_err()
+            .is_panic()
+    );
+    assert!(provider.scheme(epoch).is_none());
+
+    let index = info.players.index(&local).unwrap();
+    Registrar::new(provider.clone(), local.clone())
+        .register(
+            epoch,
+            SchemeInfo::Member {
+                participants: info.players,
+                sharing: info.output.public().clone(),
+                public_key: local,
+            },
+        )
+        .await;
+    assert_eq!(
+        provider.scheme(epoch).unwrap().me(),
+        Some(Membership::Member(index))
+    );
+}

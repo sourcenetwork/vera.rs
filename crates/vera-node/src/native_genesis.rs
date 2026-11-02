@@ -47,6 +47,10 @@ pub(super) async fn load_or_create(
             "native genesis commitments missing"
         );
         ensure!(
+            block.timestamp == genesis.timestamp,
+            "native genesis timestamp does not match configuration"
+        );
+        ensure!(
             block.receipt_commitment == Some(vera_executor::receipt_commitment(0, &[])),
             "native genesis receipt commitment is invalid"
         );
@@ -108,6 +112,7 @@ pub(super) async fn load_or_create(
     );
     let native_targets = native.committed_targets().await;
     let mut block = vera_app::genesis_block(root, targets, module_root);
+    block.timestamp = genesis.timestamp;
     // Bind the native schema and consensus parameters into the deployment identity.
     block.prevrandao = fingerprint;
     block.receipt_commitment = Some(vera_executor::receipt_commitment(0, &[]));

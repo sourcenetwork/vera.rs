@@ -40,7 +40,7 @@ resources:
 ";
 
 async fn open(context: &tokio::Context) -> NativeStateSet {
-    let cache = CacheRef::from_pooler(context, NZU16!(4084), NZUsize!(64));
+    let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
     NativeStateSet::init(
         context.child("native"),
         native::state_config("test", cache),
@@ -219,7 +219,7 @@ fn authorization_survives_forks_restart_and_rewind() {
         assert!(can_read(&loaded, &policy));
         assert_eq!(root(&set).await, second_root);
         drop(set);
-        let cache = CacheRef::from_pooler(&context, NZU16!(4084), NZUsize!(64));
+        let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
         let set = NativeStateSet::init(
             context.child("recovered"),
             native::state_config("test", cache),

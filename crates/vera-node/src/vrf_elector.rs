@@ -1,15 +1,13 @@
 //! Bounded leader terms, with VRF delivery for legacy rotating deployments.
 
-use alloy_primitives::B256;
-use commonware_codec::Encode as _;
 use commonware_consensus::{
     simplex::{
         elector::{Config, Dynamic, Elector, RoundRobin, RoundRobinElector, Terms},
-        scheme::bls12381_threshold::vrf::Certificate,
+        scheme::bls12381_threshold::vrf::{Certificate, Seed},
     },
     types::{Participant, Round, TermLength, ViewDelta},
 };
-use commonware_cryptography::{Hasher as _, Sha256, bls12381::primitives::variant::MinSig};
+use commonware_cryptography::{Sha256, bls12381::primitives::variant::MinSig};
 use commonware_utils::ordered::Set;
 use std::{num::NonZeroU32, time::Duration};
 use vera_app::{ConsensusScheme, VrfSeedCache};
@@ -55,13 +53,12 @@ impl Elector<ConsensusScheme> for VrfElector {
     }
 
     fn elect(&self, round: Round, certificate: Option<&Certificate<MinSig>>) -> Participant {
-        if let Some(signature) = certificate.and_then(Certificate::get) {
-            // EVM exposes a 32-byte PREVRANDAO while the MinSig seed is a
-            // canonical 48-byte G1 point. Hashing the encoding preserves all
-            // of its entropy and gives every validator the same B256.
-            let encoded = signature.seed_signature.encode();
-            let digest = Sha256::hash(&[encoded.as_ref()]);
-            self.seeds.insert(round, B256::from(digest.0));
+        if let Some(signature) = certificate.and_then(Certificate::get)
+            && let Some(view) = round.view().previous()
+        {
+            let previous = Round::new(round.epoch(), view);
+            self.seeds
+                .insert_seed(round, Seed::new(previous, signature.seed_signature));
         }
         self.inner.elect(round, ())
     }

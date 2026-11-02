@@ -12,7 +12,7 @@ use commonware_storage::{
     journal::contiguous::variable,
     merkle::{full, mmr},
     qmdb::current::{VariableConfig, ordered::variable::Db},
-    translator::Translator,
+    translator::{OrderedTranslator, Translator},
 };
 use commonware_utils::{NZU64, NZUsize, bitmap::Readable as _};
 use futures::{FutureExt as _, StreamExt as _};
@@ -56,6 +56,34 @@ impl Translator for KeyPrefix {
         let len = key.len().min(prefix.len());
         prefix[..len].copy_from_slice(&key[..len]);
         prefix
+    }
+}
+
+impl OrderedTranslator for KeyPrefix {}
+
+#[cfg(test)]
+mod translator_tests {
+    use super::{INDEX_PREFIX_BYTES, KeyPrefix, Translator};
+
+    #[test]
+    fn translated_prefixes_preserve_order_and_allow_collisions() {
+        let translator = KeyPrefix::default();
+        let long = vec![1; INDEX_PREFIX_BYTES];
+        let mut longer = long.clone();
+        longer.push(1);
+        let keys = [vec![], vec![0], vec![0, 1], vec![1], long, longer];
+        for pair in keys.windows(2) {
+            assert!(pair[0] < pair[1]);
+            assert!(translator.transform(&pair[0]) <= translator.transform(&pair[1]));
+        }
+        assert_eq!(
+            translator.transform(&keys[0]),
+            translator.transform(&keys[1])
+        );
+        assert_eq!(
+            translator.transform(&keys[4]),
+            translator.transform(&keys[5])
+        );
     }
 }
 
@@ -174,8 +202,7 @@ where
     E: commonware_runtime::Spawner
         + commonware_runtime::Storage
         + commonware_runtime::Clock
-        + commonware_runtime::Metrics
-        + commonware_runtime::BufferPooler,
+        + commonware_runtime::Metrics,
 {
     for entries in &changes {
         if entries.iter().any(|(key, value)| {
@@ -208,8 +235,7 @@ where
     E: commonware_runtime::Spawner
         + commonware_runtime::Storage
         + commonware_runtime::Clock
-        + commonware_runtime::Metrics
-        + commonware_runtime::BufferPooler,
+        + commonware_runtime::Metrics,
 {
     for (key, value) in entries {
         batch = batch.write(key, value.map(Bytes::from));

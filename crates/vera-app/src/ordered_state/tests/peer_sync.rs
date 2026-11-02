@@ -68,6 +68,7 @@ fn all_partitions_sync_over_authenticated_peers_and_reopen() {
                         addresses[i],
                         NZUsize!(2),
                         MAX_MESSAGE_BYTES,
+                        commonware_utils::NZUsize!(1000),
                     );
                     cfg.dial_frequency = Duration::from_millis(10);
                     cfg.peer_connection_cooldown = Duration::from_millis(10);
@@ -90,8 +91,10 @@ fn all_partitions_sync_over_authenticated_peers_and_reopen() {
                                     database: None::<Shared<WireDatabase<$db>>>,
                                     mailbox_size: NZUsize!(4),
                                     me: Some(identities[i].clone()),
-                                    timeout: Duration::from_secs(2),
-                                    fetch_retry_timeout: Duration::from_millis(10),
+                                    fetch_timeout: commonware_utils::NZDuration!(
+                                        Duration::from_secs(2)
+                                    ),
+                                    fetch_retry_delay: Duration::from_millis(10),
                                     max_serve_ops: MAX_FETCH_OPS,
                                     priority_requests: false,
                                     priority_responses: false,

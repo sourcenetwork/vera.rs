@@ -58,6 +58,7 @@ impl Peers {
                 addresses[i],
                 NZUsize!(2),
                 MAX_MESSAGE_BYTES,
+                NZUsize!(1000),
             );
             cfg.dial_frequency = Duration::from_millis(10);
             cfg.peer_connection_cooldown = Duration::from_millis(10);
@@ -73,8 +74,8 @@ impl Peers {
                     database: None::<Shared<WireDatabase>>,
                     mailbox_size: NZUsize!(4),
                     me: Some(peers[i].clone()),
-                    timeout: Duration::from_secs(2),
-                    fetch_retry_timeout: Duration::from_millis(10),
+                    fetch_timeout: commonware_utils::NZDuration!(Duration::from_secs(2)),
+                    fetch_retry_delay: Duration::from_millis(10),
                     max_serve_ops: MAX_FETCH_OPS,
                     priority_requests: false,
                     priority_responses: false,

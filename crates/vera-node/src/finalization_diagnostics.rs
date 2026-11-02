@@ -73,6 +73,7 @@ mod tests {
                 height: 7,
                 timestamp: 7,
                 prevrandao: B256::ZERO,
+                randomness: None,
                 state_root: StateRoot(B256::ZERO),
                 module_state_root: B256::ZERO,
                 txs: Vec::new(),

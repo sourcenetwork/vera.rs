@@ -6,7 +6,7 @@ use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::SolCall;
 use vera_executor::{
-    ExecutionOutcome, ModuleState, VeraExecutor,
+    ExecutionError, ExecutionOutcome, ModuleState, VeraExecutor,
     precompiles::{ACP_ADDRESS, VALIDATOR_REGISTRY_ADDRESS},
 };
 use vera_modules::{acp::abi::IAcp, validator_registry::abi::IValidatorRegistry};
@@ -73,6 +73,15 @@ pub(super) fn execute_with_executor(
     input: Bytes,
     executor: VeraExecutor,
 ) -> (ExecutionOutcome, ModuleState) {
+    try_execute_with_executor(state, to, input, executor).unwrap()
+}
+
+pub(super) fn try_execute_with_executor(
+    state: &MockStateDb,
+    to: TxKind,
+    input: Bytes,
+    executor: VeraExecutor,
+) -> Result<(ExecutionOutcome, ModuleState), ExecutionError> {
     let signer: PrivateKeySigner = "42".repeat(32).parse().unwrap();
     state.insert_account(
         signer.address(),
@@ -101,12 +110,11 @@ pub(super) fn execute_with_executor(
         B256::ZERO,
         B256::ZERO,
     );
-    let (outcome, modules) = executor
-        .execute_with_modules(state, &context, &[wire], executor.snapshot())
-        .unwrap();
+    let (outcome, modules) =
+        executor.execute_with_modules(state, &context, &[wire], executor.snapshot())?;
     executor.publish_snapshot(modules);
     let modules = executor.modules().read().unwrap().clone();
-    (outcome, modules)
+    Ok((outcome, modules))
 }
 
 #[rstest]
@@ -152,16 +160,83 @@ fn creation_cannot_inherit_signer_authority(#[case] end: &[u8], #[case] success:
 }
 
 #[test]
-fn post_execution_error_restores_successful_module_call() {
+fn post_execution_database_failure_preserves_module_state() {
     // The beneficiary is loaded when execution has finished, to credit its fee.
     let state = MockStateDb {
         unreadable_account: Some(Address::ZERO),
         ..Default::default()
     };
-    let (outcome, modules) = execute(&state, TxKind::Call(ACP_ADDRESS), policy("discarded"));
-    assert!(outcome.receipts.is_empty());
-    assert_eq!(outcome.executed_tx_indices, Some(vec![]));
-    assert!(modules.acp.query_policy_ids().unwrap().is_empty());
+    let executor = VeraExecutor::new(9001);
+    let result = try_execute_with_executor(
+        &state,
+        TxKind::Call(ACP_ADDRESS),
+        policy("discarded"),
+        executor.clone(),
+    );
+    assert!(matches!(
+        result,
+        Err(ExecutionError::State(StateDbError::Storage(_)))
+    ));
+    assert!(
+        executor
+            .modules()
+            .read()
+            .unwrap()
+            .acp
+            .query_policy_ids()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn missing_contract_code_is_a_local_state_failure() {
+    let state = MockStateDb::new();
+    let address = Address::repeat_byte(0x22);
+    let code_hash = keccak256([0x00]);
+    state.insert_account(
+        address,
+        MockAccount {
+            code_hash,
+            ..Default::default()
+        },
+    );
+    let error = try_execute_with_executor(
+        &state,
+        TxKind::Call(address),
+        Bytes::new(),
+        VeraExecutor::new(9001),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, ExecutionError::State(StateDbError::CodeNotFound(hash)) if hash == code_hash)
+    );
+    assert!(error.is_local_state_failure());
+}
+
+#[test]
+fn nested_registry_read_failure_cannot_be_discarded_by_the_caller() {
+    let state = MockStateDb {
+        unreadable_storage: Some((VALIDATOR_REGISTRY_ADDRESS, U256::from(1))),
+        ..Default::default()
+    };
+    let outer = Address::repeat_byte(0x22);
+    state.insert_account(VALIDATOR_REGISTRY_ADDRESS, MockAccount::default());
+    install(
+        &state,
+        outer,
+        forwarding_code(VALIDATOR_REGISTRY_ADDRESS, &[0x00], true),
+    );
+    let result = try_execute_with_executor(
+        &state,
+        TxKind::Call(outer),
+        IValidatorRegistry::getValidatorsCall {}.abi_encode().into(),
+        VeraExecutor::new(9001),
+    );
+    assert!(matches!(
+        result,
+        Err(ExecutionError::State(StateDbError::Storage(_)))
+    ));
 }
 
 #[rstest]

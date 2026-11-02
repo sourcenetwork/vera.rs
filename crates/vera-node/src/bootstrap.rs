@@ -60,6 +60,7 @@ pub async fn run_bootstrap(
     context: tokio::Context,
     mut settings: BootstrapSettings,
 ) -> anyhow::Result<GenesisEpochInfo> {
+    settings.genesis.validate_timestamp()?;
     if let Some(parameters) = settings.genesis.simplex {
         parameters.validate().map_err(anyhow::Error::msg)?;
     }
@@ -119,6 +120,7 @@ pub async fn run_bootstrap(
         bootstrappers,
         peer_capacity.tracked(),
         MAX_MESSAGE_SIZE,
+        MAILBOX_SIZE,
     );
     p2p_config.mailbox_size = MAILBOX_SIZE;
     let (mut p2p, oracle) = discovery::Network::new(context.child("network"), p2p_config);
@@ -143,15 +145,15 @@ pub async fn run_bootstrap(
             reveal: REVEAL,
             max_supported_mode: MAX_SUPPORTED_MODE,
             partition_prefix: "bootstrap".to_owned(),
-            page_cache: commonware_runtime::buffer::paged::CacheRef::from_pooler(
-                &context,
+            page_cache: commonware_runtime::buffer::paged::CacheRef::new(
                 PAGE_SIZE,
                 PAGE_CACHE_SIZE,
             ),
             write_buffer: IO_BUFFER_SIZE,
             replay_buffer: IO_BUFFER_SIZE,
             mailbox_size: MAILBOX_SIZE,
-            muxer_size: 128,
+            fetch_timeout: commonware_utils::NZDuration!(std::time::Duration::from_secs(2)),
+            fetch_retry_delay: std::time::Duration::from_millis(100),
             items_per_section: NZU64!(256),
             participants: participants.clone(),
             directory: Unit,

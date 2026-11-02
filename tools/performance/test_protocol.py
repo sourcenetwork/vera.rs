@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import patch
 
-from protocol import SCHEMAS, baseline_incompatible, source_schema
+from protocol import SCHEMAS, baseline_incompatible, source_schema, source_storage_version
 
 
 class ProtocolTests(unittest.TestCase):
@@ -57,6 +57,27 @@ pub struct RelationshipRecord {
             self.assertFalse(baseline_incompatible(identity))
         identity['head']['proof_schema'].pop('object_incarnation')
         with self.assertRaisesRegex(ValueError, 'unrecognized proof schema'):
+            baseline_incompatible(identity)
+
+    def test_storage_version_provenance_is_required_and_unique(self):
+        record = '[[package]]\nname = "commonware-storage"\nversion = "2026.10.0"\n'
+        with patch('protocol.subprocess.check_output', return_value=record):
+            self.assertEqual(source_storage_version('.', 'revision'), '2026.10.0')
+        for invalid in ('', record + record, record.replace('2026.10.0', 'other')):
+            with patch('protocol.subprocess.check_output', return_value=invalid):
+                with self.assertRaisesRegex(ValueError, 'storage version'):
+                    source_storage_version('.', 'revision')
+
+    def test_different_storage_versions_require_separate_baseline_qualification(self):
+        schema = dict(SCHEMAS['relationship/v5/'])
+        identity = dict(format_version=2,
+                        head=dict(proof_schema=schema, storage_version='2026.10.0'),
+                        base=dict(proof_schema=schema, storage_version='2026.9.0'))
+        self.assertTrue(baseline_incompatible(identity))
+        identity['base']['storage_version'] = '2026.10.0'
+        self.assertFalse(baseline_incompatible(identity))
+        del identity['base']['storage_version']
+        with self.assertRaisesRegex(ValueError, 'storage version provenance'):
             baseline_incompatible(identity)
 
 

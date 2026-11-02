@@ -22,8 +22,7 @@ use crate::{
 };
 
 async fn fixture(context: vera_backend::Ctx) -> (VeraApiImpl, NativeStateSet, B256) {
-    let cache = CacheRef::from_pooler(
-        &context,
+    let cache = CacheRef::new(
         NonZeroU16::new(4084).unwrap(),
         NonZeroUsize::new(64).unwrap(),
     );
