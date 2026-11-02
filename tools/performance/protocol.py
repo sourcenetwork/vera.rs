@@ -45,6 +45,20 @@ def source_schema(source, revision):
     return dict(SCHEMAS[namespaces[0]])
 
 
+def source_storage_version(source, revision):
+    lock = subprocess.check_output(['git', 'show', f'{revision}:Cargo.lock'], cwd=source, text=True)
+    packages = re.findall(r'^\[\[package\]\]\nname = "commonware-storage"\nversion = "([^"]+)"$',
+                          lock, re.MULTILINE)
+    if len(packages) != 1 or not re.fullmatch(r'\d{4}\.\d+\.\d+', packages[0]):
+        raise ValueError('unrecognized Commonware storage version')
+    return packages[0]
+
+
+def incompatibility_reason(identity):
+    if identity['head']['proof_schema'] != identity['base']['proof_schema']:
+        return 'incompatible ACP proof schema'
+    return 'different Commonware storage versions; proof compatibility not established'
+
 def baseline_incompatible(identity):
     present = ['proof_schema' in identity[side] for side in ('head', 'base')]
     if not any(present):
@@ -55,15 +69,26 @@ def baseline_incompatible(identity):
         schema = identity[side]['proof_schema']
         if not isinstance(schema, dict) or schema not in SCHEMAS.values():
             raise ValueError(f'{side}: unrecognized proof schema provenance')
+    present = ['storage_version' in identity[side] for side in ('head', 'base')]
+    if any(present):
+        if not all(present) or any(not isinstance(identity[side]['storage_version'], str) or
+                                   not re.fullmatch(r'\d{4}\.\d+\.\d+', identity[side]['storage_version'])
+                                   for side in ('head', 'base')):
+            raise ValueError('incomplete Commonware storage version provenance')
+        if identity['head']['storage_version'] != identity['base']['storage_version']:
+            return True
     return identity['head']['proof_schema'] != identity['base']['proof_schema']
 
 
 def unavailable(identity, objects):
     return {
-        'status': 'not_run', 'reason': 'incompatible ACP proof schema', 'fixed_update_objects': objects,
+        'status': 'not_run', 'reason': incompatibility_reason(identity), 'fixed_update_objects': objects,
         'node_source': identity['base']['source'], 'runner_source': identity['head']['source'],
         'node_proof_schema': identity['base']['proof_schema'],
         'runner_proof_schema': identity['head']['proof_schema'],
+        **({'node_storage_version': identity['base']['storage_version'],
+            'runner_storage_version': identity['head']['storage_version']}
+           if 'storage_version' in identity['base'] else {}),
     }
 
 

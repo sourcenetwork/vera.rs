@@ -113,6 +113,26 @@ class CompareTests(unittest.TestCase):
                 self.assertIn('baseline not run', metric['verdict'])
         self.assertIn('no baseline success or regression claim', (self.root / 'comparison.md').read_text())
 
+    def test_storage_upgrade_reports_head_only_without_comparison(self):
+        self.shared_driver()
+        for side, version in (('head', '2026.10.0'), ('base', '2026.9.0')):
+            self.identity[side]['proof_schema'] = dict(SCHEMAS['relationship/v5/'])
+            self.identity[side]['storage_version'] = version
+        self.write_identity()
+        for tag in ('base1', 'base2'):
+            for objects in (0, 32):
+                directory = self.root / tag / f'objects-{objects}'
+                directory.mkdir(exist_ok=True)
+                (directory / 'unavailable.json').write_text(json.dumps(unavailable(self.identity, objects)))
+        with patch('compare_pr.load_run', side_effect=self.shared_run_fixture) as load:
+            self.assertFalse(compare(self.root))
+        self.assertEqual({call.args[0].parent.name for call in load.call_args_list}, {'head1', 'head2'})
+        report = json.loads((self.root / 'comparison-report.json').read_text())
+        self.assertEqual(len(report['non_comparable_baselines']), 2)
+        self.assertTrue(all('Commonware storage' in row['reason'] for row in report['non_comparable_baselines']))
+        self.assertTrue(all(row['base_storage_version'] == '2026.9.0' and row['head_storage_version'] == '2026.10.0' for row in report['non_comparable_baselines']))
+        self.assertTrue(all(row['change_percent'] is None for row in report['metrics'] if 'ns/op' not in row['metric']))
+
     def test_incompatible_baseline_still_requires_each_valid_head_pass(self):
         self.incompatible_driver()
         for failure in ('missing', 'failed', 'provenance'):

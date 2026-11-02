@@ -9,7 +9,7 @@ import sys
 
 from compare_pr import TAGS, compare
 from record import digest
-from protocol import baseline_incompatible, source_schema, unavailable
+from protocol import baseline_incompatible, incompatibility_reason, source_schema, source_storage_version, unavailable
 
 
 def supports_rpc_listener(node):
@@ -42,6 +42,7 @@ def main():
         identity[side] = {
             'source': revisions[side],
             'proof_schema': source_schema(sources[side], revisions[side]),
+            'storage_version': source_storage_version(sources[side], revisions[side]),
             'runner_source': revisions['head'],
             'node_sha256': digest(binaries / side / 'verad'),
             'runner_sha256': runner_sha256,
@@ -73,7 +74,7 @@ def main():
                 skipped = destination / f'objects-{objects}'
                 skipped.mkdir()
                 (skipped / 'unavailable.json').write_text(json.dumps(unavailable(identity, objects), indent=2) + '\n')
-                print(f'{tag}/objects-{objects}: incompatible ACP proof schema; baseline not run', flush=True)
+                print(f'{tag}/objects-{objects}: {incompatibility_reason(identity)}; baseline not run', flush=True)
                 continue
             command = [sys.executable, str(scripts / 'record.py'), '--node', str(binaries / side / 'verad'),
                        '--runner', str(runner), '--runner-source', str(sources['head']), '--history', 'regolith',
