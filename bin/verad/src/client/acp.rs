@@ -153,7 +153,7 @@ impl AcpCommand {
                         .await?
                 } else {
                     let signer = ctx.require_evm_signer()?;
-                    ctx.client.create_policy(signer, &policy_bytes, 1).await?
+                    ctx.client.create_policy(&signer, &policy_bytes, 1).await?
                 };
                 ctx.print_json(&receipt)?;
             }
@@ -185,7 +185,7 @@ impl AcpCommand {
                 } else {
                     let signer = ctx.require_evm_signer()?;
                     ctx.client
-                        .register_object(signer, id, &object_id, &resource)
+                        .register_object(&signer, id, &object_id, &resource)
                         .await?
                 };
                 ctx.print_json(&receipt)?;
@@ -203,7 +203,7 @@ impl AcpCommand {
                 } else {
                     let signer = ctx.require_evm_signer()?;
                     ctx.client
-                        .archive_object(signer, id, &object_id, &resource)
+                        .archive_object(&signer, id, &object_id, &resource)
                         .await?
                 };
                 ctx.print_json(&receipt)?;
@@ -238,7 +238,7 @@ impl AcpCommand {
                 } else {
                     let signer = ctx.require_evm_signer()?;
                     ctx.client
-                        .set_relationship(signer, id, &resource, &object_id, &relation, &actor)
+                        .set_relationship(&signer, id, &resource, &object_id, &relation, &actor)
                         .await?
                 };
                 ctx.print_json(&receipt)?;
@@ -260,7 +260,7 @@ impl AcpCommand {
                 } else {
                     let signer = ctx.require_evm_signer()?;
                     ctx.client
-                        .delete_relationship(signer, id, &resource, &object_id, &relation, &actor)
+                        .delete_relationship(&signer, id, &resource, &object_id, &relation, &actor)
                         .await?
                 };
                 ctx.print_json(&receipt)?;
@@ -322,7 +322,7 @@ impl AcpCommand {
                     let signer = ctx.require_evm_signer()?;
                     ctx.client
                         .check_access(
-                            signer,
+                            &signer,
                             id,
                             vec![resource],
                             vec![object_id],

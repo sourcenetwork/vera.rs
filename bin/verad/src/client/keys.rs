@@ -2,7 +2,7 @@
 
 use clap::Subcommand;
 use k256::ecdsa::SigningKey;
-use vera_client::{BlsSigner, EvmSigner, Secp256k1SigningKey, create_bearer_token};
+use vera_client::{BlsSigner, EvmSigner, create_bearer_token};
 
 use super::context::ClientContext;
 
@@ -84,45 +84,20 @@ impl KeysCommand {
                 }))?;
             }
             Self::BearerToken { subject, expiry } => {
-                let key_hex = ctx
-                    .evm_key_hex
+                let signing_key = ctx
+                    .signing_key
                     .as_ref()
                     .ok_or_else(|| eyre::eyre!("--key is required for bearer-token"))?;
-                let signing_key = parse_signing_key(key_hex)?;
                 let issued_at = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)?
                     .as_secs();
                 let expires_at = expiry.unwrap_or(issued_at + 300);
-                let token = create_bearer_token(
-                    &signing_key,
-                    &subject,
-                    ctx.require_evm_signer()?.chain_id(),
-                    issued_at,
-                    expires_at,
-                )
-                .map_err(|e| eyre::eyre!("bearer token creation failed: {e}"))?;
+                let token =
+                    create_bearer_token(signing_key, &subject, ctx.chain_id, issued_at, expires_at)
+                        .map_err(|e| eyre::eyre!("bearer token creation failed: {e}"))?;
                 ctx.print_json(&serde_json::json!({ "token": token }))?;
             }
         }
         Ok(())
-    }
-}
-
-fn parse_signing_key(hex_key: &str) -> eyre::Result<Secp256k1SigningKey> {
-    let bytes = hex::decode(hex_key).map_err(|e| eyre::eyre!("invalid key hex: {e}"))?;
-    Secp256k1SigningKey::from_slice(&bytes).map_err(|e| eyre::eyre!("invalid secp256k1 key: {e}"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::parse_signing_key;
-
-    #[test]
-    fn parses_native_signing_keys_and_rejects_invalid_lengths() {
-        let bytes = [7u8; 32];
-        let key = parse_signing_key(&hex::encode(bytes)).unwrap();
-        assert_eq!(&key.to_bytes()[..], &bytes);
-        assert!(parse_signing_key("01").is_err());
-        assert!(parse_signing_key(&hex::encode([0u8; 32])).is_err());
     }
 }
