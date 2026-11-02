@@ -79,10 +79,10 @@ jobs:
           mkdir comparison-driver
           cp ../tools/go-comparison/*.go comparison-driver/
           go build -mod=readonly -p 2 -trimpath -o "$RUNNER_TEMP/go-driver" ./comparison-driver
-      - uses: dtolnay/rust-toolchain@62ae3a85dbdd2bedbb5819da8ce45635129289a1 # 1.98.0
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
         if: inputs.paired
         with:
-          toolchain: 1.98.0
+          toolchain: 1.99.1
       - name: Install normal Rust build and plotting dependencies
         if: inputs.paired
         run: |

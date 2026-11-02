@@ -40,7 +40,7 @@ Related repositories are independent checkouts; discover their paths rather than
 | Simplex consensus, REVM executor, e2e harness | bankd-commonware | Consensus, EVM execution, testing |
 | BLS12-381 threshold crypto | commonware monorepo | Block signing, native tx verification |
 
-The development toolchain is pinned to Rust 1.98.0 in `rust-toolchain.toml`.
+The development toolchain is pinned to Rust 1.99.1 in `rust-toolchain.toml`.
 Linux native-service CI covers module/storage checks, native lifecycle and
 recovery, crash injection, and a normal release build.
 

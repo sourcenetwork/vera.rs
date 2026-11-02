@@ -35,10 +35,10 @@ protocols and secrets remain separate from consensus.
 
 ## Development
 
-The repository pins Rust 1.98.0. Build the service with:
+The repository pins Rust 1.99.1. Build the service with:
 
 ```sh
-cargo +1.98.0 build --frozen -p verad
+cargo +1.99.1 build --frozen -p verad
 ```
 
 See [CLAUDE.md](CLAUDE.md) for implementation structure and development conventions.

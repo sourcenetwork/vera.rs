@@ -47,9 +47,9 @@ jobs:
           sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler python3-venv
           python3 -m venv "$RUNNER_TEMP/performance-python"
           "$RUNNER_TEMP/performance-python/bin/pip" install -r head/tools/performance/requirements.txt
-      - uses: dtolnay/rust-toolchain@62ae3a85dbdd2bedbb5819da8ce45635129289a1 # 1.98.0
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
         with:
-          toolchain: '1.98.0'
+          toolchain: '1.99.1'
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: performance-pr-isolated
@@ -64,7 +64,7 @@ jobs:
           GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: |
           for side in head base; do
-            (cd "$side" && cargo +1.98.0 fetch --locked)
+            (cd "$side" && cargo +1.99.1 fetch --locked)
           done
       - name: Test reporting gates
         run: python3 -m unittest discover -s head/tools/performance -p 'test_*.py'
@@ -88,7 +88,7 @@ jobs:
               if (( ${#examples[@]} )); then
                 packages+=(-p vera-e2e)
               fi
-              cargo +1.98.0 build --frozen --release "${packages[@]}" \
+              cargo +1.99.1 build --frozen --release "${packages[@]}" \
                 --bin verad "${examples[@]}"
               cp "$CARGO_TARGET_DIR/release/verad" "$GITHUB_WORKSPACE/binaries/$side/"
               if [[ "$side" == head ]]; then
