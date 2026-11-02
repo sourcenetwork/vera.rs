@@ -12,6 +12,7 @@ import tarfile
 
 
 BUILD_COMMAND = ['cargo', 'build', '--frozen', '--release', '--no-default-features', '-p', 'verad']
+LICENSE = Path(__file__).resolve().parents[2] / 'LICENSE-MIT'
 
 
 def checked_output(root, command):
@@ -56,6 +57,9 @@ def package(binary, output, metadata):
     if (len(executable) < 64 or executable[:6] != b'\x7fELF\x02\x01'
             or executable[18:20] != b'\x3e\x00'):
         raise ValueError('release input is not a Linux x86-64 executable')
+    license_text = LICENSE.read_bytes()
+    if not license_text or len(license_text) > 64 * 1024:
+        raise ValueError('invalid Vera license file')
     metadata = dict(metadata, binary_sha256=hashlib.sha256(executable).hexdigest())
     manifest = (json.dumps(metadata, sort_keys=True, indent=2) + '\n').encode()
     name = 'verad-x86_64-unknown-linux-gnu-regolith.tar.gz'
@@ -65,7 +69,8 @@ def package(binary, output, metadata):
         with gzip.GzipFile(filename='', fileobj=destination, mode='wb', mtime=0) as compressed:
             with tarfile.open(fileobj=compressed, mode='w', format=tarfile.USTAR_FORMAT) as bundle:
                 for filename, content, mode in [('verad', executable, 0o755),
-                                                ('build.json', manifest, 0o644)]:
+                                                ('build.json', manifest, 0o644),
+                                                ('LICENSE-MIT', license_text, 0o644)]:
                     entry = tarfile.TarInfo(filename)
                     entry.size = len(content)
                     entry.mode = mode

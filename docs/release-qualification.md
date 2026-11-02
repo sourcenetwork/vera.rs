@@ -257,7 +257,10 @@ Never run cloned validator identities. See
 The [release workflow](../.github/workflows/reproducible-linux-release.yml)
 records immutable source, toolchain, features and checksums and compares two
 independent clean builds. The normal Linux CI also packages the daemon it
-exercised. Artifact provenance, key handling and process-crash tests are distinct
+exercised. The daemon archive includes Vera's MIT license. Before distribution,
+complete and verify the license and notice inventory for the bundled dependencies;
+the Vera license alone does not cover third-party notices. Artifact provenance,
+key handling and process-crash tests are distinct
 from a physical-device power-loss guarantee.
 
 ## Post-release WAN qualification

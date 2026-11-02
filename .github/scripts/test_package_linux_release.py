@@ -14,7 +14,7 @@ spec.loader.exec_module(release)
 
 
 class LinuxReleaseBundle(unittest.TestCase):
-    def test_archive_is_reproducible_and_contains_only_binary_and_provenance(self):
+    def test_archive_is_reproducible_and_contains_binary_provenance_and_license(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             binary = root / 'verad'
@@ -32,8 +32,9 @@ class LinuxReleaseBundle(unittest.TestCase):
             expected = f'{hashlib.sha256(first.read_bytes()).hexdigest()}  {first.name}\n'
             self.assertEqual((first.parent / 'SHA256SUMS').read_text(), expected)
             with tarfile.open(first) as archive:
-                self.assertEqual(archive.getnames(), ['verad', 'build.json'])
+                self.assertEqual(archive.getnames(), ['verad', 'build.json', 'LICENSE-MIT'])
                 self.assertEqual(archive.extractfile('verad').read(), executable)
+                self.assertEqual(archive.extractfile('LICENSE-MIT').read(), release.LICENSE.read_bytes())
                 manifest = json.load(archive.extractfile('build.json'))
                 self.assertEqual(manifest['binary_sha256'], hashlib.sha256(executable).hexdigest())
                 self.assertEqual(manifest['source_commit'], 'a' * 40)
@@ -41,6 +42,7 @@ class LinuxReleaseBundle(unittest.TestCase):
                     self.assertEqual((entry.uid, entry.gid, entry.mtime), (0, 0, 0))
                 self.assertEqual(archive.getmember('verad').mode, 0o755)
                 self.assertEqual(archive.getmember('build.json').mode, 0o644)
+                self.assertEqual(archive.getmember('LICENSE-MIT').mode, 0o644)
             self.assertEqual(metadata, {'source_commit': 'a' * 40, 'features': []})
             with self.assertRaises(FileExistsError):
                 release.package(binary, first.parent, metadata)
@@ -57,6 +59,22 @@ class LinuxReleaseBundle(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     release.package(binary, output, {})
                 self.assertFalse(output.exists())
+
+    def test_missing_or_invalid_license_fails_before_creating_an_archive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / 'verad'
+            binary.write_bytes(b'\x7fELF\x02\x01' + bytes(12) + b'\x3e\x00' + bytes(44))
+            license_file = root / 'LICENSE-MIT'
+            output = root / 'output'
+            with patch.object(release, 'LICENSE', license_file):
+                with self.assertRaises(FileNotFoundError):
+                    release.package(binary, output, {})
+                for content in (b'', bytes(64 * 1024 + 1)):
+                    license_file.write_bytes(content)
+                    with self.assertRaisesRegex(ValueError, 'invalid Vera license'):
+                        release.package(binary, output, {})
+                    self.assertFalse(output.exists())
 
     def test_runtime_dependencies_are_names_without_loader_paths(self):
         dynamic = (' 0x0000000000000001 (NEEDED) Shared library: [libc.so.6]\n'
