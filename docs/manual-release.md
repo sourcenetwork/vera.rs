@@ -37,9 +37,9 @@ Before publishing:
 - Confirm the intended license notices for every package. The nine package
   manifests do not all declare the same license: `vera-identity`,
   `vera-zanzibar`, and `vera-acp` declare `Apache-2.0 OR MIT`; the others
-  inherit `MIT`. The inspected `vera-identity` archive contains no license
-  text or copyright notice. Resolve the required notices and package contents
-  before publishing.
+  inherit `MIT`. Each vendored package includes the Apache 2.0 text from the
+  Defra revision it originated from. Confirm the remaining MIT notices and
+  package contents before publishing.
 - Confirm ownership and publishing rights for all nine Vera names. Log in to
   crates.io locally with the maintainer account. Do not put publishing tokens
   in workflow secrets, release notes or repository files.
