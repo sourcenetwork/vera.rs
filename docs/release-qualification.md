@@ -77,6 +77,9 @@ The selected Commonware `2026.10.0` packages are available in the registry,
 but the changed dependency set still needs end-to-end qualification. A
 publishable shared `orbis-reporting` package remains a separate prerequisite;
 a Git dependency with a version string does not satisfy the registry gate.
+Orbis's README and package license metadata disagree, so the intended license
+and Vera's use of the shared crate must be resolved before publication. See the
+[manual release guide](manual-release.md#prepare-the-shared-reporting-crate).
 
 ## Measured operating envelope
 
