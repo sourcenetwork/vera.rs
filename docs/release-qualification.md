@@ -256,8 +256,16 @@ Never run cloned validator identities. See
 
 The [release workflow](../.github/workflows/reproducible-linux-release.yml)
 records immutable source, toolchain, features and checksums and compares two
-independent clean builds. The normal Linux CI also packages the daemon it
-exercised. The daemon archive includes Vera's MIT license. Before distribution,
+independent clean builds. Two builds of merged commit
+`696538b9e3be3be058ff159d93878264807a925d` in the pinned build environment
+produced matching daemon SHA-256
+`0c7e11e28fdeec79a59714e8624c6382915df82ca0e73ceaf85bec6c122a31e7` and
+archive SHA-256
+`04b6ed84f2d3ceed889c2e55d5be67e05b0aa2dd2aa6436ec87a53d7f9854a9d`.
+The [build run](https://github.com/sourcenetwork/vera.rs/actions/runs/41493668230)
+records these artifacts. This evidence applies to that commit and environment;
+a later release candidate requires its own builds and runtime checks. The normal
+Linux CI also packages the daemon it exercised. The daemon archive includes Vera's MIT license. Before distribution,
 complete and verify the license and notice inventory for the bundled dependencies;
 the Vera license alone does not cover third-party notices. For example, the
 `base256emoji 1.0.2` package declares MIT but neither its package nor its
