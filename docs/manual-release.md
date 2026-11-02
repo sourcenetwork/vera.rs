@@ -209,7 +209,7 @@ commit. To retry draft creation, dispatch with that same source and its existing
 inspect and remove an incomplete draft manually before retrying. Never delete or
 replace an already published release to make a rerun pass.
 
-The release notes disclose the unpatched DKG boundary-recovery limitation, the
+The release notes disclose the DKG midpoint recovery limitation, the
 post-release WAN qualification and the excluded Orbis service qualification.
 See [release qualification](release-qualification.md) for operating limits,
 key/backup handling, recovery evidence and the remaining acceptance gates.

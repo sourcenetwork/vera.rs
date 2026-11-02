@@ -10,10 +10,8 @@ publication from the later [four-host WAN qualification](wan-gates.md).
 
 The initial release targets native ACP v1, bulletin, identity, operator-managed
 membership, verified client APIs and the Regolith-backed daemon. ACP v2 remains
-future work. The four-host WAN test and the pending Commonware DKG boundary retry
-are follow-ups, not first-release acceptance gates. DKG itself remains part of
-consensus bootstrap and resharing; deferring the retry does not remove those
-protocols or weaken boundary verification.
+future work. The four-host WAN test is a follow-up, not a first-release
+acceptance gate. DKG remains part of consensus bootstrap and resharing.
 
 The Orbis service stack has merged. Release qualification still requires testing
 the selected Vera and Orbis revisions together.
@@ -49,11 +47,11 @@ adding version strings alone does not establish that the registry packages have
 the APIs or behavior qualified here. See Cargo's
 [published-dependency rules](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#multiple-locations).
 
-The upstream boundary-recovery retry is not included in `2026.10.0`; its later
-adoption is tracked in [#230](https://github.com/sourcenetwork/vera.rs/issues/230).
-It addresses epoch-boundary verification while finalized DKG replay is still
-catching up. The first release must disclose that recovery limitation and
-check bounded cancellation; it must not claim the patched recovery result.
+Commonware `2026.10.0` includes the upstream
+[epoch-boundary recovery fix](https://github.com/commonwarexyz/monorepo/pull/5328),
+which superseded the proposed retry. Vera must still qualify its integration with
+the selected release candidate. Upstream documents that a validator syncing past
+the epoch midpoint sits out that epoch's resharing, reducing the available quorum.
 WAN work remains tracked in [#234](https://github.com/sourcenetwork/vera.rs/issues/234),
 with its existing thresholds unchanged. Neither follow-up is marked completed.
 
