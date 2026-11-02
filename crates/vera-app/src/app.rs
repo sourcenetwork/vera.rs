@@ -13,6 +13,7 @@ use commonware_consensus::types::Round;
 use commonware_consensus::{Handoff, marshal::ancestry::Ancestry};
 use commonware_cryptography::Digestible as _;
 use commonware_glue::stateful::{Application, Finality, Input, Proposed};
+use commonware_runtime::Clock as _;
 use futures::StreamExt as _;
 use std::marker::PhantomData;
 use tracing::{info, warn};
@@ -24,6 +25,7 @@ use vera_executor::{BlockContext, ExecutionReceipt, VeraExecutor, receipt_commit
 use crate::{AppError, ConsensusScheme, FinalizedSink, ReshareInput};
 
 const MAX_CLOCK_DRIFT_SECS: u64 = 15;
+const MAX_TIMESTAMP_STEP_SECS: u64 = 5;
 const MAX_PENDING_ANCESTORS: usize = 64;
 
 /// Vera block production and verification on top of glue-managed state.
@@ -275,7 +277,9 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         }
 
         let height = parent.height + 1;
-        let timestamp = now_secs().max(parent.timestamp);
+        let timestamp = now_secs()
+            .max(parent.timestamp)
+            .min(parent.timestamp.saturating_add(MAX_TIMESTAMP_STEP_SECS));
         let prevrandao = match self.round_prevrandao(consensus_context.round) {
             Some(seed) => seed,
             None => {
@@ -401,13 +405,23 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             );
             return None;
         }
-        if block.timestamp > now_secs() + MAX_CLOCK_DRIFT_SECS {
+        if block.timestamp > parent.timestamp.saturating_add(MAX_TIMESTAMP_STEP_SECS) {
             warn!(
                 ?digest,
                 block_ts = block.timestamp,
-                "block timestamp too far in future"
+                parent_ts = parent.timestamp,
+                "block timestamp advances too far"
             );
             return None;
+        }
+        loop {
+            let wait = block
+                .timestamp
+                .saturating_sub(now_secs().saturating_add(MAX_CLOCK_DRIFT_SECS));
+            if wait == 0 {
+                break;
+            }
+            context.0.sleep(std::time::Duration::from_secs(wait)).await;
         }
         match self.re_execute(&block, batches).await {
             Ok(merkleized) => {
@@ -579,6 +593,93 @@ mod processing_failure_tests {
                 result.is_err(),
                 "a local failure must not return an invalid-block decision"
             );
+        });
+    }
+    #[test]
+    fn candidate_timestamp_waits_for_local_clock() {
+        tokio::Runner::new(tokio::Config::default()).start(|context| async move {
+            let now = super::now_secs();
+            let mut genesis = crate::genesis_block(
+                vera_domain::StateRoot(alloy_primitives::B256::ZERO),
+                vera_domain::DbTargets::default(),
+                alloy_primitives::B256::ZERO,
+            );
+            genesis.timestamp = now + 14;
+            let mut candidate = genesis.clone();
+            candidate.height = 1;
+            candidate.parent = genesis.id();
+            candidate.timestamp = now + 18;
+            let block_context = candidate.context.clone();
+            let ancestry = ancestry::from_iter([candidate, genesis.clone()].map(|block| {
+                let digest = block.digest();
+                Digested::precomputed(block, digest)
+            }));
+            let mut app = StatefulVeraApp::<NoopSink, FailingState>::new(
+                VeraExecutor::new(9001),
+                genesis,
+                InMemoryMempool::new(),
+                NoopSink,
+                64,
+                30_000_000,
+            );
+            let processing = std::panic::AssertUnwindSafe(app.process(
+                (context, block_context),
+                ancestry,
+                (),
+                Finality::Candidate,
+            ))
+            .catch_unwind();
+            ::tokio::pin!(processing);
+            assert!(
+                ::tokio::time::timeout(std::time::Duration::from_millis(100), &mut processing)
+                    .await
+                    .is_err()
+            );
+            let result = ::tokio::time::timeout(std::time::Duration::from_secs(5), processing)
+                .await
+                .expect("clock wait did not finish");
+            assert!(
+                result.is_err(),
+                "processing must reach the injected local failure"
+            );
+        });
+    }
+
+    #[test]
+    fn candidate_timestamp_rejects_excessive_parent_step() {
+        tokio::Runner::new(tokio::Config::default()).start(|context| async move {
+            let mut genesis = crate::genesis_block(
+                vera_domain::StateRoot(alloy_primitives::B256::ZERO),
+                vera_domain::DbTargets::default(),
+                alloy_primitives::B256::ZERO,
+            );
+            genesis.timestamp = super::now_secs();
+            let mut candidate = genesis.clone();
+            candidate.height = 1;
+            candidate.parent = genesis.id();
+            candidate.timestamp = genesis.timestamp + super::MAX_TIMESTAMP_STEP_SECS + 1;
+            let block_context = candidate.context.clone();
+            let ancestry = ancestry::from_iter([candidate, genesis.clone()].map(|block| {
+                let digest = block.digest();
+                Digested::precomputed(block, digest)
+            }));
+            let mut app = StatefulVeraApp::<NoopSink, FailingState>::new(
+                VeraExecutor::new(9001),
+                genesis,
+                InMemoryMempool::new(),
+                NoopSink,
+                64,
+                30_000_000,
+            );
+            let result = std::panic::AssertUnwindSafe(app.process(
+                (context, block_context),
+                ancestry,
+                (),
+                Finality::Candidate,
+            ))
+            .catch_unwind()
+            .await;
+            assert!(matches!(result, Ok(None)));
         });
     }
 }

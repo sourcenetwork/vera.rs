@@ -214,10 +214,19 @@ impl Cli {
 
     fn run_devnet(&self, args: &DevnetArgs) -> eyre::Result<()> {
         let mut config = self.load_config()?;
+        let stored_genesis = config.data_dir.join("devnet-genesis.json");
         let mut genesis = match &args.genesis {
             Some(path) => VeraGenesis::load(path)?,
-            None => VeraGenesis::devnet(),
+            None if stored_genesis.exists() => VeraGenesis::load(&stored_genesis)?,
+            None => {
+                let mut genesis = VeraGenesis::devnet();
+                genesis.timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)?
+                    .as_secs();
+                genesis
+            }
         };
+        genesis.validate_timestamp()?;
         if self.chain_id.is_none() {
             config.chain_id = genesis.chain_id;
         }
@@ -228,6 +237,15 @@ impl Cli {
         let (epoch_info, shares) =
             vera_node::trusted_setup(0, [local.clone()]).map_err(anyhow_to_eyre)?;
         genesis.epoch_info = Some(vera_node::epoch_info_hex(&epoch_info));
+        if args.genesis.is_none() && !stored_genesis.exists() {
+            let bytes = serde_json::to_vec_pretty(&genesis)?;
+            let temporary = config.data_dir.join("devnet-genesis.json.tmp");
+            let mut file = std::fs::File::create(&temporary)?;
+            std::io::Write::write_all(&mut file, &bytes)?;
+            file.sync_all()?;
+            std::fs::rename(&temporary, &stored_genesis)?;
+            std::fs::File::open(&config.data_dir)?.sync_all()?;
+        }
         let secrets_path = config.data_dir.join("secrets.json");
         let store = vera_node::FileSecretStore::load(&secrets_path).map_err(anyhow_to_eyre)?;
         let share = shares

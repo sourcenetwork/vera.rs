@@ -23,10 +23,16 @@ dialable address. Two paths produce that material:
   trusted-dealer material locally; see [wan-gates.md](wan-gates.md) for a
   worked multi-host example.
 
-The shared genesis `timestamp` is recorded in the genesis block. Nodes reject
-an existing genesis record whose timestamp differs from the configuration.
-Development data created by older builds with a nonzero configured timestamp
-must be regenerated because those builds wrote zero into the block.
+Set the shared genesis `timestamp` to a nonzero Unix time near network launch.
+It is recorded in the genesis block and must remain unchanged for restarts.
+Nodes reject a zero timestamp or an existing genesis record that differs from
+the configuration. The local testnet and devnet commands set this timestamp
+when they create a network; devnet persists its generated configuration.
+
+A block timestamp must be at least its parent's and can advance by at most five
+seconds per block. A validator waits when a candidate is more than 15 seconds
+ahead of its local clock. After a long outage, block time may therefore take
+several blocks to catch up. Operators should synchronize validator clocks.
 
 Run a node with:
 

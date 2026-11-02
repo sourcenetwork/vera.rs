@@ -164,6 +164,16 @@ impl VeraGenesis {
         Ok(genesis)
     }
 
+    /// Require a shared launch time for bounded block timestamps.
+    pub fn validate_timestamp(&self) -> Result<(), VeraGenesisError> {
+        if self.timestamp == 0 {
+            return Err(VeraGenesisError::Parse(
+                "genesis timestamp must be nonzero".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Decode the hex-encoded epoch-0 `EpochInfo<MinSig, ed25519::PublicKey, Unit>`.
     pub fn decode_epoch_info(
         &self,
@@ -633,5 +643,12 @@ mod tests {
         let mut genesis = VeraGenesis::devnet();
         genesis.epoch_info = Some("not-hex".to_string());
         assert!(genesis.decode_epoch_info().is_err());
+    }
+    #[test]
+    fn genesis_timestamp_must_be_nonzero() {
+        let mut genesis = VeraGenesis::devnet();
+        assert!(genesis.validate_timestamp().is_err());
+        genesis.timestamp = 1;
+        assert!(genesis.validate_timestamp().is_ok());
     }
 }

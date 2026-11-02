@@ -88,6 +88,7 @@ pub async fn run_node_with_rpc_listener(
     settings: NodeSettings,
     rpc_listener: Option<std::net::TcpListener>,
 ) -> anyhow::Result<()> {
+    settings.genesis.validate_timestamp()?;
     if let Some(parameters) = settings.genesis.simplex {
         parameters.validate().map_err(anyhow::Error::msg)?;
         run_node_with_elector(context, settings, rpc_listener, move |_| {

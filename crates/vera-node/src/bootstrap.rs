@@ -60,6 +60,7 @@ pub async fn run_bootstrap(
     context: tokio::Context,
     mut settings: BootstrapSettings,
 ) -> anyhow::Result<GenesisEpochInfo> {
+    settings.genesis.validate_timestamp()?;
     if let Some(parameters) = settings.genesis.simplex {
         parameters.validate().map_err(anyhow::Error::msg)?;
     }
