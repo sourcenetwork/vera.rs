@@ -15,23 +15,20 @@ then run this in the consuming project:
 cargo add --git https://github.com/sourcenetwork/vera.rs --rev "$VERA_SDK_REV" vera-client vera-verifier
 ```
 
-Commonware dependencies pin official upstream `96567b26` directly, so consumers
-do not need to copy this repository's workspace patches. CI checks a separate
-Git consumer's resolved Commonware sources against the qualified graph. The
-pending DKG retry is still excluded. Git-based SDK access and daemon artifacts
-can be qualified before crates.io publication; the registry prerequisites below
-still apply to uploads.
+Commonware dependencies select the official `2026.10.0` registry packages.
+CI checks an independent Git consumer's resolved Commonware sources against the
+workspace graph. Git-based SDK access and daemon artifacts require qualification
+at the selected Vera revision; the registry prerequisites below still apply to
+crate uploads.
 
 ## Prerequisites
 
-Publication is currently blocked by dependencies, not by the deferred DKG fix:
+Before publishing:
 
-- Publish compatible official Commonware packages containing the APIs and fixes
-  qualified by Vera. The current Git source is `96567b26`; published `2026.9.0`
-  is older and fails the registry-only SDK build. Update the registry versions
-  and lockfile, replace the Git dependencies and requalify that exact release.
+- Qualify the selected `2026.10.0` Commonware registry packages, including the
+  updated DKG boundary handling, against the actual release candidate.
 - Publish the shared-format `orbis-reporting` package independently of the Orbis
-  service stack. Vera currently pins version `0.0.1` at source `fd22c640`. Its
+  service stack. Vera currently pins version `0.0.1` at source `06cc2d86`. Its
   registry package must match the qualified formats. Replace the Git dependency
   with the verified registry release; a version field alongside a Git URL is
   insufficient.

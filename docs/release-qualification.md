@@ -28,15 +28,15 @@ remaining first-release work is:
 
 | Gate | Required result |
 | --- | --- |
-| Official Commonware source | Remove the fork from the release dependency set without waiting for the pending-epoch retry. Preserve the upstream archive and synchronization fixes. Qualify the selected unpatched source and document its boundary-recovery limitation. The release-preparation branch selects official `96567b26`; focused candidate qualification is in progress. |
+| Official Commonware source | Qualify the official `2026.10.0` registry release, including its upstream archive, synchronization and DKG boundary changes, against the selected Vera candidate. |
 | Publishable crates | Version every packaged dependency, complete package metadata and verify the registry dependency graph without workspace patches. The nine-crate client/verifier closure now has explicit publication boundaries, versioned internal dependencies and package metadata. Their dependency closure includes the Git-only, unpublished `orbis-reporting` crate; resolve that shared-format packaging dependency independently of the service stack. |
 | Release automation | Validate versions and packages and produce tagged daemon assets with checksums and provenance from the same commit. The release workflow builds and compares two clean daemon artifacts and creates a draft GitHub release for an existing matching version tag. Keep crate uploads manual; CI needs no crates.io publishing credentials. |
 | Candidate validation | Run focused native authorization, membership, receipt and recovery checks affected by the dependency change. Verify the packaged client/verifier from a clean registry consumer, independent trust configuration, and the chosen daemon artifact. Reuse earlier source-bound evidence for unchanged code. |
 | Publication handoff | Record exact source, versions, dependencies, target and limitations. Provide package checksums and dependency-ordered commands for the maintainer to publish manually, followed by registry installation and download checks. Crate uploads belong to the maintainer, not the automated workflow. |
 
-The current source-distribution path is an exact official Commonware Git pin and
-SDK access from a qualified Vera Git commit. Native candidate and daemon
-qualification continues without waiting for a registry release. The upload gates
+The candidate selects official Commonware `2026.10.0` registry packages and
+SDK access from a qualified Vera Git commit. The updated dependency set and
+daemon must be qualified at the selected candidate revision. The upload gates
 below remain requirements for the maintainer's later crates.io publication.
 See [Git SDK access](manual-release.md#current-git-sdk-access).
 
@@ -49,7 +49,7 @@ adding version strings alone does not establish that the registry packages have
 the APIs or behavior qualified here. See Cargo's
 [published-dependency rules](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#multiple-locations).
 
-The pending retry is tracked in [#230](https://github.com/sourcenetwork/vera.rs/issues/230).
+The upstream boundary-recovery change is included in `2026.10.0`; its Vera integration is tracked in [#230](https://github.com/sourcenetwork/vera.rs/issues/230).
 It addresses epoch-boundary verification while finalized DKG replay is still
 catching up. The unpatched release must disclose that recovery limitation and
 check bounded cancellation; it must not claim the patched recovery result.
@@ -73,12 +73,10 @@ explicit publication settings, complete metadata and registry-sourced runtime
 dependencies. Neither command uploads crates. CI retains the plan; a green
 metadata-report job does not mean `ready` is true.
 
-At this preparation revision, published Commonware `2026.9.0` predates the APIs
-used here. A registry-only `vera-domain` check fails with missing codec `Buf`
-and `Copying` APIs. The official Git revision compiles, but this does not make the
-SDK publishable against the older registry release. A compatible upstream crate
-release and a publishable shared `orbis-reporting` package remain prerequisites;
-changing version strings or silently using workspace patches does not satisfy them.
+The selected Commonware `2026.10.0` packages are available in the registry,
+but the changed dependency set still needs end-to-end qualification. A
+publishable shared `orbis-reporting` package remains a separate prerequisite;
+a Git dependency with a version string does not satisfy the registry gate.
 
 ## Measured operating envelope
 
