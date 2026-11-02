@@ -55,6 +55,16 @@ the epoch midpoint sits out that epoch's resharing, reducing the available quoru
 WAN work remains tracked in [#234](https://github.com/sourcenetwork/vera.rs/issues/234),
 with its existing thresholds unchanged. Neither follow-up is marked completed.
 
+The [snapshot-catchup job](https://github.com/sourcenetwork/vera.rs/actions/runs/41436021931/job/125246396865)
+for PR #242 passed all three tests, including recovery from pruned peers and
+rejoining consensus. The fixture waits for a fresh epoch share, stops another
+validator, and requires the recovered replica for quorum through a subsequent
+epoch. Its retained `linux-snapshot-catchup-evidence` artifact records zero
+failures. The tested merge commit `251ebe87d45bbdf314684beac9614c99bfaf1d5f`
+and merged commit `c86f42516d9024e4514fe3d3ad59bb7a15aae588` have the same
+tree, `d7ff4317f8d6255d4fb8caad586d02b2f0717305`. This covers Vera's recovery
+integration; it does not reproduce the exact upstream epoch-boundary timing.
+
 The [manual publication guide](manual-release.md) gives the dependency order,
 package verification commands and daemon tag/draft-release procedure. Crate
 uploads remain maintainer actions; no crates.io credentials are configured in CI.
