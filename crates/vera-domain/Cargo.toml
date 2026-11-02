@@ -26,7 +26,7 @@ alloy-primitives = { workspace = true, features = ["serde"] }
 alloy-consensus = { workspace = true, features = ["serde"] }
 alloy-eips = { workspace = true, optional = true }
 k256 = { workspace = true, optional = true }
-sha3 = { workspace = true, optional = true }
+k256-native = { package = "k256", version = "0.14", features = ["ecdsa"], optional = true }
 
 # RLP encoding
 alloy-rlp = { workspace = true }
@@ -48,4 +48,4 @@ serde_json.workspace = true
 alloy-eips.workspace = true
 
 [features]
-evm = ["dep:alloy-eips", "dep:k256", "dep:sha3"]
+evm = ["dep:alloy-eips", "dep:k256", "dep:k256-native"]

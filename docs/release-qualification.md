@@ -243,8 +243,8 @@ The current runtime dependency check still reports RUSTSEC-2026-0387 for
 `crypto-bigint 0.5.5`, reached through the `elliptic-curve 0.13` dependency
 family. Its affected constant-time operations require a security fix; no
 exception is configured here. Native node, operator, ring and bearer signing use
-`k256 0.14`. The legacy `EvmSigner` signs with the newer implementation, but
-its compatibility constructor accepts a `k256 0.13` key. Other paths include
+`k256 0.14`. The legacy `EvmSigner` and EIP-1559 helper sign with the newer
+implementation, but their compatibility APIs accept `k256 0.13` keys. Other paths include
 Alloy and `revm-precompile`'s `p256 0.13`. Disabling legacy
 transactions in pipelined consensus does not remove those dependencies or
 resolve the advisory. Resolving the dependency finding requires compatible
