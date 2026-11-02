@@ -177,6 +177,22 @@ respectively. These are local test artifacts, not release builds. The gateway
 fixture did not use the Rust Defra sidecar, external gateway process, or Docker
 Orbis nodes. It does not replace the final release-set qualification.
 
+After the zstd update, the pipelined selector also passed against Vera
+`51e2ea9f86fed0c86e88f68e37e62464dc130cee`, Trust
+`be7d44749a33bdd81f646f9b7815dcad892b09cc`, and Defra
+`f0304032367a93a75aaad45903fa5bc31a3f8624` on macOS arm64. It used the
+current Rust Defra CLI as the remote identity-store sidecar, with node access
+control enabled, and exercised the shared-store gateway configuration. The Defra
+CLI was built without its `vera` feature; this checkpoint does not qualify
+Defra's direct Vera authorization integration or Orbis containers.
+
+The debug daemon, verifier and Defra sidecar SHA-256 values were, respectively,
+`c4333192d669a8ead0ae9ad2ad7213e09b069d2aaa7a5b9d5f0145d6f601814f`,
+`29b87ab7be998ff12d4f997d1802d897802b6cb1d4b582cc320cca095edc283d`, and
+`ce6ae72bb6a81486a1eda25319df8f41a7df631f8a9cef7ad279d22e8d1f9dcd`.
+The same Trust test binaries and toolchains listed above were used. These are
+local test artifacts, not release binaries.
+
 ### Earlier checkpoints
 
 The [consumer qualification record](native-qualification-20261014.md#native-consumer-checks)
