@@ -225,6 +225,30 @@ mod tests {
     }
 
     #[test]
+    fn signed_transaction_recovers_known_address() {
+        use alloy_consensus::transaction::SignerRecoverable;
+
+        let signer = EvmSigner::new(test_key(), 1337);
+        let expected: Address = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+            .parse()
+            .unwrap();
+        assert_eq!(signer.address(), expected);
+        let raw = signer
+            .sign_tx(Address::repeat_byte(0xab), Bytes::from(vec![1, 2, 3]), 7)
+            .unwrap();
+        let envelope = alloy_consensus::TxEnvelope::decode_2718(&mut raw.as_slice()).unwrap();
+        assert_eq!(envelope.recover_signer().unwrap(), expected);
+    }
+
+    #[test]
+    fn from_hex_rejects_invalid_scalars_and_lengths() {
+        assert!(EvmSigner::from_hex(&"00".repeat(32), 1).is_err());
+        assert!(EvmSigner::from_hex(&"ff".repeat(32), 1).is_err());
+        assert!(EvmSigner::from_hex("01", 1).is_err());
+        assert!(EvmSigner::from_hex(&format!("0x{}01", "00".repeat(31)), 1).is_ok());
+    }
+
+    #[test]
     fn signing_error_display() {
         let err = ClientError::Signing("bad key".into());
         assert_eq!(err.to_string(), "signing error: bad key");
