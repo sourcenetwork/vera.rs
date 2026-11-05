@@ -1,0 +1,14 @@
+[licenses]
+allow = [
+    "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause",
+    "BSD-3-Clause", "ISC", "MPL-2.0", "Unicode-3.0", "Unicode-DFS-2016",
+    "Zlib", "BSL-1.0", "Unlicense", "CC0-1.0", "OpenSSL", "CDLA-Permissive-2.0",
+]
+exceptions = [
+    { name = "orbis-reporting", version = "=0.0.1", allow = ["BUSL-1.1"] },
+]
+
+[advisories]
+ignore = [
+    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5 has no patched release; Alloy and REVM depend on the affected elliptic-curve 0.13 family" },
+]
