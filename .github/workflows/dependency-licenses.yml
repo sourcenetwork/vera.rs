@@ -26,4 +26,3 @@ jobs:
           manifest-path: bin/verad/Cargo.toml
           arguments: ''
           command: check licenses
-          command-arguments: --exclude-dev
