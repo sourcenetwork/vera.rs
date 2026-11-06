@@ -233,13 +233,15 @@ The official RustSec database was reviewed through
 `caee11f41fab07d676c0a4655a2a5dd1f94da97c`. Rustls is updated to **0.23.46**,
 which fixes RUSTSEC-2026-0346, 0347, 0348 and 0349. The newly listed `kuva` and
 `ruzstd` packages are absent from the lockfile. Existing maintenance notices for
-`derivative`, `paste` and `unsafe-libyaml` remain disclosed; parser limits do not
-establish the memory safety of an unmaintained parser.
+`derivative`, `paste`, `pin-utils` and `unsafe-libyaml` remain disclosed; parser
+limits do not establish the memory safety of an unmaintained parser.
 
 The current runtime dependency check still reports RUSTSEC-2026-0387 for
 `crypto-bigint 0.5.5`, reached through the `elliptic-curve 0.13` dependency
-family. Its affected constant-time operations require a security fix; no
-exception is configured here. Native node, operator, ring and bearer signing use
+family. Its affected constant-time operations require a security fix; `deny.toml`
+records the same exception used by Defra and Orbis until compatible upstream
+versions are available. This exception does not remediate the vulnerability.
+Native node, operator, ring and bearer signing use
 `k256 0.14`. The legacy `EvmSigner` and EIP-1559 helper sign with the newer
 implementation, but their compatibility APIs accept `k256 0.13` keys. Other paths include
 Alloy and `revm-precompile`'s `p256 0.13`. Disabling legacy
@@ -272,7 +274,9 @@ node authorization across worker changes and restart, and native policy
 ownership and revocation, in the [artifact test run](https://github.com/sourcenetwork/vera.rs/actions/runs/41497337225).
 This evidence applies to that commit and environment; a later release candidate
 requires its own builds and runtime checks. The normal Linux CI also packages the
-daemon it exercised. The daemon archive includes Vera's MIT license. Before distribution,
+daemon it exercised. The daemon archive includes Vera's MIT license. CI checks the daemon dependency
+graph against the license allowlist in `deny.toml`; this check does not provide
+the actual third-party notices. Before distribution,
 complete and verify the license and notice inventory for the bundled dependencies;
 the Vera license alone does not cover third-party notices. For example, the
 `base256emoji 1.0.2` package declares MIT but neither its package nor its
