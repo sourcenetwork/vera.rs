@@ -8,6 +8,7 @@ description = "Verified native permission requests and read evidence"
 
 license.workspace = true
 repository.workspace = true
+readme = "README.md"
 
 [dependencies]
 bytes.workspace = true
