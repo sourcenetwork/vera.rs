@@ -8,6 +8,7 @@ description = "Vera module implementations (ACP, Bulletin, Vera)"
 
 license.workspace = true
 repository.workspace = true
+readme = "README.md"
 
 [dependencies]
 vera-acp.workspace = true

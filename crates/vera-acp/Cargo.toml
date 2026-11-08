@@ -7,6 +7,7 @@ rust-version.workspace = true
 license = "Apache-2.0 OR MIT"
 repository.workspace = true
 description = "Access control policy types and policy YAML parsing"
+readme = "README.md"
 
 [dependencies]
 vera-identity = { path = "../vera-identity", version = "=0.1.0" }
