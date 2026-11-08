@@ -5,28 +5,22 @@ commit. CI validates the package boundary and prepares daemon artifacts; it has
 no crates.io upload step or publishing credentials. `verad`, the node internals,
 test harnesses and development tools are not published as crates.
 
-## Current Git SDK access
+## SDK access
 
-Until compatible registry packages are available, use the client and verifier
-from one qualified Vera Git commit. Set `VERA_SDK_REV` to its full commit hash,
-then run this in the consuming project:
+The client and verifier `0.1.0` crates are published on crates.io. This
+runbook prepares `0.1.1`, which must be published in dependency order before
+consumers can resolve that version. The two versions have different DID key
+decoding behavior; see [delegated policies](delegated-policies.md).
 
-```sh
-cargo add --git https://github.com/sourcenetwork/vera.rs --rev "$VERA_SDK_REV" vera-client vera-verifier
-```
-
-Commonware dependencies select the official `2026.10.0` registry packages.
-CI checks an independent Git consumer's resolved Commonware sources against the
-workspace graph. Git-based SDK access and daemon artifacts require qualification
-at the selected Vera revision; the registry prerequisites below still apply to
-crate uploads.
+The SDK uses official Commonware `2026.10.0` registry packages. Daemon and
+consumer qualification must identify the exact Vera revision and dependencies.
 
 ## Prerequisites
 
 Before publishing:
 
-- Qualify the selected `2026.10.0` Commonware registry packages, including the
-  updated DKG boundary handling, against the actual release candidate.
+- Qualify the selected `2026.10.0` Commonware registry packages against the
+  release candidate. Disclose the deferred DKG midpoint recovery limitation.
 - Verify the selected `orbis-reporting` registry package and its license against
   the release record below.
 - Inspect the license notices in every package. `vera-identity`,
@@ -89,7 +83,7 @@ checksums, source commit and check results with the release record.
 
 ## Publish crates manually
 
-The candidate version is `0.1.0`. Use the dependency order in the generated plan;
+The candidate version is `0.1.1`. Use the dependency order in the generated plan;
 for the current graph it is:
 
 | Order | Package |
@@ -108,7 +102,7 @@ For each package, verify its archive before uploading it. Start with:
 
 ```sh
 cargo package --locked --registry crates-io -p vera-identity
-shasum -a 256 target/package/vera-identity-0.1.0.crate
+shasum -a 256 target/package/vera-identity-0.1.1.crate
 cargo publish --locked --registry crates-io -p vera-identity
 ```
 
@@ -141,7 +135,7 @@ roots using only registry dependencies:
 ```sh
 VERA_RELEASE_SMOKE=$(mktemp -d)
 cargo init --lib --name vera_release_smoke "$VERA_RELEASE_SMOKE"
-cargo add --manifest-path "$VERA_RELEASE_SMOKE/Cargo.toml" 'vera-client@=0.1.0' 'vera-verifier@=0.1.0'
+cargo add --manifest-path "$VERA_RELEASE_SMOKE/Cargo.toml" 'vera-client@=0.1.1' 'vera-verifier@=0.1.1'
 printf '%s\n' 'pub use vera_client as client;' 'pub use vera_verifier as verifier;' > "$VERA_RELEASE_SMOKE/src/lib.rs"
 cargo check --locked --manifest-path "$VERA_RELEASE_SMOKE/Cargo.toml"
 cargo metadata --locked --format-version 1 --manifest-path "$VERA_RELEASE_SMOKE/Cargo.toml" > "$VERA_RELEASE_SMOKE/metadata.json"
@@ -175,7 +169,7 @@ version tag yourself:
 
 ```sh
 VERA_RELEASE_SOURCE=$(git rev-parse HEAD)
-VERA_RELEASE_TAG=v0.1.0
+VERA_RELEASE_TAG=v0.1.1
 git tag --annotate "$VERA_RELEASE_TAG" "$VERA_RELEASE_SOURCE" --message "Vera $VERA_RELEASE_TAG"
 git push origin "refs/tags/$VERA_RELEASE_TAG"
 ```

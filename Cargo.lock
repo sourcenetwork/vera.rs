@@ -6911,7 +6911,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "vera-acp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "serde",
@@ -6927,7 +6927,7 @@ dependencies = [
 
 [[package]]
 name = "vera-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
@@ -6964,7 +6964,7 @@ dependencies = [
 
 [[package]]
 name = "vera-backend"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-primitives",
  "bytes",
@@ -6993,7 +6993,7 @@ dependencies = [
 
 [[package]]
 name = "vera-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "libc",
  "tempfile",
@@ -7001,7 +7001,7 @@ dependencies = [
 
 [[package]]
 name = "vera-client"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7040,7 +7040,7 @@ dependencies = [
 
 [[package]]
 name = "vera-config"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "commonware-codec",
  "commonware-cryptography",
@@ -7056,7 +7056,7 @@ dependencies = [
 
 [[package]]
 name = "vera-consensus"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "commonware-codec",
  "parking_lot",
@@ -7067,7 +7067,7 @@ dependencies = [
 
 [[package]]
 name = "vera-crypto"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-primitives",
  "ark-bls12-381 0.4.0",
@@ -7092,7 +7092,7 @@ dependencies = [
 
 [[package]]
 name = "vera-domain"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7118,7 +7118,7 @@ dependencies = [
 
 [[package]]
 name = "vera-e2e"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -7154,7 +7154,7 @@ dependencies = [
 
 [[package]]
 name = "vera-executor"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7194,7 +7194,7 @@ dependencies = [
 
 [[package]]
 name = "vera-genesis"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-evm",
  "commonware-codec",
@@ -7212,7 +7212,7 @@ dependencies = [
 
 [[package]]
 name = "vera-harness"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7244,7 +7244,7 @@ dependencies = [
 
 [[package]]
 name = "vera-identity"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hex",
  "serde",
@@ -7254,7 +7254,7 @@ dependencies = [
 
 [[package]]
 name = "vera-indexer"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-primitives",
  "parking_lot",
@@ -7264,7 +7264,7 @@ dependencies = [
 
 [[package]]
 name = "vera-jsonrpc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -7294,7 +7294,7 @@ dependencies = [
 
 [[package]]
 name = "vera-modules"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -7324,7 +7324,7 @@ dependencies = [
 
 [[package]]
 name = "vera-node"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7378,7 +7378,7 @@ dependencies = [
 
 [[package]]
 name = "vera-overlay"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-primitives",
  "tokio",
@@ -7388,7 +7388,7 @@ dependencies = [
 
 [[package]]
 name = "vera-permission"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-primitives",
  "bytes",
@@ -7406,7 +7406,7 @@ dependencies = [
 
 [[package]]
 name = "vera-qmdb"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-primitives",
  "rstest",
@@ -7416,7 +7416,7 @@ dependencies = [
 
 [[package]]
 name = "vera-test-infra"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "eyre",
  "futures",
@@ -7431,7 +7431,7 @@ dependencies = [
 
 [[package]]
 name = "vera-traits"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-primitives",
  "thiserror 2.0.18",
@@ -7440,7 +7440,7 @@ dependencies = [
 
 [[package]]
 name = "vera-verifier"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-primitives",
  "commonware-codec",
@@ -7454,7 +7454,7 @@ dependencies = [
 
 [[package]]
 name = "vera-zanzibar"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-lock",
  "async-trait",
@@ -7471,7 +7471,7 @@ dependencies = [
 
 [[package]]
 name = "verad"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloy-primitives",
  "anyhow",
