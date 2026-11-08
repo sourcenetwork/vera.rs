@@ -241,7 +241,7 @@ atomic-waker 1.1.2 | Apache-2.0 OR MIT
   6226d0632e2e1a80c23597e964da9812ae193c535fe058154afb034e94167aa5  LICENSE-THIRD-PARTY
 
 aurora-engine-modexp 1.2.0 | CC0-1.0
-  e22c53d2e5e21f28f041096c77e5a79e8d30ab4c99ac9827c01f9c660ff6af4f  AURORA-MODEXP-NOTICE.txt
+  8e5b9e77371fced8a1b8ef49c25e84db920a90b47287b617892df61a0f36e31e  Aurora package provenance
   a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499  Creative Commons CC0 1.0 legal text: https://creativecommons.org/publicdomain/zero/1.0/legalcode.txt
 
 auto_impl 1.3.0 | MIT OR Apache-2.0
@@ -18930,12 +18930,12 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 
---- SHA-256 e22c53d2e5e21f28f041096c77e5a79e8d30ab4c99ac9827c01f9c660ff6af4f ---
+--- SHA-256 8e5b9e77371fced8a1b8ef49c25e84db920a90b47287b617892df61a0f36e31e ---
 aurora-engine-modexp 1.2.0
 
 The published Cargo manifest declares CC0-1.0 and identifies Aurora Labs as
-its author. The package archive does not include a license text. The accompanying
-CC0-1.0.txt is the canonical CC0 1.0 Universal legal text from Creative Commons:
+its author. The package archive does not include a license text. This inventory includes
+the canonical CC0 1.0 Universal legal text from Creative Commons:
 https://creativecommons.org/publicdomain/zero/1.0/legalcode.txt
 
 Published package: https://crates.io/crates/aurora-engine-modexp/1.2.0

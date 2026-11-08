@@ -14,8 +14,6 @@ import tarfile
 BUILD_COMMAND = ['cargo', 'build', '--frozen', '--release', '--no-default-features', '-p', 'verad']
 ROOT = Path(__file__).resolve().parents[2]
 LICENSE = ROOT / 'LICENSE-MIT'
-AURORA_NOTICE = ROOT / 'AURORA-MODEXP-NOTICE.txt'
-CC0_LICENSE = ROOT / 'CC0-1.0.txt'
 THIRD_PARTY_NOTICES = ROOT / 'THIRD-PARTY-NOTICES.txt'
 MAX_NOTICES_BYTES = 8 * 1024 * 1024
 
@@ -65,10 +63,6 @@ def package(binary, output, metadata):
     license_text = LICENSE.read_bytes()
     if not license_text or len(license_text) > 64 * 1024:
         raise ValueError('invalid Vera license file')
-    aurora_notice = AURORA_NOTICE.read_bytes()
-    cc0_license = CC0_LICENSE.read_bytes()
-    if any(not text or len(text) > 64 * 1024 for text in (aurora_notice, cc0_license)):
-        raise ValueError('invalid Aurora notice or CC0 license file')
     third_party_notices = THIRD_PARTY_NOTICES.read_bytes()
     if not third_party_notices or len(third_party_notices) > MAX_NOTICES_BYTES:
         raise ValueError('invalid third-party notices file')
@@ -83,8 +77,6 @@ def package(binary, output, metadata):
                 for filename, content, mode in [('verad', executable, 0o755),
                                                 ('build.json', manifest, 0o644),
                                                 ('LICENSE-MIT', license_text, 0o644),
-                                                ('AURORA-MODEXP-NOTICE.txt', aurora_notice, 0o644),
-                                                ('CC0-1.0.txt', cc0_license, 0o644),
                                                 ('THIRD-PARTY-NOTICES.txt', third_party_notices, 0o644)]:
                     entry = tarfile.TarInfo(filename)
                     entry.size = len(content)
