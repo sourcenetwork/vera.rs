@@ -230,7 +230,7 @@ fn compressed_pubkey_from_did(did: &str) -> Result<Vec<u8>, JwtError> {
         .strip_prefix("did:key:")
         .ok_or_else(|| JwtError::InvalidIssuer("not a did:key: string".into()))?;
 
-    let (_base, decoded) = multibase::decode(multibase_part)
+    let decoded = crate::did_key::decode(multibase_part)
         .map_err(|e| JwtError::InvalidIssuer(format!("multibase decode: {e}")))?;
 
     let mut varint_buf = [0u8; 10];
@@ -270,10 +270,7 @@ mod tests {
         let did = |compressed| {
             let mut bytes = vec![0xe7, 0x01];
             bytes.extend_from_slice(key.verifying_key().to_encoded_point(compressed).as_bytes());
-            format!(
-                "did:key:{}",
-                multibase::encode(multibase::Base::Base58Btc, bytes)
-            )
+            format!("did:key:{}", crate::did_key::encode(&bytes))
         };
         assert!(matches_issuer(&did(true), &did(false)));
         assert!(matches_issuer(&did(false), &did(true)));
@@ -284,6 +281,26 @@ mod tests {
         .unwrap();
         assert!(!matches_issuer(&did(false), &other));
         assert!(!matches_issuer("invalid", &did(true)));
+    }
+
+    #[test]
+    fn issuer_matches_base58_and_base64url_key_forms() {
+        let key = SigningKey::from_slice(&[42; 32]).unwrap();
+        let mut bytes = vec![0xe7, 0x01];
+        bytes.extend_from_slice(key.verifying_key().to_encoded_point(true).as_bytes());
+        let base58 = format!("did:key:{}", crate::did_key::encode(&bytes));
+        let base64 = format!("did:key:u{}", URL_SAFE_NO_PAD.encode(&bytes));
+        assert!(matches_issuer(&base58, &base64));
+        assert_eq!(
+            canonical_issuer(&base58).unwrap(),
+            canonical_issuer(&base64).unwrap()
+        );
+        assert_eq!(
+            crate::secp256k1::evm_address_from_did(&base58).unwrap(),
+            crate::secp256k1::evm_address_from_did(&base64).unwrap(),
+        );
+        assert!(canonical_issuer("did:key:z0").is_err());
+        assert!(canonical_issuer("did:key:uAA=").is_err());
     }
 
     fn create_jwt(signing_key: &SigningKey, claims_json: &str) -> String {
@@ -333,6 +350,19 @@ mod tests {
         assert_eq!(result.iss, did);
         assert_eq!(result.sub, "policy-ctx");
         assert_eq!(result.exp, 9_999_999_999);
+    }
+
+    #[test]
+    fn verify_base64url_issuer_with_compressed_and_uncompressed_keys() {
+        let (sk, _) = test_key_and_did();
+        for compressed in [true, false] {
+            let mut key = vec![0xe7, 0x01];
+            key.extend_from_slice(sk.verifying_key().to_encoded_point(compressed).as_bytes());
+            let did = format!("did:key:u{}", URL_SAFE_NO_PAD.encode(key));
+            let claims = format!(r#"{{"iss":"{did}","sub":"policy-ctx","exp":9999999999}}"#);
+            let token = create_jwt(&sk, &claims);
+            assert_eq!(verify_bearer_token(&token).unwrap().iss, did);
+        }
     }
 
     #[test]

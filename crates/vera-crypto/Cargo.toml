@@ -24,7 +24,7 @@ jubjub.workspace = true
 group.workspace = true
 
 # DID derivation
-multibase.workspace = true
+bs58 = "0.5"
 unsigned-varint.workspace = true
 
 # secp256k1 DID recovery

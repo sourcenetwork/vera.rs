@@ -7,6 +7,13 @@ worker has its own submission sequence.
 Delegations use signed ES256K tokens with a worker DID in `sub`, deployment in
 `aud`, and explicit validity times. The supported scopes are separate:
 
+The issuer is a secp256k1 `did:key` using Base58BTC (`z`) or unpadded
+Base64URL (`u`). Both compressed and uncompressed public keys are accepted.
+Vera generates canonical Base58BTC identifiers and compares the underlying key
+for issuer revocation; stored actor identifiers are not rewritten. Older builds
+accepted additional multibase encodings when decoding keys. Those encodings are
+not accepted by this version, so replace them before upgrading.
+
 | Scope | Authorized operations |
 |---|---|
 | `acp:policy` | Existing object registration, archival and relationship commands |
