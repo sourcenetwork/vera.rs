@@ -193,6 +193,9 @@ The draft includes:
   shared-library requirements.
 - `release.json`, containing the source/tag/version and independent-build evidence.
 - `SHA256SUMS`, covering the archive and `release.json`.
+- The Vera license and a third-party notice inventory tied to the release
+  `Cargo.lock`, including build dependencies. Review and update the inventory
+  when the lockfile changes; packaging rejects a stale lockfile hash.
 
 Download the draft assets and verify `sha256sum --check SHA256SUMS` on Linux.
 Confirm the source and runtime libraries in `build.json`, run the selected binary

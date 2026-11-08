@@ -18,6 +18,7 @@ ARCHIVE = 'verad-x86_64-unknown-linux-gnu-regolith.tar.gz'
 MAX_BINARY_BYTES = 512 * 1024 * 1024
 MAX_MANIFEST_BYTES = 64 * 1024
 MAX_LICENSE_BYTES = 64 * 1024
+MAX_NOTICES_BYTES = 8 * 1024 * 1024
 
 
 def digest(stream):
@@ -78,8 +79,10 @@ def build(root, destination, source, member):
         'incremental': os.environ.get('CARGO_INCREMENTAL'),
         'source_path': str(root.resolve()),
     }
+    package['validate_notices_lockfile'](hashlib.sha256((root / 'Cargo.lock').read_bytes()).hexdigest())
     subprocess.run(package['BUILD_COMMAND'], cwd=root, check=True)
     metadata = package['provenance'](root)
+    package['validate_notices_lockfile'](metadata['cargo_lock_sha256'])
     package['package'](root / 'target/release/verad', destination, metadata)
     evidence = {
         'builder': member, 'environment': environment,
@@ -109,7 +112,8 @@ def release_members(archive):
                 ('build.json', 0o644, 2, MAX_MANIFEST_BYTES),
                 ('LICENSE-MIT', 0o644, 1, MAX_LICENSE_BYTES),
                 ('AURORA-MODEXP-NOTICE.txt', 0o644, 1, MAX_LICENSE_BYTES),
-                ('CC0-1.0.txt', 0o644, 1, MAX_LICENSE_BYTES)):
+                ('CC0-1.0.txt', 0o644, 1, MAX_LICENSE_BYTES),
+                ('THIRD-PARTY-NOTICES.txt', 0o644, 1, MAX_NOTICES_BYTES)):
             header = read_exact(stream, tarfile.BLOCKSIZE)
             entry = tarfile.TarInfo.frombuf(header, 'utf-8', 'strict')
             if entry.name != name or entry.type != tarfile.REGTYPE:
@@ -152,7 +156,7 @@ def release_members(archive):
 def bundle(directory, source):
     archive = directory / ARCHIVE
     with archive.open('rb') as stream:
-        if os.fstat(stream.fileno()).st_size > MAX_BINARY_BYTES + MAX_MANIFEST_BYTES + 3 * MAX_LICENSE_BYTES + 1024 * 1024:
+        if os.fstat(stream.fileno()).st_size > MAX_BINARY_BYTES + MAX_MANIFEST_BYTES + 3 * MAX_LICENSE_BYTES + MAX_NOTICES_BYTES + 1024 * 1024:
             raise ValueError('release archive exceeds comparison bounds')
         archive_sha = digest(stream)
     if (directory / 'SHA256SUMS').read_text() != f'{archive_sha}  {ARCHIVE}\n':

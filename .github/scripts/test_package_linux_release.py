@@ -1,6 +1,7 @@
 import hashlib
 import importlib.util
 import json
+import re
 from pathlib import Path
 import tarfile
 import tempfile
@@ -32,11 +33,12 @@ class LinuxReleaseBundle(unittest.TestCase):
             expected = f'{hashlib.sha256(first.read_bytes()).hexdigest()}  {first.name}\n'
             self.assertEqual((first.parent / 'SHA256SUMS').read_text(), expected)
             with tarfile.open(first) as archive:
-                self.assertEqual(archive.getnames(), ['verad', 'build.json', 'LICENSE-MIT', 'AURORA-MODEXP-NOTICE.txt', 'CC0-1.0.txt'])
+                self.assertEqual(archive.getnames(), ['verad', 'build.json', 'LICENSE-MIT', 'AURORA-MODEXP-NOTICE.txt', 'CC0-1.0.txt', 'THIRD-PARTY-NOTICES.txt'])
                 self.assertEqual(archive.extractfile('verad').read(), executable)
                 self.assertEqual(archive.extractfile('LICENSE-MIT').read(), release.LICENSE.read_bytes())
                 self.assertEqual(archive.extractfile('AURORA-MODEXP-NOTICE.txt').read(), release.AURORA_NOTICE.read_bytes())
                 self.assertEqual(archive.extractfile('CC0-1.0.txt').read(), release.CC0_LICENSE.read_bytes())
+                self.assertEqual(archive.extractfile('THIRD-PARTY-NOTICES.txt').read(), release.THIRD_PARTY_NOTICES.read_bytes())
                 manifest = json.load(archive.extractfile('build.json'))
                 self.assertEqual(manifest['binary_sha256'], hashlib.sha256(executable).hexdigest())
                 self.assertEqual(manifest['source_commit'], 'a' * 40)
@@ -93,6 +95,33 @@ class LinuxReleaseBundle(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, 'invalid Aurora notice'):
                         release.package(binary, output, {})
                     self.assertFalse(output.exists())
+
+    def test_notice_inventory_must_match_the_release_lockfile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / 'verad'
+            binary.write_bytes(b'\x7fELF\x02\x01' + bytes(12) + b'\x3e\x00' + bytes(44))
+            notices = root / 'notices'
+            notices.write_text('Cargo.lock SHA-256: ' + 'a' * 64 + '\n')
+            with patch.object(release, 'THIRD_PARTY_NOTICES', notices):
+                with self.assertRaisesRegex(ValueError, 'do not match'):
+                    release.validate_notices_lockfile('b' * 64)
+                release.validate_notices_lockfile('a' * 64)
+
+    def test_notice_inventory_preserves_referenced_texts(self):
+        notices = release.THIRD_PARTY_NOTICES.read_bytes()
+        index, texts = notices.split(b'LICENSE AND NOTICE TEXTS\n========================\n\n', 1)
+        references = set(re.findall(rb'^  ([0-9a-f]{64})  ', index, re.MULTILINE))
+        parts = re.split(rb'--- SHA-256 ([0-9a-f]{64}) ---\n', texts)
+        self.assertEqual(parts[0], b'')
+        self.assertTrue(references)
+        found = set()
+        self.assertEqual(len(parts[1::2]), len(parts[2::2]))
+        for digest, content in zip(parts[1::2], parts[2::2]):
+            self.assertTrue(content.endswith(b'\n\n'))
+            self.assertEqual(hashlib.sha256(content[:-2]).hexdigest().encode(), digest)
+            found.add(digest)
+        self.assertEqual(references, found)
 
     def test_runtime_dependencies_are_names_without_loader_paths(self):
         dynamic = (' 0x0000000000000001 (NEEDED) Shared library: [libc.so.6]\n'
