@@ -15,12 +15,10 @@ pub(crate) fn encode(bytes: &[u8]) -> String {
 }
 
 pub(crate) fn decode(encoded: &str) -> Result<Vec<u8>, DecodeError> {
-    if let Some(value) = encoded.strip_prefix('z') {
-        bs58::decode(value).into_vec().map_err(Into::into)
-    } else if let Some(value) = encoded.strip_prefix('u') {
-        URL_SAFE_NO_PAD.decode(value).map_err(Into::into)
-    } else {
-        Err(DecodeError::UnsupportedEncoding)
+    match encoded.as_bytes().first() {
+        Some(b'z') => bs58::decode(&encoded[1..]).into_vec().map_err(Into::into),
+        Some(b'u') => URL_SAFE_NO_PAD.decode(&encoded[1..]).map_err(Into::into),
+        _ => Err(DecodeError::UnsupportedEncoding),
     }
 }
 
