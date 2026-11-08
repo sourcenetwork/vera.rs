@@ -61,7 +61,7 @@ pub fn did_from_secp256k1_pubkey(compressed_pubkey: &[u8]) -> Result<String, Sec
     codec_bytes.extend_from_slice(varint);
     codec_bytes.extend_from_slice(compressed_pubkey);
 
-    let encoded = multibase::encode(multibase::Base::Base58Btc, &codec_bytes);
+    let encoded = crate::did_key::encode(&codec_bytes);
     Ok(format!("did:key:{encoded}"))
 }
 
@@ -103,7 +103,7 @@ pub fn evm_address_from_did(did: &str) -> Result<alloy_primitives::Address, Secp
         .strip_prefix("did:key:")
         .ok_or_else(|| Secp256k1Error::Recovery("not a did:key: string".into()))?;
 
-    let (_base, decoded) = multibase::decode(multibase_part)
+    let decoded = crate::did_key::decode(multibase_part)
         .map_err(|e| Secp256k1Error::Recovery(format!("multibase decode: {e}")))?;
 
     let mut varint_buf = [0u8; 10];
@@ -170,7 +170,7 @@ mod tests {
         );
 
         let multibase_part = &did["did:key:".len()..];
-        let (_base, decoded) = multibase::decode(multibase_part).unwrap();
+        let decoded = crate::did_key::decode(multibase_part).unwrap();
 
         let mut varint_buf = [0u8; 10];
         let expected_prefix =

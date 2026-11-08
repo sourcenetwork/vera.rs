@@ -12,7 +12,10 @@ import tarfile
 
 
 BUILD_COMMAND = ['cargo', 'build', '--frozen', '--release', '--no-default-features', '-p', 'verad']
-LICENSE = Path(__file__).resolve().parents[2] / 'LICENSE-MIT'
+ROOT = Path(__file__).resolve().parents[2]
+LICENSE = ROOT / 'LICENSE-MIT'
+THIRD_PARTY_NOTICES = ROOT / 'THIRD-PARTY-NOTICES.txt'
+MAX_NOTICES_BYTES = 8 * 1024 * 1024
 
 
 def checked_output(root, command):
@@ -60,6 +63,9 @@ def package(binary, output, metadata):
     license_text = LICENSE.read_bytes()
     if not license_text or len(license_text) > 64 * 1024:
         raise ValueError('invalid Vera license file')
+    third_party_notices = THIRD_PARTY_NOTICES.read_bytes()
+    if not third_party_notices or len(third_party_notices) > MAX_NOTICES_BYTES:
+        raise ValueError('invalid third-party notices file')
     metadata = dict(metadata, binary_sha256=hashlib.sha256(executable).hexdigest())
     manifest = (json.dumps(metadata, sort_keys=True, indent=2) + '\n').encode()
     name = 'verad-x86_64-unknown-linux-gnu-regolith.tar.gz'
@@ -70,7 +76,8 @@ def package(binary, output, metadata):
             with tarfile.open(fileobj=compressed, mode='w', format=tarfile.USTAR_FORMAT) as bundle:
                 for filename, content, mode in [('verad', executable, 0o755),
                                                 ('build.json', manifest, 0o644),
-                                                ('LICENSE-MIT', license_text, 0o644)]:
+                                                ('LICENSE-MIT', license_text, 0o644),
+                                                ('THIRD-PARTY-NOTICES.txt', third_party_notices, 0o644)]:
                     entry = tarfile.TarInfo(filename)
                     entry.size = len(content)
                     entry.mode = mode
@@ -81,12 +88,20 @@ def package(binary, output, metadata):
     return archive
 
 
+def validate_notices_lockfile(lock_sha):
+    notices = THIRD_PARTY_NOTICES.read_bytes()
+    if f'Cargo.lock SHA-256: {lock_sha}\n'.encode() not in notices:
+        raise ValueError('third-party notices do not match the release lockfile')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
-    package(root / 'target/release/verad', args.output, provenance(root))
+    metadata = provenance(root)
+    validate_notices_lockfile(metadata['cargo_lock_sha256'])
+    package(root / 'target/release/verad', args.output, metadata)
 
 
 if __name__ == '__main__':

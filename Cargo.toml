@@ -159,7 +159,6 @@ reqwest = { version = "0.12", features = ["json", "blocking"] }
 parking_lot = "0.12"
 
 # DID / encoding
-multibase = "0.9"
 unsigned-varint = "0.8"
 
 # Encoding

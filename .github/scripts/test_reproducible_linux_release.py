@@ -244,6 +244,7 @@ class IndependentReleaseEvidence(unittest.TestCase):
         with patch.object(reproduction, 'MAX_BINARY_BYTES', 0), \
                 patch.object(reproduction, 'MAX_MANIFEST_BYTES', 0), \
                 patch.object(reproduction, 'MAX_LICENSE_BYTES', 0), \
+                patch.object(reproduction, 'MAX_NOTICES_BYTES', 0), \
                 patch.object(reproduction, 'digest') as hash_archive:
             with (first / reproduction.ARCHIVE).open('ab') as archive:
                 archive.write(bytes(1024 * 1024))

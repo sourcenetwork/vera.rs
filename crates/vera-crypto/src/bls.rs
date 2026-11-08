@@ -156,7 +156,7 @@ fn did_from_encoded_key(pubkey: &[u8; 48]) -> String {
     let mut codec_bytes = Vec::with_capacity(varint.len() + pubkey.len());
     codec_bytes.extend_from_slice(varint);
     codec_bytes.extend_from_slice(pubkey);
-    let encoded = multibase::encode(multibase::Base::Base58Btc, &codec_bytes);
+    let encoded = crate::did_key::encode(&codec_bytes);
     format!("did:key:{encoded}")
 }
 
@@ -258,7 +258,7 @@ mod tests {
         );
 
         let multibase_part = &did["did:key:".len()..];
-        let (_base, decoded) = multibase::decode(multibase_part).expect("multibase decode");
+        let decoded = crate::did_key::decode(multibase_part).expect("multibase decode");
 
         let mut varint_buf = [0u8; 10];
         let expected_prefix = unsigned_varint::encode::u64(BLS_G1_MULTICODEC, &mut varint_buf);

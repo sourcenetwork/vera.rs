@@ -274,15 +274,14 @@ node authorization across worker changes and restart, and native policy
 ownership and revocation, in the [artifact test run](https://github.com/sourcenetwork/vera.rs/actions/runs/41497337225).
 This evidence applies to that commit and environment; a later release candidate
 requires its own builds and runtime checks. The normal Linux CI also packages the
-daemon it exercised. The daemon archive includes Vera's MIT license. CI checks the daemon dependency
-graph against the license allowlist in `deny.toml`; this check does not provide
-the actual third-party notices. Before distribution,
-complete and verify the license and notice inventory for the bundled dependencies;
-the Vera license alone does not cover third-party notices. For example, the
-`base256emoji 1.0.2` package declares MIT but neither its package nor its
-[source revision](https://github.com/Jorropo/base256emoji/tree/f7cf4ae2c15123376d6634ca7aed005034b396ec)
-contains a license text; resolve its attribution rather than using an unfilled
-template. The vendored `jsonrpsee-server 0.26.1` includes its upstream MIT
+daemon it exercised. The daemon archive includes Vera's MIT license and
+`THIRD-PARTY-NOTICES.txt`, an inventory of the selected Linux normal and build
+dependency graph with original license and notice texts. Build-time packages are
+included conservatively. The Aurora notice records its package's dirty source
+revision. The inventory is tied to `Cargo.lock`; review and update it whenever
+the lockfile changes. The allowlist and the inventory do not replace review of
+the applicable terms, including the Orbis reporting package's Business Source
+License. The vendored `jsonrpsee-server 0.26.1` includes its upstream MIT
 notice from [source revision `bcc84901`](https://github.com/paritytech/jsonrpsee/blob/bcc84901f3c882f4233f293e5acf018643cbd412/LICENSE).
 Artifact provenance,
 key handling and process-crash tests are distinct
