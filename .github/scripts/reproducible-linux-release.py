@@ -107,7 +107,9 @@ def release_members(archive):
         for name, mode, minimum, maximum in (
                 ('verad', 0o755, 64, MAX_BINARY_BYTES),
                 ('build.json', 0o644, 2, MAX_MANIFEST_BYTES),
-                ('LICENSE-MIT', 0o644, 1, MAX_LICENSE_BYTES)):
+                ('LICENSE-MIT', 0o644, 1, MAX_LICENSE_BYTES),
+                ('AURORA-MODEXP-NOTICE.txt', 0o644, 1, MAX_LICENSE_BYTES),
+                ('CC0-1.0.txt', 0o644, 1, MAX_LICENSE_BYTES)):
             header = read_exact(stream, tarfile.BLOCKSIZE)
             entry = tarfile.TarInfo.frombuf(header, 'utf-8', 'strict')
             if entry.name != name or entry.type != tarfile.REGTYPE:
@@ -150,7 +152,7 @@ def release_members(archive):
 def bundle(directory, source):
     archive = directory / ARCHIVE
     with archive.open('rb') as stream:
-        if os.fstat(stream.fileno()).st_size > MAX_BINARY_BYTES + MAX_MANIFEST_BYTES + MAX_LICENSE_BYTES + 1024 * 1024:
+        if os.fstat(stream.fileno()).st_size > MAX_BINARY_BYTES + MAX_MANIFEST_BYTES + 3 * MAX_LICENSE_BYTES + 1024 * 1024:
             raise ValueError('release archive exceeds comparison bounds')
         archive_sha = digest(stream)
     if (directory / 'SHA256SUMS').read_text() != f'{archive_sha}  {ARCHIVE}\n':

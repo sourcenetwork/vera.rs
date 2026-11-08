@@ -278,12 +278,13 @@ daemon it exercised. The daemon archive includes Vera's MIT license. CI checks t
 graph against the license allowlist in `deny.toml`; this check does not provide
 the actual third-party notices. Before distribution,
 complete and verify the license and notice inventory for the bundled dependencies;
-the Vera license alone does not cover third-party notices. For example, the
-`base256emoji 1.0.2` package declares MIT but neither its package nor its
-[source revision](https://github.com/Jorropo/base256emoji/tree/f7cf4ae2c15123376d6634ca7aed005034b396ec)
-contains a license text; resolve its attribution rather than using an unfilled
-template. The vendored `jsonrpsee-server 0.26.1` includes its upstream MIT
-notice from [source revision `bcc84901`](https://github.com/paritytech/jsonrpsee/blob/bcc84901f3c882f4233f293e5acf018643cbd412/LICENSE).
+the Vera license alone does not cover third-party notices. The archive also
+includes the notice and CC0 1.0 text for `aurora-engine-modexp 1.2.0`. Its
+published manifest declares CC0-1.0, but its package records a dirty source
+revision; the notice identifies that limitation. This notice covers only that
+package and is not a complete third-party notice inventory. The vendored
+`jsonrpsee-server 0.26.1` includes its upstream MIT notice from
+[source revision `bcc84901`](https://github.com/paritytech/jsonrpsee/blob/bcc84901f3c882f4233f293e5acf018643cbd412/LICENSE).
 Artifact provenance,
 key handling and process-crash tests are distinct
 from a physical-device power-loss guarantee.

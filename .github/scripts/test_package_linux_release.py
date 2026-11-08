@@ -32,9 +32,11 @@ class LinuxReleaseBundle(unittest.TestCase):
             expected = f'{hashlib.sha256(first.read_bytes()).hexdigest()}  {first.name}\n'
             self.assertEqual((first.parent / 'SHA256SUMS').read_text(), expected)
             with tarfile.open(first) as archive:
-                self.assertEqual(archive.getnames(), ['verad', 'build.json', 'LICENSE-MIT'])
+                self.assertEqual(archive.getnames(), ['verad', 'build.json', 'LICENSE-MIT', 'AURORA-MODEXP-NOTICE.txt', 'CC0-1.0.txt'])
                 self.assertEqual(archive.extractfile('verad').read(), executable)
                 self.assertEqual(archive.extractfile('LICENSE-MIT').read(), release.LICENSE.read_bytes())
+                self.assertEqual(archive.extractfile('AURORA-MODEXP-NOTICE.txt').read(), release.AURORA_NOTICE.read_bytes())
+                self.assertEqual(archive.extractfile('CC0-1.0.txt').read(), release.CC0_LICENSE.read_bytes())
                 manifest = json.load(archive.extractfile('build.json'))
                 self.assertEqual(manifest['binary_sha256'], hashlib.sha256(executable).hexdigest())
                 self.assertEqual(manifest['source_commit'], 'a' * 40)
@@ -73,6 +75,22 @@ class LinuxReleaseBundle(unittest.TestCase):
                 for content in (b'', bytes(64 * 1024 + 1)):
                     license_file.write_bytes(content)
                     with self.assertRaisesRegex(ValueError, 'invalid Vera license'):
+                        release.package(binary, output, {})
+                    self.assertFalse(output.exists())
+
+    def test_missing_or_invalid_aurora_notice_fails_before_creating_an_archive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / 'verad'
+            binary.write_bytes(b'\x7fELF\x02\x01' + bytes(12) + b'\x3e\x00' + bytes(44))
+            notice = root / 'notice'
+            output = root / 'output'
+            with patch.object(release, 'AURORA_NOTICE', notice):
+                with self.assertRaises(FileNotFoundError):
+                    release.package(binary, output, {})
+                for content in (b'', bytes(64 * 1024 + 1)):
+                    notice.write_bytes(content)
+                    with self.assertRaisesRegex(ValueError, 'invalid Aurora notice'):
                         release.package(binary, output, {})
                     self.assertFalse(output.exists())
 
