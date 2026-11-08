@@ -220,6 +220,7 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
         requires_pet: false,
         nonce: [1; 32],
         trusted_auth_relay_dids: None,
+        pre_share_endpoints: Vec::new(),
         reporting: ReportingConfig {
             kick_threshold: 1,
             backup_node_keys: vec![public(&nodes[3])],

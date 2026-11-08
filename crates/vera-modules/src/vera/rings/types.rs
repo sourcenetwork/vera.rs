@@ -9,6 +9,11 @@ use super::{Result, invalid};
 pub const MAX_RING_REQUEST_BYTES: usize = 48 * 1024;
 pub const MAX_RING_RECORD_BYTES: usize = 128 * 1024;
 pub const MAX_RING_MEMBERS: usize = 256;
+/// Mirrors `vera`/x/orbis's `MaxPreShareEndpoints` (Cosmos side) so a value
+/// accepted by one backend is accepted by the other.
+pub const MAX_PRE_SHARE_ENDPOINTS: usize = 8;
+/// Mirrors `vera`/x/orbis's `MaxPreShareEndpointLen` (Cosmos side).
+pub const MAX_PRE_SHARE_ENDPOINT_LEN: usize = 256;
 
 /// Creation parameters retained independently of subsequent ring state.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
@@ -23,6 +28,11 @@ pub struct RingConfig {
     pub nonce: [u8; 32],
     /// None permanently disables relays; Some allows a bounded canonical set.
     pub trusted_auth_relay_dids: Option<Vec<String>>,
+    /// DefraDB storage targets for PRE reencryption shares. Empty keeps the
+    /// direct-response PRE path unchanged. Immutable after creation, same as
+    /// `policy_id`/`nonce` -- there is deliberately no `RingUpdate` variant
+    /// for it.
+    pub pre_share_endpoints: Vec<String>,
     pub reporting: ReportingConfig,
 }
 
@@ -92,6 +102,16 @@ impl RingConfig {
                     return Err(invalid("relay must be a canonical Ed25519 key DID"));
                 }
             }
+        }
+        if self.pre_share_endpoints.len() > MAX_PRE_SHARE_ENDPOINTS
+            || !sorted(&self.pre_share_endpoints)
+        {
+            return Err(invalid(
+                "pre_share_endpoints must be bounded, sorted and unique",
+            ));
+        }
+        for endpoint in &self.pre_share_endpoints {
+            pre_share_endpoint(endpoint)?;
         }
         Ok(())
     }
@@ -424,6 +444,36 @@ pub(super) fn public_key_value(value: &str) -> Result<()> {
         || value.bytes().any(|b| b.is_ascii_uppercase())
     {
         return Err(invalid("invalid public key declaration"));
+    }
+    Ok(())
+}
+
+/// Rejects anything but a bare http(s) base URL with a host, no embedded
+/// credentials, and no query/fragment. Defra auth stays in each node's local
+/// config, never in this public, on-chain ring metadata. Mirrors `vera`/
+/// x/orbis's `validatePreShareEndpoint` (Cosmos side) exactly, minus its
+/// `net/url` parser -- this crate has no URL-parsing dependency, so the
+/// checks below are hand-rolled against the same rules instead.
+fn pre_share_endpoint(value: &str) -> Result<()> {
+    if value.is_empty() || value.len() > MAX_PRE_SHARE_ENDPOINT_LEN || value.trim() != value {
+        return Err(invalid(
+            "pre_share_endpoint must be non-empty, bounded and without surrounding whitespace",
+        ));
+    }
+    let rest = value
+        .strip_prefix("https://")
+        .or_else(|| value.strip_prefix("http://"))
+        .ok_or_else(|| invalid("pre_share_endpoint must use http or https"))?;
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if host.is_empty() || host.contains('@') {
+        return Err(invalid(
+            "pre_share_endpoint must have a host and must not embed credentials",
+        ));
+    }
+    if rest.contains('?') || rest.contains('#') {
+        return Err(invalid(
+            "pre_share_endpoint must not include a query or fragment",
+        ));
     }
     Ok(())
 }

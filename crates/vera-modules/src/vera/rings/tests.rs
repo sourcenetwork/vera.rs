@@ -170,6 +170,7 @@ fn fixture_nodes(policy: &str, nodes: &[u8]) -> (VeraModule, AcpModule, RingConf
             requires_pet: false,
             nonce: [9; 32],
             trusted_auth_relay_dids: None,
+            pre_share_endpoints: Vec::new(),
             reporting: ReportingConfig::default(),
         },
     )

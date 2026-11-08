@@ -301,12 +301,13 @@ fn v2_ring_and_participant_digests_bind_the_paired_protocol() {
         requires_pet: true,
         nonce: [9; 32],
         trusted_auth_relay_dids: None,
+        pre_share_endpoints: Vec::new(),
         reporting: ReportingConfig::default(),
     };
     let id = config.id([7; 32], "did:key:fixture").unwrap();
     assert_eq!(
         id,
-        "58b39d87fc52b1e447cef0835a9a11dafcfd97be06424283bdb2cd4eba7ed8b9"
+        "bf6fe376aa866abbcc782aad3ce66c7e20d6319579067b8ee016f9ff6ac24ff3"
     );
     assert_eq!(
         ring_key(&id).unwrap(),
@@ -325,6 +326,6 @@ fn v2_ring_and_participant_digests_bind_the_paired_protocol() {
     };
     assert_eq!(
         hex::encode(request.signing_digest().unwrap()),
-        "73d092c07a65a19a4d1e6c6f1dbcdb61aea7b2345d11cdb81b2d3f5f4da7a505"
+        "94ff96e28a51017de101b8a8d61f05646c85357c40b66962957e1452b6fa3d43"
     );
 }
