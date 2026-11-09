@@ -43,7 +43,7 @@ jobs:
       CARGO_BUILD_JOBS: '2'
       CARGO_INCREMENTAL: '0'
       VERA_E2E_DEADLINE_SCALE: '8'
-      VERA_E2E_DIR: ${{ runner.temp }}/vera-dkg-logs
+      VERA_E2E_DIR: ${{ github.workspace }}/target/vera-dkg-logs
       VERA_E2E_KEEP: '1'
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
