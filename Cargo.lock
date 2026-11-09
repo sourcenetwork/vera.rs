@@ -6921,8 +6921,24 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
- "vera-identity",
- "vera-zanzibar",
+ "vera-identity 0.1.1",
+ "vera-zanzibar 0.1.1",
+]
+
+[[package]]
+name = "vera-acp"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0a3020c3b55725f0455b9b1050f545cf6df75ba9ed09de382517e80335827ff"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "vera-identity 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vera-zanzibar 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -6951,14 +6967,14 @@ dependencies = [
  "tokio",
  "tracing",
  "vera-backend",
- "vera-client",
+ "vera-client 0.1.1",
  "vera-consensus",
- "vera-domain",
+ "vera-domain 0.1.1",
  "vera-executor",
  "vera-genesis",
  "vera-indexer",
  "vera-jsonrpc",
- "vera-modules",
+ "vera-modules 0.1.1",
  "vera-qmdb",
 ]
 
@@ -6984,11 +7000,11 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "vera-modules",
- "vera-permission",
+ "vera-modules 0.1.1",
+ "vera-permission 0.1.1",
  "vera-qmdb",
  "vera-traits",
- "vera-zanzibar",
+ "vera-zanzibar 0.1.1",
 ]
 
 [[package]]
@@ -7029,12 +7045,50 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "vera-acp",
- "vera-crypto",
- "vera-domain",
- "vera-identity",
- "vera-modules",
- "vera-permission",
+ "vera-acp 0.1.1",
+ "vera-crypto 0.1.1",
+ "vera-domain 0.1.1",
+ "vera-identity 0.1.1",
+ "vera-modules 0.1.1",
+ "vera-permission 0.1.1",
+ "zeroize",
+]
+
+[[package]]
+name = "vera-client"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23d4d1de822cc7bdc32969c7c1d33b7f15ce7a979f19e29d49d2add9287d37ce"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-sol-types",
+ "ark-bls12-381 0.4.0",
+ "ark-ec 0.4.2",
+ "ark-ff 0.4.2",
+ "ark-serialize 0.4.2",
+ "async-trait",
+ "base64",
+ "borsh",
+ "hex",
+ "k256 0.13.4",
+ "k256 0.14.0",
+ "rand 0.8.8",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "vera-acp 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vera-crypto 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vera-domain 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vera-identity 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vera-modules 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vera-permission 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "zeroize",
 ]
 
@@ -7062,7 +7116,7 @@ dependencies = [
  "parking_lot",
  "rstest",
  "tokio",
- "vera-domain",
+ "vera-domain 0.1.1",
 ]
 
 [[package]]
@@ -7081,6 +7135,31 @@ dependencies = [
  "bs58",
  "group 0.14.0",
  "hex",
+ "jubjub",
+ "k256 0.13.4",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "unsigned-varint",
+]
+
+[[package]]
+name = "vera-crypto"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f04285bb19a793b100da9393a2de3b3ef41b0aafb3438bb42fde8ddd078f3cd"
+dependencies = [
+ "alloy-primitives",
+ "ark-bls12-381 0.4.0",
+ "ark-ec 0.4.2",
+ "ark-ff 0.4.2",
+ "ark-serialize 0.4.2",
+ "base64",
+ "blst",
+ "borsh",
+ "bs58",
+ "group 0.14.0",
  "jubjub",
  "k256 0.13.4",
  "serde",
@@ -7117,6 +7196,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "vera-domain"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7d9fb832f95b46417af27692bb6dee195030f8995bdfaa7e46b234b39df2685"
+dependencies = [
+ "alloy-consensus",
+ "alloy-evm",
+ "alloy-primitives",
+ "alloy-rlp",
+ "bytes",
+ "commonware-codec",
+ "commonware-consensus",
+ "commonware-cryptography",
+ "commonware-glue",
+ "commonware-parallel",
+ "commonware-utils",
+ "futures",
+ "hex",
+ "parking_lot",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "vera-e2e"
 version = "0.1.1"
 dependencies = [
@@ -7139,17 +7242,18 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
- "vera-acp",
+ "vera-acp 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "vera-cli",
- "vera-client",
- "vera-crypto",
- "vera-domain",
+ "vera-client 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vera-crypto 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vera-domain 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "vera-genesis",
  "vera-harness",
- "vera-identity",
- "vera-modules",
+ "vera-identity 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vera-modules 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "vera-node",
- "vera-permission",
+ "vera-permission 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vera-verifier 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -7182,11 +7286,11 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "vera-acp",
- "vera-crypto",
- "vera-domain",
- "vera-identity",
- "vera-modules",
+ "vera-acp 0.1.1",
+ "vera-crypto 0.1.1",
+ "vera-domain 0.1.1",
+ "vera-identity 0.1.1",
+ "vera-modules 0.1.1",
  "vera-overlay",
  "vera-qmdb",
  "vera-traits",
@@ -7206,8 +7310,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "vera-domain",
- "vera-modules",
+ "vera-domain 0.1.1",
+ "vera-modules 0.1.1",
 ]
 
 [[package]]
@@ -7236,8 +7340,8 @@ dependencies = [
  "tokio",
  "tracing",
  "vera-cli",
- "vera-domain",
- "vera-modules",
+ "vera-domain 0.1.1",
+ "vera-modules 0.1.1",
  "vera-node",
  "vera-test-infra",
 ]
@@ -7245,6 +7349,18 @@ dependencies = [
 [[package]]
 name = "vera-identity"
 version = "0.1.1"
+dependencies = [
+ "hex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "vera-identity"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d61df30d7ca6243724f5928665c1b925286e4bab43266125f8a323fa5531c3c"
 dependencies = [
  "hex",
  "serde",
@@ -7284,11 +7400,11 @@ dependencies = [
  "tokio-util",
  "tracing",
  "vera-backend",
- "vera-domain",
+ "vera-domain 0.1.1",
  "vera-executor",
  "vera-indexer",
- "vera-modules",
- "vera-permission",
+ "vera-modules 0.1.1",
+ "vera-permission 0.1.1",
  "vera-traits",
 ]
 
@@ -7316,10 +7432,37 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.18",
- "vera-acp",
- "vera-crypto",
- "vera-identity",
- "vera-zanzibar",
+ "vera-acp 0.1.1",
+ "vera-crypto 0.1.1",
+ "vera-identity 0.1.1",
+ "vera-zanzibar 0.1.1",
+]
+
+[[package]]
+name = "vera-modules"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bebf61b4ba83fd791ef881662af58fe94a31dcf2ec54c81a044d1b0790406bba"
+dependencies = [
+ "alloy-primitives",
+ "alloy-sol-types",
+ "async-trait",
+ "borsh",
+ "bs58",
+ "bytes",
+ "futures",
+ "hex",
+ "imbl",
+ "orbis-reporting",
+ "prost",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "vera-acp 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vera-crypto 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vera-identity 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vera-zanzibar 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -7362,16 +7505,16 @@ dependencies = [
  "vera-app",
  "vera-backend",
  "vera-cli",
- "vera-client",
+ "vera-client 0.1.1",
  "vera-config",
  "vera-consensus",
- "vera-crypto",
- "vera-domain",
+ "vera-crypto 0.1.1",
+ "vera-domain 0.1.1",
  "vera-executor",
  "vera-genesis",
  "vera-indexer",
  "vera-jsonrpc",
- "vera-modules",
+ "vera-modules 0.1.1",
  "vera-qmdb",
  "vera-traits",
 ]
@@ -7398,10 +7541,30 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "vera-crypto",
- "vera-domain",
- "vera-modules",
- "vera-zanzibar",
+ "vera-crypto 0.1.1",
+ "vera-domain 0.1.1",
+ "vera-modules 0.1.1",
+ "vera-zanzibar 0.1.1",
+]
+
+[[package]]
+name = "vera-permission"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "55615417805227b2ae5dbff9e9ed866c7578bed7405d0317d699b3a8f6d0693d"
+dependencies = [
+ "alloy-primitives",
+ "bytes",
+ "commonware-codec",
+ "commonware-cryptography",
+ "commonware-storage",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "vera-crypto 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vera-domain 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vera-modules 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vera-zanzibar 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -7447,9 +7610,25 @@ dependencies = [
  "hex",
  "serde",
  "serde_json",
- "vera-domain",
- "vera-modules",
- "vera-permission",
+ "vera-domain 0.1.1",
+ "vera-modules 0.1.1",
+ "vera-permission 0.1.1",
+]
+
+[[package]]
+name = "vera-verifier"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a29ccfed34afee36b6cd4386db4cb120dc74830458c850067b7d90f18746c1fc"
+dependencies = [
+ "alloy-primitives",
+ "commonware-codec",
+ "hex",
+ "serde",
+ "serde_json",
+ "vera-domain 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vera-modules 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vera-permission 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -7466,7 +7645,24 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "vera-identity",
+ "vera-identity 0.1.1",
+]
+
+[[package]]
+name = "vera-zanzibar"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10cc4d6537c2a63c6a3b15e4768ce35c90f50483f0b6bc578ee513ca83cb763c"
+dependencies = [
+ "async-lock",
+ "async-trait",
+ "futures",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "vera-identity 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -7493,9 +7689,9 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "vera-cli",
- "vera-client",
+ "vera-client 0.1.1",
  "vera-config",
- "vera-crypto",
+ "vera-crypto 0.1.1",
  "vera-genesis",
  "vera-jsonrpc",
  "vera-node",

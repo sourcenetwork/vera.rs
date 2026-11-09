@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use alloy_sol_types::{SolCall, SolEvent};
+use commonware_codec::Encode as _;
 use vera_client::{BULLETIN_ADDRESS, BlsSigner, VeraClient};
 use vera_domain::ConsensusPublicKey;
 use vera_e2e::cluster::{ConsensusPreset, KeySet, TestCluster};
@@ -34,6 +35,18 @@ async fn submit(
             )
             .unwrap();
             if let (Some(proof), Some(_)) = (observed, local) {
+                let request = serde_json::to_vec(&serde_json::json!({
+                    "kind": "receipt", "trusted_key": hex::encode(trusted.encode()),
+                    "submission": id, "proof": proof,
+                }))
+                .unwrap();
+                let buffer = unsafe { vera_verifier::vera_verify(request.as_ptr(), request.len()) };
+                let response: serde_json::Value = serde_json::from_slice(unsafe {
+                    std::slice::from_raw_parts(buffer.data, buffer.len)
+                })
+                .unwrap();
+                unsafe { vera_verifier::vera_buffer_free(buffer) };
+                assert!(response.get("result").is_some(), "{response}");
                 let receipt = proof.verify(id, trusted).unwrap();
                 assert_eq!(receipt.success(), success, "{receipt:?}");
                 if let Some(post) = &expected_post {

@@ -27,7 +27,7 @@ vera-cli.workspace = true
 orbis-reporting.workspace = true
 blst = "0.3"
 tempfile.workspace = true
-vera-acp.workspace = true
+vera-acp = "=0.1.1"
 alloy-primitives.workspace = true
 alloy-sol-types.workspace = true
 commonware-codec.workspace = true
@@ -37,12 +37,13 @@ commonware-parallel.workspace = true
 commonware-utils.workspace = true
 futures.workspace = true
 hex.workspace = true
-vera-client.workspace = true
-vera-domain.workspace = true
-vera-crypto.workspace = true
-vera-modules.workspace = true
-vera-permission.workspace = true
-vera-identity.workspace = true
+vera-client = "=0.1.1"
+vera-verifier = "=0.1.1"
+vera-domain = "=0.1.1"
+vera-crypto = "=0.1.1"
+vera-modules = "=0.1.1"
+vera-permission = "=0.1.1"
+vera-identity = "=0.1.1"
 k256.workspace = true
 jsonrpsee.workspace = true
 jsonrpsee-server = { path = "../../vendor/jsonrpsee-server" }
