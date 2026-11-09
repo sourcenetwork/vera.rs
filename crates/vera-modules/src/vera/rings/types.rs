@@ -116,16 +116,27 @@ impl RingConfig {
         Ok(())
     }
 
-    /// Bind the immutable identity to the deployment, creator and all creation parameters.
-    pub fn id(&self, deployment_root: [u8; 32], creator: &str) -> Result<String> {
+    /// Bind the immutable identity to all creation parameters.
+    ///
+    /// Deliberately excludes creator and deployment identity, matching
+    /// `vera`/x/orbis's `GenerateRingID` (Cosmos side) exactly. Neither is
+    /// needed here: replay protection already binds `deployment_root`
+    /// directly into every signed request and into `RingRecord` itself,
+    /// checked at apply time against `context.genesis_id`, and creator
+    /// attribution is already the plain `RingRecord.creator` field. Hashing
+    /// `deployment_root` in here too only made the id a function of the
+    /// genesis block's own hash, circular for anything that needs to know a
+    /// ring's id before genesis is finalized; hashing creator in bought
+    /// nothing a policy-governed creation permission and `nonce` didn't
+    /// already cover.
+    pub fn id(&self) -> Result<String> {
         self.validate()?;
-        vera_identity::Did::new(creator).map_err(invalid)?;
-        let bytes = borsh::to_vec(&(deployment_root, creator, self)).map_err(invalid)?;
+        let bytes = borsh::to_vec(self).map_err(invalid)?;
         if bytes.len() > MAX_RING_REQUEST_BYTES {
             return Err(invalid("ring configuration exceeds byte limit"));
         }
         let mut hash = Sha256::new();
-        hash.update(b"vera/orbis/ring/v2\0");
+        hash.update(b"vera/orbis/ring/v4\0");
         hash.update(bytes);
         Ok(hex::encode(hash.finalize()))
     }
@@ -193,7 +204,8 @@ pub struct RingRecord {
 impl RingRecord {
     pub fn validate(&self, expected: &str) -> Result<()> {
         if self.id != expected
-            || self.config.id(self.deployment_root, &self.creator)? != expected
+            || self.config.id()? != expected
+            || vera_identity::Did::new(&self.creator).is_err()
             || self.revision.block_height == 0
             || self.revision.seconds == 0
         {

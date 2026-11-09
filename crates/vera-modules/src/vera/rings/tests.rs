@@ -8,7 +8,10 @@ use super::*;
 use crate::{
     acp::types::PolicyMarshalingType,
     types::Timestamp,
-    vera::nodes::{NodeCommand, NodeInfo, NodeRequest, SignedNodeRequest},
+    vera::{
+        nodes::{NodeCommand, NodeInfo, NodeRequest, SignedNodeRequest},
+        rings::reports::NodeDemeritSeed,
+    },
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use k256::ecdsa::{
@@ -344,6 +347,82 @@ fn cancellation_conflict_revocation_and_bad_signatures_cannot_reuse_a_ring() {
         RingState::Cancelled { .. }
     ));
     assert!(apply(&mut vera, &mut acp, &create, 6).is_err());
+}
+
+#[test]
+fn ring_cancellation_allows_the_creator_or_a_peer_but_rejects_outsiders() {
+    let (mut vera, mut acp, config) = fixture(POLICY);
+    let record = apply(&mut vera, &mut acp, &RingCommand::Create(config), 1).unwrap();
+    let cancel = RingCommand::Cancel { ring_id: record.id };
+
+    // Neither the creator (secret(1)) nor a ring member (secret(2), secret(3)).
+    let outsider_token = token_from(&cancel, 2, &context(), &secret(4));
+    let before = (vera.store().serialize(), acp.store().serialize());
+    assert!(
+        vera.apply_ring_command(
+            &mut acp,
+            &context(),
+            &submission(),
+            &outsider_token,
+            &cancel
+        )
+        .is_err()
+    );
+    assert_eq!((vera.store().serialize(), acp.store().serialize()), before);
+
+    // secret(2) is a peer node key, not the creator -- allowed, same as Cosmos's
+    // `CancelPendingRing`, so a node can abort its own stalled fresh DKG without
+    // being the one that happened to submit `RingCommand::Create`.
+    let member_token = token_from(&cancel, 3, &context(), &secret(2));
+    let cancelled = vera
+        .apply_ring_command(&mut acp, &context(), &submission(), &member_token, &cancel)
+        .unwrap();
+    assert!(matches!(cancelled.state, RingState::Cancelled { .. }));
+}
+
+#[test]
+fn genesis_seeded_demerits_are_readable_and_reject_duplicates_or_zero_values() {
+    let ring_id = "11".repeat(32);
+    let node_key = public(&secret(2));
+    let mut vera = VeraModule::new();
+    vera.initialize_node_demerits(&[NodeDemeritSeed {
+        ring_id: ring_id.clone(),
+        node_key: node_key.clone(),
+        points: 2,
+        window_started_at: 100,
+    }])
+    .unwrap();
+    let stored = vera.node_demerits(&ring_id, &node_key).unwrap().unwrap();
+    assert_eq!(stored.points, 2);
+    assert_eq!(stored.window_started_at, 100);
+
+    assert!(matches!(
+        vera.initialize_node_demerits(&[NodeDemeritSeed {
+            ring_id: ring_id.clone(),
+            node_key,
+            points: 1,
+            window_started_at: 200,
+        }]),
+        Err(VeraError::InvalidRingRequest { .. })
+    ));
+    for bad in [
+        NodeDemeritSeed {
+            ring_id: ring_id.clone(),
+            node_key: public(&secret(3)),
+            points: 0,
+            window_started_at: 100,
+        },
+        NodeDemeritSeed {
+            ring_id,
+            node_key: public(&secret(3)),
+            points: 1,
+            window_started_at: 0,
+        },
+    ] {
+        let before = vera.store().serialize();
+        assert!(vera.initialize_node_demerits(&[bad]).is_err());
+        assert_eq!(vera.store().serialize(), before);
+    }
 }
 
 #[test]

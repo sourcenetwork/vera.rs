@@ -304,18 +304,18 @@ fn v2_ring_and_participant_digests_bind_the_paired_protocol() {
         pre_share_endpoints: Vec::new(),
         reporting: ReportingConfig::default(),
     };
-    let id = config.id([7; 32], "did:key:fixture").unwrap();
+    let id = config.id().unwrap();
     assert_eq!(
         id,
-        "bf6fe376aa866abbcc782aad3ce66c7e20d6319579067b8ee016f9ff6ac24ff3"
+        "e5bfa730726c87e864244ca00ca8989d2eb3e9270359df1fd43b3d3d4c87a9fb"
     );
     assert_eq!(
         ring_key(&id).unwrap(),
-        format!("orbis/ring/v2/{id}").into_bytes()
+        format!("orbis/ring/v4/{id}").into_bytes()
     );
     let mut ordinary = config;
     ordinary.requires_pet = false;
-    assert_ne!(ordinary.id([7; 32], "did:key:fixture").unwrap(), id);
+    assert_ne!(ordinary.id().unwrap(), id);
     let request = RingParticipantRequest {
         deployment_root: [7; 32],
         deployment_id: 9001,
@@ -326,6 +326,6 @@ fn v2_ring_and_participant_digests_bind_the_paired_protocol() {
     };
     assert_eq!(
         hex::encode(request.signing_digest().unwrap()),
-        "94ff96e28a51017de101b8a8d61f05646c85357c40b66962957e1452b6fa3d43"
+        "d46c645aeaa4fe3bea26bebb91253d40417e38c7330cd4dffabd70b8bdebf7ea"
     );
 }

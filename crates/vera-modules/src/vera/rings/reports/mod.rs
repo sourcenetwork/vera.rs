@@ -81,6 +81,16 @@ pub fn demerits_key(ring_id: &str, node_key: &str) -> Result<Vec<u8>> {
     Ok(format!("orbis/demerits/v1/{ring_id}/{node_key}").into_bytes())
 }
 
+/// Genesis-only demerit seed, mirroring `vera`/x/orbis's genesis
+/// `NodeDemeritEntry` (Cosmos side).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NodeDemeritSeed {
+    pub ring_id: String,
+    pub node_key: String,
+    pub points: u64,
+    pub window_started_at: u64,
+}
+
 impl RingRecord {
     /// Hash the same report snapshot consumed by existing Orbis signers.
     pub fn report_state_hash(&self) -> Result<String> {
@@ -142,6 +152,37 @@ impl VeraModule {
                 Ok(record)
             })
             .transpose()
+    }
+
+    /// Seed demerit scores directly, bypassing `submit_ring_report`'s
+    /// evidence/threshold-signature verification entirely -- only safe at
+    /// genesis, before any report has ever been submitted. Each entry's
+    /// `ring_id` doesn't need to already exist as a `RingRecord`: demerits
+    /// are keyed independently, and a ring with regular (non-pre-seeded)
+    /// members doesn't exist yet at the point genesis is applied either way
+    /// -- the caller is responsible for predicting the id its own
+    /// to-be-created ring will get.
+    pub fn initialize_node_demerits(&mut self, entries: &[NodeDemeritSeed]) -> Result<()> {
+        for entry in entries {
+            if entry.points == 0 || entry.window_started_at == 0 {
+                return Err(invalid("seeded demerit points and window must be nonzero"));
+            }
+            let key = demerits_key(&entry.ring_id, &entry.node_key)?;
+            if self.store.has(&key) {
+                return Err(invalid("duplicate seeded demerit entry"));
+            }
+            let record = NodeDemerits {
+                points: entry.points,
+                window_started_at: entry.window_started_at,
+                revision: Timestamp {
+                    seconds: entry.window_started_at,
+                    block_height: 1,
+                },
+            };
+            let bytes = serde_json::to_vec(&record).map_err(invalid)?;
+            self.store.put(&key, bytes);
+        }
+        Ok(())
     }
 
     pub fn submit_ring_report(

@@ -227,7 +227,7 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
             ..Default::default()
         },
     };
-    let ring = config.id(root.0, &actor).unwrap();
+    let ring = config.id().unwrap();
     let command = RingCommand::Create(config.clone());
     execute(
         &writer,
@@ -662,7 +662,7 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
     assert!(final_record.current_settings().pending_reshare.is_none());
 
     config.nonce = [2; 32];
-    let ring = config.id(root.0, &actor).unwrap();
+    let ring = config.id().unwrap();
     let create = encode_ring_command(
         &RingCommand::Create(config),
         &token(DelegationScope::ManageRings),

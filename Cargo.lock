@@ -7369,6 +7369,7 @@ dependencies = [
  "vera-domain",
  "vera-executor",
  "vera-genesis",
+ "vera-identity",
  "vera-indexer",
  "vera-jsonrpc",
  "vera-modules",

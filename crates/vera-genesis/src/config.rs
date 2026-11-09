@@ -19,6 +19,19 @@ pub struct VeraGenesis {
     /// Initial operator approval policy. Omission disables administrative writes.
     #[serde(default)]
     pub operators: Option<vera_modules::vera::administration::OperatorPolicy>,
+    /// ACP policies seeded with caller-assigned counters (1, 2, ... in list
+    /// order), bypassing the live creation counter -- lets a deployment (or
+    /// test harness) know a policy's id before genesis exists, the same way
+    /// `operators` is seeded directly rather than through a live tx.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policies: Vec<vera_modules::acp::PolicySeed>,
+    /// Orbis node-demerit scores seeded directly, bypassing the normal
+    /// report-submission path entirely. Each entry's `ring_id` is the
+    /// caller's own responsibility to predict (`RingConfig::id()` composed
+    /// with a genesis-seeded `policy_id` above) -- nothing here creates the
+    /// ring itself.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub node_demerits: Vec<vera_modules::vera::rings::reports::NodeDemeritSeed>,
     /// Chain name (e.g., "vera-devnet").
     #[serde(default = "default_chain_name")]
     pub chain_name: String,
@@ -282,6 +295,8 @@ impl VeraGenesis {
     pub fn devnet() -> Self {
         Self {
             operators: None,
+            policies: Vec::new(),
+            node_demerits: Vec::new(),
             chain_id: 9001,
             chain_name: "vera-devnet".to_string(),
             timestamp: 0,
@@ -500,6 +515,8 @@ mod tests {
     fn genesis_parse_error_on_invalid_address() {
         let genesis = VeraGenesis {
             operators: None,
+            policies: Vec::new(),
+            node_demerits: Vec::new(),
             chain_id: 1,
             chain_name: "test".to_string(),
             timestamp: 0,
@@ -522,6 +539,8 @@ mod tests {
     fn genesis_with_validators(validators: Vec<ValidatorConfig>) -> VeraGenesis {
         VeraGenesis {
             operators: None,
+            policies: Vec::new(),
+            node_demerits: Vec::new(),
             chain_id: 1,
             chain_name: "test".to_string(),
             timestamp: 0,
