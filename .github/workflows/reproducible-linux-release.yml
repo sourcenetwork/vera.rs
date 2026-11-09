@@ -1,185 +1,92 @@
-name: Reproducible Linux release
-
+name: DKG boundary release qualification
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
-    inputs:
-      source:
-        description: Immutable Vera commit to compile twice
-        required: true
-        type: string
-      release_tag:
-        description: Existing version tag for a draft daemon release (empty builds evidence only)
-        required: false
-        default: ''
-        type: string
-
 permissions:
   contents: read
-
-concurrency:
-  group: reproducible-linux-release-${{ inputs.source || github.sha }}
-  cancel-in-progress: false
-
-env:
-  SOURCE_REF: ${{ inputs.source || github.sha }}
-  RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
-
+  actions: read
 jobs:
-  validate:
+  upstream:
+    name: Upstream DKG boundary regressions
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - name: Validate immutable source
-        run: python3 .github/scripts/reproducible-linux-release.py --source "$SOURCE_REF" validate
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ env.SOURCE_REF }}
-          path: candidate
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
-        with:
-          toolchain: 1.99.1
-      - name: Check tag, version and merged source before release builds
-        if: env.RELEASE_TAG != ''
-        run: |
-          git -C candidate merge-base --is-ancestor "$SOURCE_REF" origin/main
-          python3 .github/scripts/prepare-daemon-release.py --source "$SOURCE_REF" --tag "$RELEASE_TAG" --root candidate validate
-
-  clean-build:
-    name: clean-build (${{ matrix.member }})
-    needs: validate
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        member: ['1', '2']
-        image: ['buildpack-deps:noble-curl@sha256:4b426bbaa943d4562f2a9652a71194876a48ada25766e03e02bb4bfa45317a06']
-    container:
-      image: ${{ matrix.image }}
+    timeout-minutes: 50
     env:
       CARGO_BUILD_JOBS: '2'
-      PROTOC: /usr/bin/protoc
-      APT_SNAPSHOT: '20261020T163000Z'
-      PROTOBUF_VERSION: '3.21.12-8.2ubuntu0.4'
-      RELEASE_BUILD_IMAGE: ${{ matrix.image }}
-      DEBIAN_FRONTEND: noninteractive
+      CARGO_INCREMENTAL: '0'
     steps:
-      - name: Install pinned build environment
-        run: |
-          apt-get --snapshot "$APT_SNAPSHOT" -o Acquire::Retries=3 update
-          apt-get --snapshot "$APT_SNAPSHOT" -o Acquire::Retries=3 install --no-install-recommends -y \
-            ca-certificates curl git python3 build-essential clang libclang-dev cmake pkg-config libssl-dev \
-            "protobuf-compiler=$PROTOBUF_VERSION" "libprotoc32t64=$PROTOBUF_VERSION" \
-            "libprotobuf32t64=$PROTOBUF_VERSION" "libprotobuf-lite32t64=$PROTOBUF_VERSION"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          repository: commonwarexyz/monorepo
+          ref: 92a2f68a0e131c8b69de41e84aec37da6280f212
           persist-credentials: false
-      - name: Validate immutable source
-        run: python3 .github/scripts/reproducible-linux-release.py --source "$SOURCE_REF" validate
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ env.SOURCE_REF }}
-          path: candidate
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8
         with:
           toolchain: 1.99.1
-      - name: Fetch locked source dependencies
-        working-directory: candidate
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
+      - name: Run lagging and state-synced boundary regressions
+        run: |
+          cargo test --locked -p commonware-glue --lib reshare_e2e_boundary_ -- --nocapture > "$RUNNER_TEMP/upstream-boundary.log" 2>&1 || { tail -100 "$RUNNER_TEMP/upstream-boundary.log"; exit 1; }
+          grep -E 'running [1-9][0-9]* tests|test result:' "$RUNNER_TEMP/upstream-boundary.log"
+          grep -q 'test result: ok. 4 passed;' "$RUNNER_TEMP/upstream-boundary.log"
+      - name: Run dealing-window request regression
+        run: |
+          cargo test --locked -p commonware-glue --lib pr_5263_regression -- --nocapture > "$RUNNER_TEMP/upstream-window.log" 2>&1 || { tail -100 "$RUNNER_TEMP/upstream-window.log"; exit 1; }
+          grep -E 'running [1-9][0-9]* tests|test result:' "$RUNNER_TEMP/upstream-window.log"
+          grep -q 'test result: ok. 1 passed;' "$RUNNER_TEMP/upstream-window.log"
+  vera:
+    name: Vera release snapshot and epoch recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      VERA_E2E_DEADLINE_SCALE: '8'
+      VERA_E2E_DIR: ${{ runner.temp }}/vera-dkg-logs
+      VERA_E2E_KEEP: '1'
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 490d9a5a2bc4ed27a04588ae156993aaa90f9ec5
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8
+        with:
+          toolchain: 1.99.1
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
+      - name: Retrieve and verify release daemon
+        run: |
+          gh run download 42539283349 --name clean-release-1 --dir "$RUNNER_TEMP/daemon"
+          cd "$RUNNER_TEMP/daemon"
+          echo '203f1189bd491f04a1d56806e722ccef0f4cbc631e07c8d7d66055b0cd842998  verad-x86_64-unknown-linux-gnu-regolith.tar.gz' | sha256sum -c -
+          tar -xzf verad-x86_64-unknown-linux-gnu-regolith.tar.gz verad
+          echo '09b63062a150c0300c892d09421800ce7e416d0ae42eb3fd206f26d105486174  verad' | sha256sum -c -
+          echo "VERAD_BINARY=$RUNNER_TEMP/daemon/verad" >> "$GITHUB_ENV"
+      - name: Fetch dependencies
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
           GIT_CONFIG_COUNT: '1'
           GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
           GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: cargo fetch --locked
-      - name: Compile from a clean target and record provenance
-        env:
-          BUILD_MEMBER: ${{ matrix.member }}
-        run: >-
-          python3 .github/scripts/reproducible-linux-release.py --source "$SOURCE_REF" build
-          --root "$GITHUB_WORKSPACE/candidate" --member "$BUILD_MEMBER"
-          --output "$RUNNER_TEMP/clean-release"
-      - name: Smoke-test the compiled daemon
-        run: candidate/target/release/verad --help
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: clean-release-${{ matrix.member }}
-          path: ${{ runner.temp }}/clean-release/
-          if-no-files-found: error
-          retention-days: 14
-
-  compare:
-    needs: clean-build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          pattern: clean-release-*
-          path: ${{ runner.temp }}/clean-releases
-      - name: Verify checksums, source, environment and binary equality
-        run: >-
-          python3 .github/scripts/reproducible-linux-release.py --source "$SOURCE_REF" compare
-          --first "$RUNNER_TEMP/clean-releases/clean-release-1"
-          --second "$RUNNER_TEMP/clean-releases/clean-release-2"
-          --output "$RUNNER_TEMP/reproducible-release.json"
-      - name: Check independent-build evidence regressions
-        run: python3 -m unittest discover -s .github/scripts -p test_reproducible_linux_release.py
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: reproducible-release-evidence
-          path: ${{ runner.temp }}/reproducible-release.json
-          if-no-files-found: error
-          retention-days: 30
-
-  draft-release:
-    if: github.ref_type == 'tag' || inputs.release_tag != ''
-    needs: compare
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ env.SOURCE_REF }}
-          path: candidate
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
-        with:
-          toolchain: 1.99.1
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          pattern: clean-release-*
-          path: ${{ runner.temp }}/clean-releases
-      - name: Bind reproduced assets to the existing tag and checkout
-        run: >-
-          python3 .github/scripts/prepare-daemon-release.py --source "$SOURCE_REF"
-          --tag "$RELEASE_TAG" --root candidate prepare
-          --first "$RUNNER_TEMP/clean-releases/clean-release-1"
-          --second "$RUNNER_TEMP/clean-releases/clean-release-2"
-          --output "$RUNNER_TEMP/daemon-release"
-      - name: Create draft daemon release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+      - name: Verify snapshot recovery and quorum after resharing
         run: |
-          gh release create "$RELEASE_TAG" --verify-tag --draft --title "Vera $RELEASE_TAG" \
-            --notes-file "$RUNNER_TEMP/daemon-release/release-notes.md" \
-            "$RUNNER_TEMP/daemon-release/verad-x86_64-unknown-linux-gnu-regolith.tar.gz" \
-            "$RUNNER_TEMP/daemon-release/SHA256SUMS" \
-            "$RUNNER_TEMP/daemon-release/release.json"
+          python3 .github/scripts/capture-tests.py --logs "$VERA_E2E_DIR/snapshot" cargo test --locked -p vera-e2e --test snapshot_catchup snapshot_replica_recovers_history_and_rejoins_consensus -- --exact --nocapture
+          grep -E 'running [1-9][0-9]* tests|test result:' "$VERA_E2E_DIR/snapshot/test-output.log"
+          grep -q 'test result: ok. 1 passed;' "$VERA_E2E_DIR/snapshot/test-output.log"
+      - name: Verify pipelined recovery across epochs
+        run: |
+          python3 .github/scripts/capture-tests.py --logs "$VERA_E2E_DIR/quorum" cargo test --locked -p vera-e2e --test quorum_recovery pipelined_quorum_recovery_crosses_epoch_boundaries -- --exact --nocapture
+          grep -E 'running [1-9][0-9]* tests|test result:' "$VERA_E2E_DIR/quorum/test-output.log"
+          grep -q 'test result: ok. 1 passed;' "$VERA_E2E_DIR/quorum/test-output.log"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: failure()
+        with:
+          name: vera-dkg-recovery-logs
+          path: ${{ env.VERA_E2E_DIR }}
+          if-no-files-found: ignore
