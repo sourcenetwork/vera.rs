@@ -90,7 +90,7 @@ commonware-macros = { version = "=2026.10.0" }
 commonware-glue = { version = "=2026.10.0" }
 commonware-stream = { version = "=2026.10.0" }
 
-orbis-reporting = "=0.0.1"
+orbis-reporting = "=0.0.2"
 
 # Shared Defra types and policy evaluation
 vera-acp = { path = "crates/vera-acp", version = "=0.1.1" }
