@@ -115,6 +115,12 @@ impl VeraModule {
                     threshold,
                 });
             }
+            RingUpdate::CancelReshare => {
+                if settings.pending_reshare.is_none() {
+                    return Err(invalid("reshare is not pending"));
+                }
+                settings.pending_reshare = None;
+            }
         }
         record.settings = Some(settings);
         Ok(record)

@@ -295,6 +295,7 @@ pub enum RingUpdate {
         peer_node_keys: Option<Vec<String>>,
         threshold: Option<u32>,
     },
+    CancelReshare,
 }
 
 impl RingRecord {

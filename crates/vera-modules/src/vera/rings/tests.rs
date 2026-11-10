@@ -736,6 +736,29 @@ fn ring_reporting_relays_and_reshare_targets_preserve_controller_constraints() {
         restored.threshold_ring(&initial.id).unwrap().unwrap(),
         removed
     );
+    assert!(removed.current_settings().pending_reshare.is_some());
+    let cancelled = apply(
+        &mut vera,
+        &mut acp,
+        &update(removed.sequence, RingUpdate::CancelReshare),
+        25,
+    )
+    .unwrap();
+    assert_eq!(
+        cancelled.current_settings().peer_node_keys,
+        initial.config.peer_node_keys
+    );
+    assert_eq!(cancelled.current_settings().threshold, 2);
+    assert!(cancelled.current_settings().pending_reshare.is_none());
+    assert!(
+        apply(
+            &mut vera,
+            &mut acp,
+            &update(cancelled.sequence, RingUpdate::CancelReshare),
+            26
+        )
+        .is_err()
+    );
 }
 
 #[test]
