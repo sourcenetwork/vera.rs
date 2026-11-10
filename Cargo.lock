@@ -2666,7 +2666,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3850,9 +3850,9 @@ dependencies = [
 
 [[package]]
 name = "kovan"
-version = "0.2.3"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "daa9f1b7bd4e214a839ec477347103f4265810e25cab696762ac65bd8701963b"
+checksum = "e9eb5a8cf2ac08568dd8eae299b3000fa68df8522cc29c63ce39543aed54bec7"
 dependencies = [
  "once_cell",
  "portable-atomic",
@@ -3860,9 +3860,9 @@ dependencies = [
 
 [[package]]
 name = "kovan-channel"
-version = "0.2.3"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9132bf6a8ccf1d07adaf2e53383167b26938c6bee94aefef9f386a804b5b9e9d"
+checksum = "32e9fb4bfea186aba4866ac1ab7f7f28e3fd465c72782f06a317b541e7649c50"
 dependencies = [
  "crossbeam-utils",
  "kovan",
@@ -3870,9 +3870,9 @@ dependencies = [
 
 [[package]]
 name = "kovan-map"
-version = "0.2.3"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e37b89c7827b824d80ef7a8dba6aebd394d790dd571f6e0f00d0f8f6f6094de0"
+checksum = "603759c5d295ce0d23a7ff832ed90d5cbec58cbc7ed5e4927555db75d1072e9a"
 dependencies = [
  "foldhash 0.2.0",
  "kovan",
@@ -3880,9 +3880,9 @@ dependencies = [
 
 [[package]]
 name = "kovan-queue"
-version = "0.2.3"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dfb6480396d536cecf454bad4c133fd9a0130bac03306d2b8ece1f5d3000803a"
+checksum = "359dd718951c4c48bf64591022e9f10006c350c56f50a2bc938ab5275d90b91d"
 dependencies = [
  "crossbeam-utils",
  "kovan",
@@ -5103,9 +5103,9 @@ checksum = "a96887878f22d7bad8a3b6dc5b7440e0ada9a245242924394987b21cf2210a4c"
 
 [[package]]
 name = "regolith"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23437deaa1237042a0ca3cd786c5f5d6181531263253ae710f62b16ba2758391"
+checksum = "947ca3ef85feb5b6b58f2c700136bc844f9d68009489f959de658f93124c06cf"
 dependencies = [
  "aes-gcm-siv",
  "getrandom 0.4.3",
@@ -5565,7 +5565,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6343,7 +6343,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7676,7 +7676,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

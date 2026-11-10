@@ -55,7 +55,7 @@ bytes.workspace = true
 futures.workspace = true
 hex.workspace = true
 parking_lot.workspace = true
-regolith = "=0.2.4"
+regolith = "0.2"
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
