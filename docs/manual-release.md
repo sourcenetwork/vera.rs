@@ -47,16 +47,18 @@ with Rust 1.99.1. The resulting archive has SHA-256
 the Business Source License 1.1 and Apache 2.0 change license. Its terms restrict
 managed-service use and change to Apache 2.0 on March 13, 2030.
 
-The published `orbis-reporting` 0.0.1 archive has the same checksum and its
-`.cargo_vcs_info.json` identifies that Orbis commit. It contains both license
-files. Vera pins this registry version; recheck the archive when qualifying a
-release candidate:
+Vera selects the published `orbis-reporting` 0.0.2 archive, SHA-256
+`9493ea2c91d02f7f3cf32c765082dda1980a5489c4ff989b78d23acc7be6e43a`. Its
+`.cargo_vcs_info.json` identifies merged Orbis commit
+`77b08bb3d917a25a101ed93e6822af60dcf84578`. Its library source and both license
+files are identical to the 0.0.1 archive above; it adds a README. Recheck the
+archive when qualifying a release candidate:
 
 ```sh
-curl -fsSL https://static.crates.io/crates/orbis-reporting/orbis-reporting-0.0.1.crate -o orbis-reporting-0.0.1.crate
-shasum -a 256 orbis-reporting-0.0.1.crate
-tar -tzf orbis-reporting-0.0.1.crate
-tar -xOzf orbis-reporting-0.0.1.crate orbis-reporting-0.0.1/.cargo_vcs_info.json
+curl -fsSL https://static.crates.io/crates/orbis-reporting/orbis-reporting-0.0.2.crate -o orbis-reporting-0.0.2.crate
+shasum -a 256 orbis-reporting-0.0.2.crate
+tar -tzf orbis-reporting-0.0.2.crate
+tar -xOzf orbis-reporting-0.0.2.crate orbis-reporting-0.0.2/.cargo_vcs_info.json
 ```
 
 Check `.cargo_vcs_info.json` and the license files in the archive, and record
