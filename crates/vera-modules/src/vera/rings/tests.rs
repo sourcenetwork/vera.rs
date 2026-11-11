@@ -336,7 +336,8 @@ fn cancellation_conflict_revocation_and_bad_signatures_cannot_reuse_a_ring() {
     config.nonce = [10; 32];
     let create = RingCommand::Create(config);
     let record = apply(&mut vera, &mut acp, &create, 3).unwrap();
-    let cancel = RingCommand::Cancel { ring_id: record.id };
+    let ring_id = record.id.clone();
+    let cancel = RingCommand::Cancel { ring_id };
     vera.revoke_delegation(&context(), &actor(), &token(&cancel, 4))
         .unwrap();
     let before = (vera.store().serialize(), acp.store().serialize());
@@ -346,7 +347,13 @@ fn cancellation_conflict_revocation_and_bad_signatures_cannot_reuse_a_ring() {
         apply(&mut vera, &mut acp, &cancel, 5).unwrap().state,
         RingState::Cancelled { .. }
     ));
+    // The ring record itself is deleted outright on cancellation (mirrors
+    // Cosmos's `CancelPendingRing`/`DeleteRing`) -- but recreating under
+    // the same id still fails, because the first creation's ACP "ring"
+    // object registration has no deregistration counterpart and is never
+    // cleaned up.
     assert!(apply(&mut vera, &mut acp, &create, 6).is_err());
+    assert_eq!(vera.threshold_ring(&record.id).unwrap(), None);
 }
 
 #[test]

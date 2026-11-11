@@ -26,7 +26,7 @@ pub(super) fn invalid(error: impl std::fmt::Display) -> VeraError {
     }
 }
 
-/// Native record key, including terminal rings retained to prevent identity reuse.
+/// Record key for an active lifecycle ring.
 pub fn ring_key(id: &str) -> Result<Vec<u8>> {
     if id.len() != 64 || hex::decode(id).is_err() || id.bytes().any(|b| b.is_ascii_uppercase()) {
         return Err(invalid("invalid ring identifier"));
@@ -161,7 +161,13 @@ impl VeraModule {
                 record.state = RingState::Cancelled {
                     by: actor.to_string(),
                 };
-                record
+                self.store.delete(&ring_key(ring_id)?);
+                record.sequence = record
+                    .sequence
+                    .checked_add(1)
+                    .ok_or_else(|| invalid("ring sequence exhausted"))?;
+                record.revision = context.timestamp.clone();
+                return Ok(record);
             }
         };
         record.sequence = record
@@ -242,6 +248,13 @@ impl VeraModule {
                     )
                     .map_err(invalid)?,
                 };
+                self.store.delete(&ring_key(&record.id)?);
+                record.sequence = record
+                    .sequence
+                    .checked_add(1)
+                    .ok_or_else(|| invalid("ring sequence exhausted"))?;
+                record.revision = context.timestamp.clone();
+                return Ok(record);
             }
             RingParticipantCommand::Confirm(key) => {
                 key.validate(record.config.requires_pet)?;

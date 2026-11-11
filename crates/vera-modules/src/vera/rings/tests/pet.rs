@@ -236,7 +236,7 @@ fn paired_activation_preserves_retry_cancellation_and_restored_state() {
         .is_err()
     );
     assert!(apply(&mut vera, &mut acp, &command, 3).is_err());
-    assert_eq!(vera.threshold_ring(&other.id).unwrap(), Some(cancelled));
+    assert_eq!(vera.threshold_ring(&other.id).unwrap(), None);
 }
 
 #[test]
