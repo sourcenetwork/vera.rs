@@ -36,10 +36,11 @@ jobs:
           grep ': test$' "$RUNNER_TEMP/upstream-boundary.list" | tee "$RUNNER_TEMP/upstream-boundary.names"
           for name in lagging_validator participating_synced_validator; do
             for case in case_1_discovery case_2_lookup; do
-              grep -Eq "reshare_e2e_boundary_${name}[A-Za-z_]*::${case}: test$" "$RUNNER_TEMP/upstream-boundary.names" || { echo "missing ${name} ${case}"; exit 1; }
+              grep -Eq "reshare_e2e_boundary_${name}[A-Za-z_]*::${case}[A-Za-z_]*: test$" "$RUNNER_TEMP/upstream-boundary.names" || { echo "missing ${name} ${case}"; exit 1; }
             done
           done
           listed=$(wc -l < "$RUNNER_TEMP/upstream-boundary.names")
+          echo "listed boundary tests: ${listed}"
           cargo test --locked -p commonware-glue --lib reshare_e2e_boundary_ -- --nocapture > "$RUNNER_TEMP/upstream-boundary.log" 2>&1 || { tail -100 "$RUNNER_TEMP/upstream-boundary.log"; exit 1; }
           grep -E '^test .* \.\.\. |running [1-9][0-9]* tests|test result:' "$RUNNER_TEMP/upstream-boundary.log"
           grep -Eq "test result: ok\. ${listed} passed; 0 failed; 0 ignored;" "$RUNNER_TEMP/upstream-boundary.log"
