@@ -1,6 +1,11 @@
 name: DKG boundary release qualification
 on:
   workflow_dispatch:
+    inputs:
+      run_vera:
+        description: Run the Vera release recovery job
+        type: boolean
+        default: true
 permissions:
   contents: read
   actions: read
@@ -27,9 +32,17 @@ jobs:
           sudo apt-get install -y clang libclang-dev cmake pkg-config libssl-dev protobuf-compiler
       - name: Run lagging and state-synced boundary regressions
         run: |
+          cargo test --locked -p commonware-glue --lib reshare_e2e_boundary_ -- --list > "$RUNNER_TEMP/upstream-boundary.list"
+          grep ': test$' "$RUNNER_TEMP/upstream-boundary.list" | tee "$RUNNER_TEMP/upstream-boundary.names"
+          for name in lagging_validator participating_synced_validator; do
+            for case in case_1_discovery case_2_lookup; do
+              grep -Eq "reshare_e2e_boundary_${name}[A-Za-z_]*::${case}: test$" "$RUNNER_TEMP/upstream-boundary.names" || { echo "missing ${name} ${case}"; exit 1; }
+            done
+          done
+          listed=$(wc -l < "$RUNNER_TEMP/upstream-boundary.names")
           cargo test --locked -p commonware-glue --lib reshare_e2e_boundary_ -- --nocapture > "$RUNNER_TEMP/upstream-boundary.log" 2>&1 || { tail -100 "$RUNNER_TEMP/upstream-boundary.log"; exit 1; }
-          grep -E 'running [1-9][0-9]* tests|test result:' "$RUNNER_TEMP/upstream-boundary.log"
-          grep -q 'test result: ok. 4 passed;' "$RUNNER_TEMP/upstream-boundary.log"
+          grep -E '^test .* \.\.\. |running [1-9][0-9]* tests|test result:' "$RUNNER_TEMP/upstream-boundary.log"
+          grep -Eq "test result: ok\. ${listed} passed; 0 failed; 0 ignored;" "$RUNNER_TEMP/upstream-boundary.log"
       - name: Run dealing-window request regression
         run: |
           cargo test --locked -p commonware-glue --lib pr_5263_regression -- --nocapture > "$RUNNER_TEMP/upstream-window.log" 2>&1 || { tail -100 "$RUNNER_TEMP/upstream-window.log"; exit 1; }
@@ -37,6 +50,7 @@ jobs:
           grep -q 'test result: ok. 1 passed;' "$RUNNER_TEMP/upstream-window.log"
   vera:
     name: Vera release snapshot and epoch recovery
+    if: inputs.run_vera
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     env:
