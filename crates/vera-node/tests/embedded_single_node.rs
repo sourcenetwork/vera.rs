@@ -210,7 +210,7 @@ async fn idle_node_keeps_a_slow_heartbeat_and_wakes_for_a_write() {
     let mut fastest = Duration::MAX;
     let mut height = after;
     for name in ["wake_a", "wake_b", "wake_c"] {
-        height = finalized_beyond(&node, height + 1).await;
+        finalized_beyond(&node, height + 1).await;
         let started = std::time::Instant::now();
         let submission = create_policy(&node, &signer, name).await;
         height = verified_receipt(&node, submission).await.revision.height;
