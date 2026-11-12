@@ -8,13 +8,14 @@ pub const MAX_REGISTRATION_LEAF_BYTES: usize = 64 * 1024;
 impl AcpModule {
     /// Generate bounded commitment material without reading policy or registration state.
     /// The caller keeps object identifiers private until submitting a reveal.
+    /// Leaves bind the actor's canonical DID, which a reveal recomputes.
     pub fn generate_registration_commitment(
         policy_id: &str,
         objects: &[Object],
         actor: &Actor,
     ) -> Result<GenerateCommitmentResult> {
-        Self::validate_commitment_input(policy_id, objects, actor.0.as_str())?;
-        let actor_did = actor.0.to_string();
+        let actor_did = crate::actor::canonical(&actor.0).to_string();
+        Self::validate_commitment_input(policy_id, objects, &actor_did)?;
 
         // Build leaf hashes.
         let leaf_hashes: Vec<[u8; 32]> = objects

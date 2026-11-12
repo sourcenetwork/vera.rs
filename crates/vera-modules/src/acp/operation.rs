@@ -29,7 +29,7 @@ pub struct OperationRecord {
     pub id: OperationId,
     /// Exact semantic operation digest.
     pub digest: [u8; 32],
-    /// Actor spelling recorded by the original operation.
+    /// Canonical DID of the actor that authorized the original operation.
     pub actor: String,
     /// Original authenticated submission identifier.
     pub submission: [u8; 32],

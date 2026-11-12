@@ -6,6 +6,7 @@ use super::{
     keys, object_pairs, object_state,
     record_store::{RecordChange, RecordStore},
     relationship_index::{self, invalid},
+    spelling,
     types::{PolicyRecord, RelationPair, RelationshipRecord},
 };
 use vera_zanzibar::error::{Error, Result};
@@ -21,6 +22,13 @@ pub(super) fn prepare_put<S: RecordStore>(
 ) -> Result<Vec<RecordChange>> {
     let policy = current_policy(store, &record.policy_id)?
         .ok_or_else(|| Error::PolicyNotFound(record.policy_id.clone()))?;
+    // Commands rewrite actors before they reach storage; a spelling that slipped
+    // through would become a second identity for the same key.
+    if !spelling::is_canonical(&policy.policy, &record.relationship)
+        || crate::actor::canonical_str(&record.metadata.owner_did) != record.metadata.owner_did
+    {
+        return Err(invalid("relationship actor spelling is not canonical"));
+    }
     if policy.relations.pair(&record.relationship)? != record.generations {
         return Err(invalid(
             "relationship generations differ from current policy",

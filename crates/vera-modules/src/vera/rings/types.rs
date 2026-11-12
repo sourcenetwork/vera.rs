@@ -117,9 +117,11 @@ impl RingConfig {
     }
 
     /// Bind the immutable identity to the deployment, creator and all creation parameters.
+    /// Every accepted spelling of the creator's key gives one identity.
     pub fn id(&self, deployment_root: [u8; 32], creator: &str) -> Result<String> {
         self.validate()?;
         vera_identity::Did::new(creator).map_err(invalid)?;
+        let creator = &*crate::actor::canonical_str(creator);
         let bytes = borsh::to_vec(&(deployment_root, creator, self)).map_err(invalid)?;
         if bytes.len() > MAX_RING_REQUEST_BYTES {
             return Err(invalid("ring configuration exceeds byte limit"));
@@ -193,6 +195,7 @@ pub struct RingRecord {
 impl RingRecord {
     pub fn validate(&self, expected: &str) -> Result<()> {
         if self.id != expected
+            || crate::actor::canonical_str(&self.creator) != self.creator
             || self.config.id(self.deployment_root, &self.creator)? != expected
             || self.revision.block_height == 0
             || self.revision.seconds == 0
@@ -223,6 +226,9 @@ impl RingRecord {
             RingState::Active { keys } => keys.validate(self.config.requires_pet)?,
             RingState::Cancelled { by } => {
                 vera_identity::Did::new(by).map_err(invalid)?;
+                if crate::actor::canonical_str(by) != *by {
+                    return Err(invalid("cancelling actor spelling is not canonical"));
+                }
             }
             RingState::Conflict {
                 first_keys,

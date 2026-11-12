@@ -89,7 +89,7 @@ impl VeraModule {
             return Ok(());
         };
         let state = self
-            .relay(&claims.iss)?
+            .relay(&crate::actor::canonical_str(&claims.iss))?
             .ok_or_else(|| invalid("relay is not authorized"))?;
         if context.genesis_id == [0; 32]
             || assertion.genesis_id != context.genesis_id

@@ -29,21 +29,35 @@ pub struct DecisionRequest {
 }
 
 impl DecisionRequest {
+    /// The request as a decision records it: the creator and the actor under
+    /// their canonical DIDs, the operations as the caller wrote them.
+    fn recorded(&self) -> Self {
+        Self {
+            deployment_id: self.deployment_id,
+            policy_id: self.policy_id.clone(),
+            creator: crate::actor::canonical_str(&self.creator).into_owned(),
+            creator_sequence: self.creator_sequence,
+            request: super::spelling::access_request(&self.request).into_owned(),
+        }
+    }
+
     /// Canonical, domain-separated identifier; field boundaries and operation order are retained.
+    /// Every accepted spelling of the creator's or the actor's key gives one identifier.
     pub fn id(&self) -> Result<String, AcpError> {
-        if self.policy_id.is_empty()
-            || self.creator.is_empty()
-            || self.request.operations.is_empty()
+        let recorded = self.recorded();
+        if recorded.policy_id.is_empty()
+            || recorded.creator.is_empty()
+            || recorded.request.operations.is_empty()
         {
             return Err(invalid("policy, creator and operations must be nonempty"));
         }
         let mut fields = [
-            self.policy_id.as_str(),
-            self.creator.as_str(),
-            self.request.actor.0.as_str(),
+            recorded.policy_id.as_str(),
+            recorded.creator.as_str(),
+            recorded.request.actor.0.as_str(),
         ]
         .into_iter()
-        .chain(self.request.operations.iter().flat_map(|op| {
+        .chain(recorded.request.operations.iter().flat_map(|op| {
             [
                 op.object.resource.as_str(),
                 op.object.id.as_str(),
@@ -51,12 +65,12 @@ impl DecisionRequest {
             ]
         }));
         let field_bytes = fields.try_fold(0usize, |size, field| size.checked_add(field.len()));
-        if self.request.operations.len() > MAX_ACCESS_OPERATIONS
+        if recorded.request.operations.len() > MAX_ACCESS_OPERATIONS
             || field_bytes.is_none_or(|size| size > 64 << 10)
         {
             return Err(invalid("access decision request exceeds limits"));
         }
-        let encoded = borsh::to_vec(self).map_err(|e| AcpError::State(e.to_string()))?;
+        let encoded = borsh::to_vec(&recorded).map_err(|e| AcpError::State(e.to_string()))?;
         if encoded.len() > 64 << 10 {
             return Err(invalid("access decision request exceeds byte limit"));
         }
@@ -82,12 +96,13 @@ impl DecisionRequest {
         decision: &AccessDecision,
         at: &Timestamp,
     ) -> Result<u64, AcpError> {
-        if decision.id != self.id()?
-            || decision.policy_id != self.policy_id
-            || decision.creator != self.creator
-            || decision.creator_acc_sequence != self.creator_sequence
-            || decision.actor != self.request.actor.0.as_str()
-            || decision.operations != self.request.operations
+        let expected = self.recorded();
+        if decision.id != expected.id()?
+            || decision.policy_id != expected.policy_id
+            || decision.creator != expected.creator
+            || decision.creator_acc_sequence != expected.creator_sequence
+            || decision.actor != expected.request.actor.0.as_str()
+            || decision.operations != expected.request.operations
         {
             return Err(invalid(
                 "access decision differs from the requested operation",

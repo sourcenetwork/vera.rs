@@ -337,3 +337,70 @@ fn evaluation_propagates_capture_exhaustion() {
         assert!(capture.requests().is_err());
     }
 }
+
+/// Compressed and uncompressed points of one secp256k1 key, in Base58BTC and Base64URL.
+fn spellings(seed: u8) -> [Did; 4] {
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    let key = k256::ecdsa::SigningKey::from_slice(&[seed; 32]).unwrap();
+    let bytes = |compressed| {
+        let mut bytes = vec![0xe7, 0x01];
+        bytes.extend_from_slice(key.verifying_key().to_encoded_point(compressed).as_bytes());
+        bytes
+    };
+    [
+        format!("did:key:z{}", bs58::encode(bytes(true)).into_string()),
+        format!("did:key:z{}", bs58::encode(bytes(false)).into_string()),
+        format!("did:key:u{}", URL_SAFE_NO_PAD.encode(bytes(true))),
+        format!("did:key:u{}", URL_SAFE_NO_PAD.encode(bytes(false))),
+    ]
+    .map(|spelling| Did::new(spelling).unwrap())
+}
+
+#[test]
+fn every_spelling_of_an_actor_captures_and_replays_the_same_reads() {
+    let (reader, stranger) = (spellings(42), spellings(43));
+    let request = |actor: &Did| AccessRequest {
+        actor: Actor(actor.clone()),
+        ..request()
+    };
+    let mut stores = Vec::new();
+    for granted in &reader {
+        let shared = WritableFixture(Arc::new(RwLock::new(fixture(Subject::Wildcard, true))));
+        let adapter = QmdbZanzibarStore::new(shared.clone());
+        block_on(adapter.store_relationship(
+            POLICY,
+            &Relationship::with_entity("document", "report", "reader", granted.clone()),
+        ))
+        .unwrap();
+        let store = shared.0.read().unwrap().clone();
+        let capture = |actor: &Did| {
+            let capture = ReadCapture::new(store.clone(), LIMITS);
+            let allowed = evaluate_access_request(capture.clone(), POLICY, &request(actor));
+            (allowed.unwrap(), capture.requests().unwrap())
+        };
+        for (actors, expected) in [(&reader, true), (&stranger, false)] {
+            let (allowed, reads) = capture(&actors[0]);
+            assert_eq!(allowed, expected);
+            for actor in actors {
+                assert_eq!(capture(actor), (allowed, reads.clone()));
+                assert_eq!(
+                    evaluate_access_request(
+                        CoveredRecords::new(&store, &reads),
+                        POLICY,
+                        &request(actor)
+                    )
+                    .unwrap(),
+                    expected
+                );
+                assert_eq!(
+                    AcpModule::from_store(store.clone())
+                        .query_verify_access_request(POLICY, &request(actor))
+                        .unwrap(),
+                    expected
+                );
+            }
+        }
+        stores.push(store.serialize());
+    }
+    assert!(stores.windows(2).all(|pair| pair[0] == pair[1]));
+}

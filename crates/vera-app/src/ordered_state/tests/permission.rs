@@ -1,3 +1,4 @@
+use super::actor_spellings::{ACTOR, every_spelling, respelled};
 use super::*;
 use std::{
     collections::BTreeMap,
@@ -77,7 +78,7 @@ fn synchronized_permission_rpc_verifies_native_evidence_and_subsequent_denial() 
                     )
                     .await;
                     let owner = BlsSigner::new(1u64.into(), DEPLOYMENT).unwrap();
-                    let actor = "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH";
+                    let actor = ACTOR[0];
                     apply(
                         &source,
                         1,
@@ -118,7 +119,7 @@ fn synchronized_permission_rpc_verifies_native_evidence_and_subsequent_denial() 
                                         resource: "document".into(),
                                         objectId: "report".into(),
                                         relation: "reader".into(),
-                                        actor: actor.into(),
+                                        actor: ACTOR[1].into(),
                                     }
                                     .abi_encode()
                                     .into(),
@@ -212,6 +213,7 @@ fn synchronized_permission_rpc_verifies_native_evidence_and_subsequent_denial() 
                             .await
                             .unwrap()
                     );
+                    every_spelling(&client, &policy, &request, &light, &trusted, true).await;
                     let mut other = request.clone();
                     other.operations[0].object.id = "ungranted".into();
                     assert!(
@@ -240,11 +242,15 @@ fn synchronized_permission_rpc_verifies_native_evidence_and_subsequent_denial() 
                         )
                         .await
                         .unwrap();
-                    assert!(
-                        response
-                            .verify(&policy, &request, 2, &trusted, PERMISSION_LIMITS)
-                            .unwrap()
-                    );
+                    for spelling in ACTOR {
+                        let respelled = respelled(&request, spelling);
+                        assert!(
+                            response
+                                .verify(&policy, &respelled, 2, &trusted, PERMISSION_LIMITS)
+                                .unwrap(),
+                            "evidence for one spelling answers every spelling"
+                        );
+                    }
                     assert!(
                         response
                             .verify(&policy, &request, 3, &trusted, PERMISSION_LIMITS)
@@ -321,7 +327,7 @@ fn synchronized_permission_rpc_verifies_native_evidence_and_subsequent_denial() 
                                     resource: "document".into(),
                                     objectId: "report".into(),
                                     relation: "blocked".into(),
-                                    actor: actor.into(),
+                                    actor: ACTOR[3].into(),
                                 },
                             ),
                         ),
@@ -361,12 +367,7 @@ fn synchronized_permission_rpc_verifies_native_evidence_and_subsequent_denial() 
                             .await
                             .is_err()
                     );
-                    assert!(
-                        !client
-                            .verify_access_at(&policy, &request, &next, &trusted, PERMISSION_LIMITS)
-                            .await
-                            .unwrap()
-                    );
+                    every_spelling(&client, &policy, &request, &next, &trusted, false).await;
                     let mut owner_request = request;
                     owner_request.actor = Actor(owner.did().parse().unwrap());
                     assert!(

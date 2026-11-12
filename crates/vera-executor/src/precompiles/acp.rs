@@ -24,6 +24,8 @@ mod permissions;
 mod queries;
 #[cfg(test)]
 mod query_budget_tests;
+#[cfg(test)]
+mod spelling_tests;
 mod validation;
 #[cfg(test)]
 mod validation_tests;

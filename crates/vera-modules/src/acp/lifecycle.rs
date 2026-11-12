@@ -107,6 +107,7 @@ impl AcpModule {
                 .saturating_add(object.id.len())
                 .saturating_add(new_owner.as_str().len()),
         )?;
+        let new_owner = &crate::actor::canonical(new_owner);
         self.validate_registration_object(policy_id, object)?;
         let mut record = self
             .registration_owner_record_with_budget(policy_id, object, Some(budget))?
@@ -147,7 +148,7 @@ impl AcpModule {
         modified_at: &Timestamp,
     ) -> Result<PolicyRecord> {
         let mut record = self.query_policy(policy_id)?;
-        if record.metadata.owner_did != actor.as_str() {
+        if record.metadata.owner_did != crate::actor::canonical_str(actor.as_str()) {
             return Err(AcpError::Unauthorized {
                 reason: "only the policy creator can edit metadata".into(),
             });
@@ -166,7 +167,7 @@ impl AcpModule {
         let Some(record) = self.get_policy_record(policy_id)? else {
             return Ok(false);
         };
-        if record.metadata.owner_did != actor.as_str() {
+        if record.metadata.owner_did != crate::actor::canonical_str(actor.as_str()) {
             return Err(AcpError::Unauthorized {
                 reason: "only the policy creator can delete it".into(),
             });

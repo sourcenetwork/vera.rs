@@ -52,6 +52,7 @@ impl AcpModule {
                 reason: "object ID must not be empty".into(),
             });
         }
+        let actor = &crate::actor::canonical(actor);
         let capture = read_capture::ReadCapture::with_budget(
             self.store.clone(),
             read_capture::PERMISSION_READ_LIMITS,
@@ -91,18 +92,15 @@ impl AcpModule {
             .chain(policy.get_managers_for_relation(&object.resource, relation))
             .map(str::to_owned)
             .collect();
-        let engine = zanzibar_store::evaluation_engine_for_policy(
+        let evaluation = zanzibar_store::evaluation_for_policy(
             capture,
             record,
             Some(Arc::new(budget.permissions.clone())),
         );
         for manager in managers {
-            if engine
-                .check_blocking(policy_id, &object.resource, &object.id, &manager, actor)
-                .map_err(|error| {
-                    AcpError::State(format!("management evaluation failed: {error}"))
-                })?
-            {
+            if evaluation.check(object, &manager, actor).map_err(|error| {
+                AcpError::State(format!("management evaluation failed: {error}"))
+            })? {
                 return Ok(true);
             }
         }

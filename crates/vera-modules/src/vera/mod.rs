@@ -140,8 +140,8 @@ impl VeraModule {
             });
         }
         let is_issuer = vera_crypto::jwt::matches_issuer(&record.issuer_did, creator.as_ref());
-        let is_authorized_account =
-            !record.authorized_account.is_empty() && tx_ctx.signer == record.authorized_account;
+        let is_authorized_account = !record.authorized_account.is_empty()
+            && record.authorized_account == crate::actor::canonical_str(&tx_ctx.signer);
         if !is_issuer && !is_authorized_account {
             return Err(VeraError::Unauthorized {
                 reason: "caller is neither issuer DID nor authorized account".to_string(),
@@ -256,8 +256,8 @@ impl VeraModule {
         let record = JWSTokenRecord {
             token_hash,
             bearer_token: bearer_token.to_string(),
-            issuer_did: issuer_did.to_string(),
-            authorized_account: authorized_account.to_string(),
+            issuer_did: crate::actor::canonical(issuer_did).to_string(),
+            authorized_account: crate::actor::canonical_str(authorized_account).into_owned(),
             issued_at,
             expires_at,
             status: JWSTokenStatus::Valid,
@@ -352,6 +352,7 @@ impl VeraModule {
     /// - `0x01 || token_hash` per match (primary lookup)
     pub fn get_jws_tokens_by_did(&self, did: &Did) -> Result<Vec<JWSTokenRecord>> {
         Self::validate_token_selector(did.as_str())?;
+        let did = &crate::actor::canonical(did);
         self.collect_tokens(&keys::jws_token_did_prefix(did.as_str()), true, |record| {
             keys::jws_token_by_did_key(&record.issuer_did, &record.token_hash)
         })
@@ -371,6 +372,7 @@ impl VeraModule {
     /// - `0x01 || token_hash` per match (primary lookup)
     pub fn get_jws_tokens_by_account(&self, account: &str) -> Result<Vec<JWSTokenRecord>> {
         Self::validate_token_selector(account)?;
+        let account = &*crate::actor::canonical_str(account);
         self.collect_tokens(&keys::jws_token_account_prefix(account), true, |record| {
             keys::jws_token_by_account_key(&record.authorized_account, &record.token_hash)
         })
@@ -415,7 +417,7 @@ impl VeraModule {
         if record.status == JWSTokenStatus::Invalid {
             record.invalidated_at = Some(block_ctx.timestamp.clone());
             if !invalidated_by.is_empty() {
-                record.invalidated_by = invalidated_by.to_string();
+                record.invalidated_by = crate::actor::canonical_str(invalidated_by).into_owned();
             }
         }
         self.set_jws_token(&record)?;

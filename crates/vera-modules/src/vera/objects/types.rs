@@ -238,6 +238,7 @@ impl ObjectRecord {
         self.object.validate()?;
         vera_identity::Did::new(&self.creator).map_err(invalid)?;
         if self.id != id
+            || crate::actor::canonical_str(&self.creator) != self.creator
             || self.object.id()? != id
             || self.object.kind() != kind
             || self.deployment_root == [0; 32]

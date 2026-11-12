@@ -151,7 +151,16 @@ Delegation issuers are secp256k1 (ES256K), Ed25519 (EdDSA) or P-256 (ES256)
 `did:key` actors; the key type fixes the token algorithm. Ed25519 and P-256
 actors have one DID spelling and one signature encoding. Relay issuers remain
 secp256k1.
-Signed caller operation identities deduplicate successful effects across workers.
+A secp256k1 key is accepted in four spellings (compressed or uncompressed,
+Base58BTC or Base64URL) and is one actor: state, results, events and proof
+evaluation name its canonical compressed Base58BTC DID, in token issuers and
+subjects, relationship subjects, `actor`-resource objects, checks, decisions
+and collaborators. `vera_crypto::actor::canonical_did` defines that spelling
+and `vera_modules::actor` applies it; other identifiers are compared as
+written. Operation commitments and digests still cover the request as its
+caller wrote it. See docs/delegated-policies.md#one-actor-per-key.
+Signed caller operation identities deduplicate successful effects across workers
+and across spellings of the actor's key.
 Outcomes are bounded, expire without allowing ID reuse, and share the execution
 rollback boundary. Operator approvals configure the retained outcome budget.
 See `docs/operation-identities.md`.

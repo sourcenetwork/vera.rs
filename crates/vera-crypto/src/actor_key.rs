@@ -1,8 +1,10 @@
 //! Public keys that may issue delegation tokens, identified by `did:key`.
 //!
-//! Token records and revocation are keyed by the token's hash, and policy
-//! ownership is compared as a DID string. Ed25519 and P-256 keys therefore
-//! have exactly one accepted DID spelling and one accepted signature encoding.
+//! Token records and revocation are keyed by the token's hash, and actors are
+//! compared as DID strings. Every key therefore has one recorded spelling,
+//! [`ActorKey::canonical_did`], and one accepted signature encoding. Ed25519
+//! and P-256 keys are accepted in that spelling only; a secp256k1 key is
+//! accepted in four and recorded in one.
 
 use k256::ecdsa::signature::hazmat::PrehashVerifier as _;
 use sha2::{Digest as _, Sha256};
@@ -24,9 +26,9 @@ pub(crate) enum ActorKey {
 impl ActorKey {
     /// Decode the key a `did:key` names.
     ///
-    /// secp256k1 keeps its historical spellings: compressed or uncompressed
-    /// points, base58btc or base64url. The other types accept only the
-    /// base58btc spelling of the canonical key bytes.
+    /// secp256k1 is accepted from a compressed or uncompressed point, in
+    /// base58btc or base64url. The other types accept only the base58btc
+    /// spelling of the canonical key bytes.
     pub(crate) fn from_did(did: &str) -> Result<Self, JwtError> {
         let multibase = did
             .strip_prefix("did:key:")
@@ -86,7 +88,8 @@ impl ActorKey {
         }
     }
 
-    /// The single DID under which this key is recorded.
+    /// The single DID under which this key is recorded and compared: the
+    /// base58btc spelling of its multicodec and compressed key bytes.
     pub(crate) fn canonical_did(&self) -> String {
         let (codec, key) = match self {
             Self::Secp256k1(key) => (
@@ -99,10 +102,7 @@ impl ActorKey {
                 key.to_encoded_point(true).as_bytes().to_vec(),
             ),
         };
-        let mut buffer = [0u8; 10];
-        let mut bytes = unsigned_varint::encode::u64(codec, &mut buffer).to_vec();
-        bytes.extend_from_slice(&key);
-        format!("did:key:{}", crate::did_key::encode(&bytes))
+        crate::did_key::did(codec, &key)
     }
 
     /// Verify a raw 64-byte signature over a JWT signing input.

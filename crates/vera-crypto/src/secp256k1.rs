@@ -54,15 +54,10 @@ pub fn did_from_secp256k1_pubkey(compressed_pubkey: &[u8]) -> Result<String, Sec
         return Err(Secp256k1Error::InvalidPubkeyLength(compressed_pubkey.len()));
     }
 
-    let mut varint_buf = [0u8; 10];
-    let varint = unsigned_varint::encode::u64(SECP256K1_PUB_MULTICODEC, &mut varint_buf);
-
-    let mut codec_bytes = Vec::with_capacity(varint.len() + compressed_pubkey.len());
-    codec_bytes.extend_from_slice(varint);
-    codec_bytes.extend_from_slice(compressed_pubkey);
-
-    let encoded = crate::did_key::encode(&codec_bytes);
-    Ok(format!("did:key:{encoded}"))
+    Ok(crate::did_key::did(
+        SECP256K1_PUB_MULTICODEC,
+        compressed_pubkey,
+    ))
 }
 
 /// Recover the compressed secp256k1 public key (33 bytes) from an ECDSA signature.

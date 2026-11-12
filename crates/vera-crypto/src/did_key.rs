@@ -14,6 +14,14 @@ pub(crate) fn encode(bytes: &[u8]) -> String {
     format!("z{}", bs58::encode(bytes).into_string())
 }
 
+/// The `did:key` naming `key` under a multicodec, in base58btc.
+pub(crate) fn did(codec: u64, key: &[u8]) -> String {
+    let mut buffer = [0u8; 10];
+    let mut bytes = unsigned_varint::encode::u64(codec, &mut buffer).to_vec();
+    bytes.extend_from_slice(key);
+    format!("did:key:{}", encode(&bytes))
+}
+
 pub(crate) fn decode(encoded: &str) -> Result<Vec<u8>, DecodeError> {
     match encoded.as_bytes().first() {
         Some(b'z') => bs58::decode(&encoded[1..]).into_vec().map_err(Into::into),
