@@ -144,6 +144,10 @@ separate worker signs the submission. Creation and editing require distinct
 scopes; existing object-command tokens do not authorize either operation.
 Created records bind the owner, worker, signed submission ID and creation
 revision. See `docs/delegated-policies.md` for result verification.
+Delegation issuers are secp256k1 (ES256K), Ed25519 (EdDSA) or P-256 (ES256)
+`did:key` actors; the key type fixes the token algorithm. Ed25519 and P-256
+actors have one DID spelling and one signature encoding. Relay issuers remain
+secp256k1.
 Signed caller operation identities deduplicate successful effects across workers.
 Outcomes are bounded, expire without allowing ID reuse, and share the execution
 rollback boundary. Operator approvals configure the retained outcome budget.
@@ -352,7 +356,7 @@ vera.rs/
         vera-client/            # Rust client library (EVM + BLS tx paths, typed queries)
         vera-config/            # Node configuration types (node, network, rpc, execution)
         vera-consensus/         # Consensus application layer: mempool, proposal, traits
-        vera-crypto/            # BLS12-381, secp256k1, and JWT utilities
+        vera-crypto/            # BLS12-381, actor keys (secp256k1, Ed25519, P-256), JWT
         vera-domain/            # Block, tx, light block, proof, and DKG payload types
         vera-e2e/               # End-to-end test harness (see crates/vera-e2e/README.md)
         vera-executor/          # Block execution: REVM, precompiles, VeraExecutor

@@ -4,8 +4,10 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+mod actor_key;
 mod did_key;
 
+pub mod actor;
 pub mod bls;
 pub mod jwt;
 pub mod operation;

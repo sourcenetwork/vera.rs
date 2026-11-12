@@ -137,6 +137,8 @@ anyhow = "1"
 
 # Cryptography
 k256 = "0.13"
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
+ed25519-dalek = { version = "3", default-features = false, features = ["alloc"] }
 sha3 = "0.10"
 
 # Arkworks BLS (match orbis-rs versions)

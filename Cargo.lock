@@ -2564,6 +2564,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "ed25519"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29fcf32e6c73d1079f83ab4d782de2d81620346a5f38c6237a86a22f8368980a"
+dependencies = [
+ "pkcs8 0.11.0",
+ "signature 3.0.0",
+]
+
+[[package]]
+name = "ed25519-dalek"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ebaa1a2bf1290ab3bfe5a7b771d050ebffab2711c19a81691c683a5144a25de"
+dependencies = [
+ "curve25519-dalek",
+ "ed25519",
+ "serde",
+ "sha2 0.11.0",
+ "signature 3.0.0",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
 name = "educe"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7017,9 +7042,11 @@ dependencies = [
  "async-trait",
  "base64",
  "borsh",
+ "ed25519-dalek",
  "hex",
  "k256 0.13.4",
  "k256 0.14.0",
+ "p256 0.13.2",
  "rand 0.8.8",
  "reqwest 0.12.28",
  "serde",
@@ -7079,10 +7106,12 @@ dependencies = [
  "blst",
  "borsh",
  "bs58",
+ "ed25519-dalek",
  "group 0.14.0",
  "hex",
  "jubjub",
  "k256 0.13.4",
+ "p256 0.13.2",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -7128,12 +7157,14 @@ dependencies = [
  "commonware-cryptography",
  "commonware-parallel",
  "commonware-utils",
+ "ed25519-dalek",
  "futures",
  "hex",
  "jsonrpsee",
  "jsonrpsee-server",
  "k256 0.13.4",
  "orbis-reporting",
+ "p256 0.13.2",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -7304,6 +7335,7 @@ dependencies = [
  "borsh",
  "bs58",
  "bytes",
+ "ed25519-dalek",
  "futures",
  "group 0.14.0",
  "hex",
@@ -7311,6 +7343,7 @@ dependencies = [
  "jubjub",
  "k256 0.13.4",
  "orbis-reporting",
+ "p256 0.13.2",
  "prost",
  "serde",
  "serde_json",
