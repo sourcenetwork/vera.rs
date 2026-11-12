@@ -31,6 +31,15 @@ pub struct NodeOptions {
     pub ready: Option<tokio::sync::oneshot::Sender<LocalRpc>>,
     /// Proposal pacing for a deployment whose only validator is this node.
     pub solo_pacing: Option<SoloPacing>,
+    /// Threads of the verification pool. `None` uses the machine's parallelism, at most four.
+    pub verification_threads: Option<std::num::NonZeroUsize>,
+}
+
+/// Verification parallelism when the host does not choose one.
+pub(crate) fn default_verification_threads() -> std::num::NonZeroUsize {
+    const LIMIT: std::num::NonZeroUsize = std::num::NonZeroUsize::new(4).unwrap();
+    std::thread::available_parallelism()
+        .map_or(std::num::NonZeroUsize::MIN, |machine| machine.min(LIMIT))
 }
 
 /// How a lone validator paces proposals in pipelined mode.
@@ -71,6 +80,7 @@ impl NodeOptions {
             watchdog: WatchdogMode::ExitProcess,
             ready: None,
             solo_pacing: None,
+            verification_threads: None,
         }
     }
 }

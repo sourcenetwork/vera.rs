@@ -12,6 +12,9 @@ pub enum EmbedError {
     /// The node thread could not be spawned.
     #[error("cannot start node thread: {0}")]
     Thread(std::io::Error),
+    /// The host's thread setup failed; no other thread was started.
+    #[error("node thread setup failed: {0}")]
+    ThreadSetup(std::io::Error),
     /// A node actor stopped; the node no longer makes progress.
     #[error("node stopped: {0}")]
     Stopped(String),

@@ -122,6 +122,7 @@ async fn run_node_with_elector<
         watchdog,
         ready,
         solo_pacing,
+        verification_threads,
     } = options;
     if let RpcMode::Network(Some(listener)) = &rpc {
         anyhow::ensure!(
@@ -295,10 +296,9 @@ async fn run_node_with_elector<
         ),
     }
 
-    let verification_threads = std::thread::available_parallelism()
-        .unwrap_or(NZUsize!(1))
-        .min(NZUsize!(4));
-    let verification_strategy = Rayon::new(verification_threads)?;
+    let verification_strategy = Rayon::new(
+        verification_threads.unwrap_or_else(crate::options::default_verification_threads),
+    )?;
     let executor = VeraExecutor::new(chain_id)
         .with_membership_epochs(blocks_per_epoch, term_length)
         .with_native_verification_strategy(verification_strategy.clone());

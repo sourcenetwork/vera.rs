@@ -16,6 +16,7 @@ use vera_indexer::{
     BlockIndex, LightBlockIndex, MAX_CACHED_REVISIONS, StoredEpochMaterial, StoredFinalization,
 };
 mod regolith_store;
+pub(crate) use regolith_store::BACKGROUND_THREADS;
 use regolith_store::{HistoryDb as DB, WriteBatch};
 mod statistics;
 use statistics::HistoryWriteStatistics;
