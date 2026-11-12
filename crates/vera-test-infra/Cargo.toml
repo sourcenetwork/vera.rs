@@ -1,7 +1,7 @@
 [package]
 name = "vera-test-infra"
 publish = false
-version = "0.1.1"
+version = "0.1.2"
 description = "Shared integration test primitives for Source Network components"
 edition.workspace = true
 license.workspace = true

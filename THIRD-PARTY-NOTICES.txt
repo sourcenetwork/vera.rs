@@ -8,7 +8,7 @@ Original texts are reproduced below and identified by SHA-256. For texts from
 upstream source trees, the source URL includes the reviewed revision. Aurora's
 package records a dirty source tree; see its package-specific notice below.
 
-Cargo.lock SHA-256: dc212cca7a00fd7fa9c11eb982b0020e1360ea635046e36345bb4470ed590ec7
+Cargo.lock SHA-256: d475a25c09c743495d7a88510e4b05851675157a4728e4cf4bde53a3b565cd7b
 Packages: 537
 
 PACKAGE INDEX
@@ -1861,73 +1861,73 @@ vcpkg 0.2.15 | MIT/Apache-2.0
   60c93a31f490375aadf64098b75f10715010379541021e00261045d7800611d3  LICENSE-APACHE
   016d20f335060a70e79d9fcf8dfaa6201114d65d592211f4bdfb8ae9ca2bc1dc  LICENSE-MIT
 
-vera-acp 0.1.1 | Apache-2.0 OR MIT
+vera-acp 0.1.2 | Apache-2.0 OR MIT
   5adb10269dde2c65f174ce3e2d2e877e70bd3f525ec9f9e0888af53588f73bd5  LICENSE-APACHE
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
 
-vera-app 0.1.1 | MIT
+vera-app 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-backend 0.1.1 | MIT
+vera-backend 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-cli 0.1.1 | MIT
+vera-cli 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-client 0.1.1 | MIT
+vera-client 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
 
-vera-config 0.1.1 | MIT
+vera-config 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-consensus 0.1.1 | MIT
+vera-consensus 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-crypto 0.1.1 | MIT
+vera-crypto 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
 
-vera-domain 0.1.1 | MIT
+vera-domain 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
 
-vera-executor 0.1.1 | MIT
+vera-executor 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-genesis 0.1.1 | MIT
+vera-genesis 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-identity 0.1.1 | Apache-2.0 OR MIT
+vera-identity 0.1.2 | Apache-2.0 OR MIT
   5adb10269dde2c65f174ce3e2d2e877e70bd3f525ec9f9e0888af53588f73bd5  LICENSE-APACHE
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
 
-vera-indexer 0.1.1 | MIT
+vera-indexer 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-jsonrpc 0.1.1 | MIT
+vera-jsonrpc 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-modules 0.1.1 | MIT
+vera-modules 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
 
-vera-node 0.1.1 | MIT
+vera-node 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-overlay 0.1.1 | MIT
+vera-overlay 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-permission 0.1.1 | MIT
+vera-permission 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
 
-vera-qmdb 0.1.1 | MIT
+vera-qmdb 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-traits 0.1.1 | MIT
+vera-traits 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-zanzibar 0.1.1 | Apache-2.0 OR MIT
+vera-zanzibar 0.1.2 | Apache-2.0 OR MIT
   5adb10269dde2c65f174ce3e2d2e877e70bd3f525ec9f9e0888af53588f73bd5  LICENSE-APACHE
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
 
-verad 0.1.1 | MIT
+verad 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
 version_check 0.9.5 | MIT/Apache-2.0
