@@ -111,8 +111,12 @@ async fn policy(
                 }
                 // -32002 here is a transient wait: the replica's index has
                 // not reached the confirmed revision yet, or its evidence
-                // deadline expired while waiting for it.
-                Err(ClientError::Rpc { code: -32002, .. }) => {
+                // deadline expired while waiting for it. The client reports
+                // the retryable form as `ResourceBusy`.
+                Err(error)
+                    if error.is_throttled()
+                        || matches!(error, ClientError::Rpc { code: -32002, .. }) =>
+                {
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
                 Err(error) => panic!("verified policy read failed: {error}"),

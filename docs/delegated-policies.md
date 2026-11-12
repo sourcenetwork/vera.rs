@@ -4,15 +4,42 @@ A policy actor can authorize a signing worker to create or edit policies. The
 worker signs the native submission; the actor remains the policy owner. Each
 worker has its own submission sequence.
 
-Delegations use signed ES256K tokens with a worker DID in `sub`, deployment in
-`aud`, and explicit validity times. The supported scopes are separate:
+Delegations are signed tokens with a worker DID in `sub`, deployment in `aud`,
+and explicit validity times. The issuer is a `did:key`, and its key type fixes
+the algorithm the token header must name:
 
-The issuer is a secp256k1 `did:key` using Base58BTC (`z`) or unpadded
-Base64URL (`u`). Both compressed and uncompressed public keys are accepted.
-Vera generates canonical Base58BTC identifiers and compares the underlying key
-for issuer revocation; stored actor identifiers are not rewritten. Older builds
-accepted additional multibase encodings when decoding keys. Those encodings are
-not accepted by this version, so replace them before upgrading.
+| Issuer key | `did:key` multicodec | `alg` | Signature |
+|---|---|---|---|
+| secp256k1 | `0xe7` | `ES256K` | 64-byte `r \|\| s` over SHA-256, low `s` |
+| Ed25519 | `0xed` | `EdDSA` | 64-byte signature over the signing input |
+| P-256 | `0x1200` | `ES256` | 64-byte `r \|\| s` over SHA-256, low `s` |
+
+A token naming another key type's algorithm is rejected. Token records and
+revocation are keyed by the token hash, so each signature has one accepted
+encoding: a high-`s` ECDSA signature and a non-strict Ed25519 signature are
+rejected, as are small-order Ed25519 keys.
+
+A secp256k1 issuer uses Base58BTC (`z`) or unpadded Base64URL (`u`), with a
+compressed or uncompressed public key. Vera generates canonical Base58BTC
+identifiers and compares the underlying key for issuer revocation; stored actor
+identifiers are not rewritten. Older builds accepted additional multibase
+encodings when decoding keys. Those encodings are not accepted by this version,
+so replace them before upgrading.
+
+Ed25519 and P-256 issuers have exactly one spelling: Base58BTC over the
+multicodec and the 32-byte Ed25519 key or the 33-byte compressed P-256 point.
+Policy ownership is compared as a DID string, so any other spelling of these
+keys is rejected instead of becoming a second actor. `vera_crypto::actor`
+derives the DID from a public key.
+
+`UnsignedToken` in `vera-client` builds a delegation or operation token for a
+key the library cannot hold, such as a hardware-backed key. The caller signs
+`signing_input()` and completes the token with `finish` (raw signature) or
+`finish_der` (ASN.1 DER ECDSA, as platform key stores return it). Either ECDSA
+`s` is accepted and normalized, and a signature the issuer's key did not make
+over that token is refused locally. The secp256k1 helpers below are unchanged.
+
+The supported scopes are separate:
 
 | Scope | Authorized operations |
 |---|---|
@@ -110,7 +137,8 @@ verifies the relay's assertion against committed authority; it does not fetch
 OIDC keys during execution. The relay is trusted to attest provider identities
 within its granted scopes. Operators must provision this authority explicitly.
 
-`create_relay_token` signs ES256K claims with type `vera-relay-v1+jwt`. Standard
+`create_relay_token` signs ES256K claims with type `vera-relay-v1+jwt`; relay
+issuers are secp256k1 keys only. Standard
 native delegation claims still bind the issuer, worker, deployment and scope.
 An additional `relay` object contains:
 

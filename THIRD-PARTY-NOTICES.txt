@@ -8,8 +8,8 @@ Original texts are reproduced below and identified by SHA-256. For texts from
 upstream source trees, the source URL includes the reviewed revision. Aurora's
 package records a dirty source tree; see its package-specific notice below.
 
-Cargo.lock SHA-256: f0c09917a52172217fc824039af570b0646221ff03b99be751f2ba526b4f1aea
-Packages: 535
+Cargo.lock SHA-256: 057bf45578c2a09c107727050f9dc2d94ecabda28cd5e184112dd32205a37aa4
+Packages: 537
 
 PACKAGE INDEX
 =============
@@ -645,6 +645,13 @@ ecdsa 0.16.9 | Apache-2.0 OR MIT
 ecdsa 0.17.0 | Apache-2.0 OR MIT
   78779d420019e6b4630376af8e86b6b335ee8a2f89ede6e0411e0469a326aaa4  LICENSE-APACHE
   9aa4f92bfcde293ebeca9e2379fa18d1d61f000977da144c7b74c2986c9b6466  LICENSE-MIT
+
+ed25519 3.0.0 | Apache-2.0 OR MIT
+  78779d420019e6b4630376af8e86b6b335ee8a2f89ede6e0411e0469a326aaa4  LICENSE-APACHE
+  9aa4f92bfcde293ebeca9e2379fa18d1d61f000977da144c7b74c2986c9b6466  LICENSE-MIT
+
+ed25519-dalek 3.0.0 | BSD-3-Clause
+  7a313964a6e050794d2ad57f4863c11f6bbe055c0ae6ce2cf3b9fc45150bada3  LICENSE
 
 educe 0.6.0 | MIT
   dd0741aba702705d02da3e18fca5d3a27538fe6c983e9f09946e82ecfc59acab  LICENSE
@@ -10941,6 +10948,37 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+
+--- SHA-256 7a313964a6e050794d2ad57f4863c11f6bbe055c0ae6ce2cf3b9fc45150bada3 ---
+Copyright (c) 2017-2019 isis agora lovecruft. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+1. Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright
+notice, this list of conditions and the following disclaimer in the
+documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
 
 
 --- SHA-256 7abd9b6960dcf7d4d0a48606a5b71bfe37d472db68d70637f3a58a56785f1621 ---

@@ -44,6 +44,8 @@ vera-modules.workspace = true
 vera-permission.workspace = true
 vera-identity.workspace = true
 k256.workspace = true
+p256.workspace = true
+ed25519-dalek.workspace = true
 jsonrpsee.workspace = true
 jsonrpsee-server = { path = "../../vendor/jsonrpsee-server" }
 reqwest.workspace = true

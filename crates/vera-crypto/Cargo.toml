@@ -30,6 +30,8 @@ unsigned-varint.workspace = true
 # secp256k1 DID recovery
 alloy-primitives.workspace = true
 k256.workspace = true
+p256.workspace = true
+ed25519-dalek.workspace = true
 
 # JWT / encoding
 base64.workspace = true

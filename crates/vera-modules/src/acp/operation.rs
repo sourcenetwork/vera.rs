@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
-use vera_crypto::{jwt::canonical_issuer, operation::OperationId};
+use vera_crypto::{jwt::canonical_actor, operation::OperationId};
 
 use super::{AcpError, AcpModule, Result};
 use crate::{kv_store::ModuleKvStore as _, types::Timestamp};
@@ -41,11 +41,11 @@ pub struct OperationRecord {
     pub result: serde_json::Value,
 }
 
-/// Native ACP record key. Equivalent secp256k1 key encodings share one namespace.
+/// Native ACP record key. Equivalent encodings of one key share one namespace.
 pub fn operation_key(actor: &str, id: OperationId) -> Result<Vec<u8>> {
     vera_identity::Did::new(actor).map_err(|error| AcpError::State(error.to_string()))?;
     let actor = if actor.starts_with("did:key:") {
-        canonical_issuer(actor).map_err(|error| AcpError::State(error.to_string()))?
+        canonical_actor(actor).map_err(|error| AcpError::State(error.to_string()))?
     } else {
         actor.to_owned()
     };

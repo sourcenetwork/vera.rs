@@ -27,7 +27,7 @@ digest returns that original result without applying the effect again. Different
 arguments under a completed ID are rejected. A result describes the completed
 operation; it does not establish current ownership or permission after later
 changes. Equivalent compressed and uncompressed secp256k1 actor encodings share
-one operation namespace.
+one operation namespace. Ed25519 and P-256 actors have a single encoding.
 
 Failed execution, result encoding, storage-budget checks and enclosing batch
 reverts leave no completion record or partial effect. Only successful effects
