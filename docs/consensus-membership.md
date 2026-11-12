@@ -104,6 +104,26 @@ qualification.
 VERAD_BINARY=/path/to/verad cargo test -p vera-e2e --test native_membership
 ```
 
+### Operator keys
+
+An operator policy is a threshold and a list of keys in ascending string order
+without duplicates. Each key has exactly one entry form:
+
+| Key type | Entry | Approval signature |
+|---|---|---|
+| secp256k1 | 66 lowercase hexadecimal characters of the compressed key | ECDSA over the signing digest as the prehash, low `s` |
+| Ed25519 | its `did:key` | strict Ed25519 over the 32 digest bytes as the message |
+| P-256 | its `did:key` (compressed point) | ECDSA over the signing digest as the prehash, low `s` |
+
+A secp256k1 key written as a `did:key` is rejected, so a key cannot be listed
+twice. `AdministrativeRequest::signing_digest` is the one definition of what
+every operator signs, and an approval is a signer index with 64 signature bytes
+in lowercase hexadecimal. A hardware-held P-256 key signs the supplied digest
+directly; `external_approval` and `external_der_approval` in `vera-client` turn
+a signature made outside the library, raw or ASN.1 DER, into an approval after
+checking it against the policy entry. The threshold applies to the whole list;
+no key counts for more than one approval.
+
 `VeraClient::read_administration` verifies the current operator configuration and
 next administrative sequence against independently configured consensus trust.
 It returns the selected revision, timestamp and decoded state, or certified

@@ -4,7 +4,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use super::{Result, VeraError, VeraModule};
+use super::{Result, VeraError, VeraModule, operator_key};
 use crate::acp::{AcpModule, types::AcpParams};
 use crate::kv_store::ModuleKvStore;
 
@@ -14,13 +14,14 @@ const SIGNING_NAMESPACE: &[u8] = b"vera/admin/v1\0";
 /// Maximum number of operator keys in one approval policy.
 pub const MAX_OPERATORS: usize = 128;
 
-/// Approval threshold and canonical compressed secp256k1 keys.
+/// Approval threshold and operator keys.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OperatorPolicy {
     /// Number of distinct approvals required for a change.
     pub threshold: u16,
-    /// Lowercase hexadecimal public keys, sorted in ascending order.
+    /// Operator keys in ascending string order: lowercase hexadecimal
+    /// compressed secp256k1 keys, and `did:key` for Ed25519 and P-256 keys.
     pub keys: Vec<String>,
 }
 
@@ -35,16 +36,37 @@ impl OperatorPolicy {
             return Err(invalid("invalid operator threshold or key order"));
         }
         for key in &self.keys {
-            if key.len() != 66 {
-                return Err(invalid("operator keys must contain 33 bytes"));
-            }
-            let bytes = hex::decode(key).map_err(invalid)?;
-            if hex::encode(&bytes) != *key {
-                return Err(invalid("operator keys must use lowercase hexadecimal"));
-            }
-            vera_crypto::secp256k1::decode_pubkey(&bytes).map_err(invalid)?;
+            operator_key::did(key).map_err(invalid)?;
         }
         Ok(())
+    }
+
+    /// The `did:key` of the operator at `signer`, whatever form its entry takes.
+    pub fn operator_did(&self, signer: u16) -> Result<String> {
+        let key = self
+            .keys
+            .get(usize::from(signer))
+            .ok_or_else(|| invalid("operator index is outside the policy"))?;
+        operator_key::did(key).map_err(invalid)
+    }
+
+    /// Verify one approval of `digest` against the key at its signer index.
+    ///
+    /// The signature is 64 bytes of lowercase hexadecimal. ECDSA keys sign the
+    /// digest as the prehash with low `s`; Ed25519 signs it as the message.
+    pub fn verify_approval(&self, digest: &[u8; 32], approval: &OperatorApproval) -> Result<()> {
+        let key = self
+            .keys
+            .get(usize::from(approval.signer))
+            .ok_or_else(|| invalid("operator index is outside the policy"))?;
+        if approval.signature.len() != 128 {
+            return Err(invalid("operator signature must contain 64 bytes"));
+        }
+        let signature = hex::decode(&approval.signature).map_err(invalid)?;
+        if hex::encode(&signature) != approval.signature {
+            return Err(invalid("operator signature must use lowercase hexadecimal"));
+        }
+        operator_key::verify(key, digest, &signature).map_err(invalid)
     }
 }
 
@@ -101,7 +123,7 @@ impl AdministrativeRequest {
     }
 }
 
-/// One compact, low-S ECDSA signature from the current operator policy.
+/// One signature from the current operator policy, in its key type's single encoding.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OperatorApproval {
@@ -178,24 +200,7 @@ impl VeraModule {
         }
         let digest = request.signing_digest()?;
         for approval in &signed.approvals {
-            let key = state
-                .policy
-                .keys
-                .get(usize::from(approval.signer))
-                .ok_or_else(|| invalid("operator index is outside the policy"))?;
-            if approval.signature.len() != 128 {
-                return Err(invalid("operator signature must contain 64 bytes"));
-            }
-            let signature = hex::decode(&approval.signature).map_err(invalid)?;
-            if hex::encode(&signature) != approval.signature {
-                return Err(invalid("operator signature must use lowercase hexadecimal"));
-            }
-            vera_crypto::secp256k1::verify_digest(
-                &hex::decode(key).map_err(invalid)?,
-                &digest,
-                &signature,
-            )
-            .map_err(invalid)?;
+            state.policy.verify_approval(&digest, approval)?;
         }
         state.sequence = state
             .sequence

@@ -71,3 +71,36 @@ fn ed25519_signatures_are_raw_only() {
     assert!(canonical_signature(&did, &signature[..63]).is_err());
     assert!(canonical_der_signature(&did, &signature).is_err());
 }
+
+#[test]
+fn each_key_type_verifies_a_digest_signature_in_one_encoding() {
+    let digest: [u8; 32] = Sha256::digest(INPUT).into();
+
+    let ed25519 = ed25519_dalek::SigningKey::from_bytes(&[42; 32]);
+    let did = ed25519_did(&ed25519.verifying_key().to_bytes()).unwrap();
+    assert_eq!(key_type(&did).unwrap(), ActorKeyType::Ed25519);
+    let signature = ed25519.sign(&digest).to_bytes();
+    verify_digest(&did, &digest, &signature).unwrap();
+    assert!(verify_digest(&did, &[0; 32], &signature).is_err());
+    assert!(verify_digest(&did, &digest, &ed25519.sign(INPUT).to_bytes()).is_err());
+
+    let p256 = p256::ecdsa::SigningKey::from_slice(&[42; 32]).unwrap();
+    let did = p256_did(p256.verifying_key().to_encoded_point(true).as_bytes()).unwrap();
+    assert_eq!(key_type(&did).unwrap(), ActorKeyType::P256);
+    let signature: p256::ecdsa::Signature = p256.sign_prehash(&digest).unwrap();
+    let low = signature.normalize_s().unwrap_or(signature);
+    let high = p256::ecdsa::Signature::from_scalars(low.r(), -*low.s()).unwrap();
+    verify_digest(&did, &digest, &low.to_vec()).unwrap();
+    assert!(verify_digest(&did, &digest, &high.to_vec()).is_err());
+    assert!(verify_digest(&did, &[0; 32], &low.to_vec()).is_err());
+
+    let secp256k1 = k256::ecdsa::SigningKey::from_slice(&[42; 32]).unwrap();
+    let public = secp256k1.verifying_key().to_encoded_point(true);
+    let did = crate::secp256k1::did_from_secp256k1_pubkey(public.as_bytes()).unwrap();
+    assert_eq!(key_type(&did).unwrap(), ActorKeyType::Secp256k1);
+    let signature: k256::ecdsa::Signature = secp256k1.sign_prehash(&digest).unwrap();
+    let low = signature.normalize_s().unwrap_or(signature);
+    verify_digest(&did, &digest, &low.to_vec()).unwrap();
+    crate::secp256k1::verify_digest(public.as_bytes(), &digest, &low.to_vec()).unwrap();
+    assert!(verify_digest(&did, &digest, &low.to_vec()[..63]).is_err());
+}

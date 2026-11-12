@@ -24,7 +24,12 @@ requests. It can be awaited from any async runtime.
 `SoloGenesis` fixes the deployment when its directory is first used:
 
 - `operators` is the account's administrative policy. It, not the device's
-  validator key, is the authority for later administrative changes.
+  validator key, is the authority for later administrative changes. Its keys
+  may be secp256k1, Ed25519 or P-256; see
+  [operator keys](consensus-membership.md#operator-keys). For a personal
+  deployment, list the account key and each master device's key with a
+  threshold of two: every change then needs two distinct approvals, and one
+  device alone approves nothing.
 - The device's validator key (`validator.key`) is created in the directory and
   becomes the only validator.
 - The consensus share is dealt once from operating-system randomness and stored

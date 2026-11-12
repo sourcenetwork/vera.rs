@@ -134,6 +134,9 @@ Each module is a plain Rust struct. Two thin shims sit on top:
 
 Business logic lives once.
 
+Operator policies list secp256k1 keys in hexadecimal and Ed25519 or P-256 keys
+as `did:key`; every operator signs the same administrative digest. See
+docs/consensus-membership.md#operator-keys.
 Provider relay grants use the same operator quorum as administrative changes.
 Relay assertions bind a stable `did:opk` actor, native worker, genesis, scope,
 grant generation and exact operation. ACP stores the actor as owner; token

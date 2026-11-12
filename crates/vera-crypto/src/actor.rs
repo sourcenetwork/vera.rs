@@ -28,6 +28,34 @@ fn checked(key: &ActorKey) -> Result<String, JwtError> {
     ActorKey::from_did(&did).map(|_| did)
 }
 
+/// The key type behind an actor's `did:key`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ActorKeyType {
+    /// secp256k1, signing ES256K.
+    Secp256k1,
+    /// Ed25519, signing EdDSA.
+    Ed25519,
+    /// NIST P-256, signing ES256.
+    P256,
+}
+
+/// The key type `actor` names, if it is a supported key in an accepted spelling.
+pub fn key_type(actor: &str) -> Result<ActorKeyType, JwtError> {
+    ActorKey::from_did(actor).map(|key| match key {
+        ActorKey::Secp256k1(_) => ActorKeyType::Secp256k1,
+        ActorKey::Ed25519(_) => ActorKeyType::Ed25519,
+        ActorKey::P256(_) => ActorKeyType::P256,
+    })
+}
+
+/// Verify a raw 64-byte signature by `actor` over a 32-byte digest.
+///
+/// ECDSA keys sign the digest as the prehash and must use low `s`. Ed25519
+/// keys sign the digest bytes as the message.
+pub fn verify_digest(actor: &str, digest: &[u8; 32], signature: &[u8]) -> Result<(), JwtError> {
+    ActorKey::from_did(actor)?.verify_digest(digest, signature)
+}
+
 /// The JWT `alg` an actor's tokens must name.
 pub fn algorithm(actor: &str) -> Result<&'static str, JwtError> {
     ActorKey::from_did(actor).map(|key| key.algorithm())
