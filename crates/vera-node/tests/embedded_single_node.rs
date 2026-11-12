@@ -168,3 +168,49 @@ async fn two_deployments_share_a_process_without_sharing_trust() {
     left.stop().await.unwrap();
     right.stop().await.unwrap();
 }
+
+#[tokio::test]
+async fn invalid_timeouts_are_rejected_before_the_node_starts() {
+    let directory = tempfile::tempdir().unwrap();
+    let valid = config(directory.path(), 9404, ACCOUNT_KEY);
+    let mut inverted = valid.clone();
+    inverted.certification_timeout = inverted.leader_timeout;
+    let mut beyond_stall = valid;
+    beyond_stall.certification_timeout = Duration::from_secs(5);
+    for invalid in [inverted, beyond_stall] {
+        assert!(matches!(
+            EmbeddedNode::start(invalid).await,
+            Err(EmbedError::Config(_))
+        ));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn idle_node_keeps_a_slow_heartbeat_and_wakes_for_a_write() {
+    let directory = tempfile::tempdir().unwrap();
+    let chain_id = 9405;
+    let node = EmbeddedNode::start(config(directory.path(), chain_id, ACCOUNT_KEY))
+        .await
+        .unwrap();
+    let finalized = |status: vera_jsonrpc::NodeStatus| status.finalized_height.unwrap_or(0);
+    let before = finalized(node.rpc().call_empty("vera_nodeStatus").await.unwrap());
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    let after = finalized(node.rpc().call_empty("vera_nodeStatus").await.unwrap());
+    // The default idle wait is 1.5 s; the daemon cadence would finalize dozens of blocks.
+    assert!(
+        (1..=12).contains(&(after - before)),
+        "idle heartbeat finalized {} blocks in 6 s",
+        after - before
+    );
+
+    let signer = BlsSigner::new(4u64.into(), chain_id).unwrap();
+    let started = std::time::Instant::now();
+    let submission = create_policy(&node, &signer, "wake").await;
+    verified_receipt(&node, submission).await;
+    assert!(
+        started.elapsed() < Duration::from_millis(1500),
+        "a write waited for the idle heartbeat: {:?}",
+        started.elapsed()
+    );
+    node.stop().await.unwrap();
+}

@@ -6,6 +6,9 @@ pub enum EmbedError {
     /// The deployment could not be created or reopened.
     #[error(transparent)]
     Deployment(#[from] crate::SoloError),
+    /// The configuration cannot run.
+    #[error("invalid configuration: {0}")]
+    Config(&'static str),
     /// The node thread could not be spawned.
     #[error("cannot start node thread: {0}")]
     Thread(std::io::Error),

@@ -77,9 +77,44 @@ that also embeds DefraDB gives each its own directory.
 A single validator dials no peers, but the consensus network still binds
 `p2p_listen`. Use a loopback address unless other validators must reach it.
 
+## Proposal pacing
+
+`EmbeddedConfig::pacing` controls how the lone validator paces proposals. The
+default, `SoloPacing::within(leader_timeout, stall_timeout)`, has two parts:
+
+- **Idle wait.** With no request pending and no unfinalized block that carries
+  requests, the proposer waits up to half the leader timeout (1.5 s by default)
+  for a first request, then proposes an empty block as a heartbeat. A request
+  ends the wait at once. The wait must stay below the leader timeout and the
+  genesis stall timeout; `start` rejects settings that would not.
+- **Batch window.** Once a request has arrived the proposer collects more for
+  50 ms. While a block that carries requests is unfinalized it keeps this
+  cadence, because the wait runs on the actor that also processes finalization.
+
+`pacing: None` keeps the standalone daemon's cadence.
+
+Measured on one Apple-silicon laptop with a release build: 100 sequential
+policy creations, each timed from submission to a verified certified receipt,
+then 30 seconds idle. Reproduce with
+`cargo test --release -p vera-node --test embedded_solo_profile -- --ignored --nocapture`
+(`PROFILE_IDLE_MS` and `PROFILE_BATCH_MS` select a row).
+
+| Idle wait | Batch window | Receipt p50 | Receipt p95 | Idle blocks/s | Idle disk growth |
+| --- | --- | --- | --- | --- | --- |
+| none | 100 ms (daemon) | 281 ms | 340 ms | 6.97 | 158 MB/h |
+| 1.5 s | 100 ms | 280 ms | 340 ms | 0.67 | 12.4 MB/h |
+| 1.5 s | 50 ms (default) | 185 ms | 244 ms | 0.67 | 11.9 MB/h |
+| 1.5 s | 25 ms | 148 ms | 202 ms | 0.67 | 12.4 MB/h |
+| 1.5 s | 15 ms | 220 ms | 377 ms | 0.67 | 12.7 MB/h |
+| 1.5 s | 5 ms | 377 ms | 604 ms | 0.73 | 15.6 MB/h |
+
+No run abandoned a view. Below roughly 25 ms the receipt latency rises again
+on this machine; that point depends on how fast the disk commits, so the
+default leaves margin. These are single-process results on one machine. They
+are not a capacity or multi-validator measurement.
+
 ## Limits
 
 - One validator. A stopped or lost device stops the deployment.
-- Idle deployments keep producing empty blocks at the pipelined cadence.
-- Resource use is that of a validator; it has not been measured for embedded
-  hosts.
+- An idle deployment still produces a heartbeat block about every 1.5 s.
+- Memory use has not been measured for embedded hosts.

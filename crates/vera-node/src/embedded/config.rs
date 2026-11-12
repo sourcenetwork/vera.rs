@@ -4,7 +4,7 @@ use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use vera_config::PruningConfig;
 
-use crate::SoloGenesis;
+use crate::{SoloGenesis, SoloPacing};
 
 /// Configuration of an embedded single-validator node.
 #[derive(Clone, Debug)]
@@ -25,10 +25,12 @@ pub struct EmbeddedConfig {
     pub timeout_retry: Duration,
     /// Consensus history pruning. `None` retains all history.
     pub pruning: Option<PruningConfig>,
+    /// Proposal pacing for the lone validator. `None` keeps the daemon's cadence.
+    pub pacing: Option<SoloPacing>,
 }
 
 impl EmbeddedConfig {
-    /// Loopback-only defaults with the standalone daemon's consensus timeouts.
+    /// Defaults for a lone validator: quiet when idle, with timeouts ordered below the genesis stall timeout.
     #[must_use]
     pub fn new(data_dir: impl Into<PathBuf>, genesis: SoloGenesis, p2p_listen: SocketAddr) -> Self {
         Self {
@@ -36,10 +38,14 @@ impl EmbeddedConfig {
             genesis,
             p2p_listen,
             rpc_listen: None,
-            leader_timeout: Duration::from_secs(1),
-            certification_timeout: Duration::from_secs(2),
+            leader_timeout: Duration::from_secs(3),
+            certification_timeout: Duration::from_secs(4),
             timeout_retry: Duration::from_millis(500),
             pruning: None,
+            pacing: Some(SoloPacing::within(
+                Duration::from_secs(3),
+                Duration::from_millis(vera_domain::SimplexParameters::default().stall_timeout_ms),
+            )),
         }
     }
 }

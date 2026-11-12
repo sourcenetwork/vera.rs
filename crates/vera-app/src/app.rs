@@ -43,6 +43,7 @@ pub struct StatefulVeraApp<S: FinalizedSink, D: ApplicationState = OrderedState>
     vrf_verifier: Option<ConsensusScheme>,
     native_pipeline: bool,
     proposal_batch_wait: std::time::Duration,
+    proposal_idle_wait: std::time::Duration,
 }
 
 impl<S: FinalizedSink, D: ApplicationState> std::fmt::Debug for StatefulVeraApp<S, D> {
@@ -81,6 +82,7 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
             vrf_verifier: None,
             native_pipeline: false,
             proposal_batch_wait: std::time::Duration::ZERO,
+            proposal_idle_wait: std::time::Duration::ZERO,
         }
     }
 
@@ -100,6 +102,15 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
     ) -> Self {
         self.native_pipeline = enabled;
         self.proposal_batch_wait = batch_wait;
+        self
+    }
+
+    /// Let an idle proposer wait this long for a first request before proposing an empty block.
+    ///
+    /// The wait must stay below the consensus leader and stall timeouts.
+    #[must_use]
+    pub const fn with_idle_wait(mut self, idle_wait: std::time::Duration) -> Self {
+        self.proposal_idle_wait = idle_wait;
         self
     }
 
@@ -264,7 +275,20 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             }
         }
         let excluded = Self::pending_tx_ids(&pending);
-        let mut txs = if self.native_pipeline {
+        // This wait runs on the application actor, which also processes finalization.
+        // Idling while an ancestor with requests is unfinalized would delay its receipts.
+        let settled = pending.iter().all(|block| block.txs.is_empty());
+        let mut txs = if self.native_pipeline && settled && !self.proposal_idle_wait.is_zero() {
+            input
+                .provider
+                .build_block_idle_wait(
+                    self.max_txs,
+                    &excluded,
+                    self.proposal_batch_wait,
+                    self.proposal_idle_wait,
+                )
+                .await
+        } else if self.native_pipeline {
             input
                 .provider
                 .build_block_wait(self.max_txs, &excluded, self.proposal_batch_wait)

@@ -56,6 +56,26 @@ impl EmbeddedNode {
             .output
             .public()
             .public();
+        let stall_timeout_ms = genesis
+            .simplex
+            .map_or(u64::MAX, |parameters| parameters.stall_timeout_ms);
+        // Simplex requires this ordering and aborts its engine otherwise.
+        if config.leader_timeout.is_zero()
+            || config.certification_timeout <= config.leader_timeout
+            || u128::from(stall_timeout_ms) <= config.certification_timeout.as_millis()
+        {
+            return Err(EmbedError::Config(
+                "timeouts must satisfy 0 < leader < certification < genesis stall timeout",
+            ));
+        }
+        if config
+            .pacing
+            .is_some_and(|pacing| pacing.idle >= config.leader_timeout)
+        {
+            return Err(EmbedError::Config(
+                "idle wait must be shorter than the leader timeout",
+            ));
+        }
         let settings = NodeSettings {
             secrets_path: node_config.data_dir.join("secrets.json"),
             config: node_config,
@@ -79,6 +99,7 @@ impl EmbeddedNode {
             },
             watchdog: WatchdogMode::Report,
             ready: Some(ready_tx),
+            solo_pacing: config.pacing,
         };
         let storage = config.data_dir.join("commonware");
         std::fs::create_dir_all(&storage).map_err(|source| crate::SoloError::Io {

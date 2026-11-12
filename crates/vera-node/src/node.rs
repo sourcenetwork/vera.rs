@@ -121,6 +121,7 @@ async fn run_node_with_elector<
         rpc,
         watchdog,
         ready,
+        solo_pacing,
     } = options;
     if let RpcMode::Network(Some(listener)) = &rpc {
         anyhow::ensure!(
@@ -632,8 +633,12 @@ async fn run_node_with_elector<
     .with_consensus_key(*sharing.public())
     .with_native_pipeline(
         genesis.simplex.is_some(),
-        (leader_timeout / 4).min(Duration::from_millis(100)),
-    );
+        solo_pacing.map_or_else(
+            || (leader_timeout / 4).min(Duration::from_millis(100)),
+            |pacing| pacing.batch,
+        ),
+    )
+    .with_idle_wait(solo_pacing.map_or(Duration::ZERO, |pacing| pacing.idle));
     let vrf_elector = make_elector(application.vrf_seed_cache());
 
     let snapshot_history = crate::history::SnapshotHistory {
