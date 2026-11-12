@@ -3,7 +3,7 @@
 use anyhow::{Result, ensure};
 use std::{path::Path, sync::Arc};
 
-use super::statistics::HistoryWriteStatistics;
+use super::{HistoryMemory, statistics::HistoryWriteStatistics};
 
 /// Threads the store runs besides its callers: Regolith's compaction workers, which also flush.
 pub(crate) const BACKGROUND_THREADS: usize = 1;
@@ -15,13 +15,36 @@ pub(super) struct HistoryDb {
 }
 
 impl HistoryDb {
-    pub(super) fn open_default(path: impl AsRef<Path>) -> Result<Self> {
+    pub(super) fn open_default(
+        path: impl AsRef<Path>,
+        memory: Option<HistoryMemory>,
+    ) -> Result<Self> {
         let statistics =
             crate::diagnostics::enabled().then(|| Arc::new(regolith::Statistics::new()));
-        Self::open(path, statistics)
+        Self::open(path, memory, statistics)
     }
 
-    fn open(path: impl AsRef<Path>, statistics: Option<Arc<regolith::Statistics>>) -> Result<Self> {
+    /// `None` keeps Regolith's own cache and buffer sizes.
+    pub(super) fn options(
+        memory: Option<HistoryMemory>,
+        statistics: Option<Arc<regolith::Statistics>>,
+    ) -> regolith::Options {
+        let mut options = regolith::Options::default()
+            .max_background_compactions(BACKGROUND_THREADS)
+            .statistics(statistics);
+        if let Some(memory) = memory {
+            options = options
+                .block_cache_size(memory.block_cache_bytes)
+                .write_buffer_size(memory.write_buffer_bytes);
+        }
+        options
+    }
+
+    fn open(
+        path: impl AsRef<Path>,
+        memory: Option<HistoryMemory>,
+        statistics: Option<Arc<regolith::Statistics>>,
+    ) -> Result<Self> {
         let path = path.as_ref();
         match std::fs::read_dir(path) {
             Ok(entries) => {
@@ -38,9 +61,7 @@ impl HistoryDb {
         }
         let db = regolith::Db::open(
             path.join("regolith"),
-            regolith::Options::default()
-                .max_background_compactions(BACKGROUND_THREADS)
-                .statistics(statistics.clone()),
+            Self::options(memory, statistics.clone()),
         )?;
         Ok(Self { db, statistics })
     }
@@ -240,7 +261,7 @@ mod tests {
         thread.join().unwrap();
         drop(store);
 
-        let reopened = HistoryDb::open_default(directory.path()).unwrap();
+        let reopened = HistoryDb::open_default(directory.path(), None).unwrap();
         assert_eq!(
             reopened.get(b"key1").unwrap().as_deref(),
             Some(b"value1".as_slice())
@@ -256,6 +277,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let db = HistoryDb::open(
             directory.path(),
+            None,
             Some(Arc::new(regolith::Statistics::new())),
         )
         .unwrap();
@@ -276,6 +298,7 @@ mod tests {
 
         let reopened = HistoryDb::open(
             directory.path(),
+            None,
             Some(Arc::new(regolith::Statistics::new())),
         )
         .unwrap();
@@ -284,7 +307,7 @@ mod tests {
         assert_eq!(reopened.write_statistics().unwrap().batch_input_bytes, 0);
         drop(reopened);
 
-        let uninstrumented = HistoryDb::open(directory.path(), None).unwrap();
+        let uninstrumented = HistoryDb::open(directory.path(), None, None).unwrap();
         assert!(uninstrumented.write_statistics().is_none());
         assert_eq!(uninstrumented.get(b"k2").unwrap().unwrap(), b"value2");
     }
@@ -292,7 +315,7 @@ mod tests {
     #[test]
     fn pinned_metadata_is_separate_from_table_reader_estimates() {
         let directory = tempfile::tempdir().unwrap();
-        let db = HistoryDb::open_default(directory.path()).unwrap();
+        let db = HistoryDb::open_default(directory.path(), None).unwrap();
         assert_eq!(
             db.property_int_value("regolith.pinned-metadata-bytes")
                 .unwrap(),
@@ -311,7 +334,7 @@ mod tests {
             let directory = tempfile::tempdir().unwrap();
             let foreign = directory.path().join(name);
             std::fs::write(&foreign, b"retained history").unwrap();
-            assert!(HistoryDb::open_default(directory.path()).is_err());
+            assert!(HistoryDb::open_default(directory.path(), None).is_err());
             assert_eq!(std::fs::read(foreign).unwrap(), b"retained history");
             assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
         }
@@ -323,7 +346,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let target = tempfile::tempdir().unwrap();
         std::os::unix::fs::symlink(target.path(), directory.path().join("regolith")).unwrap();
-        assert!(HistoryDb::open_default(directory.path()).is_err());
+        assert!(HistoryDb::open_default(directory.path(), None).is_err());
         assert_eq!(std::fs::read_dir(target.path()).unwrap().count(), 0);
     }
 }

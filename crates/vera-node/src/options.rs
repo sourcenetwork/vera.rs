@@ -33,6 +33,8 @@ pub struct NodeOptions {
     pub solo_pacing: Option<SoloPacing>,
     /// Threads of the verification pool. `None` uses the machine's parallelism, at most four.
     pub verification_threads: Option<std::num::NonZeroUsize>,
+    /// Byte budgets of the finalized-history store. `None` keeps the store's defaults.
+    pub history_memory: Option<crate::HistoryMemory>,
 }
 
 /// Verification parallelism when the host does not choose one.
@@ -81,6 +83,7 @@ impl NodeOptions {
             ready: None,
             solo_pacing: None,
             verification_threads: None,
+            history_memory: None,
         }
     }
 }

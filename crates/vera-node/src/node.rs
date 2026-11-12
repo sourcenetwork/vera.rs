@@ -123,6 +123,7 @@ async fn run_node_with_elector<
         ready,
         solo_pacing,
         verification_threads,
+        history_memory,
     } = options;
     if let RpcMode::Network(Some(listener)) = &rpc {
         anyhow::ensure!(
@@ -379,8 +380,12 @@ async fn run_node_with_elector<
         ))
     });
     let history = Arc::new(
-        crate::FinalizedHistory::open(config.data_dir.join("history"), &genesis_block)?
-            .with_metrics(finalization_metrics.clone()),
+        crate::FinalizedHistory::open_with(
+            config.data_dir.join("history"),
+            &genesis_block,
+            history_memory,
+        )?
+        .with_metrics(finalization_metrics.clone()),
     );
     let completed_sync_height = plan.completed();
     let mut snapshot_sync = plan.should_sync(config.snapshot.is_some());

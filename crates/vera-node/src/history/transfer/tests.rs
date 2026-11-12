@@ -358,7 +358,7 @@ fn previous_format_imports_are_rejected_without_modification() {
             .contains("previous binary")
     );
     {
-        let db = DB::open_default(dir.path()).unwrap();
+        let db = DB::open_default(dir.path(), None).unwrap();
         assert_eq!(db.get(IMPORT).unwrap().unwrap(), b"old cursor");
         db.delete(IMPORT).unwrap();
     }

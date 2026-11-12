@@ -366,8 +366,11 @@ request before proposing, with a bounded heartbeat, unless a block carrying
 requests is still unfinalized. `EmbeddedConfig::thread_setup` runs on the node
 thread before its runtime is built, so every node thread is created afterwards
 and, on Linux, inherits the CPU affinity it sets. `thread_budget()` reports the
-node, worker, blocking, verification and history-store thread counts. See
-`docs/embedded-node.md`.
+node, worker, blocking, verification and history-store thread counts.
+`EmbeddedConfig::history_memory` sets the history store's block-cache and
+write-buffer budgets, 8 MiB and 4 MiB by default; the daemon keeps Regolith's
+512 MiB and 64 MiB. The consensus listener always binds; `127.0.0.1:0` keeps
+it on loopback with a system-chosen port. See `docs/embedded-node.md`.
 
 ## Crate Structure
 

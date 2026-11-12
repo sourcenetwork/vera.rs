@@ -75,8 +75,10 @@ durability. Numeric diagnostics report used and reserved memtable bytes, retired
 arena-pool bytes, block-cache usage and pinned table metadata separately. These
 counters are non-atomic and do not account for all validator allocations.
 
-Vera currently uses Regolith's default 512 MiB decompressed block-cache target
-and 64 MiB memtable flush threshold. The cache fills on reads; reaching the
+The daemon uses Regolith's default 512 MiB decompressed block-cache target
+and 64 MiB memtable flush threshold. An embedded node selects both through
+`EmbeddedConfig::history_memory`, 8 MiB and 4 MiB by default; see
+[embedded node memory](embedded-node.md#memory). The cache fills on reads; reaching the
 memtable threshold starts rotation and flushing. Large entries and write batches
 can exceed these targets, and readers can retain buffers after eviction. These
 values describe storage settings rather than a whole-validator memory ceiling.

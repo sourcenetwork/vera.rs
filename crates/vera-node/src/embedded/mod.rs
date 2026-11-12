@@ -43,6 +43,9 @@ impl EmbeddedNode {
     /// Create or reopen the deployment and return once the node serves requests.
     pub async fn start(config: EmbeddedConfig) -> Result<Self, EmbedError> {
         let threads = config.thread_budget();
+        if let Some(reason) = config.history_memory.rejection() {
+            return Err(EmbedError::Config(reason));
+        }
         let node_config = NodeConfig {
             chain_id: config.genesis.chain_id,
             data_dir: config.data_dir.clone(),
@@ -110,6 +113,7 @@ impl EmbeddedNode {
             ready: Some(ready_tx),
             solo_pacing: config.pacing,
             verification_threads,
+            history_memory: Some(config.history_memory),
         };
         let thread_setup = config.thread_setup;
         let storage = config.data_dir.join("commonware");
