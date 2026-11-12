@@ -29,6 +29,60 @@ pub fn approve_administration(
     })
 }
 
+/// Build an approval from a signature made outside this library.
+///
+/// For operator keys this library cannot hold, such as hardware-backed keys.
+/// The operator signs [`AdministrativeRequest::signing_digest`]: ECDSA keys
+/// (secp256k1, P-256) as the prehash, Ed25519 keys as the message. `signature`
+/// is the raw 64 bytes; either ECDSA `s` is accepted. A signature the key at
+/// `signer` in `policy` did not make over this request is an error.
+pub fn external_approval(
+    request: &AdministrativeRequest,
+    policy: &OperatorPolicy,
+    signer: u16,
+    signature: &[u8],
+) -> Result<OperatorApproval, ClientError> {
+    let signing = |error: &dyn std::fmt::Display| ClientError::Signing(error.to_string());
+    let operator = policy.operator_did(signer).map_err(|e| signing(&e))?;
+    let signature =
+        vera_crypto::actor::canonical_signature(&operator, signature).map_err(|e| signing(&e))?;
+    checked_approval(request, policy, signer, &signature)
+}
+
+/// Build an approval from an ASN.1 DER ECDSA signature, as platform key
+/// stores return it. See [`external_approval`].
+pub fn external_der_approval(
+    request: &AdministrativeRequest,
+    policy: &OperatorPolicy,
+    signer: u16,
+    signature: &[u8],
+) -> Result<OperatorApproval, ClientError> {
+    let signing = |error: &dyn std::fmt::Display| ClientError::Signing(error.to_string());
+    let operator = policy.operator_did(signer).map_err(|e| signing(&e))?;
+    let signature = vera_crypto::actor::canonical_der_signature(&operator, signature)
+        .map_err(|e| signing(&e))?;
+    checked_approval(request, policy, signer, &signature)
+}
+
+fn checked_approval(
+    request: &AdministrativeRequest,
+    policy: &OperatorPolicy,
+    signer: u16,
+    signature: &[u8],
+) -> Result<OperatorApproval, ClientError> {
+    let digest = request
+        .signing_digest()
+        .map_err(|error| ClientError::Signing(error.to_string()))?;
+    let approval = OperatorApproval {
+        signer,
+        signature: hex::encode(signature),
+    };
+    policy
+        .verify_approval(&digest, &approval)
+        .map_err(|error| ClientError::Signing(error.to_string()))?;
+    Ok(approval)
+}
+
 /// Operator configuration or certified absence at a finalized revision.
 #[derive(Clone, Debug)]
 pub struct AdministrationRecord {
@@ -189,6 +243,42 @@ mod certified_tests {
             &hex::decode(&approval.signature).unwrap(),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn an_external_secp256k1_signature_becomes_the_same_approval() {
+        let key = SigningKey::from_slice(&[3; 32]).unwrap();
+        let legacy = k256::ecdsa::SigningKey::from_slice(&[3; 32]).unwrap();
+        let policy = OperatorPolicy {
+            threshold: 1,
+            keys: vec![hex::encode(key.verifying_key().to_sec1_bytes())],
+        };
+        let request = AdministrativeRequest {
+            genesis_id: [1; 32],
+            sequence: 7,
+            expires_at: 100,
+            command: AdministrativeCommand::SetOperationBudget(1024),
+        };
+        let own = approve_administration(&request, 0, &key).unwrap();
+        let signature: k256::ecdsa::Signature = legacy
+            .sign_prehash(&request.signing_digest().unwrap())
+            .unwrap();
+        let low = signature.normalize_s().unwrap_or(signature);
+        let high = k256::ecdsa::Signature::from_scalars(low.r(), -*low.s()).unwrap();
+        for raw in [low.to_vec(), high.to_vec()] {
+            assert_eq!(external_approval(&request, &policy, 0, &raw).unwrap(), own);
+        }
+        let der = low.to_der();
+        assert_eq!(
+            external_der_approval(&request, &policy, 0, der.as_bytes()).unwrap(),
+            own
+        );
+        assert!(external_approval(&request, &policy, 1, &low.to_vec()).is_err());
+        let other = AdministrativeRequest {
+            sequence: 8,
+            ..request
+        };
+        assert!(external_approval(&other, &policy, 0, &low.to_vec()).is_err());
     }
 
     #[test]

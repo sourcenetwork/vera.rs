@@ -139,6 +139,30 @@ impl ActorKey {
         verified.then_some(()).ok_or(JwtError::InvalidSignature)
     }
 
+    /// Verify a raw 64-byte signature over an already computed 32-byte digest.
+    ///
+    /// ECDSA keys treat the digest as the prehash and accept low-S only.
+    /// Ed25519 signs the digest bytes as its message, verified strictly.
+    pub(crate) fn verify_digest(
+        &self,
+        digest: &[u8; 32],
+        signature: &[u8],
+    ) -> Result<(), JwtError> {
+        let verified = match self {
+            Self::Secp256k1(key) => k256::ecdsa::Signature::from_slice(signature)
+                .ok()
+                .filter(|signature| signature.normalize_s().is_none())
+                .is_some_and(|signature| key.verify_prehash(digest, &signature).is_ok()),
+            Self::P256(key) => p256::ecdsa::Signature::from_slice(signature)
+                .ok()
+                .filter(|signature| signature.normalize_s().is_none())
+                .is_some_and(|signature| key.verify_prehash(digest, &signature).is_ok()),
+            Self::Ed25519(key) => ed25519_dalek::Signature::from_slice(signature)
+                .is_ok_and(|signature| key.verify_strict(digest, &signature).is_ok()),
+        };
+        verified.then_some(()).ok_or(JwtError::InvalidSignature)
+    }
+
     /// The one accepted encoding of a raw fixed-width signature.
     ///
     /// ECDSA signers may return either `s`; the verifier accepts the low one.
