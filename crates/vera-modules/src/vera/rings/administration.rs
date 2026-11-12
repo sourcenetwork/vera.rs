@@ -121,6 +121,13 @@ impl VeraModule {
                 }
                 settings.pending_reshare = None;
             }
+            RingUpdate::SetPreShareEndpoints(endpoints) => {
+                if *endpoints == settings.pre_share_endpoints {
+                    return Err(invalid("pre-share endpoints are unchanged"));
+                }
+                types::validate_pre_share_endpoints(endpoints)?;
+                settings.pre_share_endpoints = endpoints.clone();
+            }
         }
         record.settings = Some(settings);
         Ok(record)

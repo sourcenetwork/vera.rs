@@ -568,6 +568,84 @@ fn ring_updates_require_acp_authority_and_reject_stale_commands_within_one_revis
 }
 
 #[test]
+fn ring_pre_share_endpoints_are_mutable_via_acp_update() {
+    let policy = POLICY.replace("  - name: ring\n", "  - name: ring\n    relations:\n      - name: operator\n    permissions:\n      - name: update_ring\n        expr: operator\n");
+    let (mut vera, mut acp, config) = fixture(&policy);
+    let initial = apply(&mut vera, &mut acp, &RingCommand::Create(config), 1).unwrap();
+    vera.apply_ring_participant_request(&context(), &confirm(&initial.id, 2, "aabb"))
+        .unwrap();
+    let active = vera
+        .apply_ring_participant_request(&context(), &confirm(&initial.id, 3, "aabb"))
+        .unwrap();
+    assert!(active.current_settings().pre_share_endpoints.is_empty());
+    acp.direct_policy_cmd(
+        &actor(),
+        &initial.config.policy_id,
+        PolicyCmd::SetRelationship(Relationship::with_entity(
+            "ring",
+            &initial.id,
+            "operator",
+            actor(),
+        )),
+    )
+    .unwrap();
+    let update = |sequence, update| RingCommand::Update {
+        ring_id: initial.id.clone(),
+        expected_sequence: sequence,
+        update,
+    };
+    let endpoints = vec!["https://defra.example/a".to_string()];
+    let set = update(
+        active.sequence,
+        RingUpdate::SetPreShareEndpoints(endpoints.clone()),
+    );
+    let changed = apply(&mut vera, &mut acp, &set, 2).unwrap();
+    assert_eq!(changed.current_settings().pre_share_endpoints, endpoints);
+    // Creation-time value is untouched -- only the live setting moved.
+    assert!(changed.config.pre_share_endpoints.is_empty());
+    // Re-applying the identical value is rejected as unchanged.
+    assert!(
+        apply(
+            &mut vera,
+            &mut acp,
+            &update(
+                changed.sequence,
+                RingUpdate::SetPreShareEndpoints(endpoints)
+            ),
+            3
+        )
+        .is_err()
+    );
+    // Unsorted input is rejected (native deliberately doesn't auto-canonicalize).
+    let unsorted = vec![
+        "https://b.example".to_string(),
+        "https://a.example".to_string(),
+    ];
+    assert!(
+        apply(
+            &mut vera,
+            &mut acp,
+            &update(changed.sequence, RingUpdate::SetPreShareEndpoints(unsorted)),
+            4
+        )
+        .is_err()
+    );
+    // Over-max is rejected.
+    let too_many = (0..9)
+        .map(|n| format!("https://defra-{n}.example"))
+        .collect();
+    assert!(
+        apply(
+            &mut vera,
+            &mut acp,
+            &update(changed.sequence, RingUpdate::SetPreShareEndpoints(too_many)),
+            5
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn ring_reporting_relays_and_reshare_targets_preserve_controller_constraints() {
     let policy = POLICY.replace("  - name: ring\n", "  - name: ring\n    relations:\n      - name: operator\n    permissions:\n      - name: update_ring\n        expr: operator\n");
     let (mut vera, mut acp, mut config) = fixture(&policy);

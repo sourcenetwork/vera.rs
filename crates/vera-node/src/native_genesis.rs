@@ -104,10 +104,14 @@ pub(super) async fn load_or_create(
         // live `ring_policy` object/`creator` relation a ring actually needs
         // is granted separately, after boot, same as today.
         let creator = vera_identity::Did::new("did:key:zVeraGenesisSeed")?;
-        modules.acp.initialize_policies(&creator, &genesis.policies)?;
+        modules
+            .acp
+            .initialize_policies(&creator, &genesis.policies)?;
     }
     if !genesis.node_demerits.is_empty() {
-        modules.vera.initialize_node_demerits(&genesis.node_demerits)?;
+        modules
+            .vera
+            .initialize_node_demerits(&genesis.node_demerits)?;
     }
     let sealed = native::prepare(
         native.new_batches().await,
