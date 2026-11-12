@@ -148,7 +148,6 @@ fn relay_evidence_binds_caller_time_and_requires_a_complete_window() {
             "valid_window_start":null, "valid_window_end":null, "timestamp":null, "document_inline":false
         })),
         relay_signature: vec![5; 64],
-        checked_at_anchor: "revision".into(),
     };
     let mut report = envelope(payload.canonical_bytes());
     report.report_type = UNAUTHORIZED_REQUEST_REPORT_TYPE.into();
