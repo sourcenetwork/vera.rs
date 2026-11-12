@@ -23,7 +23,7 @@ formats and qualification limits.
 | Pending | First confirmation from a participant | Record that participant's complete key pair |
 | Pending | All participants confirm the same key pair | Active ring |
 | Pending | Different participant confirms either conflicting key | Terminal conflict record |
-| Pending | Creator or participant cancels | Terminal cancellation record |
+| Pending | Creator or participant cancels | Record removed |
 | Active, cancelled or conflicting | Fresh-DKG confirmation/cancellation | Rejected |
 
 Duplicate confirmations are rejected before checking for a conflicting key, so a
@@ -33,8 +33,10 @@ this fresh-DKG unanimity rule. Confirmation also checks the node controller's
 current allowed-policy/ring set. Participant cancellation remains available if
 the controller withdraws that permission.
 
-Cancelled and conflicting records remain stored. Their identifiers cannot be
-reused, preventing old signed confirmations from applying to a recreated ring.
+Conflicting records remain stored. A cancelled pending ring's record is removed,
+as in the Cosmos implementation, but its ACP object stays registered, so creating
+the same configuration again is refused. Neither identifier can be reused, which
+prevents old signed confirmations from applying to a recreated ring.
 Creation retries with the same authenticated operation identity return the
 original recorded outcome; read the ring again to obtain its current state.
 
