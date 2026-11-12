@@ -689,16 +689,17 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
         true,
     )
     .await;
-    assert!(matches!(
+    // Cancelling a pending ring removes its record. The ring's ACP object
+    // stays registered, so the two requests below still cannot recreate or
+    // confirm it.
+    assert!(
         reader
             .read_threshold_ring(&ring, cancelled.block_number, &trusted)
             .await
             .unwrap()
             .record
-            .unwrap()
-            .state,
-        RingState::Cancelled { .. }
-    ));
+            .is_none()
+    );
     execute(
         &writer,
         &reader,
