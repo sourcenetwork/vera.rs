@@ -48,8 +48,19 @@ limits are the same: proof admission slots, request deadlines and the
 retryable `-32002` response all apply. `LocalRpcError::is_retryable` identifies
 that response.
 
-Transport limits do not apply in-process: request-size checks, batch limits
-and per-connection subscription limits belong to the network server.
+Method bodies run on the node's runtime, not on the caller's. The futures that
+`LocalRpc` returns can be awaited from any executor, including one that is not
+Tokio, and from any thread. After the node stops they fail with
+`LocalRpcError::Stopped`.
+
+- `request` and `call_empty` take positional JSON parameters and decode the result.
+- `request_raw` returns the result as JSON text, so a host can apply its own
+  response byte limit. Transport limits (request size, batching,
+  per-connection subscriptions) belong to the network server and do not apply
+  in-process.
+- `subscribe` returns a `LocalSubscription`; `vera_subscribeHeaders` delivers
+  each finalized header. Dropping the subscription ends it, and it ends when the
+  node stops.
 
 Set `EmbeddedConfig::rpc_listen` to also serve the same methods over the
 network. It is off by default.
@@ -57,7 +68,9 @@ network. It is off by default.
 ## Threads and shutdown
 
 The node runs on a dedicated thread with its own Commonware runtime, and that
-runtime owns its worker threads. The host's runtime is not used.
+runtime owns its worker threads. The host's runtime is not used. `EmbeddedConfig::worker_threads`
+and `max_blocking_threads` bound that runtime's threads; a small host can set
+one worker.
 
 `stop` ends the node and waits for its thread. Stopping drops the runtime
 without a separate shutdown protocol, so durability relies on the same recovery

@@ -47,3 +47,66 @@ async fn local_only_table_reports_method_errors_without_a_listener() {
         .unwrap_err();
     assert!(matches!(unknown, LocalRpcError::Call { code: -32601, .. }));
 }
+
+/// Drives a future on the calling thread without any async runtime.
+fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    struct Unpark(std::thread::Thread);
+    impl std::task::Wake for Unpark {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+    let waker = std::sync::Arc::new(Unpark(std::thread::current())).into();
+    let mut context = std::task::Context::from_waker(&waker);
+    let mut future = std::pin::pin!(future);
+    loop {
+        match future.as_mut().poll(&mut context) {
+            std::task::Poll::Ready(output) => return output,
+            std::task::Poll::Pending => std::thread::park(),
+        }
+    }
+}
+
+fn timer_module() -> jsonrpsee::RpcModule<()> {
+    let mut module = jsonrpsee::RpcModule::new(());
+    module
+        .register_async_method("test_timer", |_, _, _| async {
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            tokio::task::spawn_blocking(|| "ran on the node runtime")
+                .await
+                .expect("blocking task")
+        })
+        .unwrap();
+    module
+}
+
+#[test]
+fn calls_run_on_the_building_runtime_from_a_thread_without_one() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let local = runtime.block_on(async {
+        RpcServer::new(NodeState::new(7, 0, 1), "127.0.0.1:0".parse().unwrap())
+            .with_extra_module(timer_module())
+            .into_local()
+            .unwrap()
+    });
+    assert!(tokio::runtime::Handle::try_current().is_err());
+
+    let answer: String = block_on(local.call_empty("test_timer")).unwrap();
+    assert_eq!(answer, "ran on the node runtime");
+    let raw = block_on(local.request_raw("test_timer", Vec::new())).unwrap();
+    assert_eq!(raw, "\"ran on the node runtime\"");
+
+    drop(runtime);
+    assert!(matches!(
+        block_on(local.call_empty::<String>("test_timer")),
+        Err(LocalRpcError::Stopped)
+    ));
+    assert!(matches!(
+        block_on(local.subscribe("vera_subscribeHeaders", Vec::new(), 4)),
+        Err(LocalRpcError::Stopped)
+    ));
+}

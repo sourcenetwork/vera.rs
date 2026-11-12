@@ -59,6 +59,9 @@ impl EmbeddedNode {
         let stall_timeout_ms = genesis
             .simplex
             .map_or(u64::MAX, |parameters| parameters.stall_timeout_ms);
+        if config.worker_threads == Some(0) || config.max_blocking_threads == Some(0) {
+            return Err(EmbedError::Config("thread counts must be nonzero"));
+        }
         // Simplex requires this ordering and aborts its engine otherwise.
         if config.leader_timeout.is_zero()
             || config.certification_timeout <= config.leader_timeout
@@ -101,6 +104,8 @@ impl EmbeddedNode {
             ready: Some(ready_tx),
             solo_pacing: config.pacing,
         };
+        let (worker_threads, max_blocking_threads) =
+            (config.worker_threads, config.max_blocking_threads);
         let storage = config.data_dir.join("commonware");
         std::fs::create_dir_all(&storage).map_err(|source| crate::SoloError::Io {
             path: storage.clone(),
@@ -110,8 +115,14 @@ impl EmbeddedNode {
             .name("vera-node".into())
             .stack_size(NODE_STACK_BYTES)
             .spawn(move || {
-                let runtime =
+                let mut runtime =
                     commonware_runtime::tokio::Config::default().with_storage_directory(storage);
+                if let Some(threads) = worker_threads {
+                    runtime = runtime.with_worker_threads(threads);
+                }
+                if let Some(threads) = max_blocking_threads {
+                    runtime = runtime.with_max_blocking_threads(threads);
+                }
                 let result =
                     commonware_runtime::tokio::Runner::new(runtime).start(|context| async move {
                         ::tokio::select! {

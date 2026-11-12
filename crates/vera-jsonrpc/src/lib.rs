@@ -28,7 +28,7 @@ pub use vera_api::{LightBlockLookup, ReceiptProofLookup, VeraApiImpl, VeraApiSer
 mod nuclei_transport;
 
 mod local;
-pub use local::{LocalRpc, LocalRpcError};
+pub use local::{LocalRpc, LocalRpcError, LocalSubscription};
 
 mod server;
 pub use server::{JsonRpcServer, RpcServer, RpcServerHandle, ServerError};

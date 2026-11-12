@@ -214,3 +214,54 @@ async fn idle_node_keeps_a_slow_heartbeat_and_wakes_for_a_write() {
     );
     node.stop().await.unwrap();
 }
+
+/// Drives a future on the calling thread without any async runtime.
+fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    struct Unpark(std::thread::Thread);
+    impl std::task::Wake for Unpark {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+    let waker = std::sync::Arc::new(Unpark(std::thread::current())).into();
+    let mut context = std::task::Context::from_waker(&waker);
+    let mut future = std::pin::pin!(future);
+    loop {
+        match future.as_mut().poll(&mut context) {
+            std::task::Poll::Ready(output) => return output,
+            std::task::Poll::Pending => std::thread::park(),
+        }
+    }
+}
+
+#[test]
+fn a_host_without_an_async_runtime_follows_finalized_headers() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut settings = config(directory.path(), 9406, ACCOUNT_KEY);
+    settings.worker_threads = Some(1);
+    assert!(tokio::runtime::Handle::try_current().is_err());
+
+    let node = block_on(EmbeddedNode::start(settings)).unwrap();
+    let rpc = node.rpc().clone();
+    let mut headers = block_on(rpc.subscribe("vera_subscribeHeaders", Vec::new(), 8)).unwrap();
+    let first: vera_domain::GossipHeader = block_on(headers.next()).unwrap().unwrap();
+    let second: vera_domain::GossipHeader = block_on(headers.next()).unwrap().unwrap();
+    assert_eq!(first.chain_id, 9406);
+    assert_eq!(second.height, first.height + 1);
+    assert_eq!(second.parent_hash, first.block_hash);
+    let block: vera_domain::LightBlock =
+        block_on(rpc.request("vera_getLightBlock", vec![json!(second.height)])).unwrap();
+    assert_eq!(
+        vera_domain::verify_finalized_block(&block, node.consensus_key())
+            .unwrap()
+            .height,
+        second.height
+    );
+
+    block_on(node.stop()).unwrap();
+    assert!(matches!(
+        block_on(rpc.call_empty::<vera_jsonrpc::NodeStatus>("vera_nodeStatus")),
+        Err(vera_jsonrpc::LocalRpcError::Stopped)
+    ));
+    assert!(block_on(headers.next::<vera_domain::GossipHeader>()).is_none());
+}

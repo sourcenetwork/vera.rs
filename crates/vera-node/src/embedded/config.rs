@@ -27,6 +27,10 @@ pub struct EmbeddedConfig {
     pub pruning: Option<PruningConfig>,
     /// Proposal pacing for the lone validator. `None` keeps the daemon's cadence.
     pub pacing: Option<SoloPacing>,
+    /// Async worker threads of the node's runtime. `None` uses the runtime default.
+    pub worker_threads: Option<usize>,
+    /// Upper bound on the node runtime's blocking threads. `None` uses the runtime default.
+    pub max_blocking_threads: Option<usize>,
 }
 
 impl EmbeddedConfig {
@@ -46,6 +50,8 @@ impl EmbeddedConfig {
                 Duration::from_secs(3),
                 Duration::from_millis(vera_domain::SimplexParameters::default().stall_timeout_ms),
             )),
+            worker_threads: None,
+            max_blocking_threads: None,
         }
     }
 }
