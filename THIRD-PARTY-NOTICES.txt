@@ -8,7 +8,7 @@ Original texts are reproduced below and identified by SHA-256. For texts from
 upstream source trees, the source URL includes the reviewed revision. Aurora's
 package records a dirty source tree; see its package-specific notice below.
 
-Cargo.lock SHA-256: d475a25c09c743495d7a88510e4b05851675157a4728e4cf4bde53a3b565cd7b
+Cargo.lock SHA-256: 4902f51ac42775ad24e44c36ddae550853d780b33bf5b74d672425196cda76eb
 Packages: 537
 
 PACKAGE INDEX
