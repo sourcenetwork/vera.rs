@@ -338,6 +338,15 @@ The native stream is available with only the header broadcaster configured.
 Consumers authenticate headers against their configured finality trust; receiving a
 notification alone does not establish its authority.
 
+### Embedded node
+
+`vera_node::EmbeddedNode` hosts a single-validator deployment inside another
+program on a dedicated thread and Commonware runtime. Hosts call the node's
+method table in-process through `vera_jsonrpc::LocalRpc`; an RPC listener is
+optional. The deployment's authority is the account's operator policy, its
+consensus share comes from operating-system randomness, and a tripped watchdog
+stops the node without exiting the host. See `docs/embedded-node.md`.
+
 ## Crate Structure
 
 Workspace membership comes from the root `Cargo.toml` (`bin/verad` + `crates/*`).

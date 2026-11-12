@@ -268,13 +268,11 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
         Ok(self.start_inner(Some(listener)))
     }
 
-    fn start_inner(self, listener: Option<TcpListener>) -> RpcServerHandle {
-        let addr = self.addr;
+    /// Build the method table served by this node, without binding a listener.
+    pub fn into_module(self) -> Result<jsonrpsee::RpcModule<()>, ServerError> {
         let node_state = Arc::new(self.state);
-        let node_state_for_jsonrpc = Arc::clone(&node_state);
         let chain_id = self.chain_id;
         let tx_submit = self.tx_submit;
-        let max_connections = self.max_connections;
         let state_provider = self.state_provider;
         let subscription_heads = self.subscription_heads;
         let subscription_logs = self.subscription_logs;
@@ -286,136 +284,154 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
         let vera_light_block_lookup = self.vera_light_block_lookup;
         let vera_receipt_proof_lookup = self.vera_receipt_proof_lookup;
         let vera_archive = self.vera_archive;
-
-        // Signal from the JSON-RPC task to the HTTP task indicating whether it
-        // successfully bound the port. The HTTP status server waits for this
-        // before attempting to bind, so there is no race condition.
-
-        // JSON-RPC server serves eth_*, vera_*, net_*, web3_* methods over both
-        // HTTP and WebSocket. It binds first and signals readiness to the HTTP task.
         let extra_modules = self.extra_modules;
 
-        let jsonrpc_handle = tokio::spawn(async move {
-            let config = ServerConfig::builder()
-                // Subscription acknowledgements echo the client's request id;
-                // keeping the response budget above the request budget keeps
-                // that echo from overflowing the response limit.
-                .max_request_body_size(vera_domain::SUBMISSION_REQUEST_BYTES)
-                .max_response_body_size(
-                    vera_permission::PERMISSION_RESPONSE_BYTES
-                        .max(vera_domain::RECEIPT_RESPONSE_BYTES) as u32,
-                )
-                .max_connections(max_connections)
-                .set_batch_request_config(BatchRequestConfig::Limit(64))
-                .max_subscriptions_per_connection(8)
-                .set_message_buffer_capacity(8)
-                .enable_ws_ping(
-                    PingConfig::default()
-                        .ping_interval(std::time::Duration::from_secs(30))
-                        .max_failures(2),
-                )
-                .build();
-            #[cfg(not(feature = "nuclei-rpc"))]
-            let result = {
-                let builder = Server::builder().set_config(config);
-                match listener {
-                    Some(listener) => builder.build_from_tcp(listener),
-                    None => builder.build(addr).await,
-                }
-            };
-            #[cfg(feature = "nuclei-rpc")]
-            let result = crate::nuclei_transport::Server::bind(addr, listener, config);
-            let server = match result {
-                Ok(s) => s,
-                Err(e) => {
-                    error!(error = %e, "Failed to build JSON-RPC server");
-                    return None;
-                }
-            };
+        let eth_api = {
+            let api = tx_submit.as_ref().map_or_else(
+                || EthApiImpl::new(chain_id, state_provider.clone()),
+                |submit| {
+                    EthApiImpl::with_tx_submit(chain_id, state_provider.clone(), submit.clone())
+                },
+            );
+            api.with_node_state((*node_state).clone())
+        };
+        let net_api = NetApiImpl::new(chain_id);
+        let web3_api = Web3ApiImpl::new();
+        let vera_api = {
+            let mut api = VeraApiImpl::new(node_state, tx_submit);
+            if let (Some(idx), Some(mods)) = (vera_index, vera_modules) {
+                api = api.with_index_and_modules(idx, mods);
+            }
+            if let Some((databases, modules)) = vera_native_modules {
+                api = api.with_native_modules(databases, modules);
+            }
+            if let Some(archive) = vera_archive {
+                api = api.with_archive(archive);
+            }
+            if let Some(lookup) = vera_receipt_proof_lookup {
+                api = api.with_receipt_proof_lookup(lookup);
+            }
+            if let Some(lookup) = vera_light_block_lookup {
+                api = api.with_light_block_lookup(lookup);
+            }
+            if let Some(lbi) = vera_light_block_index {
+                api = api.with_light_block_index(lbi);
+            }
+            api
+        };
 
-            let eth_api = {
-                let api = tx_submit.as_ref().map_or_else(
-                    || EthApiImpl::new(chain_id, state_provider.clone()),
-                    |submit| {
-                        EthApiImpl::with_tx_submit(chain_id, state_provider.clone(), submit.clone())
-                    },
-                );
-                api.with_node_state((*node_state_for_jsonrpc).clone())
-            };
-            let net_api = NetApiImpl::new(chain_id);
-            let web3_api = Web3ApiImpl::new();
-            let vera_api = {
-                let mut api = VeraApiImpl::new(node_state_for_jsonrpc, tx_submit);
-                if let (Some(idx), Some(mods)) = (vera_index, vera_modules) {
-                    api = api.with_index_and_modules(idx, mods);
-                }
-                if let Some((databases, modules)) = vera_native_modules {
-                    api = api.with_native_modules(databases, modules);
-                }
-                if let Some(archive) = vera_archive {
-                    api = api.with_archive(archive);
-                }
-                if let Some(lookup) = vera_receipt_proof_lookup {
-                    api = api.with_receipt_proof_lookup(lookup);
-                }
-                if let Some(lookup) = vera_light_block_lookup {
-                    api = api.with_light_block_lookup(lookup);
-                }
-                if let Some(lbi) = vera_light_block_index {
-                    api = api.with_light_block_index(lbi);
-                }
-                api
-            };
-
-            let mut module = jsonrpsee::RpcModule::new(());
-            if let Err(e) = module.merge(eth_api.into_rpc()) {
-                error!(error = %e, "Failed to merge eth API");
-                return None;
+        let mut module = jsonrpsee::RpcModule::new(());
+        module.merge(eth_api.into_rpc())?;
+        module.merge(net_api.into_rpc())?;
+        module.merge(web3_api.into_rpc())?;
+        module.merge(vera_api.into_rpc())?;
+        if let Some(headers) = subscription_headers.as_ref() {
+            module.merge(HeaderSubscriptionApiImpl(headers.clone()).into_rpc())?;
+        }
+        if let (Some(heads_tx), Some(logs_tx)) = (subscription_heads, subscription_logs) {
+            let mut sub_api = EthSubscriptionApiImpl::new(heads_tx, logs_tx);
+            if let Some(headers_tx) = subscription_headers {
+                sub_api = sub_api.with_headers(headers_tx);
             }
-            if let Err(e) = module.merge(net_api.into_rpc()) {
-                error!(error = %e, "Failed to merge net API");
-                return None;
-            }
-            if let Err(e) = module.merge(web3_api.into_rpc()) {
-                error!(error = %e, "Failed to merge web3 API");
-                return None;
-            }
-            if let Err(e) = module.merge(vera_api.into_rpc()) {
-                error!(error = %e, "Failed to merge vera API");
-                return None;
-            }
-            if let Some(headers) = subscription_headers.as_ref()
-                && let Err(e) = module.merge(HeaderSubscriptionApiImpl(headers.clone()).into_rpc())
-            {
-                error!(error = %e, "Failed to merge header subscription API");
-                return None;
-            }
-            if let (Some(heads_tx), Some(logs_tx)) = (subscription_heads, subscription_logs) {
-                let mut sub_api = EthSubscriptionApiImpl::new(heads_tx, logs_tx);
-                if let Some(headers_tx) = subscription_headers {
-                    sub_api = sub_api.with_headers(headers_tx);
-                }
-                if let Err(e) = module.merge(sub_api.into_rpc()) {
-                    error!(error = %e, "Failed to merge subscription API");
-                    return None;
-                }
-            }
-            for extra in extra_modules {
-                if let Err(e) = module.merge(extra) {
-                    error!(error = %e, "Failed to merge extra API module");
-                    return None;
-                }
-            }
-
-            info!(addr = %addr, "JSON-RPC server started");
-
-            let handle = server.start(module);
-            handle.stopped().await;
-            Some(())
-        });
-
-        RpcServerHandle { jsonrpc_handle }
+            module.merge(sub_api.into_rpc())?;
+        }
+        for extra in extra_modules {
+            module.merge(extra)?;
+        }
+        Ok(module)
     }
+
+    /// Expose the method table to in-process callers only.
+    pub fn into_local(self) -> Result<crate::LocalRpc, ServerError> {
+        Ok(crate::LocalRpc::new(self.into_module()?))
+    }
+
+    /// Serve over the network and expose the same method table in-process.
+    pub fn start_with_local(
+        self,
+        listener: Option<TcpListener>,
+    ) -> Result<(RpcServerHandle, crate::LocalRpc), ServerError> {
+        if let Some(listener) = &listener {
+            let actual = listener.local_addr().map_err(ServerError::Bind)?;
+            if actual != self.addr {
+                return Err(ServerError::Build(format!(
+                    "listener address {actual} does not match configured {}",
+                    self.addr
+                )));
+            }
+            listener.set_nonblocking(true).map_err(ServerError::Bind)?;
+        }
+        let (addr, max_connections) = (self.addr, self.max_connections);
+        let module = self.into_module()?;
+        let local = crate::LocalRpc::new(module.clone());
+        Ok((serve(addr, max_connections, module, listener), local))
+    }
+
+    fn start_inner(self, listener: Option<TcpListener>) -> RpcServerHandle {
+        let (addr, max_connections) = (self.addr, self.max_connections);
+        match self.into_module() {
+            Ok(module) => serve(addr, max_connections, module, listener),
+            Err(error) => {
+                error!(%error, "Failed to build JSON-RPC methods");
+                RpcServerHandle {
+                    jsonrpc_handle: tokio::spawn(async { None }),
+                }
+            }
+        }
+    }
+}
+
+fn serve(
+    addr: SocketAddr,
+    max_connections: u32,
+    module: jsonrpsee::RpcModule<()>,
+    listener: Option<TcpListener>,
+) -> RpcServerHandle {
+    let jsonrpc_handle = tokio::spawn(async move {
+        let config = ServerConfig::builder()
+            // Subscription acknowledgements echo the client's request id;
+            // keeping the response budget above the request budget keeps
+            // that echo from overflowing the response limit.
+            .max_request_body_size(vera_domain::SUBMISSION_REQUEST_BYTES)
+            .max_response_body_size(
+                vera_permission::PERMISSION_RESPONSE_BYTES.max(vera_domain::RECEIPT_RESPONSE_BYTES)
+                    as u32,
+            )
+            .max_connections(max_connections)
+            .set_batch_request_config(BatchRequestConfig::Limit(64))
+            .max_subscriptions_per_connection(8)
+            .set_message_buffer_capacity(8)
+            .enable_ws_ping(
+                PingConfig::default()
+                    .ping_interval(std::time::Duration::from_secs(30))
+                    .max_failures(2),
+            )
+            .build();
+        #[cfg(not(feature = "nuclei-rpc"))]
+        let result = {
+            let builder = Server::builder().set_config(config);
+            match listener {
+                Some(listener) => builder.build_from_tcp(listener),
+                None => builder.build(addr).await,
+            }
+        };
+        #[cfg(feature = "nuclei-rpc")]
+        let result = crate::nuclei_transport::Server::bind(addr, listener, config);
+        let server = match result {
+            Ok(s) => s,
+            Err(e) => {
+                error!(error = %e, "Failed to build JSON-RPC server");
+                return None;
+            }
+        };
+
+        info!(addr = %addr, "JSON-RPC server started");
+
+        let handle = server.start(module);
+        handle.stopped().await;
+        Some(())
+    });
+    RpcServerHandle { jsonrpc_handle }
 }
 
 /// Handle for managing the RPC server lifecycle.

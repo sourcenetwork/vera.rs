@@ -185,14 +185,33 @@ pub async fn run_bootstrap(
 }
 
 /// Deal an epoch-0 sharing among `participants` deterministically from `seed`.
+///
+/// The sharing is reproducible from public inputs; use it for local test networks only.
 pub fn trusted_setup(
     seed: u64,
     participants: impl IntoIterator<Item = PublicKey>,
 ) -> anyhow::Result<(GenesisEpochInfo, Map<PublicKey, Share>)> {
     let players: Set<PublicKey> = Set::from_iter_dedup(participants);
-    let (output, shares): (Output<MinSig, PublicKey>, Map<PublicKey, Share>) =
-        deal::<MinSig, _, N3f1>(TestRng::new(seed), SHARING_MODE, players.clone())
-            .map_err(|e| anyhow::anyhow!("trusted deal failed: {e:?}"))?;
+    let dealt = deal::<MinSig, _, N3f1>(TestRng::new(seed), SHARING_MODE, players.clone());
+    initial_epoch(players, dealt)
+}
+
+/// Deal an epoch-0 sharing among `participants` from operating-system randomness.
+pub(crate) fn random_setup(
+    participants: impl IntoIterator<Item = PublicKey>,
+) -> anyhow::Result<(GenesisEpochInfo, Map<PublicKey, Share>)> {
+    let players: Set<PublicKey> = Set::from_iter_dedup(participants);
+    let dealt = deal::<MinSig, _, N3f1>(commonware_utils::sys_rng(), SHARING_MODE, players.clone());
+    initial_epoch(players, dealt)
+}
+
+type Dealt = (Output<MinSig, PublicKey>, Map<PublicKey, Share>);
+
+fn initial_epoch<E: std::fmt::Debug>(
+    players: Set<PublicKey>,
+    dealt: Result<Dealt, E>,
+) -> anyhow::Result<(GenesisEpochInfo, Map<PublicKey, Share>)> {
+    let (output, shares) = dealt.map_err(|e| anyhow::anyhow!("trusted deal failed: {e:?}"))?;
     let info = EpochInfo {
         outcome: EpochOutcome::Success,
         epoch: Epoch::zero(),

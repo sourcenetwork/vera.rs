@@ -24,6 +24,9 @@ mod diagnostics;
 mod finalization_diagnostics;
 mod finalization_metrics;
 
+mod embedded;
+pub use embedded::{EmbedError, EmbeddedConfig, EmbeddedNode};
+
 mod finalize;
 pub use finalize::{index_finalized_block, subscription_data};
 
@@ -37,7 +40,10 @@ mod marshal_floor;
 mod native_genesis;
 mod node;
 
-pub use node::{run_node, run_node_with_rpc_listener};
+pub use node::{run_node, run_node_with_options, run_node_with_rpc_listener};
+
+mod options;
+pub use options::{NodeOptions, RpcMode, WatchdogMode};
 
 mod participants;
 pub use participants::{RegistryParticipants, validator_address};
@@ -54,6 +60,9 @@ pub(crate) use watchdog::run as run_watchdog;
 
 mod secret_store;
 pub use secret_store::FileSecretStore;
+
+mod solo;
+pub use solo::{SOLO_BLOCKS_PER_EPOCH, SoloError, SoloGenesis, prepare_solo};
 
 mod sink;
 pub use sink::{FinalizationArtifacts, FinalizationLookup, NodeSink, SinkParts};
