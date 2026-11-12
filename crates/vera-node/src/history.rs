@@ -15,6 +15,8 @@ use vera_executor::ExecutionReceipt;
 use vera_indexer::{
     BlockIndex, LightBlockIndex, MAX_CACHED_REVISIONS, StoredEpochMaterial, StoredFinalization,
 };
+mod memory;
+pub use memory::HistoryMemory;
 mod regolith_store;
 pub(crate) use regolith_store::BACKGROUND_THREADS;
 use regolith_store::{HistoryDb as DB, WriteBatch};
@@ -154,8 +156,17 @@ impl FinalizedHistory {
 
     /// Open the history for a specific genesis identity.
     pub fn open(path: impl AsRef<Path>, genesis: &Block) -> Result<Self> {
+        Self::open_with(path, genesis, None)
+    }
+
+    /// Open the history with explicit memory budgets. `None` keeps the store's defaults.
+    pub fn open_with(
+        path: impl AsRef<Path>,
+        genesis: &Block,
+        memory: Option<HistoryMemory>,
+    ) -> Result<Self> {
         let path = path.as_ref();
-        let db = DB::open_default(path)?;
+        let db = DB::open_default(path, memory)?;
         match db.get(FORMAT)? {
             Some(version) => {
                 ensure!(

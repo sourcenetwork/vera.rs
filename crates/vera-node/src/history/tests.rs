@@ -14,6 +14,9 @@ mod compaction_tests;
 #[path = "recovery_cache_tests.rs"]
 mod recovery_cache_tests;
 
+#[path = "memory_tests.rs"]
+mod memory_tests;
+
 pub(super) fn block(height: u64, parent: BlockId) -> Block {
     Block {
         context: Block::genesis_context(),

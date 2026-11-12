@@ -155,7 +155,65 @@ Everything is under `EmbeddedConfig::data_dir`: `validator.key`, `secrets.json`,
 that also embeds DefraDB gives each its own directory.
 
 A single validator dials no peers, but the consensus network still binds
-`p2p_listen`. Use a loopback address unless other validators must reach it.
+`p2p_listen`. The listener cannot be switched off: Commonware 2026.10's
+`authenticated::discovery` network takes a required listen address, always
+starts its listener actor, treats a failed bind as fatal and stops when the
+listener stops. The node's other actors are wired to that network, so it
+stays.
+
+For a deployment that no other validator reaches, pass `127.0.0.1:0`. The
+listener then binds loopback on a port the operating system chooses, so the
+host reserves no port and nothing outside the machine can connect. A
+connection from the same machine is accepted only from a peer the node tracks,
+after the authenticated handshake. Use another address only when other
+validators must reach the node.
+
+## Memory
+
+`EmbeddedConfig::history_memory` bounds what the finalized-history store keeps
+in memory. The embedded defaults are `HistoryMemory::EMBEDDED`; the daemon
+keeps Regolith's own sizes.
+
+| Budget | Embedded default | Daemon |
+| --- | --- | --- |
+| `block_cache_bytes`: decompressed table blocks kept for reads | 8 MiB | 512 MiB |
+| `write_buffer_bytes`: records held before a flush | 4 MiB | 64 MiB |
+
+Both fill with use, the cache on reads and the buffer as revisions finalize.
+Regolith also keeps flushed buffers for reuse, so memory attributable to the
+write buffer can reach a few times its budget. A smaller buffer flushes more
+often and writes smaller tables.
+
+Everything else about the store is as the daemon opens it, including the
+64 MiB value limit and the background worker. Regolith's `Options::embedded()`
+preset is not used: it caps a value at 256 KiB, and one history record holds a
+whole block, up to 17 MiB, with its receipts. A record larger than the write
+buffer is accepted and stays in memory until it is flushed. A block cache of
+zero disables the cache. `start` rejects a write buffer of zero, the one size
+Regolith refuses.
+
+Measured with
+`cargo test --release -p vera-node --test embedded_solo_profile -- --ignored --nocapture`
+on an Apple M5 Max (18 cores, 64 GiB, macOS 27.0.1), two runs of the first row
+and three of the second. The first row sets `PROFILE_HISTORY_CACHE_MIB=512 PROFILE_HISTORY_BUFFER_MIB=64`.
+The figures are the peak resident size of the test process, which holds the
+node, the test harness and its Tokio runtime; that process measured 8.3 MiB
+before the node started.
+
+| History budgets | After start | After 100 policy writes | After 30 s idle |
+| --- | --- | --- | --- |
+| 512 MiB cache, 64 MiB buffer | 107.2 to 109.6 MiB | 121.1 to 121.2 MiB | 121.3 MiB |
+| 8 MiB cache, 4 MiB buffer (default) | 107.0 to 109.0 MiB | 119.4 to 120.0 MiB | 119.4 to 120.0 MiB |
+
+This workload leaves about 0.3 MiB of history on disk and reads little of it
+back, so neither pair of budgets is reached and the rows do not differ beyond
+run-to-run variation. The budgets limit growth over a longer life; they do not
+lower the starting footprint, which the node's other allocations set. The
+machine was running other builds (load average 9 to 30), which does not change
+what the node allocates but did make the system reclaim idle memory: the
+current resident size fell as low as 36 MiB during the idle period in some
+runs while the peak stayed put. Receipt latencies from these runs are not
+comparable with the table under [Proposal pacing](#proposal-pacing).
 
 ## Proposal pacing
 
@@ -197,7 +255,9 @@ are not a capacity or multi-validator measurement.
 
 - One validator. A stopped or lost device stops the deployment.
 - An idle deployment still produces a heartbeat block about every 1.5 s.
-- Memory use has not been measured for embedded hosts.
+- Memory was measured for one short workload on one machine; see
+  [Memory](#memory). Growth over hours, larger states and Linux are not
+  measured.
 - The smallest workable `max_blocking_threads` has not been established.
   Blocking tasks that wait on storage hold threads that storage needs, so a
   bound that is too small can stall the node. On one Apple-silicon laptop a

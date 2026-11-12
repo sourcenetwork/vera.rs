@@ -1,5 +1,5 @@
-//! Helpers for the embedded thread tests, which run without an async runtime
-//! so that every thread they observe belongs to the node.
+//! Helpers for embedded node tests that run without an async runtime, so that
+//! every thread they observe belongs to the node.
 
 use std::{
     path::Path,
@@ -70,8 +70,9 @@ pub(crate) fn config(directory: &Path, chain_id: u64) -> EmbeddedConfig {
     config
 }
 
-/// Creates a policy through the in-process method table and waits for its certified receipt.
-pub(crate) fn finalize_a_write(node: &EmbeddedNode, signer: &BlsSigner) {
+/// Creates a policy through the in-process method table, waits for its certified
+/// receipt and returns the submission.
+pub(crate) fn finalize_a_write(node: &EmbeddedNode, signer: &BlsSigner) -> B256 {
     let call = IAcp::createPolicyCall {
         policy: POLICY.as_bytes().to_vec().into(),
         marshalType: 1,
@@ -84,6 +85,12 @@ pub(crate) fn finalize_a_write(node: &EmbeddedNode, signer: &BlsSigner) {
         vec![json!(format!("0x{}", hex::encode(wire)))],
     ))
     .unwrap();
+    await_certified_receipt(node, submission);
+    submission
+}
+
+/// Waits until the node serves a receipt for `submission` that verifies against its consensus key.
+pub(crate) fn await_certified_receipt(node: &EmbeddedNode, submission: B256) {
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         let proof: Option<ReceiptResponse> = block_on(

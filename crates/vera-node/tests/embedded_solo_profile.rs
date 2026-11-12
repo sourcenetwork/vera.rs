@@ -36,6 +36,66 @@ fn directory_bytes(path: &Path) -> u64 {
         .sum()
 }
 
+/// Resident set size of this process, which also holds the test harness and its runtime.
+/// The system can lower it at any time by compressing or paging out idle memory.
+fn resident_bytes() -> u64 {
+    #[cfg(target_os = "linux")]
+    let kibibytes = std::fs::read_to_string("/proc/self/status")
+        .unwrap()
+        .lines()
+        .find_map(|line| line.strip_prefix("VmRSS:").map(str::to_owned))
+        .unwrap();
+    #[cfg(not(target_os = "linux"))]
+    let kibibytes = String::from_utf8(
+        std::process::Command::new("ps")
+            .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
+    let kibibytes: u64 = kibibytes
+        .trim()
+        .trim_end_matches("kB")
+        .trim()
+        .parse()
+        .unwrap();
+    kibibytes * 1024
+}
+
+/// Largest resident set size this process has had, which idle-memory reclaim cannot lower.
+#[cfg(unix)]
+fn peak_resident_bytes() -> Option<u64> {
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
+    // SAFETY: `usage` is writable storage for one `rusage`, which the call fills on success.
+    let usage = unsafe {
+        assert_eq!(libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()), 0);
+        usage.assume_init()
+    };
+    // Darwin reports bytes; other systems report kibibytes.
+    let unit = if cfg!(target_vendor = "apple") {
+        1
+    } else {
+        1024
+    };
+    Some(u64::try_from(usage.ru_maxrss).unwrap() * unit)
+}
+
+#[cfg(not(unix))]
+fn peak_resident_bytes() -> Option<u64> {
+    None
+}
+
+fn memory() -> serde_json::Value {
+    json!({ "resident_bytes": resident_bytes(), "peak_resident_bytes": peak_resident_bytes() })
+}
+
+fn mebibytes(variable: &str) -> Option<usize> {
+    std::env::var(variable)
+        .ok()
+        .map(|value| value.parse::<usize>().unwrap() << 20)
+}
+
 async fn status(node: &EmbeddedNode) -> NodeStatus {
     node.rpc().call_empty("vera_nodeStatus").await.unwrap()
 }
@@ -116,8 +176,17 @@ async fn profile_solo_writes_and_idle_cost() {
         }
         None => {}
     }
-    let pacing = config.pacing;
+    // `PROFILE_HISTORY_CACHE_MIB=512 PROFILE_HISTORY_BUFFER_MIB=64` measures the daemon's store sizes.
+    if let Some(bytes) = mebibytes("PROFILE_HISTORY_CACHE_MIB") {
+        config.history_memory.block_cache_bytes = bytes;
+    }
+    if let Some(bytes) = mebibytes("PROFILE_HISTORY_BUFFER_MIB") {
+        config.history_memory.write_buffer_bytes = bytes;
+    }
+    let (pacing, history) = (config.pacing, config.history_memory);
+    let memory_before_start = memory();
     let node = EmbeddedNode::start(config).await.unwrap();
+    let memory_after_start = memory();
     let signer = BlsSigner::new(3u64.into(), chain_id).unwrap();
 
     let mut latencies = Vec::with_capacity(WRITES);
@@ -129,7 +198,9 @@ async fn profile_solo_writes_and_idle_cost() {
 
     let before = status(&node).await;
     let bytes_before = directory_bytes(directory.path());
+    let memory_after_writes = memory();
     tokio::time::sleep(IDLE).await;
+    let memory_after_idle = memory();
     let after = status(&node).await;
     let bytes_after = directory_bytes(directory.path());
     let blocks = after.finalized_height.unwrap() - before.finalized_height.unwrap();
@@ -150,6 +221,15 @@ async fn profile_solo_writes_and_idle_cost() {
             "idle_nullified_views": nullified,
             "idle_disk_bytes_per_hour": (bytes_after.saturating_sub(bytes_before)) as f64
                 * 3600.0 / IDLE.as_secs_f64(),
+            "history_disk_bytes": directory_bytes(&directory.path().join("history")),
+            "history_block_cache_bytes": history.block_cache_bytes,
+            "history_write_buffer_bytes": history.write_buffer_bytes,
+            "memory": {
+                "before_start": memory_before_start,
+                "after_start": memory_after_start,
+                "after_writes": memory_after_writes,
+                "after_idle": memory_after_idle,
+            },
         })
     );
     node.stop().await.unwrap();

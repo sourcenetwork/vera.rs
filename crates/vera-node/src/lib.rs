@@ -33,7 +33,7 @@ pub use finalize::{index_finalized_block, subscription_data};
 mod history;
 pub use history::{
     FinalizedHistory, HISTORY_CHUNK_BYTES, HistoricalExecution, HistoryChunk, HistoryLimits,
-    HistoryPeer, start_history_peer,
+    HistoryMemory, HistoryPeer, start_history_peer,
 };
 
 mod marshal_floor;
