@@ -126,6 +126,8 @@ pub fn prepare_solo(
             validators: vec![validator(&local, &config.network.listen_addr)],
             contracts: Vec::new(),
             extra_storage: Vec::new(),
+            policies: Vec::new(),
+            node_demerits: Vec::new(),
             epoch_info: Some(crate::epoch_info_hex(&epoch_info)),
             blocks_per_epoch: SOLO_BLOCKS_PER_EPOCH,
             simplex: Some(vera_domain::SimplexParameters::default()),
