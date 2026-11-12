@@ -192,27 +192,51 @@ async fn idle_node_keeps_a_slow_heartbeat_and_wakes_for_a_write() {
     let node = EmbeddedNode::start(config(directory.path(), chain_id, ACCOUNT_KEY))
         .await
         .unwrap();
-    let finalized = |status: vera_jsonrpc::NodeStatus| status.finalized_height.unwrap_or(0);
-    let before = finalized(node.rpc().call_empty("vera_nodeStatus").await.unwrap());
+    // Startup on a loaded machine can outlast any fixed window, so measure
+    // only once the heartbeat is running.
+    let before = finalized_beyond(&node, 0).await;
     tokio::time::sleep(Duration::from_secs(6)).await;
-    let after = finalized(node.rpc().call_empty("vera_nodeStatus").await.unwrap());
+    let after = finalized_beyond(&node, before).await;
     // The default idle wait is 1.5 s; the daemon cadence would finalize dozens of blocks.
     assert!(
-        (1..=12).contains(&(after - before)),
+        after - before <= 12,
         "idle heartbeat finalized {} blocks in 6 s",
         after - before
     );
 
+    // Each write starts just after an idle heartbeat, when a proposer that
+    // ignored it would have most of the idle wait still to run.
     let signer = BlsSigner::new(4u64.into(), chain_id).unwrap();
-    let started = std::time::Instant::now();
-    let submission = create_policy(&node, &signer, "wake").await;
-    verified_receipt(&node, submission).await;
+    let mut fastest = Duration::MAX;
+    let mut height = after;
+    for name in ["wake_a", "wake_b", "wake_c"] {
+        height = finalized_beyond(&node, height + 1).await;
+        let started = std::time::Instant::now();
+        let submission = create_policy(&node, &signer, name).await;
+        height = verified_receipt(&node, submission).await.revision.height;
+        fastest = fastest.min(started.elapsed());
+    }
     assert!(
-        started.elapsed() < Duration::from_millis(1500),
-        "a write waited for the idle heartbeat: {:?}",
-        started.elapsed()
+        fastest < Duration::from_secs(1),
+        "writes waited for the idle heartbeat: {fastest:?}"
     );
     node.stop().await.unwrap();
+}
+
+/// Waits for the finalized height to pass `height` and returns it.
+async fn finalized_beyond(node: &EmbeddedNode, height: u64) -> u64 {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let status: vera_jsonrpc::NodeStatus =
+                node.rpc().call_empty("vera_nodeStatus").await.unwrap();
+            match status.finalized_height {
+                Some(finalized) if finalized > height => return finalized,
+                _ => tokio::time::sleep(Duration::from_millis(20)).await,
+            }
+        }
+    })
+    .await
+    .expect("the heartbeat finalizes a block")
 }
 
 /// Drives a future on the calling thread without any async runtime.
