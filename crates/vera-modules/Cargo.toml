@@ -39,6 +39,8 @@ group.workspace = true
 blst = "0.3"
 base64.workspace = true
 k256.workspace = true
+p256.workspace = true
+ed25519-dalek.workspace = true
 
 [lints]
 workspace = true

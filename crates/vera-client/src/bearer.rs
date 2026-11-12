@@ -1,12 +1,10 @@
-//! JWT ES256K bearer token creation for client-side signing.
+//! Bearer tokens signed with a secp256k1 key held by the caller.
 
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use k256_native::ecdsa::SigningKey;
 use sha2::{Digest, Sha256};
 use vera_crypto::jwt::DelegationScope;
 
-use crate::error::ClientError;
+use crate::{error::ClientError, unsigned_token::UnsignedToken};
 
 /// Create a JWT bearer token signed with ES256K.
 ///
@@ -38,26 +36,15 @@ pub fn create_scoped_bearer_token(
     expires_at: u64,
     scope: DelegationScope,
 ) -> Result<String, ClientError> {
-    if issued_at >= expires_at {
-        return Err(ClientError::Signing("invalid delegation lifetime".into()));
-    }
-    let compressed = signing_key
-        .verifying_key()
-        .to_sec1_point(true)
-        .as_bytes()
-        .to_vec();
-    let iss = vera_crypto::secp256k1::did_from_secp256k1_pubkey(&compressed)
-        .map_err(|e| ClientError::Signing(format!("DID derivation: {e}")))?;
-
-    let header = r#"{"alg":"ES256K","typ":"vera-delegation-v1+jwt"}"#;
-    let payload = serde_json::json!({
-        "iss": iss, "sub": subject, "aud": format!("vera:{deployment_id}"),
-        "scope": scope, "iat": issued_at,
-        "nbf": issued_at.saturating_sub(30), "exp": expires_at,
-    })
-    .to_string();
-
-    sign_payload(signing_key, header, &payload)
+    let unsigned = UnsignedToken::delegation(
+        &issuer(signing_key)?,
+        subject,
+        deployment_id,
+        issued_at,
+        expires_at,
+        scope,
+    )?;
+    Ok(sign(signing_key, unsigned))
 }
 
 /// Sign one exact caller operation without operator-managed relay authority.
@@ -66,34 +53,10 @@ pub fn create_operation_token(
     signing_key: &SigningKey,
     claims: &vera_crypto::jwt::JwtClaims,
 ) -> Result<String, ClientError> {
-    let issuer = vera_crypto::secp256k1::did_from_secp256k1_pubkey(
-        signing_key.verifying_key().to_sec1_point(true).as_bytes(),
-    )
-    .map_err(|e| ClientError::Signing(e.to_string()))?;
-    let request = claims
-        .request
-        .as_ref()
-        .ok_or_else(|| ClientError::Signing("operation claim required".into()))?;
-    if claims.iss != issuer
-        || claims.relay.is_some()
-        || claims.nbf != claims.iat
-        || claims.iat >= claims.exp
-        || claims.exp > request.id.expires_at()
-        || request.genesis_id == [0; 32]
-    {
-        return Err(ClientError::Signing(
-            "invalid operation issuer, binding or lifetime".into(),
-        ));
+    if claims.iss != issuer(signing_key)? {
+        return Err(ClientError::Signing("invalid operation issuer".into()));
     }
-    request
-        .id
-        .validate(claims.iat)
-        .map_err(|e| ClientError::Signing(e.to_string()))?;
-    sign_payload(
-        signing_key,
-        r#"{"alg":"ES256K","typ":"vera-delegation-v1+jwt"}"#,
-        &serde_json::to_string(claims)?,
-    )
+    Ok(sign(signing_key, UnsignedToken::operation(claims)?))
 }
 
 /// Sign an operation-bound relay assertion. The issuer must match the signing key.
@@ -102,11 +65,7 @@ pub fn create_relay_token(
     signing_key: &SigningKey,
     claims: &vera_crypto::jwt::JwtClaims,
 ) -> Result<String, ClientError> {
-    let issuer = vera_crypto::secp256k1::did_from_secp256k1_pubkey(
-        signing_key.verifying_key().to_sec1_point(true).as_bytes(),
-    )
-    .map_err(|error| ClientError::Signing(error.to_string()))?;
-    if claims.iss != issuer
+    if claims.iss != issuer(signing_key)?
         || claims.relay.is_none()
         || claims.nbf != claims.iat
         || claims.iat >= claims.exp
@@ -116,28 +75,25 @@ pub fn create_relay_token(
             "invalid relay issuer, assertion or lifetime".into(),
         ));
     }
-    sign_payload(
-        signing_key,
-        r#"{"alg":"ES256K","typ":"vera-relay-v1+jwt"}"#,
+    let unsigned = UnsignedToken::new(
+        &claims.iss,
+        "vera-relay-v1+jwt",
         &serde_json::to_string(claims)?,
-    )
+    )?;
+    Ok(sign(signing_key, unsigned))
 }
 
-fn sign_payload(
-    signing_key: &SigningKey,
-    header: &str,
-    payload: &str,
-) -> Result<String, ClientError> {
-    let header_b64 = URL_SAFE_NO_PAD.encode(header.as_bytes());
-    let payload_b64 = URL_SAFE_NO_PAD.encode(payload.as_bytes());
+fn issuer(signing_key: &SigningKey) -> Result<String, ClientError> {
+    vera_crypto::secp256k1::did_from_secp256k1_pubkey(
+        signing_key.verifying_key().to_sec1_point(true).as_bytes(),
+    )
+    .map_err(|e| ClientError::Signing(format!("DID derivation: {e}")))
+}
 
-    let signing_input = format!("{header_b64}.{payload_b64}");
-    let digest = Sha256::digest(signing_input.as_bytes());
-
-    let (sig, _) = signing_key.sign_prehash_recoverable(digest.as_ref());
-    let sig_b64 = URL_SAFE_NO_PAD.encode(sig.to_bytes());
-
-    Ok(format!("{header_b64}.{payload_b64}.{sig_b64}"))
+fn sign(signing_key: &SigningKey, unsigned: UnsignedToken) -> String {
+    let digest = Sha256::digest(unsigned.signing_input());
+    let (signature, _) = signing_key.sign_prehash_recoverable(digest.as_ref());
+    unsigned.assemble(&signature.to_bytes())
 }
 
 #[cfg(test)]
@@ -160,6 +116,25 @@ mod tests {
         assert_eq!(claims.exp, 100);
         claims.authorize(subject, 9001, 50).unwrap();
         assert!(claims.iss.starts_with("did:key:"));
+    }
+
+    #[test]
+    fn secp256k1_tokens_keep_their_exact_bytes() {
+        let token = create_scoped_bearer_token(
+            &test_key(),
+            "did:key:worker",
+            9001,
+            50,
+            100,
+            DelegationScope::CreatePolicy,
+        )
+        .unwrap();
+        assert_eq!(
+            token,
+            "eyJhbGciOiJFUzI1NksiLCJ0eXAiOiJ2ZXJhLWRlbGVnYXRpb24tdjErand0In0.\
+             eyJhdWQiOiJ2ZXJhOjkwMDEiLCJleHAiOjEwMCwiaWF0Ijo1MCwiaXNzIjoiZGlkOmtleTp6UTNzaGtwcVphUlI0UDhLc1RFMXZYSFJ0akFBaktQZkhGZXU1Qjh2bVBuVzc5QTUxIiwibmJmIjoyMCwic2NvcGUiOiJhY3A6cG9saWN5OmNyZWF0ZSIsInN1YiI6ImRpZDprZXk6d29ya2VyIn0.\
+             K2C9cBB2Iu2XS0cRD9S_lXQ9hqFs8IjE8tQv8Y7MXQ0nRq_iziAQzVW2Z99xPJ4pyFxKJ1e19QoVmhn7C8tFuA"
+        );
     }
 
     #[test]
