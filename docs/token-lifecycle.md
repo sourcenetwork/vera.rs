@@ -4,7 +4,9 @@ Token records remain queryable after invalidation. An ordered index contains onl
 tokens with an expiry and a status other than invalid. Its key is `0x04`, followed
 by the expiry time as a big-endian 64-bit integer and the token hash's UTF-8 bytes;
 its value is empty. The primary record and existing issuer/account indexes retain
-their formats.
+their formats. A record and its index keys name a secp256k1 issuer or account by
+its [canonical DID](delegated-policies.md#one-actor-per-key); lookups and
+revocation accept any spelling of the key.
 
 Every token write updates the expiry index. Usage updates retain one entry;
 revocation removes it. The end-of-revision sweep visits at most 128 due entries

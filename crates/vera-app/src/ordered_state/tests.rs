@@ -12,6 +12,7 @@ use vera_backend::state_set_config;
 use vera_client::{ACP_ADDRESS, BlsSigner};
 use vera_modules::acp::abi::IAcp;
 
+mod actor_spellings;
 mod application;
 mod checkpoint;
 mod peer_sync;

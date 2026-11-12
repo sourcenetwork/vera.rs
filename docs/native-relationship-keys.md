@@ -18,6 +18,15 @@ Entity-set fields are ordered `resource`, `object_id`, `relation`; typed wildcar
 carry `resource`. Changes to this representation require a coordinated format
 upgrade.
 
+Keys name each actor by its canonical DID. Commands and queries rewrite a
+secp256k1 `did:key` in an entity subject, and in an object identifier of the
+policy's `actor` resource, before deriving a key, so every accepted spelling
+selects one relationship. Relationship writes refuse a record that names an
+actor in another spelling. The key builders encode the values they are given:
+callers that derive a key from a caller-supplied DID pass
+`vera_modules::actor::canonical` first. Other object identifiers are opaque.
+See [one actor per key](delegated-policies.md#one-actor-per-key).
+
 The builders live in [`vera_modules::acp::keys`](../crates/vera-modules/src/acp/keys.rs).
 `relationship_storage_key` and `relation_prefix` require an explicit incarnation.
 `object_prefix` covers every physical incarnation; `object_incarnation_prefix`

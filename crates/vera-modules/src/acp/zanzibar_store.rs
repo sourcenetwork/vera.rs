@@ -9,10 +9,10 @@ use vera_zanzibar::{ObjectRef, Policy, Relationship, Subject, ZanzibarStore};
 
 use super::record_store::RecordStore;
 use super::types::{
-    AccessRequest, PolicyMarshalingType, PolicyRecord, RecordMetadata, RelationGenerations,
+    AccessRequest, Object, PolicyMarshalingType, PolicyRecord, RecordMetadata, RelationGenerations,
     RelationPair, RelationshipRecord,
 };
-use super::{keys, object_state, relationship_index, relationship_mutations};
+use super::{keys, object_state, relationship_index, relationship_mutations, spelling};
 use crate::kv_store::InMemoryKvStore;
 use crate::types::Timestamp;
 
@@ -25,39 +25,57 @@ pub fn evaluate_access_request<S: RecordStore>(
     policy_id: &str,
     request: &AccessRequest,
 ) -> Result<bool> {
-    let Some(engine) = evaluation_engine(store, policy_id, None)? else {
+    let Some(evaluation) = evaluation(store, policy_id, None)? else {
         return Ok(false);
     };
     for operation in &request.operations {
-        if !engine.check_blocking(
-            policy_id,
-            &operation.object.resource,
-            &operation.object.id,
-            &operation.permission,
-            &request.actor.0,
-        )? {
+        if !evaluation.check(&operation.object, &operation.permission, &request.actor.0)? {
             return Ok(false);
         }
     }
     Ok(true)
 }
 
-pub(super) fn evaluation_engine<S: RecordStore>(
+/// One policy's evaluator over an immutable record snapshot.
+///
+/// Every permission evaluation, in execution and in proof replay, enters the
+/// engine through [`Evaluation::check`], which names actors canonically.
+pub(super) struct Evaluation<S: RecordStore> {
+    engine: vera_zanzibar::PermissionEngine<QmdbZanzibarStore<S>>,
+    adapter: std::sync::Arc<QmdbZanzibarStore<S>>,
+}
+
+impl<S: RecordStore> Evaluation<S> {
+    /// Whether `actor` holds `relation` on `object`, in any accepted spelling
+    /// of the actor or of an actor the object names.
+    pub(super) fn check(&self, object: &Object, relation: &str, actor: &Did) -> Result<bool> {
+        let policy = self.adapter.installed_policy();
+        self.engine.check_blocking(
+            &policy.id,
+            &object.resource,
+            &spelling::object_id(policy, &object.resource, &object.id),
+            relation,
+            &crate::actor::canonical(actor),
+        )
+    }
+}
+
+pub(super) fn evaluation<S: RecordStore>(
     store: S,
     policy_id: &str,
     meter: Option<std::sync::Arc<dyn vera_zanzibar::engine::EvaluationMeter>>,
-) -> Result<Option<vera_zanzibar::PermissionEngine<QmdbZanzibarStore<S>>>> {
+) -> Result<Option<Evaluation<S>>> {
     let Some(record) = read_policy(&store, policy_id)? else {
         return Ok(None);
     };
-    Ok(Some(evaluation_engine_for_policy(store, record, meter)))
+    Ok(Some(evaluation_for_policy(store, record, meter)))
 }
 
-pub(super) fn evaluation_engine_for_policy<S: RecordStore>(
+pub(super) fn evaluation_for_policy<S: RecordStore>(
     store: S,
     record: PolicyRecord,
     meter: Option<std::sync::Arc<dyn vera_zanzibar::engine::EvaluationMeter>>,
-) -> vera_zanzibar::PermissionEngine<QmdbZanzibarStore<S>> {
+) -> Evaluation<S> {
     // This adapter never leaves the evaluation or receives mutations. The initial
     // policy point read remains part of captured and replayed proof evidence.
     let adapter = std::sync::Arc::new(QmdbZanzibarStore {
@@ -65,17 +83,11 @@ pub(super) fn evaluation_engine_for_policy<S: RecordStore>(
         evaluation_policy: Some(record),
     });
     let mut engine = vera_zanzibar::PermissionEngine::new(adapter.clone());
-    engine.add_policy(
-        &adapter
-            .evaluation_policy
-            .as_ref()
-            .expect("evaluation policy was just installed")
-            .policy,
-    );
+    engine.add_policy(adapter.installed_policy());
     if let Some(meter) = meter {
         engine = engine.with_evaluation_meter(meter);
     }
-    engine
+    Evaluation { engine, adapter }
 }
 
 /// A [`ZanzibarStore`] adapter over vera's module KV store.
@@ -102,6 +114,14 @@ impl<S: RecordStore> QmdbZanzibarStore<S> {
             store: RwLock::new(store),
             evaluation_policy: None,
         }
+    }
+
+    const fn installed_policy(&self) -> &Policy {
+        &self
+            .evaluation_policy
+            .as_ref()
+            .expect("an evaluation adapter is built with its policy")
+            .policy
     }
 
     fn policy_record<'a>(
@@ -223,6 +243,14 @@ fn decode_relationship(
         ));
     }
     Ok(record)
+}
+
+/// A caller's relationship under the actors it names. Engine reads skip this:
+/// [`Evaluation::check`] already names them canonically.
+fn canonical(policy: &Policy, relationship: &Relationship) -> Relationship {
+    let mut relationship = relationship.clone();
+    spelling::relationship(policy, &mut relationship);
+    relationship
 }
 
 fn deleted_policy_key(policy: &str) -> Vec<u8> {
@@ -364,6 +392,7 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
         let mut store = self.store.write().unwrap();
         let policy = read_policy(&*store, policy_id)?
             .ok_or_else(|| invalid("relationship policy does not exist"))?;
+        let rel = &canonical(&policy.policy, rel);
         let pair = policy.relations.pair(rel)?;
         let incarnation = object_state::for_relationship(&*store, policy_id, rel)?;
         let record = RelationshipRecord {
@@ -394,6 +423,7 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
         let Some(policy) = read_policy(&*store, policy_id)? else {
             return Ok(false);
         };
+        let rel = &canonical(&policy.policy, rel);
         let Ok(pair) = policy.relations.pair(rel) else {
             return Ok(false);
         };
@@ -424,7 +454,11 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
         subject: &Subject,
     ) -> Result<bool> {
         let rel = Relationship::new(resource, object_id, relation, subject.clone());
-        self.is_live(policy_id, &rel)
+        let policy = self.policy_record(&*self.store.read().unwrap(), policy_id)?;
+        match policy {
+            Some(policy) => self.is_live(policy_id, &canonical(&policy.policy, &rel)),
+            None => Ok(false),
+        }
     }
 
     async fn check_permission_direct(
@@ -498,6 +532,7 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
         let Some(definition) = policy.policy.get_resource(resource) else {
             return Ok(());
         };
+        let object_id = &*spelling::object_id(&policy.policy, resource, object_id);
         let suffix = keys::object_prefix(resource, object_id);
         let mut keys_to_delete = Vec::new();
         for relation in &definition.relations {

@@ -77,7 +77,7 @@ impl AcpModule {
             Self::validate_policy_revision(&existing, revision)?;
         }
 
-        if existing.metadata.owner_did != creator.to_string() {
+        if existing.metadata.owner_did != crate::actor::canonical_str(creator.as_str()) {
             return Err(AcpError::Unauthorized {
                 reason: "only the policy creator can edit it".into(),
             });

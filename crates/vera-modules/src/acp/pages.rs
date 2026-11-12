@@ -71,6 +71,8 @@ impl AcpModule {
         budget: &QueryBudget,
     ) -> Result<RecordPage<RelationshipRecord>> {
         let policy = self.query_policy_with_budget(policy_id, budget)?;
+        let mut selector = request.selector.clone();
+        spelling::selector(&policy.policy, &mut selector);
         let after = request.after.as_deref();
         if after.is_some_and(|key| {
             key.len() > 64 << 10 || !key.starts_with(&keys::relationship_policy_prefix(policy_id))
@@ -86,7 +88,7 @@ impl AcpModule {
         let mut bytes = 0usize;
         let mut count = 0usize;
         let mut previous = None;
-        for prefix in self.relationship_query_prefixes(&policy, &request.selector, budget)? {
+        for prefix in self.relationship_query_prefixes(&policy, &selector, budget)? {
             if after.is_some_and(|key| key >= prefix.as_slice() && !key.starts_with(&prefix)) {
                 continue;
             }
@@ -118,8 +120,7 @@ impl AcpModule {
                 }
                 bytes += size;
                 count += 1;
-                if current && !record.archived && self.matches_selector(&record, &request.selector)
-                {
+                if current && !record.archived && self.matches_selector(&record, &selector) {
                     page.records.push(record);
                 }
                 previous = Some(key.to_vec());

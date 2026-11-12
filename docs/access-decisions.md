@@ -7,7 +7,10 @@ permissions are evaluated.
 `DecisionRequest` identifies the deployment, policy, submitting identity, its
 authenticated operation sequence, and the actor's ordered operations. The identifier
 is SHA-256 of `vera/access-decision/v1\0` followed by the Borsh encoding of that
-request. String and vector lengths preserve field boundaries. Requests are limited to 64
+request, with the submitting identity and the actor under their
+[canonical DIDs](delegated-policies.md#one-actor-per-key) and the operations as
+requested. A consumer may spell either key differently and derives the same
+identifier. String and vector lengths preserve field boundaries. Requests are limited to 64
 operations and 64 KiB of Borsh data; consumers reject records above 128 KiB. A later submission
 uses a different sequence and cannot replace an earlier decision under its key.
 

@@ -104,3 +104,91 @@ fn each_key_type_verifies_a_digest_signature_in_one_encoding() {
     crate::secp256k1::verify_digest(public.as_bytes(), &digest, &low.to_vec()).unwrap();
     assert!(verify_digest(&did, &digest, &low.to_vec()[..63]).is_err());
 }
+
+fn secp256k1_spellings(key: &k256::ecdsa::SigningKey) -> [String; 4] {
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    let bytes = |compressed| {
+        let mut bytes = vec![0xe7, 0x01];
+        bytes.extend_from_slice(key.verifying_key().to_encoded_point(compressed).as_bytes());
+        bytes
+    };
+    [
+        format!("did:key:{}", crate::did_key::encode(&bytes(true))),
+        format!("did:key:{}", crate::did_key::encode(&bytes(false))),
+        format!("did:key:u{}", URL_SAFE_NO_PAD.encode(bytes(true))),
+        format!("did:key:u{}", URL_SAFE_NO_PAD.encode(bytes(false))),
+    ]
+}
+
+#[test]
+fn every_secp256k1_spelling_is_recorded_as_the_compressed_base58_did() {
+    let key = k256::ecdsa::SigningKey::from_slice(&[42; 32]).unwrap();
+    let spellings = secp256k1_spellings(&key);
+    let canonical = crate::secp256k1::did_from_secp256k1_pubkey(
+        key.verifying_key().to_encoded_point(true).as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(spellings[0], canonical);
+    assert!(canonical.starts_with("did:key:zQ3s"));
+    for spelling in &spellings {
+        assert_eq!(key_type(spelling).unwrap(), ActorKeyType::Secp256k1);
+        assert_eq!(canonical_did(spelling), canonical);
+        assert_eq!(
+            crate::jwt::canonical_actor(spelling).unwrap(),
+            canonical,
+            "both canonical functions share one definition"
+        );
+        assert_eq!(canonical_did(&canonical_did(spelling)), canonical);
+        assert!(crate::jwt::matches_issuer(spelling, &canonical));
+    }
+    assert!(matches!(
+        canonical_did(&canonical),
+        std::borrow::Cow::Borrowed(_)
+    ));
+
+    let other = k256::ecdsa::SigningKey::from_slice(&[43; 32]).unwrap();
+    for spelling in secp256k1_spellings(&other) {
+        assert_ne!(canonical_did(&spelling), canonical);
+        assert!(!crate::jwt::matches_issuer(&spelling, &canonical));
+    }
+}
+
+#[test]
+fn identifiers_with_one_spelling_are_recorded_as_written() {
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    let ed25519 = ed25519_dalek::SigningKey::from_bytes(&[42; 32]);
+    let ed25519_key = ed25519.verifying_key().to_bytes();
+    let p256 = p256::ecdsa::SigningKey::from_slice(&[42; 32]).unwrap();
+    let p256_key = p256.verifying_key();
+    let bls = crate::bls::did_from_bls_pubkey(&ark_ec::AffineRepr::generator());
+
+    let mut ed25519_base64 = vec![0xed, 0x01];
+    ed25519_base64.extend_from_slice(&ed25519_key);
+    let mut p256_uncompressed = vec![0x80, 0x24];
+    p256_uncompressed.extend_from_slice(p256_key.to_encoded_point(false).as_bytes());
+    let mut off_curve = vec![0xe7, 0x01, 0x04];
+    off_curve.extend_from_slice(&[0x11; 64]);
+
+    for unchanged in [
+        ed25519_did(&ed25519_key).unwrap(),
+        p256_did(p256_key.to_encoded_point(true).as_bytes()).unwrap(),
+        format!("did:key:u{}", URL_SAFE_NO_PAD.encode(&ed25519_base64)),
+        format!("did:key:{}", crate::did_key::encode(&p256_uncompressed)),
+        format!("did:key:{}", crate::did_key::encode(&off_curve)),
+        format!("did:key:u{}", URL_SAFE_NO_PAD.encode(&off_curve)),
+        bls.unwrap(),
+        format!("did:opk:{}", "ab".repeat(32)),
+        "*".to_owned(),
+        "did:key:alice".to_owned(),
+        "did:key:user".to_owned(),
+        "did:key:z0".to_owned(),
+        "did:key:".to_owned(),
+        "0xABCD".to_owned(),
+        String::new(),
+    ] {
+        assert!(
+            matches!(canonical_did(&unchanged), std::borrow::Cow::Borrowed(_)),
+            "rewrote {unchanged:?}"
+        );
+    }
+}

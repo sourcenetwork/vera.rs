@@ -48,11 +48,12 @@ impl AcpModule {
         &mut self,
         policy: &str,
         marshal_type: PolicyMarshalingType,
-        metadata: RecordMetadata,
+        mut metadata: RecordMetadata,
         specification: Option<PolicySpecification>,
         supplied: &SuppliedMetadata,
         budget: &PolicyCreateBudget,
     ) -> Result<PolicyRecord> {
+        crate::actor::canonicalize(&mut metadata.owner_did);
         if policy.len() > MAX_POLICY_DEFINITION_BYTES {
             return Err(AcpError::InvalidPolicy {
                 reason: "policy definition exceeds 64 KiB".into(),

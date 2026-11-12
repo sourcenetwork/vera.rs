@@ -130,6 +130,9 @@ fn modules() -> (VeraModule, AcpModule) {
     .unwrap();
     (vera, acp)
 }
+#[path = "support/relay_spellings.rs"]
+mod spellings;
+
 fn create(
     vera: &mut VeraModule,
     acp: &mut AcpModule,

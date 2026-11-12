@@ -505,6 +505,7 @@ jobs:
               --test native_signed_operation
               --test delegated_policy
               --test actor_key_types
+              --test one_actor_spelling
               --test native_bulletin
               --test native_registration
               --test cross_endpoint_receipts

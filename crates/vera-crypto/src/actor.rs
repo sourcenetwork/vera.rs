@@ -4,7 +4,24 @@
 //! secp256k1, EdDSA for Ed25519 and ES256 for P-256. ECDSA signatures cover
 //! the SHA-256 digest of the signing input; Ed25519 signs the input itself.
 
+use std::borrow::Cow;
+
 use crate::{actor_key::ActorKey, jwt::JwtError};
+
+/// The single DID under which the key behind `did` is recorded and compared.
+///
+/// A secp256k1 key may be named from its compressed or uncompressed point, in
+/// base58btc or base64url. All four spellings name one actor, recorded under
+/// the compressed base58btc one. Ed25519 and P-256 keys have a single accepted
+/// spelling, which is returned as written. Any other identifier, including a
+/// provider actor, a BLS key and the wildcard, is not a delegation key and is
+/// returned unchanged.
+pub fn canonical_did(did: &str) -> Cow<'_, str> {
+    match ActorKey::from_did(did).map(|key| key.canonical_did()) {
+        Ok(canonical) if canonical != did => Cow::Owned(canonical),
+        _ => Cow::Borrowed(did),
+    }
+}
 
 /// The `did:key` under which an Ed25519 public key acts.
 pub fn ed25519_did(public_key: &[u8; 32]) -> Result<String, JwtError> {

@@ -46,6 +46,7 @@ mod relationship_queries;
 mod restoration;
 mod retirement;
 mod retirement_cleanup;
+mod spelling;
 pub mod theorem;
 pub use registration_queries::{MAX_REGISTRATION_LEAF_BYTES, MAX_REGISTRATION_OBJECTS};
 pub mod decision;
@@ -223,6 +224,8 @@ impl AcpModule {
             });
         }
         budget.request(policy_id, creator.as_str(), access_request)?;
+        let access_request = &*spelling::access_request(access_request);
+        let creator = &crate::actor::canonical(creator);
         let expected = decision::DecisionRequest {
             deployment_id: block.deployment_id,
             policy_id: policy_id.into(),
@@ -287,7 +290,7 @@ impl AcpModule {
         &mut self,
         creator: &Did,
         policy_id: &str,
-        cmd: PolicyCmd,
+        mut cmd: PolicyCmd,
         budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
         let policy_key = keys::policy_key(policy_id);
@@ -295,7 +298,8 @@ impl AcpModule {
             .permissions
             .records
             .read(&policy_key, self.store.get_ref(&policy_key))?;
-        self.query_policy(policy_id)?;
+        spelling::command(&self.query_policy(policy_id)?.policy, &mut cmd);
+        let creator = &crate::actor::canonical(creator);
         let object_id = match &cmd {
             PolicyCmd::SetRelationship(rel) | PolicyCmd::DeleteRelationship(rel) => {
                 Some(rel.object_id.as_str())
@@ -415,21 +419,15 @@ impl AcpModule {
             read_capture::PERMISSION_READ_LIMITS,
             budget.clone(),
         );
-        let engine =
-            zanzibar_store::evaluation_engine(capture, policy_id, Some(Arc::new(budget.clone())))
+        let evaluation =
+            zanzibar_store::evaluation(capture, policy_id, Some(Arc::new(budget.clone())))
                 .map_err(|error| budget.evaluation_error(error))?
                 .ok_or_else(|| AcpError::PolicyNotFound {
                     id: policy_id.into(),
                 })?;
         for op in &request.operations {
-            let granted = engine
-                .check_blocking(
-                    policy_id,
-                    &op.object.resource,
-                    &op.object.id,
-                    &op.permission,
-                    &request.actor.0,
-                )
+            let granted = evaluation
+                .check(&op.object, &op.permission, &request.actor.0)
                 .map_err(|error| budget.evaluation_error(error))?;
             if !granted {
                 if decision {
@@ -554,6 +552,7 @@ impl AcpModule {
         objects: &[Object],
         actor: &types::Actor,
     ) -> Result<GenerateCommitmentResult> {
+        let actor = &Actor(crate::actor::canonical(&actor.0));
         Self::validate_commitment_input(policy_id, objects, actor.0.as_str())?;
 
         if !self.zanzibar_policies.contains_key(policy_id) {

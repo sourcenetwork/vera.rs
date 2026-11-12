@@ -155,6 +155,7 @@ impl VeraClient {
     }
 
     /// Read one collaborator record; absence means no stored collaborator grant.
+    /// Any accepted spelling of the collaborator's key selects its one record.
     pub async fn read_bulletin_collaborator(
         &self,
         namespace: &str,
@@ -166,6 +167,7 @@ impl VeraClient {
         if did.len() > MAX_KEY_BYTES {
             return Err(vera_permission::PermissionError::Limit.into());
         }
+        let did = &*vera_modules::actor::canonical_str(did);
         self.bulletin_record(
             keys::collaborator_key(&namespace, did),
             minimum,

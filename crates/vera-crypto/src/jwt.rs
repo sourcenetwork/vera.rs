@@ -86,14 +86,20 @@ pub struct RelayAssertion {
 }
 
 impl JwtClaims {
-    /// Actor identity; relay claims still require committed grant verification.
+    /// Actor identity as the token spells it; relay claims still require
+    /// committed grant verification. [`crate::actor::canonical_did`] gives the
+    /// spelling under which the actor is recorded.
     pub fn actor(&self) -> &str {
         self.relay.as_ref().map_or(&self.iss, |relay| &relay.actor)
     }
 
     /// Check the authenticated caller, deployment and agreed execution time.
+    ///
+    /// The subject may name the caller's key in any accepted spelling.
     pub fn authorize(&self, submitter: &str, deployment_id: u64, now: u64) -> Result<(), JwtError> {
-        if self.sub != submitter || self.aud != format!("vera:{deployment_id}") {
+        if crate::actor::canonical_did(&self.sub) != crate::actor::canonical_did(submitter)
+            || self.aud != format!("vera:{deployment_id}")
+        {
             return Err(JwtError::InvalidClaims(
                 "caller or deployment mismatch".into(),
             ));
@@ -122,7 +128,7 @@ pub enum JwtError {
     /// Signature verification failed, or the signature encoding is not canonical.
     #[error("invalid signature")]
     InvalidSignature,
-    /// The `iss` claim is not a supported, canonically spelled `did:key:`.
+    /// The `iss` claim is not a supported `did:key:` in an accepted spelling.
     #[error("invalid issuer: {0}")]
     InvalidIssuer(String),
     /// Payload decoding or deserialization failed.
@@ -203,18 +209,16 @@ pub fn canonical_issuer(issuer: &str) -> Result<String, JwtError> {
 }
 
 /// The single DID under which a delegation actor of any supported key type is recorded.
+///
+/// Rejects an identifier that is not a supported key; [`crate::actor::canonical_did`]
+/// returns such an identifier unchanged.
 pub fn canonical_actor(actor: &str) -> Result<String, JwtError> {
     ActorKey::from_did(actor).map(|key| key.canonical_did())
 }
 
-/// Match an issuer for revocation, including compressed and uncompressed key DIDs.
-/// This does not change the issuer identity recorded in policies or token indexes.
+/// Whether two identifiers name one issuer, in any accepted spelling of its key.
 pub fn matches_issuer(issuer: &str, caller: &str) -> bool {
-    issuer == caller
-        || match (ActorKey::from_did(issuer), ActorKey::from_did(caller)) {
-            (Ok(issuer), Ok(caller)) => issuer == caller,
-            _ => false,
-        }
+    crate::actor::canonical_did(issuer) == crate::actor::canonical_did(caller)
 }
 
 #[cfg(test)]
@@ -264,6 +268,33 @@ mod tests {
         );
         assert!(canonical_issuer("did:key:z0").is_err());
         assert!(canonical_issuer("did:key:uAA=").is_err());
+    }
+
+    #[test]
+    fn subject_names_the_submitting_key_in_any_spelling() {
+        let (key, issuer) = test_key_and_did();
+        let submitter = SigningKey::from_slice(&[7; 32]).unwrap();
+        let did = |key: &SigningKey, compressed| {
+            let mut bytes = vec![0xe7, 0x01];
+            bytes.extend_from_slice(key.verifying_key().to_encoded_point(compressed).as_bytes());
+            format!("did:key:{}", crate::did_key::encode(&bytes))
+        };
+        for written in [true, false] {
+            let token = create_jwt(
+                &key,
+                &serde_json::json!({"iss": issuer, "sub": did(&submitter, written), "exp": 100})
+                    .to_string(),
+            );
+            let claims = verify_bearer_token(&token).unwrap();
+            assert_eq!(claims.sub, did(&submitter, written));
+            for authenticated in [true, false] {
+                claims
+                    .authorize(&did(&submitter, authenticated), 9001, 50)
+                    .unwrap();
+            }
+            assert!(claims.authorize(&did(&key, true), 9001, 50).is_err());
+            assert!(claims.authorize("caller", 9001, 50).is_err());
+        }
     }
 
     fn create_jwt(signing_key: &SigningKey, claims_json: &str) -> String {

@@ -5,7 +5,8 @@ A ring starts with an ACP-authorized creation request. The actor must have
 `ring/<ring_id>` ACP object for that actor and stores the pending ring atomically.
 All committee and reporting-backup node keys must already be registered.
 
-`RingConfig::id` binds the initial deployment state, creator and complete creation
+`RingConfig::id` binds the initial deployment state, the creator's
+[canonical DID](delegated-policies.md#one-actor-per-key) and complete creation
 configuration, including a caller-generated nonce and required `requires_pet` mode. Node and relay sets must be
 sorted and unique. Reporting settings are explicit; `ReportingConfig::default`
 uses one demerit per report, a daily reset and a kick threshold of three. Ring
