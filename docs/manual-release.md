@@ -14,8 +14,8 @@ operator keys and records one canonical DID per secp256k1 actor, so results can
 name an actor under a different spelling than a request used; see
 [delegated policies](delegated-policies.md). Threshold-ring identifiers no
 longer include the deployment or the creator, so `RingConfig::id` takes no
-arguments and every ring identifier differs from `0.1.1`; ring commands and
-updates gain `CancelReshare` and `SetPreShareEndpoints`. Consumers that derive ring
+arguments and every ring identifier differs from `0.1.1`; `RingUpdate` gains
+`CancelReshare` and `SetPreShareEndpoints`. Consumers that derive ring
 identifiers or match ring commands must be updated together with this version.
 Every validator of a deployment must run the same version.
 
