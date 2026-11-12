@@ -59,6 +59,7 @@ impl AcpModule {
                 .saturating_add(submission.signer.len())
                 .saturating_add(submission.tx_hash.len()),
         )?;
+        let actor = &crate::actor::canonical(actor);
         if block.timestamp.block_height == 0
             || submission.tx_hash.len() != 32
             || submission.signer.is_empty()

@@ -314,9 +314,13 @@ impl AcpModule {
         let claims = vera
             .authorize_delegation(context, &caller, token, delegated.0, delegated.1)
             .map_err(invalid)?;
-        let actor = Did::new(claims.actor()).map_err(|error| AcpError::InvalidBearerToken {
-            reason: error.to_string(),
-        })?;
+        // The token keeps the spelling its issuer signed; the operation, its
+        // outcome and every record it writes name the actor canonically.
+        let actor = Did::new(claims.actor())
+            .map(|actor| crate::actor::canonical(&actor))
+            .map_err(|error| AcpError::InvalidBearerToken {
+                reason: error.to_string(),
+            })?;
         let issuer = Did::new(&claims.iss).map_err(|error| AcpError::InvalidBearerToken {
             reason: error.to_string(),
         })?;

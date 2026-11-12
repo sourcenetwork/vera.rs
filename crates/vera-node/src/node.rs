@@ -65,9 +65,9 @@ use crate::{
     BACKFILL_CHANNEL, BROADCAST_CHANNEL, CERTIFICATE_CHANNEL, CommittedState, DKG_CHANNEL,
     DKG_PROBE_CHANNEL, DynamicProvider, FileSecretStore, IO_BUFFER_SIZE, MAILBOX_SIZE,
     MAX_BLOCK_TXS, MAX_MESSAGE_SIZE, MAX_PARTICIPANTS, MAX_SUPPORTED_MODE, MAX_TX_BYTES,
-    MEMPOOL_CHANNEL, MESSAGE_RATE, NAMESPACE, NodeSettings, P2P_SUFFIX, PAGE_CACHE_SIZE, PAGE_SIZE,
-    RESOLVER_CHANNEL, REVEAL, Registrar, RegistryParticipants, SHARING_MODE, TxGossip,
-    VOTE_CHANNEL, VrfElectorConfig,
+    MEMPOOL_CHANNEL, MESSAGE_RATE, NAMESPACE, NodeOptions, NodeSettings, P2P_SUFFIX,
+    PAGE_CACHE_SIZE, PAGE_SIZE, RESOLVER_CHANNEL, REVEAL, Registrar, RegistryParticipants, RpcMode,
+    SHARING_MODE, TxGossip, VOTE_CHANNEL, VrfElectorConfig,
     peer_capacity::PeerCapacity,
     rejoin,
     sink::{FinalizationArtifacts, FinalizationLookup, NodeSink, SinkParts},
@@ -88,15 +88,24 @@ pub async fn run_node_with_rpc_listener(
     settings: NodeSettings,
     rpc_listener: Option<std::net::TcpListener>,
 ) -> anyhow::Result<()> {
+    run_node_with_options(context, settings, NodeOptions::daemon(rpc_listener)).await
+}
+
+/// Run a validator hosted by another program until one of its actors stops.
+pub async fn run_node_with_options(
+    context: tokio::Context,
+    settings: NodeSettings,
+    options: NodeOptions,
+) -> anyhow::Result<()> {
     settings.genesis.validate_timestamp()?;
     if let Some(parameters) = settings.genesis.simplex {
         parameters.validate().map_err(anyhow::Error::msg)?;
-        run_node_with_elector(context, settings, rpc_listener, move |_| {
+        run_node_with_elector(context, settings, options, move |_| {
             crate::vrf_elector::pipelined_elector(parameters)
         })
         .await
     } else {
-        run_node_with_elector(context, settings, rpc_listener, VrfElectorConfig::new).await
+        run_node_with_elector(context, settings, options, VrfElectorConfig::new).await
     }
 }
 
@@ -105,10 +114,17 @@ async fn run_node_with_elector<
 >(
     context: tokio::Context,
     settings: NodeSettings,
-    rpc_listener: Option<std::net::TcpListener>,
+    options: NodeOptions,
     make_elector: impl FnOnce(vera_app::VrfSeedCache) -> L + Send,
 ) -> anyhow::Result<()> {
-    if let Some(listener) = &rpc_listener {
+    let NodeOptions {
+        rpc,
+        watchdog,
+        ready,
+        solo_pacing,
+        verification_threads,
+    } = options;
+    if let RpcMode::Network(Some(listener)) = &rpc {
         anyhow::ensure!(
             listener.local_addr()? == settings.rpc_addr,
             "inherited RPC listener does not match configured address"
@@ -280,10 +296,9 @@ async fn run_node_with_elector<
         ),
     }
 
-    let verification_threads = std::thread::available_parallelism()
-        .unwrap_or(NZUsize!(1))
-        .min(NZUsize!(4));
-    let verification_strategy = Rayon::new(verification_threads)?;
+    let verification_strategy = Rayon::new(
+        verification_threads.unwrap_or_else(crate::options::default_verification_threads),
+    )?;
     let executor = VeraExecutor::new(chain_id)
         .with_membership_epochs(blocks_per_epoch, term_length)
         .with_native_verification_strategy(verification_strategy.clone());
@@ -556,7 +571,7 @@ async fn run_node_with_elector<
         let watchdog_state = node_state.clone();
         let has_durable_history = history.head_height() > 0;
         state_resolver_handles.push(context.child("watchdog").spawn(move |_| async move {
-            crate::run_watchdog(watchdog_state, stall, has_durable_history).await;
+            crate::run_watchdog(watchdog_state, stall, has_durable_history, watchdog).await;
         }));
     }
     if let Some(height) = completed_sync_height {
@@ -618,8 +633,12 @@ async fn run_node_with_elector<
     .with_consensus_key(*sharing.public())
     .with_native_pipeline(
         genesis.simplex.is_some(),
-        (leader_timeout / 4).min(Duration::from_millis(100)),
-    );
+        solo_pacing.map_or_else(
+            || (leader_timeout / 4).min(Duration::from_millis(100)),
+            |pacing| pacing.batch,
+        ),
+    )
+    .with_idle_wait(solo_pacing.map_or(Duration::ZERO, |pacing| pacing.idle));
     let vrf_elector = make_elector(application.vrf_seed_cache());
 
     let snapshot_history = crate::history::SnapshotHistory {
@@ -979,15 +998,28 @@ async fn run_node_with_elector<
             })
         })
         .with_vera_light_block_index(light_block_index);
-    let rpc_handle = match rpc_listener {
-        Some(listener) => rpc_server.start_with_listener(listener)?,
-        None => rpc_server.start(),
+    let local = match rpc {
+        RpcMode::Network(listener) => {
+            let (rpc_handle, local) = rpc_server.start_with_local(listener)?;
+            context.child("rpc").spawn(move |_| async move {
+                rpc_handle.stopped().await;
+                error!("RPC server stopped unexpectedly");
+            });
+            info!(validator_index, %rpc_addr, "vera validator started");
+            local
+        }
+        RpcMode::Local => {
+            info!(
+                validator_index,
+                "vera validator started without an RPC listener"
+            );
+            rpc_server.into_local()?
+        }
     };
-    context.child("rpc").spawn(move |_| async move {
-        rpc_handle.stopped().await;
-        error!("RPC server stopped unexpectedly");
-    });
-    info!(validator_index, %rpc_addr, "vera validator started");
+    if let Some(ready) = ready {
+        // A host that stopped waiting no longer needs the method table.
+        let _ = ready.send(local);
+    }
 
     ::tokio::select! {
         result = &mut startup_actors => result,

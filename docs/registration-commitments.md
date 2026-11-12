@@ -48,7 +48,8 @@ uses the same validation, including actor, policy, object and storage-key bindin
 Archived ownership remains reserved for its previous owner.
 
 The registration leaf is `vera/registration-leaf/v1` followed by a zero byte and
-the Borsh encoding of four strings: policy ID, resource, object ID and actor DID.
+the Borsh encoding of four strings: policy ID, resource, object ID and the actor's
+[canonical DID](delegated-policies.md#one-actor-per-key).
 Strings use Borsh's little-endian 32-bit byte lengths and UTF-8 bytes. The leaf
 hash is SHA-256 of `0x00 || leaf`; inner hashes use `0x01 || left || right`.
 Odd trailing nodes are promoted unchanged. Verification checks the leaf index,

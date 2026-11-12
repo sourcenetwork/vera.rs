@@ -8,8 +8,8 @@ Original texts are reproduced below and identified by SHA-256. For texts from
 upstream source trees, the source URL includes the reviewed revision. Aurora's
 package records a dirty source tree; see its package-specific notice below.
 
-Cargo.lock SHA-256: cbd7a92b3a0aa80e4e872f121c5dc7a0e8128062bb96d8986f404087a2b96fd1
-Packages: 535
+Cargo.lock SHA-256: d475a25c09c743495d7a88510e4b05851675157a4728e4cf4bde53a3b565cd7b
+Packages: 537
 
 PACKAGE INDEX
 =============
@@ -646,6 +646,13 @@ ecdsa 0.17.0 | Apache-2.0 OR MIT
   78779d420019e6b4630376af8e86b6b335ee8a2f89ede6e0411e0469a326aaa4  LICENSE-APACHE
   9aa4f92bfcde293ebeca9e2379fa18d1d61f000977da144c7b74c2986c9b6466  LICENSE-MIT
 
+ed25519 3.0.0 | Apache-2.0 OR MIT
+  78779d420019e6b4630376af8e86b6b335ee8a2f89ede6e0411e0469a326aaa4  LICENSE-APACHE
+  9aa4f92bfcde293ebeca9e2379fa18d1d61f000977da144c7b74c2986c9b6466  LICENSE-MIT
+
+ed25519-dalek 3.0.0 | BSD-3-Clause
+  7a313964a6e050794d2ad57f4863c11f6bbe055c0ae6ce2cf3b9fc45150bada3  LICENSE
+
 educe 0.6.0 | MIT
   dd0741aba702705d02da3e18fca5d3a27538fe6c983e9f09946e82ecfc59acab  LICENSE
 
@@ -998,17 +1005,17 @@ keccak 0.2.2 | Apache-2.0 OR MIT
   a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5  LICENSE-APACHE
   8c7516d4b27b1e495be5e38b612298b63de48d05f49cdac94f70f3cd70f8864b  LICENSE-MIT
 
-kovan 0.2.3 | Apache-2.0
-  59899c6091b540582ed617e8eeaac4919dc985ccfc35459ee9752b699be5205b  https://github.com/vertexclique/kovan/blob/368297dde46a8dc8d67e87a8b6f12a0156788f46/LICENSE
+kovan 0.2.5 | Apache-2.0
+  59899c6091b540582ed617e8eeaac4919dc985ccfc35459ee9752b699be5205b  https://github.com/vertexclique/kovan/blob/bc19d4a8389818f559b48ff795f71e932453bee5/LICENSE
 
-kovan-channel 0.2.3 | Apache-2.0
-  59899c6091b540582ed617e8eeaac4919dc985ccfc35459ee9752b699be5205b  https://github.com/vertexclique/kovan/blob/368297dde46a8dc8d67e87a8b6f12a0156788f46/LICENSE
+kovan-channel 0.2.5 | Apache-2.0
+  59899c6091b540582ed617e8eeaac4919dc985ccfc35459ee9752b699be5205b  https://github.com/vertexclique/kovan/blob/bc19d4a8389818f559b48ff795f71e932453bee5/LICENSE
 
-kovan-map 0.2.3 | Apache-2.0
-  59899c6091b540582ed617e8eeaac4919dc985ccfc35459ee9752b699be5205b  https://github.com/vertexclique/kovan/blob/368297dde46a8dc8d67e87a8b6f12a0156788f46/LICENSE
+kovan-map 0.2.5 | Apache-2.0
+  59899c6091b540582ed617e8eeaac4919dc985ccfc35459ee9752b699be5205b  https://github.com/vertexclique/kovan/blob/bc19d4a8389818f559b48ff795f71e932453bee5/LICENSE
 
-kovan-queue 0.2.3 | Apache-2.0
-  59899c6091b540582ed617e8eeaac4919dc985ccfc35459ee9752b699be5205b  https://github.com/vertexclique/kovan/blob/368297dde46a8dc8d67e87a8b6f12a0156788f46/LICENSE
+kovan-queue 0.2.5 | Apache-2.0
+  59899c6091b540582ed617e8eeaac4919dc985ccfc35459ee9752b699be5205b  https://github.com/vertexclique/kovan/blob/bc19d4a8389818f559b48ff795f71e932453bee5/LICENSE
 
 lazy_static 1.5.0 | MIT OR Apache-2.0
   a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
@@ -1160,7 +1167,7 @@ opentelemetry-proto 0.32.0 | Apache-2.0
 opentelemetry_sdk 0.32.1 | Apache-2.0
   c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4  https://github.com/open-telemetry/opentelemetry-rust/blob/284a37d93b3856e1975c2807ba3af1421ebd9b52/LICENSE
 
-orbis-reporting 0.0.1 | BUSL-1.1
+orbis-reporting 0.0.2 | BUSL-1.1
   020858523d997683cecf617c13cae99bebfdde8e0d183d2385979639c1605121  Bsl.txt
   dea08b5be5296bd43768cd6badd26b45fca31399151329afb941f9c62ab3b4ed  LICENSE-APACHE
 
@@ -1369,7 +1376,7 @@ regex-syntax 0.8.9 | MIT OR Apache-2.0
   6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb  LICENSE-MIT
   74db5baf44a41b1000312c673544b3374e4198af5605c7f9080a402cec42cfa3  src/unicode_tables/LICENSE-UNICODE
 
-regolith 0.2.4 | Apache-2.0 OR MIT
+regolith 0.2.5 | Apache-2.0 OR MIT
   475b9a525caa3483583d8b407b9d1e67a585c8c4de401f104c910f5688a8aaa5  LICENSE-APACHE
   de06893b7c56eefb7e5d7e3126d264f3bd7424da0792870a37b254ae342243f8  LICENSE-MIT
 
@@ -1854,73 +1861,73 @@ vcpkg 0.2.15 | MIT/Apache-2.0
   60c93a31f490375aadf64098b75f10715010379541021e00261045d7800611d3  LICENSE-APACHE
   016d20f335060a70e79d9fcf8dfaa6201114d65d592211f4bdfb8ae9ca2bc1dc  LICENSE-MIT
 
-vera-acp 0.1.1 | Apache-2.0 OR MIT
+vera-acp 0.1.2 | Apache-2.0 OR MIT
   5adb10269dde2c65f174ce3e2d2e877e70bd3f525ec9f9e0888af53588f73bd5  LICENSE-APACHE
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
 
-vera-app 0.1.1 | MIT
+vera-app 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-backend 0.1.1 | MIT
+vera-backend 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-cli 0.1.1 | MIT
+vera-cli 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-client 0.1.1 | MIT
+vera-client 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
 
-vera-config 0.1.1 | MIT
+vera-config 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-consensus 0.1.1 | MIT
+vera-consensus 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-crypto 0.1.1 | MIT
+vera-crypto 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
 
-vera-domain 0.1.1 | MIT
+vera-domain 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
 
-vera-executor 0.1.1 | MIT
+vera-executor 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-genesis 0.1.1 | MIT
+vera-genesis 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-identity 0.1.1 | Apache-2.0 OR MIT
+vera-identity 0.1.2 | Apache-2.0 OR MIT
   5adb10269dde2c65f174ce3e2d2e877e70bd3f525ec9f9e0888af53588f73bd5  LICENSE-APACHE
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
 
-vera-indexer 0.1.1 | MIT
+vera-indexer 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-jsonrpc 0.1.1 | MIT
+vera-jsonrpc 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-modules 0.1.1 | MIT
+vera-modules 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
 
-vera-node 0.1.1 | MIT
+vera-node 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-overlay 0.1.1 | MIT
+vera-overlay 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-permission 0.1.1 | MIT
+vera-permission 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
 
-vera-qmdb 0.1.1 | MIT
+vera-qmdb 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-traits 0.1.1 | MIT
+vera-traits 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
-vera-zanzibar 0.1.1 | Apache-2.0 OR MIT
+vera-zanzibar 0.1.2 | Apache-2.0 OR MIT
   5adb10269dde2c65f174ce3e2d2e877e70bd3f525ec9f9e0888af53588f73bd5  LICENSE-APACHE
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
 
-verad 0.1.1 | MIT
+verad 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
 version_check 0.9.5 | MIT/Apache-2.0
@@ -10941,6 +10948,37 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+
+--- SHA-256 7a313964a6e050794d2ad57f4863c11f6bbe055c0ae6ce2cf3b9fc45150bada3 ---
+Copyright (c) 2017-2019 isis agora lovecruft. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+1. Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright
+notice, this list of conditions and the following disclaimer in the
+documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
 
 
 --- SHA-256 7abd9b6960dcf7d4d0a48606a5b71bfe37d472db68d70637f3a58a56785f1621 ---

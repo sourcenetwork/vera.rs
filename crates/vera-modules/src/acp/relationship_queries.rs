@@ -29,7 +29,9 @@ impl AcpModule {
         budget: &QueryBudget,
     ) -> Result<Vec<RelationshipRecord>> {
         let policy = self.query_policy_with_budget(policy_id, budget)?;
-        self.filter_relationships_for_policy(&policy, selector, budget)
+        let mut selector = selector.clone();
+        spelling::selector(&policy.policy, &mut selector);
+        self.filter_relationships_for_policy(&policy, &selector, budget)
     }
 
     pub(super) fn filter_relationships_for_policy(

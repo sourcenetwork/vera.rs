@@ -172,9 +172,9 @@ fn run(
             let event = IAcp::RelationshipSet {
                 policyId: alloy_primitives::keccak256(policy_id.as_bytes()),
                 resource: call.resource.clone(),
-                objectId: call.objectId.clone(),
+                objectId: record.relationship.object_id.clone(),
                 relation: call.relation.clone(),
-                actor: call.actor,
+                actor: subject_object_id(&record.relationship.subject, call.actor),
             };
             let ret = IAcp::setRelationshipCall::abi_encode_returns(&IAcp::setRelationshipReturn {
                 recordExisted: record_existed,
@@ -188,12 +188,13 @@ fn run(
             let creator = did_from_signer(&tx_ctx.signer)?;
             let policy_id = policy_id_to_string(&call.policyId);
             let actor_did = did_from_actor(&call.actor)?;
-            let cmd = PolicyCmd::DeleteRelationship(vera_acp::Relationship::new(
+            let relationship = vera_acp::Relationship::new(
                 &call.resource,
                 &call.objectId,
                 &call.relation,
                 vera_acp::Subject::entity(actor_did),
-            ));
+            );
+            let cmd = PolicyCmd::DeleteRelationship(relationship.clone());
 
             let result = match module.execute_policy_cmd_with_budget(
                 &creator, &policy_id, cmd, block_ctx, tx_ctx, budget,
@@ -213,12 +214,13 @@ fn run(
                 }
             };
 
+            let deleted = recorded_relationship(module, &policy_id, relationship)?;
             let event = IAcp::RelationshipDeleted {
                 policyId: alloy_primitives::keccak256(policy_id.as_bytes()),
                 resource: call.resource.clone(),
-                objectId: call.objectId.clone(),
+                objectId: deleted.object_id,
                 relation: call.relation.clone(),
-                actor: call.actor,
+                actor: subject_object_id(&deleted.subject, call.actor),
             };
             let ret = IAcp::deleteRelationshipCall::abi_encode_returns(&record_found);
             Ok(ok_dispatch(0, ret, vec![event_log(ACP_ADDRESS, &event)]))
@@ -263,11 +265,14 @@ fn run(
             let event = IAcp::RelationshipSubjectSet {
                 policyId: alloy_primitives::keccak256(policy_id.as_bytes()),
                 resource: call.resource,
-                objectId: call.objectId,
+                objectId: record.relationship.object_id.clone(),
                 relation: call.relation,
                 subjectKind: call.subjectKind,
                 subjectResource: call.subjectResource,
-                subjectObjectId: call.subjectObjectId,
+                subjectObjectId: subject_object_id(
+                    &record.relationship.subject,
+                    call.subjectObjectId,
+                ),
                 subjectRelation: call.subjectRelation,
             };
             let ret = IAcp::setRelationshipSubjectCall::abi_encode_returns(
@@ -290,12 +295,13 @@ fn run(
                 &call.subjectObjectId,
                 &call.subjectRelation,
             )?;
-            let cmd = PolicyCmd::DeleteRelationship(vera_acp::Relationship::new(
+            let relationship = vera_acp::Relationship::new(
                 &call.resource,
                 &call.objectId,
                 &call.relation,
                 subject,
-            ));
+            );
+            let cmd = PolicyCmd::DeleteRelationship(relationship.clone());
 
             let result = match module.execute_policy_cmd_with_budget(
                 &creator, &policy_id, cmd, block_ctx, tx_ctx, budget,
@@ -315,14 +321,15 @@ fn run(
                 }
             };
 
+            let deleted = recorded_relationship(module, &policy_id, relationship)?;
             let event = IAcp::RelationshipSubjectDeleted {
                 policyId: alloy_primitives::keccak256(policy_id.as_bytes()),
                 resource: call.resource,
-                objectId: call.objectId,
+                objectId: deleted.object_id,
                 relation: call.relation,
                 subjectKind: call.subjectKind,
                 subjectResource: call.subjectResource,
-                subjectObjectId: call.subjectObjectId,
+                subjectObjectId: subject_object_id(&deleted.subject, call.subjectObjectId),
                 subjectRelation: call.subjectRelation,
             };
             let ret = IAcp::deleteRelationshipSubjectCall::abi_encode_returns(&record_found);
@@ -600,7 +607,8 @@ fn run(
         IAcp::transferObjectCall::SELECTOR => {
             let call = IAcp::transferObjectCall::abi_decode(input).map_err(decode_error)?;
             let actor = did_from_signer(&tx_ctx.signer)?;
-            let new_owner = did_from_actor(&call.newOwner)?;
+            let new_owner = vera_modules::actor::canonical(&did_from_actor(&call.newOwner)?);
+            let recorded_owner = new_owner.to_string();
             let policy = policy_id_to_string(&call.policyId);
             let command = PolicyCmd::TransferObject {
                 object: Object {
@@ -621,7 +629,7 @@ fn run(
                             policyId: call.policyId,
                             resource: call.resource,
                             objectId: call.objectId,
-                            newOwner: call.newOwner,
+                            newOwner: recorded_owner,
                         },
                     )],
                 )),
@@ -651,5 +659,26 @@ fn run(
             }
         }
         _ => unreachable!("command selector checked by dispatcher"),
+    }
+}
+
+/// The relationship a successful command changed, as the policy records it.
+fn recorded_relationship(
+    module: &AcpModule,
+    policy_id: &str,
+    relationship: vera_acp::Relationship,
+) -> Result<vera_acp::Relationship, PrecompileError> {
+    module
+        .recorded_relationship(policy_id, relationship)
+        .map_err(|error| PrecompileError::Fatal(format!("recorded relationship: {error}")))
+}
+
+/// The identifier an event reports for a subject: the recorded actor or
+/// object, or the caller's field for a subject that names neither.
+fn subject_object_id(subject: &vera_acp::Subject, written: String) -> String {
+    match subject {
+        vera_acp::Subject::Entity(actor) => actor.to_string(),
+        vera_acp::Subject::EntitySet { object_id, .. } => object_id.clone(),
+        _ => written,
     }
 }

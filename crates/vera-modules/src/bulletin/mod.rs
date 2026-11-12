@@ -162,6 +162,7 @@ impl BulletinModule {
         namespace: &str,
     ) -> Result<Namespace> {
         validate_namespace(namespace)?;
+        let creator = &crate::actor::canonical(creator);
         let policy_id = self.ensure_policy(acp)?;
         let namespace_id = keys::namespace_id(namespace);
 
@@ -205,6 +206,7 @@ impl BulletinModule {
         _artifact: &str,
     ) -> Result<String> {
         validate_namespace(namespace)?;
+        let creator = &crate::actor::canonical(creator);
         let policy_id = self
             .get_policy_id()?
             .ok_or(BulletinError::PolicyNotInitialized)?;
@@ -266,10 +268,9 @@ impl BulletinModule {
 
     /// Add a collaborator to a namespace.
     ///
-    /// The `collaborator_did` must be a proper `did:key:zQ3s...` string
-    /// matching the format produced by secp256k1 public key recovery.
-    /// The caller (precompile shim or native tx shim) is responsible for
-    /// passing the DID in the correct format.
+    /// A secp256k1 `collaborator_did` may use any accepted spelling of its key;
+    /// the collaborator is recorded and returned under the canonical
+    /// `did:key:zQ3s...` DID that public key recovery produces.
     pub fn add_collaborator(
         &mut self,
         acp: &mut super::acp::AcpModule,
@@ -279,6 +280,7 @@ impl BulletinModule {
         collaborator_did: &str,
     ) -> Result<String> {
         validate_namespace(namespace)?;
+        let collaborator_did = &*crate::actor::canonical_str(collaborator_did);
         let policy_id = self
             .get_policy_id()?
             .ok_or(BulletinError::PolicyNotInitialized)?;
@@ -337,6 +339,7 @@ impl BulletinModule {
         collaborator_did: &str,
     ) -> Result<String> {
         validate_namespace(namespace)?;
+        let collaborator_did = &*crate::actor::canonical_str(collaborator_did);
         let policy_id = self
             .get_policy_id()?
             .ok_or(BulletinError::PolicyNotInitialized)?;

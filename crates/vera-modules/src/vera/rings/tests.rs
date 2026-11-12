@@ -3,6 +3,7 @@ mod jubjub;
 mod object_registration;
 mod pet;
 mod pet_reports;
+mod spelling;
 
 use super::*;
 use crate::{
@@ -72,13 +73,23 @@ fn delegated_token(
     at: &BlockExecCtx,
     key: &SigningKey,
 ) -> String {
+    let issuer = vera_crypto::secp256k1::did_from_secp256k1_pubkey(
+        key.verifying_key().to_sec1_bytes().as_ref(),
+    )
+    .unwrap();
+    spelled_token(operation, entropy, at, key, issuer)
+}
+fn spelled_token(
+    operation: DelegatedOperation<'_>,
+    entropy: u8,
+    at: &BlockExecCtx,
+    key: &SigningKey,
+    issuer: String,
+) -> String {
     let mut id = [entropy; 32];
     id[..8].copy_from_slice(&(at.timestamp.seconds + 100).to_be_bytes());
     let claims = JwtClaims {
-        iss: vera_crypto::secp256k1::did_from_secp256k1_pubkey(
-            key.verifying_key().to_sec1_bytes().as_ref(),
-        )
-        .unwrap(),
+        iss: issuer,
         sub: submission().signer,
         exp: at.timestamp.seconds + 100,
         aud: "vera:9001".into(),

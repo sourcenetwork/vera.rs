@@ -25,11 +25,16 @@ pub(crate) fn tripped(
     finalized_ever && peers_connected && stalled_for >= budget
 }
 
-/// Run the watchdog until the process ends.
+/// Run the watchdog until it trips.
 ///
 /// `has_durable_history` arms the watchdog for a restart even before this
 /// process observes its first finalization.
-pub(crate) async fn run(state: NodeState, budget: Duration, has_durable_history: bool) {
+pub(crate) async fn run(
+    state: NodeState,
+    budget: Duration,
+    has_durable_history: bool,
+    mode: crate::WatchdogMode,
+) {
     let mut progress = Progress::new(state.finalized_count(), has_durable_history);
     loop {
         tokio::time::sleep(Duration::from_secs(30)).await;
@@ -43,9 +48,14 @@ pub(crate) async fn run(state: NodeState, budget: Duration, has_durable_history:
             tracing::error!(
                 stalled_seconds = progress.since.elapsed().as_secs(),
                 peers,
-                "finality stalled with peers connected; exiting for supervised rejoin"
+                ?mode,
+                "finality stalled with peers connected"
             );
-            std::process::exit(EXIT_CODE);
+            match mode {
+                crate::WatchdogMode::ExitProcess => std::process::exit(EXIT_CODE),
+                // Returning completes this actor, which stops the node with an error.
+                crate::WatchdogMode::Report => return,
+            }
         }
     }
 }

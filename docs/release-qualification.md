@@ -27,7 +27,7 @@ remaining first-release work is:
 | Gate | Required result |
 | --- | --- |
 | Official Commonware source | Qualify the official `2026.10.0` registry release, including its upstream archive, synchronization and DKG boundary changes, against the selected Vera candidate. |
-| Publishable crates | Version every packaged dependency, complete package metadata and verify the registry dependency graph without workspace patches. The nine-crate client/verifier closure has explicit publication boundaries, versioned internal dependencies and package metadata. `orbis-reporting` 0.0.1 is published and selected from the registry. |
+| Publishable crates | Version every packaged dependency, complete package metadata and verify the registry dependency graph without workspace patches. The nine-crate client/verifier closure has explicit publication boundaries, versioned internal dependencies and package metadata. `orbis-reporting` 0.0.2 is published and selected from the registry. |
 | Release automation | Validate versions and packages and produce tagged daemon assets with checksums and provenance from the same commit. The release workflow builds and compares two clean daemon artifacts and creates a draft GitHub release for an existing matching version tag. Keep crate uploads manual; CI needs no crates.io publishing credentials. |
 | Candidate validation | Run focused native authorization, membership, receipt and recovery checks affected by the dependency change. Verify the packaged client/verifier from a clean registry consumer, independent trust configuration, and the chosen daemon artifact. Reuse earlier source-bound evidence for unchanged code. |
 | Publication handoff | Record exact source, versions, dependencies, target and limitations. Provide package checksums and dependency-ordered commands for the maintainer to publish manually, followed by registry installation and download checks. Crate uploads belong to the maintainer, not the automated workflow. |
@@ -82,7 +82,7 @@ explicit publication settings, complete metadata and registry-sourced runtime
 dependencies. Neither command uploads crates. CI retains the plan; a green
 metadata-report job does not mean `ready` is true.
 
-The selected Commonware `2026.10.0` and `orbis-reporting` 0.0.1 packages are
+The selected Commonware `2026.10.0` and `orbis-reporting` 0.0.2 packages are
 available in the registry, but the changed dependency set still needs end-to-end
 qualification. See the [manual release guide](manual-release.md#shared-reporting-crate)
 for the reporting package provenance and license.

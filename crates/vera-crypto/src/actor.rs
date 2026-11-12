@@ -1,0 +1,99 @@
+//! Delegation actors: the `did:key` identities that issue tokens.
+//!
+//! An actor signs with the JWT algorithm of its key type: ES256K for
+//! secp256k1, EdDSA for Ed25519 and ES256 for P-256. ECDSA signatures cover
+//! the SHA-256 digest of the signing input; Ed25519 signs the input itself.
+
+use std::borrow::Cow;
+
+use crate::{actor_key::ActorKey, jwt::JwtError};
+
+/// The single DID under which the key behind `did` is recorded and compared.
+///
+/// A secp256k1 key may be named from its compressed or uncompressed point, in
+/// base58btc or base64url. All four spellings name one actor, recorded under
+/// the compressed base58btc one. Ed25519 and P-256 keys have a single accepted
+/// spelling, which is returned as written. Any other identifier, including a
+/// provider actor, a BLS key and the wildcard, is not a delegation key and is
+/// returned unchanged.
+pub fn canonical_did(did: &str) -> Cow<'_, str> {
+    match ActorKey::from_did(did).map(|key| key.canonical_did()) {
+        Ok(canonical) if canonical != did => Cow::Owned(canonical),
+        _ => Cow::Borrowed(did),
+    }
+}
+
+/// The `did:key` under which an Ed25519 public key acts.
+pub fn ed25519_did(public_key: &[u8; 32]) -> Result<String, JwtError> {
+    let key = ed25519_dalek::VerifyingKey::from_bytes(public_key)
+        .map_err(|error| JwtError::InvalidIssuer(format!("invalid Ed25519 key: {error}")))?;
+    checked(&ActorKey::Ed25519(key))
+}
+
+/// The `did:key` under which a P-256 public key acts.
+///
+/// Accepts a compressed or uncompressed SEC1 point; the DID always names the
+/// compressed one.
+pub fn p256_did(public_key: &[u8]) -> Result<String, JwtError> {
+    let key = p256::ecdsa::VerifyingKey::from_sec1_bytes(public_key)
+        .map_err(|error| JwtError::InvalidIssuer(format!("invalid P-256 key: {error}")))?;
+    checked(&ActorKey::P256(key))
+}
+
+fn checked(key: &ActorKey) -> Result<String, JwtError> {
+    let did = key.canonical_did();
+    ActorKey::from_did(&did).map(|_| did)
+}
+
+/// The key type behind an actor's `did:key`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ActorKeyType {
+    /// secp256k1, signing ES256K.
+    Secp256k1,
+    /// Ed25519, signing EdDSA.
+    Ed25519,
+    /// NIST P-256, signing ES256.
+    P256,
+}
+
+/// The key type `actor` names, if it is a supported key in an accepted spelling.
+pub fn key_type(actor: &str) -> Result<ActorKeyType, JwtError> {
+    ActorKey::from_did(actor).map(|key| match key {
+        ActorKey::Secp256k1(_) => ActorKeyType::Secp256k1,
+        ActorKey::Ed25519(_) => ActorKeyType::Ed25519,
+        ActorKey::P256(_) => ActorKeyType::P256,
+    })
+}
+
+/// Verify a raw 64-byte signature by `actor` over a 32-byte digest.
+///
+/// ECDSA keys sign the digest as the prehash and must use low `s`. Ed25519
+/// keys sign the digest bytes as the message.
+pub fn verify_digest(actor: &str, digest: &[u8; 32], signature: &[u8]) -> Result<(), JwtError> {
+    ActorKey::from_did(actor)?.verify_digest(digest, signature)
+}
+
+/// The JWT `alg` an actor's tokens must name.
+pub fn algorithm(actor: &str) -> Result<&'static str, JwtError> {
+    ActorKey::from_did(actor).map(|key| key.algorithm())
+}
+
+/// The single signature encoding accepted from `actor`, from a raw signature.
+///
+/// ECDSA input is the 64-byte `r || s`; a high `s` is replaced by its low
+/// equivalent. Ed25519 input is returned unchanged.
+pub fn canonical_signature(actor: &str, signature: &[u8]) -> Result<Vec<u8>, JwtError> {
+    ActorKey::from_did(actor)?.canonical_signature(signature)
+}
+
+/// The single signature encoding accepted from `actor`, from ASN.1 DER.
+///
+/// Platform key stores return ECDSA signatures in this form. Ed25519 has no
+/// DER signature form and is rejected.
+pub fn canonical_der_signature(actor: &str, signature: &[u8]) -> Result<Vec<u8>, JwtError> {
+    ActorKey::from_did(actor)?.canonical_der_signature(signature)
+}
+
+#[cfg(test)]
+#[path = "actor_tests.rs"]
+mod tests;

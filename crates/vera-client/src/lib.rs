@@ -53,6 +53,7 @@ mod signer;
 mod subject;
 mod tx;
 mod types;
+mod unsigned_token;
 mod worker;
 pub use worker::NativeWorker;
 
@@ -72,4 +73,5 @@ pub use readiness::{ReadinessError, VerifiedReadiness};
 pub use signer::EvmSigner;
 pub use subject::RelationshipSubject;
 pub use types::{Log, NativeReceipt, NodeStatus, TransactionReceipt};
+pub use unsigned_token::UnsignedToken;
 pub use vera_crypto::jwt::DelegationScope;

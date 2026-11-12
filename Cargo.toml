@@ -4,7 +4,7 @@ exclude = ["vendor/jsonrpsee-server"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.99"
 license = "MIT"
@@ -52,27 +52,27 @@ strip = "symbols"
 
 [workspace.dependencies]
 # Core crates
-vera-backend = { path = "crates/vera-backend", version = "=0.1.1" }
-vera-modules = { path = "crates/vera-modules", version = "=0.1.1" }
-vera-cli = { path = "crates/vera-cli", version = "=0.1.1" }
-vera-config = { path = "crates/vera-config", version = "=0.1.1" }
-vera-consensus = { path = "crates/vera-consensus", version = "=0.1.1" }
-vera-crypto = { path = "crates/vera-crypto", version = "=0.1.1" }
-vera-domain = { path = "crates/vera-domain", version = "=0.1.1" }
-vera-indexer = { path = "crates/vera-indexer", version = "=0.1.1" }
-vera-overlay = { path = "crates/vera-overlay", version = "=0.1.1" }
-vera-qmdb = { path = "crates/vera-qmdb", version = "=0.1.1" }
-vera-jsonrpc = { path = "crates/vera-jsonrpc", version = "=0.1.1" }
-vera-traits = { path = "crates/vera-traits", version = "=0.1.1" }
+vera-backend = { path = "crates/vera-backend", version = "=0.1.2" }
+vera-modules = { path = "crates/vera-modules", version = "=0.1.2" }
+vera-cli = { path = "crates/vera-cli", version = "=0.1.2" }
+vera-config = { path = "crates/vera-config", version = "=0.1.2" }
+vera-consensus = { path = "crates/vera-consensus", version = "=0.1.2" }
+vera-crypto = { path = "crates/vera-crypto", version = "=0.1.2" }
+vera-domain = { path = "crates/vera-domain", version = "=0.1.2" }
+vera-indexer = { path = "crates/vera-indexer", version = "=0.1.2" }
+vera-overlay = { path = "crates/vera-overlay", version = "=0.1.2" }
+vera-qmdb = { path = "crates/vera-qmdb", version = "=0.1.2" }
+vera-jsonrpc = { path = "crates/vera-jsonrpc", version = "=0.1.2" }
+vera-traits = { path = "crates/vera-traits", version = "=0.1.2" }
 
-vera-app = { path = "crates/vera-app", version = "=0.1.1" }
-vera-node = { path = "crates/vera-node", version = "=0.1.1" }
-vera-client = { path = "crates/vera-client", version = "=0.1.1" }
-vera-permission = { path = "crates/vera-permission", version = "=0.1.1" }
-vera-executor = { path = "crates/vera-executor", version = "=0.1.1" }
-vera-genesis = { path = "crates/vera-genesis", version = "=0.1.1" }
-vera-harness = { path = "crates/vera-harness", version = "=0.1.1" }
-vera-test-infra = { path = "crates/vera-test-infra", version = "=0.1.1" }
+vera-app = { path = "crates/vera-app", version = "=0.1.2" }
+vera-node = { path = "crates/vera-node", version = "=0.1.2" }
+vera-client = { path = "crates/vera-client", version = "=0.1.2" }
+vera-permission = { path = "crates/vera-permission", version = "=0.1.2" }
+vera-executor = { path = "crates/vera-executor", version = "=0.1.2" }
+vera-genesis = { path = "crates/vera-genesis", version = "=0.1.2" }
+vera-harness = { path = "crates/vera-harness", version = "=0.1.2" }
+vera-test-infra = { path = "crates/vera-test-infra", version = "=0.1.2" }
 
 # Commonware (calver 2026.9.0)
 commonware-actor = { version = "=2026.10.0" }
@@ -90,12 +90,12 @@ commonware-macros = { version = "=2026.10.0" }
 commonware-glue = { version = "=2026.10.0" }
 commonware-stream = { version = "=2026.10.0" }
 
-orbis-reporting = "=0.0.1"
+orbis-reporting = "=0.0.2"
 
 # Shared Defra types and policy evaluation
-vera-acp = { path = "crates/vera-acp", version = "=0.1.1" }
-vera-identity = { path = "crates/vera-identity", version = "=0.1.1" }
-vera-zanzibar = { path = "crates/vera-zanzibar", version = "=0.1.1" }
+vera-acp = { path = "crates/vera-acp", version = "=0.1.2" }
+vera-identity = { path = "crates/vera-identity", version = "=0.1.2" }
+vera-zanzibar = { path = "crates/vera-zanzibar", version = "=0.1.2" }
 
 # Alloy
 alloy-primitives = "1.7"
@@ -137,6 +137,8 @@ anyhow = "1"
 
 # Cryptography
 k256 = "0.13"
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
+ed25519-dalek = { version = "3", default-features = false, features = ["alloc"] }
 sha3 = "0.10"
 
 # Arkworks BLS (match orbis-rs versions)

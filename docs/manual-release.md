@@ -7,10 +7,13 @@ test harnesses and development tools are not published as crates.
 
 ## SDK access
 
-The client and verifier `0.1.0` crates are published on crates.io. This
-runbook prepares `0.1.1`, which must be published in dependency order before
-consumers can resolve that version. The two versions have different DID key
-decoding behavior; see [delegated policies](delegated-policies.md).
+The client and verifier `0.1.1` crates are published on crates.io. This
+runbook prepares `0.1.2`, which must be published in dependency order before
+consumers can resolve that version. `0.1.2` accepts Ed25519 and P-256 actors and
+operator keys and records one canonical DID per secp256k1 actor, so results can
+name an actor under a different spelling than a request used; see
+[delegated policies](delegated-policies.md). Every validator of a deployment
+must run the same version.
 
 The SDK uses official Commonware `2026.10.0` registry packages. Daemon and
 consumer qualification must identify the exact Vera revision and dependencies.
@@ -47,16 +50,18 @@ with Rust 1.99.1. The resulting archive has SHA-256
 the Business Source License 1.1 and Apache 2.0 change license. Its terms restrict
 managed-service use and change to Apache 2.0 on March 13, 2030.
 
-The published `orbis-reporting` 0.0.1 archive has the same checksum and its
-`.cargo_vcs_info.json` identifies that Orbis commit. It contains both license
-files. Vera pins this registry version; recheck the archive when qualifying a
-release candidate:
+Vera selects the published `orbis-reporting` 0.0.2 archive, SHA-256
+`9493ea2c91d02f7f3cf32c765082dda1980a5489c4ff989b78d23acc7be6e43a`. Its
+`.cargo_vcs_info.json` identifies merged Orbis commit
+`77b08bb3d917a25a101ed93e6822af60dcf84578`. Its library source and both license
+files are identical to the 0.0.1 archive above; it adds a README. Recheck the
+archive when qualifying a release candidate:
 
 ```sh
-curl -fsSL https://static.crates.io/crates/orbis-reporting/orbis-reporting-0.0.1.crate -o orbis-reporting-0.0.1.crate
-shasum -a 256 orbis-reporting-0.0.1.crate
-tar -tzf orbis-reporting-0.0.1.crate
-tar -xOzf orbis-reporting-0.0.1.crate orbis-reporting-0.0.1/.cargo_vcs_info.json
+curl -fsSL https://static.crates.io/crates/orbis-reporting/orbis-reporting-0.0.2.crate -o orbis-reporting-0.0.2.crate
+shasum -a 256 orbis-reporting-0.0.2.crate
+tar -tzf orbis-reporting-0.0.2.crate
+tar -xOzf orbis-reporting-0.0.2.crate orbis-reporting-0.0.2/.cargo_vcs_info.json
 ```
 
 Check `.cargo_vcs_info.json` and the license files in the archive, and record
@@ -83,7 +88,7 @@ checksums, source commit and check results with the release record.
 
 ## Publish crates manually
 
-The candidate version is `0.1.1`. Use the dependency order in the generated plan;
+The candidate version is `0.1.2`. Use the dependency order in the generated plan;
 for the current graph it is:
 
 | Order | Package |
@@ -102,7 +107,7 @@ For each package, verify its archive before uploading it. Start with:
 
 ```sh
 cargo package --locked --registry crates-io -p vera-identity
-shasum -a 256 target/package/vera-identity-0.1.1.crate
+shasum -a 256 target/package/vera-identity-0.1.2.crate
 cargo publish --locked --registry crates-io -p vera-identity
 ```
 
@@ -135,7 +140,7 @@ roots using only registry dependencies:
 ```sh
 VERA_RELEASE_SMOKE=$(mktemp -d)
 cargo init --lib --name vera_release_smoke "$VERA_RELEASE_SMOKE"
-cargo add --manifest-path "$VERA_RELEASE_SMOKE/Cargo.toml" 'vera-client@=0.1.1' 'vera-verifier@=0.1.1'
+cargo add --manifest-path "$VERA_RELEASE_SMOKE/Cargo.toml" 'vera-client@=0.1.2' 'vera-verifier@=0.1.2'
 printf '%s\n' 'pub use vera_client as client;' 'pub use vera_verifier as verifier;' > "$VERA_RELEASE_SMOKE/src/lib.rs"
 cargo check --locked --manifest-path "$VERA_RELEASE_SMOKE/Cargo.toml"
 cargo metadata --locked --format-version 1 --manifest-path "$VERA_RELEASE_SMOKE/Cargo.toml" > "$VERA_RELEASE_SMOKE/metadata.json"
@@ -169,7 +174,7 @@ version tag yourself:
 
 ```sh
 VERA_RELEASE_SOURCE=$(git rev-parse HEAD)
-VERA_RELEASE_TAG=v0.1.1
+VERA_RELEASE_TAG=v0.1.2
 git tag --annotate "$VERA_RELEASE_TAG" "$VERA_RELEASE_SOURCE" --message "Vera $VERA_RELEASE_TAG"
 git push origin "refs/tags/$VERA_RELEASE_TAG"
 ```

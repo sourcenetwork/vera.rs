@@ -4,15 +4,41 @@ A policy actor can authorize a signing worker to create or edit policies. The
 worker signs the native submission; the actor remains the policy owner. Each
 worker has its own submission sequence.
 
-Delegations use signed ES256K tokens with a worker DID in `sub`, deployment in
-`aud`, and explicit validity times. The supported scopes are separate:
+Delegations are signed tokens with a worker DID in `sub`, deployment in `aud`,
+and explicit validity times. The issuer is a `did:key`, and its key type fixes
+the algorithm the token header must name:
 
-The issuer is a secp256k1 `did:key` using Base58BTC (`z`) or unpadded
-Base64URL (`u`). Both compressed and uncompressed public keys are accepted.
-Vera generates canonical Base58BTC identifiers and compares the underlying key
-for issuer revocation; stored actor identifiers are not rewritten. Older builds
+| Issuer key | `did:key` multicodec | `alg` | Signature |
+|---|---|---|---|
+| secp256k1 | `0xe7` | `ES256K` | 64-byte `r \|\| s` over SHA-256, low `s` |
+| Ed25519 | `0xed` | `EdDSA` | 64-byte signature over the signing input |
+| P-256 | `0x1200` | `ES256` | 64-byte `r \|\| s` over SHA-256, low `s` |
+
+A token naming another key type's algorithm is rejected. Token records and
+revocation are keyed by the token hash, so each signature has one accepted
+encoding: a high-`s` ECDSA signature and a non-strict Ed25519 signature are
+rejected, as are small-order Ed25519 keys.
+
+A secp256k1 issuer uses Base58BTC (`z`) or unpadded Base64URL (`u`), with a
+compressed or uncompressed public key. All four spellings name one actor, which
+Vera records under its canonical DID: Base58BTC over the multicodec and the
+compressed key. See [one actor per key](#one-actor-per-key). Older builds
 accepted additional multibase encodings when decoding keys. Those encodings are
 not accepted by this version, so replace them before upgrading.
+
+Ed25519 and P-256 issuers have exactly one spelling: Base58BTC over the
+multicodec and the 32-byte Ed25519 key or the 33-byte compressed P-256 point.
+Any other spelling of these keys is rejected instead of becoming a second
+actor. `vera_crypto::actor` derives the DID from a public key.
+
+`UnsignedToken` in `vera-client` builds a delegation or operation token for a
+key the library cannot hold, such as a hardware-backed key. The caller signs
+`signing_input()` and completes the token with `finish` (raw signature) or
+`finish_der` (ASN.1 DER ECDSA, as platform key stores return it). Either ECDSA
+`s` is accepted and normalized, and a signature the issuer's key did not make
+over that token is refused locally. The secp256k1 helpers below are unchanged.
+
+The supported scopes are separate:
 
 | Scope | Authorized operations |
 |---|---|
@@ -95,6 +121,50 @@ revocation before applying a change. Failed operations do not record delegation
 usage. The actor or the bound worker can revoke a token through
 `revokeDelegation`; revocation applies to that token, including after restart.
 
+## One actor per key
+
+Actors are compared as DID strings, so every key has one recorded spelling.
+`vera_crypto::actor::canonical_did` returns it; `vera_modules::actor` applies it
+to typed values. A request may name a secp256k1 key in any accepted spelling and
+behaves as the same request in the canonical spelling:
+
+| Where a key is named | What is recorded or compared |
+|---|---|
+| Token issuer | Policy, object, ring and threshold-object owner or creator; operation outcome actor; token record issuer |
+| Token subject | The authenticated submitter, and the token record's authorized account |
+| Relationship subject, transfer target, bulletin collaborator | The stored relationship, its storage key and the collaborator record |
+| Object of the policy's `actor` resource, as an object or as an object-edge or userset subject | The stored relationship and its storage key |
+| Actor and actor-resource objects of an access check, theorem or relationship query | The evaluated actor and the selected relationships |
+| Creator and actor of a recorded decision | The decision record and its identifier |
+| Revoking caller, token lookup by issuer or account | The issuer or account the token records |
+
+Results, events and proofs name the canonical DID even when the request used
+another spelling. A client that compares a returned owner, creator or actor with
+its own DID compares canonical forms. Permission, owner, decision and outcome
+verification in `vera-permission`, `vera-client` and the C verifier apply the
+same rule, so evidence captured for one spelling answers a request in any other.
+
+Provider actors (`did:opk:`), BLS worker DIDs, the wildcard and any `did:key`
+that is not a supported key in an accepted spelling are compared as written.
+Object identifiers outside the `actor` resource are opaque and never rewritten.
+
+Signed bindings cover the request as its caller wrote it. An operation
+commitment, a relay assertion's `operation` and an operation identity's `digest`
+are computed over the typed arguments before any actor is rewritten, so existing
+signers need no change. A retry under a completed operation identity therefore
+signs the same spelling of its arguments; the issuer may be spelled differently.
+A recorded decision keeps the caller's operations and names its creator and
+actor canonically, and its identifier is computed over that recorded form.
+
+Operator-authored records keep a single form: a relay grant and the key passed
+to `RevokeRelay` name the canonical issuer, and operator policies list keys as
+before. A relay token may spell its issuer in any accepted way.
+
+Stored state names secp256k1 actors canonically. Relationship writes refuse any
+other spelling, and ring and threshold-object records with one fail validation.
+This changes execution: every validator runs the same version, and deployments
+start from fresh state.
+
 ## Provider actors and authorized relays
 
 Operators can authorize a relay to attest stable provider actors through
@@ -110,7 +180,8 @@ verifies the relay's assertion against committed authority; it does not fetch
 OIDC keys during execution. The relay is trusted to attest provider identities
 within its granted scopes. Operators must provision this authority explicitly.
 
-`create_relay_token` signs ES256K claims with type `vera-relay-v1+jwt`. Standard
+`create_relay_token` signs ES256K claims with type `vera-relay-v1+jwt`; relay
+issuers are secp256k1 keys only. Standard
 native delegation claims still bind the issuer, worker, deployment and scope.
 An additional `relay` object contains:
 
@@ -136,7 +207,9 @@ formats use their enum names such as `ShortYaml`. Graph commands use the typed
 `PolicyCmd` representation. Access requests contain ordered `operations` followed
 by `actor`; each operation contains `object` (`resource`, `id`) and `permission`. The service decodes and serializes these typed
 arguments before checking the commitment. Equivalent transport whitespace does
-not alter the operation; changing its semantic arguments does.
+not alter the operation; changing its semantic arguments does. A DID inside the
+arguments is committed in the caller's spelling, before execution records its
+canonical form.
 
 ACP records retain the provider actor as owner and the native worker as
 submitter. Token lifecycle records retain the relay key as issuer, so revocation

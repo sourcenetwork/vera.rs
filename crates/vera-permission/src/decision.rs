@@ -20,6 +20,7 @@ pub struct DecisionOperation {
     /// Independently configured deployment.
     pub deployment_id: u64,
     /// Authenticated caller, distinct from both target actor and submitting worker.
+    /// Any accepted spelling of its key selects the outcome recorded for it.
     pub caller: String,
     /// Immutable caller operation identity.
     pub operation_id: B256,
@@ -122,7 +123,7 @@ impl RecordResponse {
             .map_err(|_| PermissionError::Invalid("invalid decision request"))?;
         if outcome.id != id
             || outcome.digest != digest
-            || outcome.actor != expected.caller
+            || outcome.actor != vera_modules::actor::canonical_str(&expected.caller)
             || outcome.submission == [0; 32]
             || outcome.revision.block_height == 0
             || outcome.revision.block_height > self.revision.height

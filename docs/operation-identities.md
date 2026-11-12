@@ -26,8 +26,12 @@ effects and token usage. A later authorized request with the same actor, ID and
 digest returns that original result without applying the effect again. Different
 arguments under a completed ID are rejected. A result describes the completed
 operation; it does not establish current ownership or permission after later
-changes. Equivalent compressed and uncompressed secp256k1 actor encodings share
-one operation namespace.
+changes. Every accepted spelling of a secp256k1 actor's key shares one operation
+namespace, and the outcome records the actor's canonical DID. Ed25519 and P-256
+actors have a single spelling. The digest covers the arguments as the caller
+wrote them: a retry may spell its issuer differently, but a DID inside the
+arguments must be spelled as in the original request. See
+[one actor per key](delegated-policies.md#one-actor-per-key).
 
 Failed execution, result encoding, storage-budget checks and enclosing batch
 reverts leave no completion record or partial effect. Only successful effects
@@ -56,8 +60,8 @@ historical authorization-state retention.
 The budget and encoded-byte counter use `operation-budget/v1` and
 `operation-bytes/v1`, respectively, as eight-byte big-endian integers.
 
-Clients verify the certificate, exact key, actor, ID, digest, original execution
-metadata and typed result. Lookup can recover an outcome without the original
+Clients verify the certificate, exact key, canonical actor, ID, digest, original
+execution metadata and typed result. Lookup can recover an outcome without the original
 worker's submission ID. A missing record after expiry is not proof that the
 operation never ran. Receipt verification establishes the submitted attempt's
 result; retries can have different submission IDs while referring to the same

@@ -10,8 +10,8 @@ description = "Access control policy types and policy YAML parsing"
 readme = "README.md"
 
 [dependencies]
-vera-identity = { path = "../vera-identity", version = "=0.1.1" }
-vera-zanzibar = { path = "../vera-zanzibar", version = "=0.1.1" }
+vera-identity = { path = "../vera-identity", version = "=0.1.2" }
+vera-zanzibar = { path = "../vera-zanzibar", version = "=0.1.2" }
 async-trait.workspace = true
 thiserror.workspace = true
 serde.workspace = true

@@ -1,4 +1,4 @@
-use vera_crypto::jwt::{DelegationScope, JwtClaims, matches_issuer, verify_bearer_token};
+use vera_crypto::jwt::{DelegationScope, JwtClaims, verify_bearer_token};
 use vera_identity::Did;
 
 use super::{JWSTokenRecord, JWSTokenStatus, Result, VeraError, VeraModule};
@@ -56,7 +56,9 @@ impl VeraModule {
         token: &str,
     ) -> Result<JWSTokenRecord> {
         let claims = verify_bearer_token(token).map_err(invalid)?;
-        let caller = caller.to_string();
+        let caller = crate::actor::canonical(caller).to_string();
+        let issuer = crate::actor::canonical_str(&claims.iss).into_owned();
+        let submitter = crate::actor::canonical_str(&claims.sub).into_owned();
         if claims.aud != format!("vera:{}", context.deployment_id)
             || claims.relay.as_ref().is_some_and(|relay| {
                 context.genesis_id == [0; 32] || relay.genesis_id != context.genesis_id
@@ -64,7 +66,7 @@ impl VeraModule {
             || claims.request.as_ref().is_some_and(|request| {
                 context.genesis_id == [0; 32] || request.genesis_id != context.genesis_id
             })
-            || (!matches_issuer(&claims.iss, &caller) && caller != claims.sub)
+            || (caller != issuer && caller != submitter)
         {
             return Err(VeraError::Unauthorized {
                 reason: "delegation revocation is not authorized".into(),
@@ -76,8 +78,8 @@ impl VeraModule {
             .unwrap_or_else(|| JWSTokenRecord {
                 token_hash: hash,
                 bearer_token: token.into(),
-                issuer_did: claims.iss,
-                authorized_account: claims.sub,
+                issuer_did: issuer,
+                authorized_account: submitter,
                 issued_at: Timestamp {
                     seconds: claims.iat,
                     block_height: 0,

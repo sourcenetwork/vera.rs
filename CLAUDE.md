@@ -134,6 +134,9 @@ Each module is a plain Rust struct. Two thin shims sit on top:
 
 Business logic lives once.
 
+Operator policies list secp256k1 keys in hexadecimal and Ed25519 or P-256 keys
+as `did:key`; every operator signs the same administrative digest. See
+docs/consensus-membership.md#operator-keys.
 Provider relay grants use the same operator quorum as administrative changes.
 Relay assertions bind a stable `did:opk` actor, native worker, genesis, scope,
 grant generation and exact operation. ACP stores the actor as owner; token
@@ -144,7 +147,20 @@ separate worker signs the submission. Creation and editing require distinct
 scopes; existing object-command tokens do not authorize either operation.
 Created records bind the owner, worker, signed submission ID and creation
 revision. See `docs/delegated-policies.md` for result verification.
-Signed caller operation identities deduplicate successful effects across workers.
+Delegation issuers are secp256k1 (ES256K), Ed25519 (EdDSA) or P-256 (ES256)
+`did:key` actors; the key type fixes the token algorithm. Ed25519 and P-256
+actors have one DID spelling and one signature encoding. Relay issuers remain
+secp256k1.
+A secp256k1 key is accepted in four spellings (compressed or uncompressed,
+Base58BTC or Base64URL) and is one actor: state, results, events and proof
+evaluation name its canonical compressed Base58BTC DID, in token issuers and
+subjects, relationship subjects, `actor`-resource objects, checks, decisions
+and collaborators. `vera_crypto::actor::canonical_did` defines that spelling
+and `vera_modules::actor` applies it; other identifiers are compared as
+written. Operation commitments and digests still cover the request as its
+caller wrote it. See docs/delegated-policies.md#one-actor-per-key.
+Signed caller operation identities deduplicate successful effects across workers
+and across spellings of the actor's key.
 Outcomes are bounded, expire without allowing ID reuse, and share the execution
 rollback boundary. Operator approvals configure the retained outcome budget.
 See `docs/operation-identities.md`.
@@ -338,6 +354,21 @@ The native stream is available with only the header broadcaster configured.
 Consumers authenticate headers against their configured finality trust; receiving a
 notification alone does not establish its authority.
 
+### Embedded node
+
+`vera_node::EmbeddedNode` hosts a single-validator deployment inside another
+program on a dedicated thread and Commonware runtime. Hosts call the node's
+method table in-process through `vera_jsonrpc::LocalRpc`; an RPC listener is
+optional. The deployment's authority is the account's operator policy, its
+consensus share comes from operating-system randomness, and a tripped watchdog
+stops the node without exiting the host. A lone validator waits for a first
+request before proposing, with a bounded heartbeat, unless a block carrying
+requests is still unfinalized. `EmbeddedConfig::thread_setup` runs on the node
+thread before its runtime is built, so every node thread is created afterwards
+and, on Linux, inherits the CPU affinity it sets. `thread_budget()` reports the
+node, worker, blocking, verification and history-store thread counts. See
+`docs/embedded-node.md`.
+
 ## Crate Structure
 
 Workspace membership comes from the root `Cargo.toml` (`bin/verad` + `crates/*`).
@@ -352,7 +383,7 @@ vera.rs/
         vera-client/            # Rust client library (EVM + BLS tx paths, typed queries)
         vera-config/            # Node configuration types (node, network, rpc, execution)
         vera-consensus/         # Consensus application layer: mempool, proposal, traits
-        vera-crypto/            # BLS12-381, secp256k1, and JWT utilities
+        vera-crypto/            # BLS12-381, actor keys (secp256k1, Ed25519, P-256), JWT
         vera-domain/            # Block, tx, light block, proof, and DKG payload types
         vera-e2e/               # End-to-end test harness (see crates/vera-e2e/README.md)
         vera-executor/          # Block execution: REVM, precompiles, VeraExecutor

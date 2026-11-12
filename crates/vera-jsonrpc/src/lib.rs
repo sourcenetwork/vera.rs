@@ -27,6 +27,9 @@ pub use vera_api::{LightBlockLookup, ReceiptProofLookup, VeraApiImpl, VeraApiSer
 #[cfg(feature = "nuclei-rpc")]
 mod nuclei_transport;
 
+mod local;
+pub use local::{LocalRpc, LocalRpcError, LocalSubscription};
+
 mod server;
 pub use server::{JsonRpcServer, RpcServer, RpcServerHandle, ServerError};
 
@@ -45,6 +48,9 @@ pub use types::{
     RpcLogFilter, RpcNativeReceipt, RpcTransaction, RpcTransactionReceipt, SyncInfo, SyncStatus,
     TopicFilter,
 };
+
+#[cfg(test)]
+mod local_tests;
 
 #[cfg(test)]
 mod transport_tests;

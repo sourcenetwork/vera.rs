@@ -1,17 +1,14 @@
-//! JWT ES256K verification for bearer token authentication.
+//! JWT verification for bearer token authentication.
 //!
-//! Verifies JWTs signed with the ES256K algorithm (secp256k1 + SHA-256).
-//! The issuer (`iss`) claim must be a secp256k1 `did:key:` identifier;
-//! the public key is extracted from the DID and used to verify the signature.
+//! Verifies delegation tokens signed with ES256K (secp256k1), EdDSA (Ed25519)
+//! or ES256 (P-256). The issuer (`iss`) claim is a `did:key:` identifier; its
+//! key verifies the signature and fixes the algorithm the header must name.
+//! Relay tokens are ES256K only.
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use k256::ecdsa::signature::hazmat::PrehashVerifier;
-use k256::ecdsa::{Signature, VerifyingKey};
-use sha2::{Digest, Sha256};
 
-/// secp256k1 multicodec prefix (`0xe7`).
-const SECP256K1_PUB_MULTICODEC: u64 = 0xe7;
+use crate::actor_key::ActorKey;
 
 /// Operations an actor authorizes a worker to submit.
 #[derive(
@@ -52,7 +49,7 @@ pub enum DelegationScope {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JwtClaims {
-    /// Issuer — a `did:key:z...` (secp256k1) identifier.
+    /// Issuer: a secp256k1, Ed25519 or P-256 `did:key:` identifier.
     pub iss: String,
     /// Authenticated submitting identity.
     pub sub: String,
@@ -89,14 +86,20 @@ pub struct RelayAssertion {
 }
 
 impl JwtClaims {
-    /// Actor identity; relay claims still require committed grant verification.
+    /// Actor identity as the token spells it; relay claims still require
+    /// committed grant verification. [`crate::actor::canonical_did`] gives the
+    /// spelling under which the actor is recorded.
     pub fn actor(&self) -> &str {
         self.relay.as_ref().map_or(&self.iss, |relay| &relay.actor)
     }
 
     /// Check the authenticated caller, deployment and agreed execution time.
+    ///
+    /// The subject may name the caller's key in any accepted spelling.
     pub fn authorize(&self, submitter: &str, deployment_id: u64, now: u64) -> Result<(), JwtError> {
-        if self.sub != submitter || self.aud != format!("vera:{deployment_id}") {
+        if crate::actor::canonical_did(&self.sub) != crate::actor::canonical_did(submitter)
+            || self.aud != format!("vera:{deployment_id}")
+        {
             return Err(JwtError::InvalidClaims(
                 "caller or deployment mismatch".into(),
             ));
@@ -119,13 +122,13 @@ pub enum JwtError {
     /// Token does not have exactly three `.`-separated segments.
     #[error("malformed token: {0}")]
     MalformedToken(String),
-    /// Header specifies an algorithm other than ES256K.
+    /// Header names an algorithm the issuer's key type does not sign with.
     #[error("unsupported algorithm: {0}")]
     UnsupportedAlgorithm(String),
-    /// ECDSA signature verification failed.
+    /// Signature verification failed, or the signature encoding is not canonical.
     #[error("invalid signature")]
     InvalidSignature,
-    /// The `iss` claim is not a valid secp256k1 `did:key:`.
+    /// The `iss` claim is not a supported `did:key:` in an accepted spelling.
     #[error("invalid issuer: {0}")]
     InvalidIssuer(String),
     /// Payload decoding or deserialization failed.
@@ -133,11 +136,10 @@ pub enum JwtError {
     PayloadDecode(String),
 }
 
-/// Verify a JWT bearer token signed with ES256K (secp256k1 + SHA-256).
+/// Verify a JWT bearer token against the key its `did:key:` issuer names.
 ///
-/// Returns the verified claims on success. The `iss` field must be a
-/// secp256k1 `did:key:` — the public key is extracted from the DID and
-/// used to verify the ECDSA signature.
+/// Returns the verified claims on success. The header's `alg` must be the one
+/// the issuer's key type signs with.
 pub fn verify_bearer_token(token: &str) -> Result<JwtClaims, JwtError> {
     if token.len() > 16 * 1024 {
         return Err(JwtError::MalformedToken("token exceeds 16 KiB".into()));
@@ -159,7 +161,7 @@ pub fn verify_bearer_token(token: &str) -> Result<JwtClaims, JwtError> {
         .map_err(|e| JwtError::MalformedToken(format!("header base64: {e}")))?;
     let header: Header = serde_json::from_slice(&header_bytes)
         .map_err(|e| JwtError::MalformedToken(format!("header JSON: {e}")))?;
-    if header.alg != "ES256K" {
+    if !matches!(header.alg.as_str(), "ES256K" | "EdDSA" | "ES256") {
         return Err(JwtError::UnsupportedAlgorithm(header.alg));
     }
     if header.typ != "vera-delegation-v1+jwt" && header.typ != "vera-relay-v1+jwt" {
@@ -176,25 +178,17 @@ pub fn verify_bearer_token(token: &str) -> Result<JwtClaims, JwtError> {
         ));
     }
 
-    let compressed_pubkey = compressed_pubkey_from_did(&raw.iss)?;
-    let verifying_key = VerifyingKey::from_sec1_bytes(&compressed_pubkey)
-        .map_err(|e| JwtError::InvalidIssuer(format!("invalid secp256k1 key: {e}")))?;
-
+    let issuer = ActorKey::from_did(&raw.iss)?;
+    if issuer.algorithm() != header.alg
+        || (raw.relay.is_some() && !matches!(issuer, ActorKey::Secp256k1(_)))
+    {
+        return Err(JwtError::UnsupportedAlgorithm(header.alg));
+    }
     let sig_bytes = URL_SAFE_NO_PAD
         .decode(sig_b64)
         .map_err(|e| JwtError::MalformedToken(format!("signature base64: {e}")))?;
-    let signature = Signature::from_slice(&sig_bytes).map_err(|_| JwtError::InvalidSignature)?;
-
-    if signature.normalize_s().is_some() {
-        return Err(JwtError::InvalidSignature);
-    }
-
     let signing_input = format!("{header_b64}.{payload_b64}");
-    let digest = Sha256::digest(signing_input.as_bytes());
-
-    verifying_key
-        .verify_prehash(&digest, &signature)
-        .map_err(|_| JwtError::InvalidSignature)?;
+    issuer.verify(signing_input.as_bytes(), &sig_bytes)?;
 
     if raw.sub.is_empty() || raw.nbf > raw.iat || raw.iat >= raw.exp {
         return Err(JwtError::InvalidClaims(
@@ -205,64 +199,37 @@ pub fn verify_bearer_token(token: &str) -> Result<JwtClaims, JwtError> {
 }
 
 /// Canonical compressed key DID used to identify an authorized relay.
+///
+/// Relays are secp256k1 keys; any other issuer is rejected.
 pub fn canonical_issuer(issuer: &str) -> Result<String, JwtError> {
-    let key = compressed_pubkey_from_did(issuer)?;
-    crate::secp256k1::did_from_secp256k1_pubkey(&key)
-        .map_err(|error| JwtError::InvalidIssuer(error.to_string()))
-}
-
-/// Match an issuer for revocation, including compressed and uncompressed key DIDs.
-/// This does not change the issuer identity recorded in policies or token indexes.
-pub fn matches_issuer(issuer: &str, caller: &str) -> bool {
-    issuer == caller
-        || match (
-            compressed_pubkey_from_did(issuer),
-            compressed_pubkey_from_did(caller),
-        ) {
-            (Ok(issuer), Ok(caller)) => issuer == caller,
-            _ => false,
-        }
-}
-
-/// Extract a compressed secp256k1 public key (33 bytes) from a `did:key:` string.
-fn compressed_pubkey_from_did(did: &str) -> Result<Vec<u8>, JwtError> {
-    let multibase_part = did
-        .strip_prefix("did:key:")
-        .ok_or_else(|| JwtError::InvalidIssuer("not a did:key: string".into()))?;
-
-    let decoded = crate::did_key::decode(multibase_part)
-        .map_err(|e| JwtError::InvalidIssuer(format!("multibase decode: {e}")))?;
-
-    let mut varint_buf = [0u8; 10];
-    let prefix = unsigned_varint::encode::u64(SECP256K1_PUB_MULTICODEC, &mut varint_buf);
-    if !decoded.starts_with(prefix) {
-        return Err(JwtError::InvalidIssuer("not a secp256k1 did:key".into()));
+    match ActorKey::from_did(issuer)? {
+        key @ ActorKey::Secp256k1(_) => Ok(key.canonical_did()),
+        _ => Err(JwtError::InvalidIssuer("not a secp256k1 did:key".into())),
     }
-
-    let key_bytes = &decoded[prefix.len()..];
-    let compressed = match key_bytes.len() {
-        33 => key_bytes.to_vec(),
-        65 => {
-            // Uncompressed secp256k1 key — compress it.
-            // DefraDB uses uncompressed keys in did:key (matching Go's SerializeUncompressed).
-            let vk = VerifyingKey::from_sec1_bytes(key_bytes)
-                .map_err(|e| JwtError::InvalidIssuer(format!("invalid uncompressed key: {e}")))?;
-            vk.to_encoded_point(true).as_bytes().to_vec()
-        }
-        n => {
-            return Err(JwtError::InvalidIssuer(format!(
-                "expected 33 or 65 byte pubkey, got {n}",
-            )));
-        }
-    };
-
-    Ok(compressed)
 }
+
+/// The single DID under which a delegation actor of any supported key type is recorded.
+///
+/// Rejects an identifier that is not a supported key; [`crate::actor::canonical_did`]
+/// returns such an identifier unchanged.
+pub fn canonical_actor(actor: &str) -> Result<String, JwtError> {
+    ActorKey::from_did(actor).map(|key| key.canonical_did())
+}
+
+/// Whether two identifiers name one issuer, in any accepted spelling of its key.
+pub fn matches_issuer(issuer: &str, caller: &str) -> bool {
+    crate::actor::canonical_did(issuer) == crate::actor::canonical_did(caller)
+}
+
+#[cfg(test)]
+#[path = "jwt_key_type_tests.rs"]
+mod key_type_tests;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use k256::ecdsa::SigningKey;
+    use k256::ecdsa::{Signature, SigningKey};
+    use sha2::{Digest as _, Sha256};
 
     #[test]
     fn issuer_revocation_matches_key_encodings() {
@@ -301,6 +268,33 @@ mod tests {
         );
         assert!(canonical_issuer("did:key:z0").is_err());
         assert!(canonical_issuer("did:key:uAA=").is_err());
+    }
+
+    #[test]
+    fn subject_names_the_submitting_key_in_any_spelling() {
+        let (key, issuer) = test_key_and_did();
+        let submitter = SigningKey::from_slice(&[7; 32]).unwrap();
+        let did = |key: &SigningKey, compressed| {
+            let mut bytes = vec![0xe7, 0x01];
+            bytes.extend_from_slice(key.verifying_key().to_encoded_point(compressed).as_bytes());
+            format!("did:key:{}", crate::did_key::encode(&bytes))
+        };
+        for written in [true, false] {
+            let token = create_jwt(
+                &key,
+                &serde_json::json!({"iss": issuer, "sub": did(&submitter, written), "exp": 100})
+                    .to_string(),
+            );
+            let claims = verify_bearer_token(&token).unwrap();
+            assert_eq!(claims.sub, did(&submitter, written));
+            for authenticated in [true, false] {
+                claims
+                    .authorize(&did(&submitter, authenticated), 9001, 50)
+                    .unwrap();
+            }
+            assert!(claims.authorize(&did(&key, true), 9001, 50).is_err());
+            assert!(claims.authorize("caller", 9001, 50).is_err());
+        }
     }
 
     fn create_jwt(signing_key: &SigningKey, claims_json: &str) -> String {

@@ -199,6 +199,7 @@ impl RingRecord {
         if self.id != expected
             || self.config.id()? != expected
             || vera_identity::Did::new(&self.creator).is_err()
+            || crate::actor::canonical_str(&self.creator) != self.creator
             || self.revision.block_height == 0
             || self.revision.seconds == 0
         {
@@ -228,6 +229,9 @@ impl RingRecord {
             RingState::Active { keys } => keys.validate(self.config.requires_pet)?,
             RingState::Cancelled { by } => {
                 vera_identity::Did::new(by).map_err(invalid)?;
+                if crate::actor::canonical_str(by) != *by {
+                    return Err(invalid("cancelling actor spelling is not canonical"));
+                }
             }
             RingState::Conflict {
                 first_keys,

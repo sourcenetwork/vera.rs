@@ -4,6 +4,8 @@
 
 use alloy_primitives as _;
 
+/// Canonical actor spelling shared by every module and its verifiers.
+pub mod actor;
 mod borsh_did;
 /// Shared key encoding helpers (length prefix, sanitization).
 pub mod key_encoding;
