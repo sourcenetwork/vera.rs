@@ -54,6 +54,28 @@ impl VeraClient {
         Ok((response.revision, allowed))
     }
 
+    /// Fetch current permission evidence paired with its revision, without verifying it.
+    /// Callers that need to capture a bundle now and verify it later (offline, no further
+    /// RPC) should use this instead of `verify_current_access`, which verifies and discards
+    /// the bundle immediately.
+    pub async fn current_permission_response(
+        &self,
+        policy: &str,
+        request: &AccessRequest,
+        minimum_height: u64,
+        limits: PermissionLimits,
+    ) -> Result<PermissionResponse, ClientError> {
+        validate_request(policy, request, limits)?;
+        self.rpc_call_bounded(
+            "vera_getCurrentPermissionProof",
+            serde_json::json!([policy, request, minimum_height]),
+            vera_domain::LIGHT_BLOCK_RESPONSE_BYTES
+                .saturating_add(limits.proof_bytes)
+                .saturating_add(1024),
+        )
+        .await
+    }
+
     /// Verify permission evidence at the caller's selected finalized revision.
     ///
     /// The consensus key must come from authenticated configuration. The caller
