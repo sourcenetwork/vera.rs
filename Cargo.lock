@@ -4409,9 +4409,9 @@ dependencies = [
 
 [[package]]
 name = "orbis-reporting"
-version = "0.0.2"
+version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9493ea2c91d02f7f3cf32c765082dda1980a5489c4ff989b78d23acc7be6e43a"
+checksum = "692fa65b3f4ac3c188158a13554ed2a10822aa9b8503ce8c17f6a816102caef3"
 dependencies = [
  "hex",
  "serde",

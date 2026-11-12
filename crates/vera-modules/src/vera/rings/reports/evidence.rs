@@ -209,10 +209,6 @@ pub(super) fn validate(report: &ReportEnvelope) -> Result<Metadata> {
             let p = UnauthorizedRequestPayload::from_canonical_bytes(&report.payload)
                 .map_err(invalid)?;
             signature(&p.relay_signature)?;
-            require(
-                !p.checked_at_anchor.is_empty(),
-                "missing authorization anchor",
-            )?;
             let s = p.statement;
             require(
                 matches!(s.origin_protocol.as_str(), "pre" | "sign")

@@ -8,7 +8,7 @@ Original texts are reproduced below and identified by SHA-256. For texts from
 upstream source trees, the source URL includes the reviewed revision. Aurora's
 package records a dirty source tree; see its package-specific notice below.
 
-Cargo.lock SHA-256: 4902f51ac42775ad24e44c36ddae550853d780b33bf5b74d672425196cda76eb
+Cargo.lock SHA-256: ebf98d0f390d819b0ee50efc25524c867d6b1f2fd95e4b77c8ae1e149e17989a
 Packages: 537
 
 PACKAGE INDEX
@@ -1167,7 +1167,7 @@ opentelemetry-proto 0.32.0 | Apache-2.0
 opentelemetry_sdk 0.32.1 | Apache-2.0
   c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4  https://github.com/open-telemetry/opentelemetry-rust/blob/284a37d93b3856e1975c2807ba3af1421ebd9b52/LICENSE
 
-orbis-reporting 0.0.2 | BUSL-1.1
+orbis-reporting 0.0.3 | BUSL-1.1
   020858523d997683cecf617c13cae99bebfdde8e0d183d2385979639c1605121  Bsl.txt
   dea08b5be5296bd43768cd6badd26b45fca31399151329afb941f9c62ab3b4ed  LICENSE-APACHE
 
