@@ -54,18 +54,20 @@ with Rust 1.99.1. The resulting archive has SHA-256
 the Business Source License 1.1 and Apache 2.0 change license. Its terms restrict
 managed-service use and change to Apache 2.0 on March 13, 2030.
 
-Vera selects the published `orbis-reporting` 0.0.2 archive, SHA-256
-`9493ea2c91d02f7f3cf32c765082dda1980a5489c4ff989b78d23acc7be6e43a`. Its
+Vera selects the published `orbis-reporting` 0.0.3 archive, SHA-256
+`692fa65b3f4ac3c188158a13554ed2a10822aa9b8503ce8c17f6a816102caef3`. Its
 `.cargo_vcs_info.json` identifies merged Orbis commit
-`77b08bb3d917a25a101ed93e6822af60dcf84578`. Its library source and both license
-files are identical to the 0.0.1 archive above; it adds a README. Recheck the
-archive when qualifying a release candidate:
+`852848c93db3caa55af18c0b71d223c42ac7e3a5`. Both license files are identical to
+the 0.0.1 archive above. Its report format differs from 0.0.2: the relay report
+payload no longer carries an authorization anchor, and the acceptor's evidence
+travels outside the on-chain envelope. Recheck the archive when qualifying a
+release candidate:
 
 ```sh
-curl -fsSL https://static.crates.io/crates/orbis-reporting/orbis-reporting-0.0.2.crate -o orbis-reporting-0.0.2.crate
-shasum -a 256 orbis-reporting-0.0.2.crate
-tar -tzf orbis-reporting-0.0.2.crate
-tar -xOzf orbis-reporting-0.0.2.crate orbis-reporting-0.0.2/.cargo_vcs_info.json
+curl -fsSL https://static.crates.io/crates/orbis-reporting/orbis-reporting-0.0.3.crate -o orbis-reporting-0.0.3.crate
+shasum -a 256 orbis-reporting-0.0.3.crate
+tar -tzf orbis-reporting-0.0.3.crate
+tar -xOzf orbis-reporting-0.0.3.crate orbis-reporting-0.0.3/.cargo_vcs_info.json
 ```
 
 Check `.cargo_vcs_info.json` and the license files in the archive, and record
