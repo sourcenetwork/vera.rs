@@ -354,7 +354,11 @@ optional. The deployment's authority is the account's operator policy, its
 consensus share comes from operating-system randomness, and a tripped watchdog
 stops the node without exiting the host. A lone validator waits for a first
 request before proposing, with a bounded heartbeat, unless a block carrying
-requests is still unfinalized. See `docs/embedded-node.md`.
+requests is still unfinalized. `EmbeddedConfig::thread_setup` runs on the node
+thread before its runtime is built, so every node thread is created afterwards
+and, on Linux, inherits the CPU affinity it sets. `thread_budget()` reports the
+node, worker, blocking, verification and history-store thread counts. See
+`docs/embedded-node.md`.
 
 ## Crate Structure
 

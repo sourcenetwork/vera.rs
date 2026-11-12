@@ -70,12 +70,74 @@ Tokio, and from any thread. After the node stops they fail with
 Set `EmbeddedConfig::rpc_listen` to also serve the same methods over the
 network. It is off by default.
 
-## Threads and shutdown
+## Threads
 
-The node runs on a dedicated thread with its own Commonware runtime, and that
-runtime owns its worker threads. The host's runtime is not used. `EmbeddedConfig::worker_threads`
-and `max_blocking_threads` bound that runtime's threads; a small host can set
-one worker.
+The node runs on a dedicated thread with its own Commonware runtime. The host's
+runtime is not used. Every other thread of the node is created by the node
+thread or by a thread it created.
+
+| Group | Name | Count | Bound | Started |
+| --- | --- | --- | --- | --- |
+| Node thread | `vera-node` | 1 | fixed | by the thread that calls `start` |
+| Async workers | `tokio-rt-worker` | `worker_threads`, default 2 | `EmbeddedConfig::worker_threads` | when the runtime is built |
+| Blocking threads | `tokio-rt-worker` | 0 to `max_blocking_threads`, default 512 | `EmbeddedConfig::max_blocking_threads` | on demand, by the node thread that submits the work; they exit after ten idle seconds |
+| Verification pool | unnamed | `verification_threads` | `EmbeddedConfig::verification_threads` | at startup |
+| History store | `regolith-compaction-0` | 1 | fixed: Vera opens Regolith with one background worker, which flushes and compacts, and without its log-writeback thread | when the history store opens at startup |
+
+The verification pool checks native request signatures and digests blocks.
+`EmbeddedConfig::new` sets `verification_threads` to the machine's available
+parallelism, at most four, which is what the daemon uses. The field holds the
+resolved number, so the count does not change if the host later narrows the
+CPUs the node may use.
+
+The node starts no Commonware dedicated thread. In Commonware 2026.10 only the
+partitioned QMDB index build spawns them, and Vera's stores build their indexes
+serially. Storage operations, name resolution, history reads and the reshare
+verification task use the blocking threads, and so does the replacement worker
+that the runtime starts when a worker blocks in place. The node uses no
+process-global thread pool: the verification pool is private to the node, and
+BLS arithmetic is built without its own pool.
+
+`EmbeddedConfig::thread_budget()` returns these counts as a `ThreadBudget`.
+`persistent()` is the number of threads that live as long as the node, and
+`max()` adds the blocking bound.
+
+```rust
+let mut config = EmbeddedConfig::new(data_dir, genesis, p2p_listen);
+config.worker_threads = Some(1);
+config.max_blocking_threads = Some(16);
+config.verification_threads = 1;
+config.thread_setup = Some(ThreadSetup::new(move || pin_to(&edge_cpus)));
+let budget = config.thread_budget();
+```
+
+`thread_setup` runs once per `start`, on the node thread, before the runtime is
+built and so before any other thread of the node exists. If it returns an
+error, `start` fails with `EmbedError::ThreadSetup` and no other thread was
+started.
+
+In-process calls do not add threads outside this set. `LocalRpc` queues a call
+on the node's runtime and waits for the result; the calling thread starts
+nothing, and blocking work done for the call starts from a node thread.
+
+What a thread passes on to the threads it creates depends on the platform:
+
+- **Linux.** A new thread inherits its creator's CPU affinity mask. A mask that
+  `thread_setup` applies with `sched_setaffinity` therefore holds for every
+  thread in the table. `crates/vera-node/tests/embedded_thread_affinity.rs`
+  checks this for every thread the process gains, and that their number stays
+  within the budget.
+- **macOS.** There is no CPU affinity mask to inherit, so a node cannot be
+  confined to a set of cores this way. The ordering and the counts above still
+  hold.
+- **Windows.** A thread affinity mask applies to the thread it is set on; new
+  threads start from the process affinity mask. `thread_setup` therefore places
+  only the node thread. Vera's CI does not build or test on Windows.
+
+The inventory covers the default build. The optional `nuclei-rpc` transport
+uses a process-global proactor and is not covered.
+
+## Shutdown
 
 `stop` ends the node and waits for its thread. Stopping drops the runtime
 without a separate shutdown protocol, so durability relies on the same recovery
@@ -136,3 +198,10 @@ are not a capacity or multi-validator measurement.
 - One validator. A stopped or lost device stops the deployment.
 - An idle deployment still produces a heartbeat block about every 1.5 s.
 - Memory use has not been measured for embedded hosts.
+- The smallest workable `max_blocking_threads` has not been established.
+  Blocking tasks that wait on storage hold threads that storage needs, so a
+  bound that is too small can stall the node. On one Apple-silicon laptop a
+  debug build with one worker started, finalized a policy and idled with bounds
+  of 1, 2, 4 and 16, filling the bound each time, and used 46 blocking threads
+  under the default bound. Resharing at an epoch boundary was not part of that
+  run.

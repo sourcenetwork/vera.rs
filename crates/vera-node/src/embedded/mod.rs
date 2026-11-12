@@ -6,6 +6,8 @@
 
 mod config;
 mod error;
+mod thread_budget;
+mod thread_setup;
 
 use std::{net::SocketAddr, thread::JoinHandle};
 
@@ -18,6 +20,8 @@ use vera_jsonrpc::LocalRpc;
 
 pub use config::EmbeddedConfig;
 pub use error::EmbedError;
+pub use thread_budget::ThreadBudget;
+pub use thread_setup::ThreadSetup;
 
 use crate::{NodeOptions, NodeSettings, RpcMode, WatchdogMode};
 
@@ -31,13 +35,14 @@ pub struct EmbeddedNode {
     genesis: VeraGenesis,
     consensus_key: ConsensusPublicKey,
     stop: Option<oneshot::Sender<()>>,
-    exit: oneshot::Receiver<Result<(), String>>,
+    exit: oneshot::Receiver<Result<(), EmbedError>>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl EmbeddedNode {
     /// Create or reopen the deployment and return once the node serves requests.
     pub async fn start(config: EmbeddedConfig) -> Result<Self, EmbedError> {
+        let threads = config.thread_budget();
         let node_config = NodeConfig {
             chain_id: config.genesis.chain_id,
             data_dir: config.data_dir.clone(),
@@ -59,7 +64,8 @@ impl EmbeddedNode {
         let stall_timeout_ms = genesis
             .simplex
             .map_or(u64::MAX, |parameters| parameters.stall_timeout_ms);
-        if config.worker_threads == Some(0) || config.max_blocking_threads == Some(0) {
+        let verification_threads = std::num::NonZeroUsize::new(threads.verification);
+        if threads.workers == 0 || threads.max_blocking == 0 || verification_threads.is_none() {
             return Err(EmbedError::Config("thread counts must be nonzero"));
         }
         // Simplex requires this ordering and aborts its engine otherwise.
@@ -103,9 +109,9 @@ impl EmbeddedNode {
             watchdog: WatchdogMode::Report,
             ready: Some(ready_tx),
             solo_pacing: config.pacing,
+            verification_threads,
         };
-        let (worker_threads, max_blocking_threads) =
-            (config.worker_threads, config.max_blocking_threads);
+        let thread_setup = config.thread_setup;
         let storage = config.data_dir.join("commonware");
         std::fs::create_dir_all(&storage).map_err(|source| crate::SoloError::Io {
             path: storage.clone(),
@@ -115,22 +121,25 @@ impl EmbeddedNode {
             .name("vera-node".into())
             .stack_size(NODE_STACK_BYTES)
             .spawn(move || {
-                let mut runtime =
-                    commonware_runtime::tokio::Config::default().with_storage_directory(storage);
-                if let Some(threads) = worker_threads {
-                    runtime = runtime.with_worker_threads(threads);
+                // Threads take their placement from their creator, so the setup precedes the runtime.
+                if let Some(setup) = thread_setup
+                    && let Err(error) = setup.run()
+                {
+                    let _ = exit_tx.send(Err(EmbedError::ThreadSetup(error)));
+                    return;
                 }
-                if let Some(threads) = max_blocking_threads {
-                    runtime = runtime.with_max_blocking_threads(threads);
-                }
+                let runtime = commonware_runtime::tokio::Config::default()
+                    .with_storage_directory(storage)
+                    .with_worker_threads(threads.workers)
+                    .with_max_blocking_threads(threads.max_blocking);
                 let result =
                     commonware_runtime::tokio::Runner::new(runtime).start(|context| async move {
                         ::tokio::select! {
                             result = crate::run_node_with_options(context, settings, options) => {
-                                Err(result.map_or_else(
+                                Err(EmbedError::Stopped(result.map_or_else(
                                     |error| format!("{error:#}"),
                                     |()| "node actors exited".into(),
-                                ))
+                                )))
                             }
                             _ = stop_rx => Ok(()),
                         }
@@ -139,15 +148,20 @@ impl EmbeddedNode {
                 let _ = exit_tx.send(result);
             })
             .map_err(EmbedError::Thread)?;
-        let rpc = ::tokio::select! {
-            ready = ready_rx => ready.ok(),
-            _ = &mut exit_rx => None,
+        // A received exit must not be awaited again: a completed receiver panics when polled.
+        let started = ::tokio::select! {
+            ready = ready_rx => ready.map_err(|_| None),
+            exit = &mut exit_rx => Err(Some(exit)),
         };
-        let Some(rpc) = rpc else {
-            return Err(outcome(exit_rx, thread)
-                .await
-                .err()
-                .unwrap_or(EmbedError::Panicked));
+        let rpc = match started {
+            Ok(rpc) => rpc,
+            Err(exit) => {
+                let exit = match exit {
+                    Some(exit) => exit,
+                    None => exit_rx.await,
+                };
+                return Err(joined(exit, thread).err().unwrap_or(EmbedError::Panicked));
+            }
         };
         Ok(Self {
             rpc,
@@ -180,7 +194,7 @@ impl EmbeddedNode {
     /// Wait until the node stops on its own, which is always an error.
     pub async fn failed(&mut self) -> EmbedError {
         match (&mut self.exit).await {
-            Ok(Err(reason)) => EmbedError::Stopped(reason),
+            Ok(Err(error)) => error,
             Ok(Ok(())) | Err(_) => EmbedError::Panicked,
         }
     }
@@ -193,7 +207,7 @@ impl EmbeddedNode {
         }
         let thread = self.thread.take().ok_or(EmbedError::Panicked)?;
         let exit = std::mem::replace(&mut self.exit, oneshot::channel().1);
-        outcome(exit, thread).await
+        joined(exit.await, thread)
     }
 }
 
@@ -205,16 +219,13 @@ impl Drop for EmbeddedNode {
     }
 }
 
-async fn outcome(
-    exit: oneshot::Receiver<Result<(), String>>,
+fn joined(
+    exit: Result<Result<(), EmbedError>, oneshot::error::RecvError>,
     thread: JoinHandle<()>,
 ) -> Result<(), EmbedError> {
-    let result = exit.await;
     // The thread has sent its result or is unwinding, so this join is brief.
-    let joined = thread.join();
-    match (result, joined) {
-        (Ok(Ok(())), Ok(())) => Ok(()),
-        (Ok(Err(reason)), Ok(())) => Err(EmbedError::Stopped(reason)),
+    match (exit, thread.join()) {
+        (Ok(result), Ok(())) => result,
         _ => Err(EmbedError::Panicked),
     }
 }

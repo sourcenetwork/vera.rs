@@ -4,6 +4,7 @@ use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use vera_config::PruningConfig;
 
+use super::{ThreadBudget, ThreadSetup};
 use crate::{SoloGenesis, SoloPacing};
 
 /// Configuration of an embedded single-validator node.
@@ -31,6 +32,13 @@ pub struct EmbeddedConfig {
     pub worker_threads: Option<usize>,
     /// Upper bound on the node runtime's blocking threads. `None` uses the runtime default.
     pub max_blocking_threads: Option<usize>,
+    /// Threads of the pool that verifies native requests and digests blocks.
+    ///
+    /// The default depends on the machine, so `new` resolves it and
+    /// [`Self::thread_budget`] reports the number that will run.
+    pub verification_threads: usize,
+    /// Runs on the node thread before any other thread of the node exists.
+    pub thread_setup: Option<ThreadSetup>,
 }
 
 impl EmbeddedConfig {
@@ -52,6 +60,23 @@ impl EmbeddedConfig {
             )),
             worker_threads: None,
             max_blocking_threads: None,
+            verification_threads: crate::options::default_verification_threads().get(),
+            thread_setup: None,
+        }
+    }
+
+    /// The threads a node started with this configuration creates.
+    #[must_use]
+    pub fn thread_budget(&self) -> ThreadBudget {
+        let runtime = commonware_runtime::tokio::Config::default();
+        ThreadBudget {
+            node: 1,
+            workers: self.worker_threads.unwrap_or(runtime.worker_threads()),
+            max_blocking: self
+                .max_blocking_threads
+                .unwrap_or(runtime.max_blocking_threads()),
+            verification: self.verification_threads,
+            history: crate::history::BACKGROUND_THREADS,
         }
     }
 }

@@ -5,6 +5,9 @@ use std::{path::Path, sync::Arc};
 
 use super::statistics::HistoryWriteStatistics;
 
+/// Threads the store runs besides its callers: Regolith's compaction workers, which also flush.
+pub(crate) const BACKGROUND_THREADS: usize = 1;
+
 #[derive(Debug)]
 pub(super) struct HistoryDb {
     db: regolith::Db,
@@ -35,7 +38,9 @@ impl HistoryDb {
         }
         let db = regolith::Db::open(
             path.join("regolith"),
-            regolith::Options::default().statistics(statistics.clone()),
+            regolith::Options::default()
+                .max_background_compactions(BACKGROUND_THREADS)
+                .statistics(statistics.clone()),
         )?;
         Ok(Self { db, statistics })
     }
