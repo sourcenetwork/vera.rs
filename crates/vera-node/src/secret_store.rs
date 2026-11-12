@@ -91,6 +91,12 @@ impl FileSecretStore {
         })
     }
 
+    /// Whether any epoch share is stored.
+    #[must_use]
+    pub fn has_shares(&self) -> bool {
+        !self.inner.lock().shares.is_empty()
+    }
+
     /// Seed the store with a trusted-setup share for `epoch`.
     pub fn put_initial_share(&self, epoch: Epoch, share: Share) -> anyhow::Result<()> {
         self.update(|data| {
