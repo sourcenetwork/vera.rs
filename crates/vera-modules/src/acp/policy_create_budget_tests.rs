@@ -151,3 +151,58 @@ fn creation_charges_corrupt_counter_before_decoding_and_invalid_definition_work(
     assert_eq!(module.store.serialize(), before);
     assert!(module.zanzibar_policies.is_empty());
 }
+
+#[test]
+fn genesis_seeded_policies_match_predicted_ids_and_leave_room_for_live_creation() {
+    let owner = Did::new("did:key:owner").unwrap();
+    let other_policy = "name: second\nresources:\n  - name: widget\n";
+    let predicted_first =
+        AcpModule::predict_policy_id(POLICY, &PolicyMarshalingType::ShortYaml, 1).unwrap();
+    let predicted_second =
+        AcpModule::predict_policy_id(other_policy, &PolicyMarshalingType::ShortYaml, 2).unwrap();
+
+    let mut module = AcpModule::new();
+    let records = module
+        .initialize_policies(
+            &owner,
+            &[
+                PolicySeed {
+                    definition: POLICY.to_string(),
+                    marshal_type: PolicyMarshalingType::ShortYaml,
+                },
+                PolicySeed {
+                    definition: other_policy.to_string(),
+                    marshal_type: PolicyMarshalingType::ShortYaml,
+                },
+            ],
+        )
+        .unwrap();
+    assert_eq!(records[0].policy.id, predicted_first);
+    assert_eq!(records[1].policy.id, predicted_second);
+    assert_ne!(predicted_first, predicted_second);
+
+    // Seeding twice (e.g. a restarted genesis apply) is rejected, not silently
+    // re-applied over the live counter it already set.
+    assert!(matches!(
+        module.initialize_policies(
+            &owner,
+            &[PolicySeed {
+                definition: POLICY.to_string(),
+                marshal_type: PolicyMarshalingType::ShortYaml,
+            }]
+        ),
+        Err(AcpError::State(_))
+    ));
+
+    // A live creation right after genesis gets the next counter, not a
+    // collision with anything seeded above.
+    let live = module
+        .create_policy(
+            &owner,
+            "name: live\nresources:\n  - name: doc\n",
+            PolicyMarshalingType::ShortYaml,
+        )
+        .unwrap();
+    assert_ne!(live.policy.id, predicted_first);
+    assert_ne!(live.policy.id, predicted_second);
+}

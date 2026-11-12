@@ -9,7 +9,10 @@ use super::*;
 use crate::{
     acp::types::PolicyMarshalingType,
     types::Timestamp,
-    vera::nodes::{NodeCommand, NodeInfo, NodeRequest, SignedNodeRequest},
+    vera::{
+        nodes::{NodeCommand, NodeInfo, NodeRequest, SignedNodeRequest},
+        rings::reports::NodeDemeritSeed,
+    },
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use k256::ecdsa::{
@@ -344,7 +347,8 @@ fn cancellation_conflict_revocation_and_bad_signatures_cannot_reuse_a_ring() {
     config.nonce = [10; 32];
     let create = RingCommand::Create(config);
     let record = apply(&mut vera, &mut acp, &create, 3).unwrap();
-    let cancel = RingCommand::Cancel { ring_id: record.id };
+    let ring_id = record.id.clone();
+    let cancel = RingCommand::Cancel { ring_id };
     vera.revoke_delegation(&context(), &actor(), &token(&cancel, 4))
         .unwrap();
     let before = (vera.store().serialize(), acp.store().serialize());
@@ -354,7 +358,89 @@ fn cancellation_conflict_revocation_and_bad_signatures_cannot_reuse_a_ring() {
         apply(&mut vera, &mut acp, &cancel, 5).unwrap().state,
         RingState::Cancelled { .. }
     ));
+    // The ring record itself is deleted outright on cancellation (mirrors
+    // Cosmos's `CancelPendingRing`/`DeleteRing`) -- but recreating under
+    // the same id still fails, because the first creation's ACP "ring"
+    // object registration has no deregistration counterpart and is never
+    // cleaned up.
     assert!(apply(&mut vera, &mut acp, &create, 6).is_err());
+    assert_eq!(vera.threshold_ring(&record.id).unwrap(), None);
+}
+
+#[test]
+fn ring_cancellation_allows_the_creator_or_a_peer_but_rejects_outsiders() {
+    let (mut vera, mut acp, config) = fixture(POLICY);
+    let record = apply(&mut vera, &mut acp, &RingCommand::Create(config), 1).unwrap();
+    let cancel = RingCommand::Cancel { ring_id: record.id };
+
+    // Neither the creator (secret(1)) nor a ring member (secret(2), secret(3)).
+    let outsider_token = token_from(&cancel, 2, &context(), &secret(4));
+    let before = (vera.store().serialize(), acp.store().serialize());
+    assert!(
+        vera.apply_ring_command(
+            &mut acp,
+            &context(),
+            &submission(),
+            &outsider_token,
+            &cancel
+        )
+        .is_err()
+    );
+    assert_eq!((vera.store().serialize(), acp.store().serialize()), before);
+
+    // secret(2) is a peer node key, not the creator -- allowed, same as Cosmos's
+    // `CancelPendingRing`, so a node can abort its own stalled fresh DKG without
+    // being the one that happened to submit `RingCommand::Create`.
+    let member_token = token_from(&cancel, 3, &context(), &secret(2));
+    let cancelled = vera
+        .apply_ring_command(&mut acp, &context(), &submission(), &member_token, &cancel)
+        .unwrap();
+    assert!(matches!(cancelled.state, RingState::Cancelled { .. }));
+}
+
+#[test]
+fn genesis_seeded_demerits_are_readable_and_reject_duplicates_or_zero_values() {
+    let ring_id = "11".repeat(32);
+    let node_key = public(&secret(2));
+    let mut vera = VeraModule::new();
+    vera.initialize_node_demerits(&[NodeDemeritSeed {
+        ring_id: ring_id.clone(),
+        node_key: node_key.clone(),
+        points: 2,
+        window_started_at: 100,
+    }])
+    .unwrap();
+    let stored = vera.node_demerits(&ring_id, &node_key).unwrap().unwrap();
+    assert_eq!(stored.points, 2);
+    assert_eq!(stored.window_started_at, 100);
+
+    assert!(matches!(
+        vera.initialize_node_demerits(&[NodeDemeritSeed {
+            ring_id: ring_id.clone(),
+            node_key,
+            points: 1,
+            window_started_at: 200,
+        }]),
+        Err(VeraError::InvalidRingRequest { .. })
+    ));
+    for bad in [
+        NodeDemeritSeed {
+            ring_id: ring_id.clone(),
+            node_key: public(&secret(3)),
+            points: 0,
+            window_started_at: 100,
+        },
+        NodeDemeritSeed {
+            ring_id,
+            node_key: public(&secret(3)),
+            points: 1,
+            window_started_at: 0,
+        },
+    ] {
+        let before = vera.store().serialize();
+        assert!(vera.initialize_node_demerits(&[bad]).is_err());
+        assert_eq!(vera.store().serialize(), before);
+    }
 }
 
 #[test]
@@ -490,6 +576,84 @@ fn ring_updates_require_acp_authority_and_reject_stale_commands_within_one_revis
         initial.config.pss_interval
     );
     assert_eq!(old.sequence, 0);
+}
+
+#[test]
+fn ring_pre_share_endpoints_are_mutable_via_acp_update() {
+    let policy = POLICY.replace("  - name: ring\n", "  - name: ring\n    relations:\n      - name: operator\n    permissions:\n      - name: update_ring\n        expr: operator\n");
+    let (mut vera, mut acp, config) = fixture(&policy);
+    let initial = apply(&mut vera, &mut acp, &RingCommand::Create(config), 1).unwrap();
+    vera.apply_ring_participant_request(&context(), &confirm(&initial.id, 2, "aabb"))
+        .unwrap();
+    let active = vera
+        .apply_ring_participant_request(&context(), &confirm(&initial.id, 3, "aabb"))
+        .unwrap();
+    assert!(active.current_settings().pre_share_endpoints.is_empty());
+    acp.direct_policy_cmd(
+        &actor(),
+        &initial.config.policy_id,
+        PolicyCmd::SetRelationship(Relationship::with_entity(
+            "ring",
+            &initial.id,
+            "operator",
+            actor(),
+        )),
+    )
+    .unwrap();
+    let update = |sequence, update| RingCommand::Update {
+        ring_id: initial.id.clone(),
+        expected_sequence: sequence,
+        update,
+    };
+    let endpoints = vec!["https://defra.example/a".to_string()];
+    let set = update(
+        active.sequence,
+        RingUpdate::SetPreShareEndpoints(endpoints.clone()),
+    );
+    let changed = apply(&mut vera, &mut acp, &set, 2).unwrap();
+    assert_eq!(changed.current_settings().pre_share_endpoints, endpoints);
+    // Creation-time value is untouched -- only the live setting moved.
+    assert!(changed.config.pre_share_endpoints.is_empty());
+    // Re-applying the identical value is rejected as unchanged.
+    assert!(
+        apply(
+            &mut vera,
+            &mut acp,
+            &update(
+                changed.sequence,
+                RingUpdate::SetPreShareEndpoints(endpoints)
+            ),
+            3
+        )
+        .is_err()
+    );
+    // Unsorted input is rejected (native deliberately doesn't auto-canonicalize).
+    let unsorted = vec![
+        "https://b.example".to_string(),
+        "https://a.example".to_string(),
+    ];
+    assert!(
+        apply(
+            &mut vera,
+            &mut acp,
+            &update(changed.sequence, RingUpdate::SetPreShareEndpoints(unsorted)),
+            4
+        )
+        .is_err()
+    );
+    // Over-max is rejected.
+    let too_many = (0..9)
+        .map(|n| format!("https://defra-{n}.example"))
+        .collect();
+    assert!(
+        apply(
+            &mut vera,
+            &mut acp,
+            &update(changed.sequence, RingUpdate::SetPreShareEndpoints(too_many)),
+            5
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -667,6 +831,29 @@ fn ring_reporting_relays_and_reshare_targets_preserve_controller_constraints() {
     assert_eq!(
         restored.threshold_ring(&initial.id).unwrap().unwrap(),
         removed
+    );
+    assert!(removed.current_settings().pending_reshare.is_some());
+    let cancelled = apply(
+        &mut vera,
+        &mut acp,
+        &update(removed.sequence, RingUpdate::CancelReshare),
+        25,
+    )
+    .unwrap();
+    assert_eq!(
+        cancelled.current_settings().peer_node_keys,
+        initial.config.peer_node_keys
+    );
+    assert_eq!(cancelled.current_settings().threshold, 2);
+    assert!(cancelled.current_settings().pending_reshare.is_none());
+    assert!(
+        apply(
+            &mut vera,
+            &mut acp,
+            &update(cancelled.sequence, RingUpdate::CancelReshare),
+            26
+        )
+        .is_err()
     );
 }
 

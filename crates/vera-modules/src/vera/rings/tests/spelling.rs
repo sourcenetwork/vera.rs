@@ -46,12 +46,6 @@ fn a_ring_and_its_objects_have_one_creator_for_every_issuer_spelling() {
     for (written, issuer) in spellings().into_iter().enumerate() {
         let other = spellings()[(written + 1) % 4].clone();
         let (mut vera, mut acp, config) = fixture(POLICY);
-        for creator in spellings() {
-            assert_eq!(
-                config.id(context().genesis_id, &creator).unwrap(),
-                config.id(context().genesis_id, &canonical).unwrap()
-            );
-        }
         let create = RingCommand::Create(config.clone());
         let ring = vera
             .apply_ring_command(
@@ -69,10 +63,7 @@ fn a_ring_and_its_objects_have_one_creator_for_every_issuer_spelling() {
             )
             .unwrap();
         assert_eq!(ring.creator, canonical);
-        assert_eq!(
-            ring.id,
-            config.id(context().genesis_id, &canonical).unwrap()
-        );
+        assert_eq!(ring.id, config.id().unwrap());
         let owner = acp
             .query_object_owner(
                 &config.policy_id,

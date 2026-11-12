@@ -6,7 +6,9 @@
 use std::path::Path;
 
 use serde::Serialize;
+use vera_modules::acp::{PolicySeed, types::PolicyMarshalingType};
 use vera_modules::vera::administration::OperatorPolicy;
+use vera_modules::vera::rings::reports::NodeDemeritSeed;
 
 /// Matches vera-genesis VeraGenesis JSON schema exactly.
 #[derive(Clone, Debug, Serialize)]
@@ -16,6 +18,12 @@ pub struct VeraGenesis {
     /// Initial operator approval policy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operators: Option<OperatorPolicy>,
+    /// ACP policies seeded with caller-assigned counters.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policies: Vec<PolicySeed>,
+    /// Orbis node-demerit scores seeded directly.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub node_demerits: Vec<NodeDemeritSeed>,
     /// Human-readable chain name.
     pub chain_name: String,
     /// Genesis timestamp (unix seconds).
@@ -106,6 +114,8 @@ pub struct GenesisStorage {
 pub struct GenesisBuilder {
     chain_id: u64,
     operators: Option<OperatorPolicy>,
+    policies: Vec<PolicySeed>,
+    node_demerits: Vec<NodeDemeritSeed>,
     chain_name: String,
     allocations: Vec<GenesisAllocation>,
     native_mint: NativeMintConfig,
@@ -122,6 +132,8 @@ impl Default for GenesisBuilder {
         Self {
             chain_id: 9001,
             operators: None,
+            policies: Vec::new(),
+            node_demerits: Vec::new(),
             chain_name: "vera-test".to_string(),
             allocations: Vec::new(),
             native_mint: NativeMintConfig::default(),
@@ -146,6 +158,8 @@ impl GenesisBuilder {
         Self {
             chain_id: 9001,
             operators: None,
+            policies: Vec::new(),
+            node_demerits: Vec::new(),
             chain_name: "vera-devnet".to_string(),
             allocations: vec![
                 GenesisAllocation {
@@ -175,6 +189,41 @@ impl GenesisBuilder {
     #[must_use]
     pub fn operators(mut self, policy: OperatorPolicy) -> Self {
         self.operators = Some(policy);
+        self
+    }
+
+    /// Seed one ACP policy at genesis, assigned the next counter in list
+    /// order (1-based). Predict its resulting id with
+    /// `AcpModule::predict_policy_id` before calling `build`/`build_and_write`.
+    #[must_use]
+    pub fn policy(
+        mut self,
+        definition: impl Into<String>,
+        marshal_type: PolicyMarshalingType,
+    ) -> Self {
+        self.policies.push(PolicySeed {
+            definition: definition.into(),
+            marshal_type,
+        });
+        self
+    }
+
+    /// Seed one Orbis node-demerit score at genesis, bypassing the normal
+    /// report-submission path entirely.
+    #[must_use]
+    pub fn node_demerit(
+        mut self,
+        ring_id: impl Into<String>,
+        node_key: impl Into<String>,
+        points: u64,
+        window_started_at: u64,
+    ) -> Self {
+        self.node_demerits.push(NodeDemeritSeed {
+            ring_id: ring_id.into(),
+            node_key: node_key.into(),
+            points,
+            window_started_at,
+        });
         self
     }
 
@@ -301,6 +350,8 @@ impl GenesisBuilder {
         VeraGenesis {
             chain_id: self.chain_id,
             operators: self.operators.clone(),
+            policies: self.policies,
+            node_demerits: self.node_demerits,
             chain_name: self.chain_name,
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -322,6 +373,8 @@ impl GenesisBuilder {
         let genesis = VeraGenesis {
             chain_id: self.chain_id,
             operators: self.operators.clone(),
+            policies: self.policies.clone(),
+            node_demerits: self.node_demerits.clone(),
             chain_name: self.chain_name.clone(),
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

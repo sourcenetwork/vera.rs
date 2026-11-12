@@ -24,6 +24,7 @@ vera-crypto.workspace = true
 vera-domain.workspace = true
 vera-executor.workspace = true
 vera-genesis.workspace = true
+vera-identity.workspace = true
 vera-indexer.workspace = true
 vera-jsonrpc.workspace = true
 vera-modules.workspace = true

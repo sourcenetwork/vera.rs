@@ -26,12 +26,12 @@ pub(super) fn invalid(error: impl std::fmt::Display) -> VeraError {
     }
 }
 
-/// Native record key, including terminal rings retained to prevent identity reuse.
+/// Record key for an active lifecycle ring.
 pub fn ring_key(id: &str) -> Result<Vec<u8>> {
     if id.len() != 64 || hex::decode(id).is_err() || id.bytes().any(|b| b.is_ascii_uppercase()) {
         return Err(invalid("invalid ring identifier"));
     }
-    Ok(format!("orbis/ring/v2/{id}").into_bytes())
+    Ok(format!("orbis/ring/v4/{id}").into_bytes())
 }
 
 impl VeraModule {
@@ -86,7 +86,7 @@ impl VeraModule {
     ) -> Result<RingRecord> {
         let mut record = match command {
             RingCommand::Create(config) => {
-                let id = config.id(context.genesis_id, actor.as_str())?;
+                let id = config.id()?;
                 if self.threshold_ring(&id)?.is_some() {
                     return Err(invalid("ring identity already used"));
                 }
@@ -138,15 +138,36 @@ impl VeraModule {
                 let mut record = self
                     .threshold_ring(ring_id)?
                     .ok_or_else(|| invalid("ring not found"))?;
-                if record.creator != actor.as_str()
+                // Mirrors `vera`/x/orbis's `CancelPendingRing` (Cosmos side): the
+                // creator or any peer node key may abort a ring that never
+                // finished DKG -- a node detecting its own stalled fresh-DKG
+                // session needs this, not just whoever happened to submit
+                // `RingCommand::Create`.
+                let is_member = record.config.peer_node_keys.iter().any(|node_key| {
+                    hex::decode(node_key)
+                        .ok()
+                        .and_then(|bytes| {
+                            vera_crypto::secp256k1::did_from_secp256k1_pubkey(&bytes).ok()
+                        })
+                        .is_some_and(|did| did == actor.as_str())
+                });
+                if (record.creator != actor.as_str() && !is_member)
                     || !matches!(record.state, RingState::Pending { .. })
                 {
-                    return Err(invalid("only the creator can cancel a pending ring"));
+                    return Err(invalid(
+                        "only the creator or a ring member can cancel a pending ring",
+                    ));
                 }
                 record.state = RingState::Cancelled {
                     by: actor.to_string(),
                 };
-                record
+                self.store.delete(&ring_key(ring_id)?);
+                record.sequence = record
+                    .sequence
+                    .checked_add(1)
+                    .ok_or_else(|| invalid("ring sequence exhausted"))?;
+                record.revision = context.timestamp.clone();
+                return Ok(record);
             }
         };
         record.sequence = record
@@ -227,6 +248,13 @@ impl VeraModule {
                     )
                     .map_err(invalid)?,
                 };
+                self.store.delete(&ring_key(&record.id)?);
+                record.sequence = record
+                    .sequence
+                    .checked_add(1)
+                    .ok_or_else(|| invalid("ring sequence exhausted"))?;
+                record.revision = context.timestamp.clone();
+                return Ok(record);
             }
             RingParticipantCommand::Confirm(key) => {
                 key.validate(record.config.requires_pet)?;

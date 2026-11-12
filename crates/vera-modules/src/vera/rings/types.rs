@@ -28,10 +28,12 @@ pub struct RingConfig {
     pub nonce: [u8; 32],
     /// None permanently disables relays; Some allows a bounded canonical set.
     pub trusted_auth_relay_dids: Option<Vec<String>>,
-    /// DefraDB storage targets for PRE reencryption shares. Empty keeps the
-    /// direct-response PRE path unchanged. Immutable after creation, same as
-    /// `policy_id`/`nonce` -- there is deliberately no `RingUpdate` variant
-    /// for it.
+    /// DefraDB storage targets for PRE reencryption shares, as of ring
+    /// creation. Empty keeps the direct-response PRE path unchanged. This is
+    /// the creation-time value baked into [`RingConfig::id`]'s hash; the
+    /// live, current value lives in `RingSettings::pre_share_endpoints` and
+    /// is mutable post-creation via `RingUpdate::SetPreShareEndpoints`, same
+    /// as `pss_interval`.
     pub pre_share_endpoints: Vec<String>,
     pub reporting: ReportingConfig,
 }
@@ -103,31 +105,31 @@ impl RingConfig {
                 }
             }
         }
-        if self.pre_share_endpoints.len() > MAX_PRE_SHARE_ENDPOINTS
-            || !sorted(&self.pre_share_endpoints)
-        {
-            return Err(invalid(
-                "pre_share_endpoints must be bounded, sorted and unique",
-            ));
-        }
-        for endpoint in &self.pre_share_endpoints {
-            pre_share_endpoint(endpoint)?;
-        }
+        validate_pre_share_endpoints(&self.pre_share_endpoints)?;
         Ok(())
     }
 
-    /// Bind the immutable identity to the deployment, creator and all creation parameters.
-    /// Every accepted spelling of the creator's key gives one identity.
-    pub fn id(&self, deployment_root: [u8; 32], creator: &str) -> Result<String> {
+    /// Bind the immutable identity to all creation parameters.
+    ///
+    /// Deliberately excludes creator and deployment identity, matching
+    /// `vera`/x/orbis's `GenerateRingID` (Cosmos side) exactly. Neither is
+    /// needed here: replay protection already binds `deployment_root`
+    /// directly into every signed request and into `RingRecord` itself,
+    /// checked at apply time against `context.genesis_id`, and creator
+    /// attribution is already the plain `RingRecord.creator` field. Hashing
+    /// `deployment_root` in here too only made the id a function of the
+    /// genesis block's own hash, circular for anything that needs to know a
+    /// ring's id before genesis is finalized; hashing creator in bought
+    /// nothing a policy-governed creation permission and `nonce` didn't
+    /// already cover.
+    pub fn id(&self) -> Result<String> {
         self.validate()?;
-        vera_identity::Did::new(creator).map_err(invalid)?;
-        let creator = &*crate::actor::canonical_str(creator);
-        let bytes = borsh::to_vec(&(deployment_root, creator, self)).map_err(invalid)?;
+        let bytes = borsh::to_vec(self).map_err(invalid)?;
         if bytes.len() > MAX_RING_REQUEST_BYTES {
             return Err(invalid("ring configuration exceeds byte limit"));
         }
         let mut hash = Sha256::new();
-        hash.update(b"vera/orbis/ring/v2\0");
+        hash.update(b"vera/orbis/ring/v4\0");
         hash.update(bytes);
         Ok(hex::encode(hash.finalize()))
     }
@@ -195,8 +197,9 @@ pub struct RingRecord {
 impl RingRecord {
     pub fn validate(&self, expected: &str) -> Result<()> {
         if self.id != expected
+            || self.config.id()? != expected
+            || vera_identity::Did::new(&self.creator).is_err()
             || crate::actor::canonical_str(&self.creator) != self.creator
-            || self.config.id(self.deployment_root, &self.creator)? != expected
             || self.revision.block_height == 0
             || self.revision.seconds == 0
         {
@@ -260,6 +263,7 @@ pub struct RingSettings {
     pub reporting: ReportingConfig,
     pub trusted_auth_relay_dids: Option<Vec<String>>,
     pub pending_reshare: Option<ReshareTarget>,
+    pub pre_share_endpoints: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -289,6 +293,8 @@ pub enum RingUpdate {
         peer_node_keys: Option<Vec<String>>,
         threshold: Option<u32>,
     },
+    CancelReshare,
+    SetPreShareEndpoints(Vec<String>),
 }
 
 impl RingRecord {
@@ -302,6 +308,7 @@ impl RingRecord {
             reporting: self.config.reporting.clone(),
             trusted_auth_relay_dids: self.config.trusted_auth_relay_dids.clone(),
             pending_reshare: None,
+            pre_share_endpoints: self.config.pre_share_endpoints.clone(),
         })
     }
 }
@@ -460,6 +467,21 @@ pub(super) fn public_key_value(value: &str) -> Result<()> {
 /// x/orbis's `validatePreShareEndpoint` (Cosmos side) exactly, minus its
 /// `net/url` parser -- this crate has no URL-parsing dependency, so the
 /// checks below are hand-rolled against the same rules instead.
+/// Shared bounds/sorted/format check, used both at ring creation
+/// ([`RingConfig::validate`]) and by `RingUpdate::SetPreShareEndpoints`
+/// (`administration.rs`).
+pub(super) fn validate_pre_share_endpoints(endpoints: &[String]) -> Result<()> {
+    if endpoints.len() > MAX_PRE_SHARE_ENDPOINTS || !sorted(endpoints) {
+        return Err(invalid(
+            "pre_share_endpoints must be bounded, sorted and unique",
+        ));
+    }
+    for endpoint in endpoints {
+        pre_share_endpoint(endpoint)?;
+    }
+    Ok(())
+}
+
 fn pre_share_endpoint(value: &str) -> Result<()> {
     if value.is_empty() || value.len() > MAX_PRE_SHARE_ENDPOINT_LEN || value.trim() != value {
         return Err(invalid(
