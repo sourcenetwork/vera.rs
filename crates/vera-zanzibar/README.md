@@ -9,7 +9,7 @@ available for in-memory use. Unresolved exclusions fail closed.
 
 ```toml
 [dependencies]
-vera-zanzibar = "0.1.0"
+vera-zanzibar = "0.1.2"
 ```
 
 See the [API documentation](https://docs.rs/vera-zanzibar) and

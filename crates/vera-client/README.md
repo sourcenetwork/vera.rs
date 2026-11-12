@@ -8,7 +8,7 @@ of the endpoint when verifying certified responses.
 
 ```toml
 [dependencies]
-vera-client = "0.1.0"
+vera-client = "0.1.2"
 ```
 
 See the [API documentation](https://docs.rs/vera-client) and
@@ -17,3 +17,8 @@ See the [API documentation](https://docs.rs/vera-client) and
 ## License
 
 Licensed under the MIT license. See the included license file.
+
+This crate depends on [`orbis-reporting`](https://crates.io/crates/orbis-reporting),
+which is licensed under the Business Source License 1.1. Its terms restrict
+managed-service use and change to Apache 2.0 on March 13, 2030; review them
+before use.

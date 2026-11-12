@@ -9,7 +9,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def plan(metadata, config):
+def plan(metadata, config, readme=None):
     if config.get('schema_version') != 1:
         raise ValueError('unsupported release configuration')
     expected = config['packages']
@@ -58,6 +58,13 @@ def plan(metadata, config):
                 refuse('package_metadata', name, 'missing ' + field)
         if package['publish'] != ['crates-io']:
             refuse('publication_registry', name, 'release crates must explicitly select crates-io')
+        if readme is not None:
+            text = readme(package)
+            requirement = name + ' = "' + package['version'] + '"'
+            if text is None:
+                refuse('package_readme', name, 'missing README')
+            elif requirement not in text:
+                refuse('readme_version', name, 'README must show ' + requirement)
         ordered.append(dict(name=name, version=package['version'], manifest_path=package['manifest_path']))
 
     for root in sorted(config['roots']):
@@ -94,6 +101,13 @@ def plan(metadata, config):
                 roots=config['roots'], packages=ordered, blockers=blockers)
 
 
+def packaged_readme(package):
+    if not package.get('readme'):
+        return None
+    path = Path(package['manifest_path']).parent / package['readme']
+    return path.read_text() if path.is_file() else None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=('plan', 'check'))
@@ -103,7 +117,7 @@ def main():
         ['cargo', 'metadata', '--locked', '--format-version', '1'], cwd=ROOT,
         check=True, capture_output=True, text=True, timeout=120).stdout)
     config = json.loads((ROOT / '.github/release-packages.json').read_text())
-    result = plan(metadata, config)
+    result = plan(metadata, config, packaged_readme)
     output = json.dumps(result, sort_keys=True, indent=2) + '\n'
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
