@@ -6,7 +6,7 @@ Identity types shared by Vera's Rust client and access-control libraries.
 
 ```toml
 [dependencies]
-vera-identity = "0.1.0"
+vera-identity = "0.1.2"
 ```
 
 ```rust

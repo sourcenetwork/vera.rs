@@ -63,6 +63,15 @@ class PublicationPlan(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'cycle'):
             plan(self.metadata, self.config)
 
+    def test_readme_must_show_the_version_being_published(self):
+        current = {'sdk': 'sdk = "0.1.0"', 'types': 'types = "0.1.0"'}
+        self.assertTrue(plan(self.metadata, self.config, lambda p: current[p['name']])['ready'])
+        stale = dict(current, sdk='sdk = "0.0.9"')
+        result = plan(self.metadata, self.config, lambda p: stale[p['name']])
+        self.assertEqual([(b['code'], b['package']) for b in result['blockers']], [('readme_version', 'sdk')])
+        result = plan(self.metadata, self.config, lambda p: None)
+        self.assertEqual({b['code'] for b in result['blockers']}, {'package_readme'})
+
     def test_dev_dependency_does_not_expand_release(self):
         dep = dependency('private-test-helper')
         dep['kind'] = 'dev'

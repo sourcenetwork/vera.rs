@@ -8,7 +8,7 @@ the storage and execution environment.
 
 ```toml
 [dependencies]
-vera-acp = "0.1.0"
+vera-acp = "0.1.2"
 ```
 
 See the [API documentation](https://docs.rs/vera-acp) and

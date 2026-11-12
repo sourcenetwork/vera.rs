@@ -84,7 +84,8 @@ python3 .github/scripts/release-packages.py check
 ```
 
 Stop if `check` fails. It inspects the resolved dependency sources as well as
-manifest versions and publication metadata. The uploaded CI plan can report
+manifest versions and publication metadata, and requires each crate's README to
+show the version being published in its installation snippet. The uploaded CI plan can report
 blockers even when the reporting job is green.
 
 Require the candidate's normal CI and relevant recovery checks to pass. Historical
