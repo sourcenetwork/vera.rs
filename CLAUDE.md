@@ -187,7 +187,11 @@ Commonware coordinator generation, binding the native current-state root to the
 selected operation-log targets. It is reconstructed from the durable recovery
 anchor, not persisted as an independent journal.
 
-ACP and token lifecycle errors reject proposal execution and re-verification.
+A module call that fails on what its caller sent (an unknown selector, calldata
+that does not decode, an argument out of bounds) rejects that request with a
+failed receipt, and the block goes on. Only an error marked as the node's own
+(`precompiles::internal_fault`: stored membership or policy state that does not
+read back) fails the block. ACP and token lifecycle errors reject proposal execution and re-verification.
 Malformed token records encountered during reads or expiry are errors, including a mismatch between the storage key
 and the record's token hash. Failed lifecycle work cannot publish its module view. Token expiry uses an ordered
 deadline index, leaving invalidated and non-expiring tokens out of each revision's
