@@ -56,7 +56,34 @@ const fn address_from_last_two_bytes(hi: u8, lo: u8) -> Address {
 }
 
 pub(super) fn did_from_signer(signer: &str) -> Result<Did, PrecompileError> {
-    Did::new(signer).map_err(|e| PrecompileError::Fatal(format!("DID: {e}")))
+    // The executor derives the signer; a caller cannot make it malformed.
+    Did::new(signer).map_err(|e| internal_fault(format!("DID: {e}")))
+}
+
+/// Sentinel prefix of an error that is the node's own: stored state that does
+/// not read back as what was written, or a value the executor derived that is
+/// not what it must be. revm's precompile error has no variant to tell such a
+/// fault from a refusal of what the caller sent, so the fault is marked.
+///
+/// Only a marked error fails the block. Every other error of a module call
+/// rejects the request that caused it: its sender gets a failed receipt and
+/// the block goes on. The default is the refusal because calldata is the
+/// caller's to choose, and a request that failed its block would fail every
+/// block proposed while it waits in the pool.
+const INTERNAL_FAULT: &str = "\u{0}internal-fault:";
+
+/// A fault of the node, which fails the block.
+pub(crate) fn internal_fault(reason: impl core::fmt::Display) -> PrecompileError {
+    PrecompileError::Fatal(format!("{INTERNAL_FAULT}{reason}"))
+}
+
+/// The reason of an [`internal_fault`], or `None` for a refusal.
+pub(crate) fn internal_fault_reason(error: &PrecompileError) -> Option<String> {
+    match error {
+        PrecompileError::Fatal(message) => message.strip_prefix(INTERNAL_FAULT).map(str::to_owned),
+        // Not raised by the modules; whatever raises one is not a refusal.
+        PrecompileError::FatalAny(error) => Some(error.to_string()),
+    }
 }
 
 pub(super) fn decode_error(e: alloy_sol_types::Error) -> PrecompileError {
@@ -421,8 +448,14 @@ impl VeraPrecompiles {
                 result.result = InstructionResult::PrecompileOOG;
                 Ok((Some(result), vec![]))
             }
-            Err(revm::precompile::PrecompileError::Fatal(e)) => Err(e),
-            Err(revm::precompile::PrecompileError::FatalAny(e)) => Err(e.to_string()),
+            Err(error) => match internal_fault_reason(&error) {
+                Some(fault) => Err(fault),
+                None => {
+                    result.result = InstructionResult::Revert;
+                    result.output = recoverable_message(&error).into_bytes().into();
+                    Ok((Some(result), vec![]))
+                }
+            },
         }
     }
 
@@ -461,9 +494,7 @@ impl VeraPrecompiles {
                 Ok(None) => return Ok((None, vec![])),
                 Err(_) => {
                     tracing::warn!("module call panicked");
-                    Err(PrecompileError::Fatal(
-                        "module execution failed".to_string(),
-                    ))
+                    Err(internal_fault("module execution failed"))
                 }
             };
 

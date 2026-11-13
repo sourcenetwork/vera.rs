@@ -57,7 +57,7 @@ pub(super) fn dispatch(
                 ACP_ADDRESS,
                 &IAcp::DelegatedPolicyCreated {
                     policyId: record.policy.id.parse().map_err(|_| {
-                        PrecompileError::Fatal("invalid created policy identifier".to_string())
+                        crate::precompiles::internal_fault("invalid created policy identifier")
                     })?,
                     creator: record.metadata.owner_did,
                 },

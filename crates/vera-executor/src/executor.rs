@@ -19,7 +19,6 @@ use revm::{
     },
     context_interface::{ContextTr, JournalTr},
     database::State,
-    precompile::PrecompileError,
     primitives::hardfork::SpecId,
 };
 use tracing::warn;
@@ -235,7 +234,9 @@ impl VeraExecutor {
                     .journal_mut()
                     .load_account(VALIDATOR_REGISTRY_ADDRESS)
                     .map_err(|error| {
-                        PrecompileError::Fatal(format!("membership account read failed: {error:?}"))
+                        crate::precompiles::internal_fault(format!(
+                            "membership account read failed: {error:?}"
+                        ))
                     })?;
                 journal
                     .journal_mut()
@@ -302,8 +303,13 @@ impl VeraExecutor {
                 None,
             )),
             Ok(Ok(_)) => Ok(failed_receipt()),
-            Ok(Err(PrecompileError::Fatal(message))) => Err(ExecutionError::TxExecution(message)),
-            Ok(Err(_)) => Ok(failed_receipt()),
+            // A fault of the node fails the block. Anything else a module
+            // refused is the request's own: it is rejected, and the block
+            // goes on with the requests after it.
+            Ok(Err(error)) => crate::precompiles::internal_fault_reason(&error).map_or_else(
+                || Ok(failed_receipt()),
+                |fault| Err(ExecutionError::TxExecution(fault)),
+            ),
             Err(_) => {
                 warn!(%tx_hash, "native tx module panicked");
                 Ok(failed_receipt())
@@ -1229,6 +1235,109 @@ mod tests {
             )
             .unwrap();
         assert!(receipt.success(), "getParams query should succeed");
+    }
+
+    /// A signed native tx to `target` with `calldata`, from the test keypair.
+    fn signed_native_call(target: Address, nonce: u64, calldata: Vec<u8>) -> Vec<u8> {
+        let (sk, pk_bytes) = test_bls_keypair();
+        let mut tx = NativeTx {
+            chain_id: 9001,
+            nonce,
+            bls_pubkey: FixedBytes::from_slice(&pk_bytes),
+            target,
+            calldata: Bytes::from(calldata),
+            signature: FixedBytes::from([0x00; 96]),
+        };
+        let sig = bls::sign(&sk, &tx.signing_data()).unwrap();
+        tx.signature = FixedBytes::from_slice(&sig);
+        tx.encode_wire()
+    }
+
+    /// Calldata a module cannot read is the caller's mistake: the request is
+    /// rejected with a receipt and takes its sequence, and execution goes on.
+    /// A plain fatal error would fail every block that carries the request.
+    #[test]
+    fn a_request_no_module_can_read_is_rejected_and_the_next_one_runs() {
+        use alloy_sol_types::SolCall;
+        use vera_modules::acp::abi::IAcp;
+
+        let executor = test_executor();
+        let block_ctx = test_block_ctx();
+        let mut acp = AcpModule::new();
+        let mut bulletin = BulletinModule::new();
+        let mut vera = VeraModule::new();
+        let mut nonces = NativeNonceStore::default();
+        let mut journal = test_journal();
+
+        // A selector's four bytes followed by nothing its arguments decode from.
+        let truncated = IAcp::createPolicyCall::SELECTOR.to_vec();
+        let unreadable = [
+            (ACP_ADDRESS, vec![1, 2, 3, 4]),
+            (BULLETIN_ADDRESS, vec![1, 2, 3, 4]),
+            (VERA_ADDRESS, vec![1, 2, 3, 4]),
+            (ACP_ADDRESS, truncated),
+        ];
+        let mut nonce = 0;
+        for (target, calldata) in unreadable {
+            let wire = signed_native_call(target, nonce, calldata);
+            let receipt = executor
+                .execute_native_tx(
+                    &wire,
+                    &block_ctx,
+                    &mut acp,
+                    &mut bulletin,
+                    &mut vera,
+                    &mut nonces,
+                    &mut journal,
+                )
+                .unwrap_or_else(|error| panic!("{target}: the block would fail: {error}"));
+            assert!(!receipt.success(), "{target}: rejected");
+            nonce += 1;
+        }
+
+        let wire = signed_native_call(ACP_ADDRESS, nonce, IAcp::getParamsCall {}.abi_encode());
+        let receipt = executor
+            .execute_native_tx(
+                &wire,
+                &block_ctx,
+                &mut acp,
+                &mut bulletin,
+                &mut vera,
+                &mut nonces,
+                &mut journal,
+            )
+            .unwrap();
+        assert!(receipt.success(), "a request after the rejected ones runs");
+    }
+
+    /// Only an error marked as the node's own fails the block.
+    #[test]
+    fn a_node_fault_is_told_apart_from_a_refusal() {
+        use crate::precompiles::{internal_fault, internal_fault_reason};
+        use revm::precompile::PrecompileError;
+
+        assert_eq!(
+            internal_fault_reason(&internal_fault("membership record is missing")).as_deref(),
+            Some("membership record is missing")
+        );
+        for refusal in [
+            "unknown ACP selector: 0x01020304",
+            "ABI decode: buffer overrun",
+            "",
+        ] {
+            assert_eq!(
+                internal_fault_reason(&PrecompileError::Fatal(refusal.to_owned())),
+                None
+            );
+        }
+        // A caller cannot forge the mark: calldata never becomes an error's
+        // first bytes, which are the module's own words.
+        assert_eq!(
+            internal_fault_reason(&PrecompileError::Fatal(
+                "ABI decode: \u{0}internal-fault:forged".to_owned()
+            )),
+            None
+        );
     }
 
     /// Build a signed native tx targeting ACP with a given nonce and keypair.

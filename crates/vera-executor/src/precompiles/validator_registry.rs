@@ -20,7 +20,7 @@ use vera_modules::vera::VeraModule;
 
 use super::{
     DispatchReturn, VALIDATOR_REGISTRY_ADDRESS, decode_error, did_from_signer, err_dispatch,
-    event_log, json_bytes, ok_dispatch, oog_dispatch,
+    event_log, internal_fault, json_bytes, ok_dispatch, oog_dispatch,
 };
 
 pub(super) fn is_query(input: &[u8]) -> bool {
@@ -96,9 +96,7 @@ fn journal_sload<CTX: ContextTr>(context: &mut CTX, slot: U256) -> Result<U256, 
         .journal_mut()
         .sload(VALIDATOR_REGISTRY_ADDRESS, slot)
         .map(|r| r.data)
-        .map_err(|error| {
-            PrecompileError::Fatal(format!("membership storage read failed: {error:?}"))
-        })
+        .map_err(|error| internal_fault(format!("membership storage read failed: {error:?}")))
 }
 
 fn journal_sstore<CTX: ContextTr>(
@@ -110,9 +108,7 @@ fn journal_sstore<CTX: ContextTr>(
         .journal_mut()
         .sstore(VALIDATOR_REGISTRY_ADDRESS, slot, value)
         .map(|_| ())
-        .map_err(|error| {
-            PrecompileError::Fatal(format!("membership storage write failed: {error:?}"))
-        })
+        .map_err(|error| internal_fault(format!("membership storage write failed: {error:?}")))
 }
 
 // ── ACP access check ──────────────────────────────────────────────────
@@ -156,7 +152,7 @@ fn load_policy_id<CTX: ContextTr>(
 ) -> Result<String, PrecompileError> {
     let state = vera
         .administration()
-        .map_err(|error| PrecompileError::Fatal(error.to_string()))?;
+        .map_err(|error| internal_fault(error.to_string()))?;
     if let Some(policy) = state.and_then(|state| state.membership_policy) {
         return Ok(hex::encode(policy));
     }
@@ -185,8 +181,8 @@ fn validate_p2p_address(addr: &str) -> Result<(), ValidatorRegistryError> {
 fn load_member_count<CTX: ContextTr>(context: &mut CTX) -> Result<u64, PrecompileError> {
     let count = journal_sload(context, SLOT_VALIDATOR_COUNT)?;
     if count > U256::from(vera_domain::MAX_DKG_PARTICIPANTS.get()) {
-        return Err(PrecompileError::Fatal(
-            "membership count exceeds the protocol limit".into(),
+        return Err(internal_fault(
+            "membership count exceeds the protocol limit",
         ));
     }
     Ok(count.as_limbs()[0])
@@ -206,16 +202,14 @@ fn load_validator_raw<CTX: ContextTr>(
     let (evm_address, active) = unpack_address_active(packed);
     let packed_bytes = packed.to_be_bytes::<32>();
     if evm_address != addr || packed_bytes[20] > 1 || packed_bytes[21..].iter().any(|b| *b != 0) {
-        return Err(PrecompileError::Fatal(
-            "invalid membership identity or status".into(),
-        ));
+        return Err(internal_fault("invalid membership identity or status"));
     }
     let consensus_bytes: [u8; 32] =
         journal_sload(context, entry_base.wrapping_add(U256::from(1)))?.to_be_bytes();
     let stored_index = journal_sload(context, entry_base.wrapping_add(U256::from(2)))?;
     if stored_index >= U256::from(load_member_count(context)?) {
-        return Err(PrecompileError::Fatal(
-            "membership index exceeds the registry count".into(),
+        return Err(internal_fault(
+            "membership index exceeds the registry count",
         ));
     }
     let index = stored_index.as_limbs()[0];
@@ -224,21 +218,17 @@ fn load_validator_raw<CTX: ContextTr>(
         array_element_slot(SLOT_VALIDATORS_ARRAY_BASE, index),
     )? != address_to_padded_u256(addr)
     {
-        return Err(PrecompileError::Fatal(
-            "membership array and record disagree".into(),
-        ));
+        return Err(internal_fault("membership array and record disagree"));
     }
     let stored_length = journal_sload(context, entry_base.wrapping_add(U256::from(3)))?;
     if stored_length > U256::from(MAX_P2P_ADDRESS_LEN) {
-        return Err(PrecompileError::Fatal(
-            "membership route exceeds its storage bound".into(),
-        ));
+        return Err(internal_fault("membership route exceeds its storage bound"));
     }
     let p2p_len = stored_length.as_limbs()[0] as usize;
     let p2p_data: [u8; 32] =
         journal_sload(context, entry_base.wrapping_add(U256::from(4)))?.to_be_bytes();
     let p2p_address = std::str::from_utf8(&p2p_data[..p2p_len])
-        .map_err(|_| PrecompileError::Fatal("membership route is not UTF-8".into()))?
+        .map_err(|_| internal_fault("membership route is not UTF-8"))?
         .to_owned();
 
     Ok(Some((
@@ -268,13 +258,10 @@ fn load_all_validators<CTX: ContextTr>(
     for i in 0..count {
         let addr_slot = array_element_slot(SLOT_VALIDATORS_ARRAY_BASE, i);
         let addr = u256_to_address(journal_sload(context, addr_slot)?);
-        let raw = load_validator_raw(context, addr)?.ok_or_else(|| {
-            PrecompileError::Fatal("membership array references a missing record".into())
-        })?;
+        let raw = load_validator_raw(context, addr)?
+            .ok_or_else(|| internal_fault("membership array references a missing record"))?;
         if raw.0 != addr || raw.4 != i {
-            return Err(PrecompileError::Fatal(
-                "membership array and record disagree".into(),
-            ));
+            return Err(internal_fault("membership array and record disagree"));
         }
         validators.push(to_validator_info(raw));
     }
@@ -287,25 +274,21 @@ pub(crate) fn active_consensus_keys<CTX: ContextTr>(
     context
         .journal_mut()
         .load_account(VALIDATOR_REGISTRY_ADDRESS)
-        .map_err(|error| {
-            PrecompileError::Fatal(format!("membership account read failed: {error:?}"))
-        })?;
+        .map_err(|error| internal_fault(format!("membership account read failed: {error:?}")))?;
     let mut keys = Vec::new();
     for member in load_all_validators(context)? {
         if member.active {
             let mut key = [0; 32];
             hex::decode_to_slice(member.consensus_pubkey, &mut key)
-                .map_err(|_| PrecompileError::Fatal("invalid consensus key encoding".into()))?;
+                .map_err(|_| internal_fault("invalid consensus key encoding"))?;
             vera_domain::PublicKey::read(&mut commonware_codec::Copying(key.as_slice()))
-                .map_err(|_| PrecompileError::Fatal("invalid consensus key".into()))?;
+                .map_err(|_| internal_fault("invalid consensus key"))?;
             keys.push(key);
         }
     }
     keys.sort_unstable();
     if keys.is_empty() || keys.windows(2).any(|pair| pair[0] == pair[1]) {
-        return Err(PrecompileError::Fatal(
-            "empty or duplicate consensus roster".into(),
-        ));
+        return Err(internal_fault("empty or duplicate consensus roster"));
     }
     Ok(keys)
 }

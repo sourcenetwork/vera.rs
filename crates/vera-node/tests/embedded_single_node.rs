@@ -289,3 +289,58 @@ fn a_host_without_an_async_runtime_follows_finalized_headers() {
     ));
     assert!(block_on(headers.next::<vera_domain::GossipHeader>()).is_none());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rejected_request_does_not_stop_the_heartbeat() {
+    let directory = tempfile::tempdir().unwrap();
+    let chain_id = 9409;
+    let node = EmbeddedNode::start(config(directory.path(), chain_id, ACCOUNT_KEY))
+        .await
+        .unwrap();
+    let before = finalized_beyond(&node, 0).await;
+
+    // Calldata no ACP method accepts: the request is admitted, executed and rejected.
+    let signer = BlsSigner::new(5u64.into(), chain_id).unwrap();
+    let wire = signer
+        .sign_native_tx(ACP_ADDRESS, vec![1, 2, 3, 4].into())
+        .unwrap();
+    let submission: B256 = node
+        .rpc()
+        .request(
+            "vera_sendNativeTx",
+            vec![json!(format!("0x{}", hex::encode(wire)))],
+        )
+        .await
+        .unwrap();
+    let rejected = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let proof: Option<ReceiptResponse> = node
+                .rpc()
+                .request("vera_getReceiptProof", vec![json!(submission)])
+                .await
+                .unwrap();
+            if let Some(proof) = proof {
+                return proof;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("certified receipt deadline");
+    assert!(
+        !rejected
+            .verify(submission, node.consensus_key())
+            .unwrap()
+            .success()
+    );
+    let at = rejected.revision.height.max(before);
+
+    // The node keeps finalizing: its heartbeat, and a later request.
+    let after = tokio::time::timeout(Duration::from_secs(20), finalized_beyond(&node, at + 1))
+        .await
+        .expect("the heartbeat continues after a rejected request");
+    assert!(after > at + 1);
+    let accepted = create_policy(&node, &signer, "after_rejected").await;
+    verified_receipt(&node, accepted).await;
+    node.stop().await.unwrap();
+}
