@@ -216,9 +216,12 @@ cadence (`pacing: None`, about 6.6 revisions a second) for five minutes, about
 | none | 10.6 MB | about 5.1 kB | about 1.05 kB |
 | 512 consensus, 256 state | 5.3 MB and levelling off | about 1.05 kB once the window is full | about 1.05 kB |
 
-At the default heartbeat of one revision every 1.5 s that is about 12 MB an
-hour without retention and about 2.5 MB an hour with it, all of it finalized
-history. Revisions that carry requests are larger.
+At the default heartbeat of one revision every 10 s, 360 an hour, that is
+about 1.8 MB an hour without retention and about 0.4 MB an hour with it, all
+of it finalized history. Both figures are computed from the per-revision
+growth above, not measured at this cadence; the retention window takes about
+85 minutes of idling to fill, and until then the node grows at the first
+rate. Revisions that carry requests are larger.
 
 ## Memory
 
@@ -305,13 +308,22 @@ comparable with the table under [Proposal pacing](#proposal-pacing).
 ## Proposal pacing
 
 `EmbeddedConfig::pacing` controls how the lone validator paces proposals. The
-default, `SoloPacing::within(leader_timeout, stall_timeout)`, has two parts:
+default has two parts:
 
 - **Idle wait.** With no request pending and no unfinalized block that carries
-  requests, the proposer waits up to half the leader timeout (1.5 s by default)
-  for a first request, then proposes an empty block as a heartbeat. A request
-  ends the wait at once. The wait must stay below the leader timeout and the
-  genesis stall timeout; `start` rejects settings that would not.
+  requests, the proposer waits up to `EmbeddedConfig::HEARTBEAT` (10 s) for a
+  first request, then proposes an empty block as a heartbeat. A request ends
+  the wait at once. The wait must stay below the leader timeout, 12 s by
+  default, and that below the certification timeout and the solo genesis stall
+  timeout of 30 s; `start` rejects settings that would not.
+
+  The heartbeat cannot be dropped: a client that verifies state against
+  finalized headers refuses a state older than its freshness limit, which is
+  30 seconds in Backbone's light client. A host that lengthens the idle wait
+  must keep it inside the limit its clients use.
+
+  The leader timeout is also how long a lone validator waits before it tries
+  again after a proposal it could not build.
 - **Batch window.** Once a request has arrived the proposer collects more for
   50 ms. While a block that carries requests is unfinalized it keeps this
   cadence, because the wait runs on the actor that also processes finalization.
@@ -328,10 +340,22 @@ then 30 seconds idle. Reproduce with
 | --- | --- | --- | --- | --- | --- |
 | none | 100 ms (daemon) | 281 ms | 340 ms | 6.97 | 158 MB/h |
 | 1.5 s | 100 ms | 280 ms | 340 ms | 0.67 | 12.4 MB/h |
-| 1.5 s | 50 ms (default) | 185 ms | 244 ms | 0.67 | 11.9 MB/h |
+| 1.5 s | 50 ms | 185 ms | 244 ms | 0.67 | 11.9 MB/h |
 | 1.5 s | 25 ms | 148 ms | 202 ms | 0.67 | 12.4 MB/h |
 | 1.5 s | 15 ms | 220 ms | 377 ms | 0.67 | 12.7 MB/h |
 | 1.5 s | 5 ms | 377 ms | 604 ms | 0.73 | 15.6 MB/h |
+
+The idle wait was 1.5 s when those rows were measured. The 10 s default was
+compared with it afterwards on an Apple M5 Max, with the same 100 writes and
+five minutes idle (`PROFILE_IDLE_SECONDS=300`), one run each. The 1.5 s row
+ran without retention; the 10 s row ran with the default retention, whose
+512-revision window does not fill in a run this short, so neither row shows
+pruning at work:
+
+| Idle wait | Batch window | Receipt p50 | Receipt p95 | Idle blocks/s | Idle disk growth |
+| --- | --- | --- | --- | --- | --- |
+| 1.5 s | 50 ms | 194 ms | 260 ms | 0.65 | 14.9 MB/h |
+| 10 s (default) | 50 ms | 187 ms | 253 ms | 0.10 | 2.4 MB/h |
 
 No run abandoned a view. Below roughly 25 ms the receipt latency rises again
 on this machine; that point depends on how fast the disk commits, so the
@@ -341,7 +365,7 @@ are not a capacity or multi-validator measurement.
 ## Limits
 
 - One validator. A stopped or lost device stops the deployment.
-- An idle deployment still produces a heartbeat block about every 1.5 s, and
+- An idle deployment still produces a heartbeat block about every 10 s, and
   finalized history has no retention, so the directory grows without bound;
   see [Disk](#disk).
 - Memory was measured for short workloads on one machine; see

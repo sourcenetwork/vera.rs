@@ -66,15 +66,6 @@ impl SoloPacing {
     /// Shorter windows propose empty blocks faster than they are durably committed,
     /// which delays the receipts of real requests. See `docs/embedded-node.md`.
     pub const BATCH: std::time::Duration = std::time::Duration::from_millis(50);
-
-    /// Half of the tighter of the two timeouts that an idle proposer must not exceed.
-    #[must_use]
-    pub fn within(leader_timeout: std::time::Duration, stall_timeout: std::time::Duration) -> Self {
-        Self {
-            idle: leader_timeout.min(stall_timeout) / 2,
-            batch: Self::BATCH,
-        }
-    }
 }
 
 impl NodeOptions {

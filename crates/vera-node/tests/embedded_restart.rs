@@ -2,7 +2,7 @@
 
 mod support;
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use support::{block_on, config, finalize_a_write};
 use vera_client::BlsSigner;
@@ -12,11 +12,9 @@ use vera_node::EmbeddedNode;
 fn the_first_write_after_a_start_does_not_wait_out_a_view() {
     let directory = tempfile::tempdir().unwrap();
     let chain_id = 9416;
-    let mut settings = config(directory.path(), chain_id);
-    // As long as the genesis stall timeout allows, to tell a write that waits
-    // for a view to be abandoned from a slow machine.
-    settings.leader_timeout = Duration::from_millis(4_000);
-    settings.certification_timeout = Duration::from_millis(4_500);
+    let settings = config(directory.path(), chain_id);
+    // A write that waits for a view to be abandoned takes the whole leader
+    // timeout, which a slow machine does not approach.
     let wasted_view = settings.leader_timeout * 3 / 4;
 
     for seed in [30u64, 31] {

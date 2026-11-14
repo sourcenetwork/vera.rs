@@ -67,7 +67,9 @@ mod secret_store;
 pub use secret_store::FileSecretStore;
 
 mod solo;
-pub use solo::{SOLO_BLOCKS_PER_EPOCH, SoloError, SoloGenesis, prepare_solo};
+pub use solo::{
+    SOLO_BLOCKS_PER_EPOCH, SOLO_STALL_TIMEOUT_MS, SoloError, SoloGenesis, prepare_solo,
+};
 
 mod sink;
 pub use sink::{FinalizationArtifacts, FinalizationLookup, NodeSink, SinkParts};

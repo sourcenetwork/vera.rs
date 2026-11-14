@@ -372,7 +372,7 @@ consensus share comes from operating-system randomness, and a tripped watchdog
 stops the node without exiting the host. `stop` holds back new proposals and
 waits up to two seconds for proposed blocks to finalize, so the next start
 does not wait out a view. A lone validator waits for a first
-request before proposing, with a bounded heartbeat, unless a block carrying
+request before proposing, with a ten-second heartbeat, unless a block carrying
 requests is still unfinalized. `EmbeddedConfig::thread_setup` runs on the node
 thread before its runtime is built, so every node thread is created afterwards
 and, on Linux, inherits the CPU affinity it sets. `thread_budget()` reports the

@@ -16,7 +16,6 @@ use vera_modules::{acp::abi::IAcp, vera::administration::OperatorPolicy};
 use vera_node::{EmbeddedConfig, EmbeddedNode, SoloGenesis, SoloPacing};
 
 const ACCOUNT_KEY: &str = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
-const IDLE: Duration = Duration::from_secs(30);
 
 fn directory_bytes(path: &Path) -> u64 {
     std::fs::read_dir(path)
@@ -167,6 +166,12 @@ async fn profile_solo_writes_and_idle_cost() {
         .local_addr()
         .unwrap();
     let mut config = EmbeddedConfig::new(directory.path(), genesis, listen);
+    // `PROFILE_IDLE_SECONDS` lengthens the idle period that follows the writes.
+    let idle = Duration::from_secs(
+        std::env::var("PROFILE_IDLE_SECONDS")
+            .ok()
+            .map_or(30, |seconds| seconds.parse().unwrap()),
+    );
     // `PROFILE_IDLE_MS=off` measures the daemon cadence; a number overrides the idle wait.
     match std::env::var("PROFILE_IDLE_MS").ok().as_deref() {
         Some("off") => config.pacing = None,
@@ -214,7 +219,7 @@ async fn profile_solo_writes_and_idle_cost() {
     let before = status(&node).await;
     let bytes_before = directory_bytes(directory.path());
     let memory_after_writes = memory();
-    tokio::time::sleep(IDLE).await;
+    tokio::time::sleep(idle).await;
     let memory_after_idle = memory();
     let after = status(&node).await;
     let bytes_after = directory_bytes(directory.path());
@@ -235,12 +240,12 @@ async fn profile_solo_writes_and_idle_cost() {
             "certified_receipt_ms": {
                 "p50": percentile(50), "p95": percentile(95), "max": percentile(100)
             },
-            "idle_seconds": IDLE.as_secs(),
+            "idle_seconds": idle.as_secs(),
             "idle_blocks": blocks,
-            "idle_blocks_per_second": blocks as f64 / IDLE.as_secs_f64(),
+            "idle_blocks_per_second": blocks as f64 / idle.as_secs_f64(),
             "idle_nullified_views": nullified,
             "idle_disk_bytes_per_hour": (bytes_after.saturating_sub(bytes_before)) as f64
-                * 3600.0 / IDLE.as_secs_f64(),
+                * 3600.0 / idle.as_secs_f64(),
             "history_disk_bytes": directory_bytes(&directory.path().join("history")),
             "restart_ms": restart_ms,
             "write_after_restart_ms": write_after_restart.as_secs_f64() * 1e3,
