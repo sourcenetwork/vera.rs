@@ -1,8 +1,6 @@
 //! Measures an embedded single-validator node. Run explicitly:
 //! `cargo test --release -p vera-node --test embedded_solo_profile -- --ignored --nocapture`
 
-#![recursion_limit = "256"]
-
 use std::{
     path::Path,
     time::{Duration, Instant},
@@ -18,7 +16,6 @@ use vera_modules::{acp::abi::IAcp, vera::administration::OperatorPolicy};
 use vera_node::{EmbeddedConfig, EmbeddedNode, SoloGenesis, SoloPacing};
 
 const ACCOUNT_KEY: &str = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
-const WRITES: usize = 100;
 const IDLE: Duration = Duration::from_secs(30);
 
 fn directory_bytes(path: &Path) -> u64 {
@@ -94,6 +91,15 @@ fn mebibytes(variable: &str) -> Option<usize> {
     std::env::var(variable)
         .ok()
         .map(|value| value.parse::<usize>().unwrap() << 20)
+}
+
+fn number<T: std::str::FromStr>(variable: &str) -> Option<T>
+where
+    T::Err: std::fmt::Debug,
+{
+    std::env::var(variable)
+        .ok()
+        .map(|value| value.parse().unwrap())
 }
 
 async fn status(node: &EmbeddedNode) -> NodeStatus {
@@ -183,18 +189,27 @@ async fn profile_solo_writes_and_idle_cost() {
     if let Some(bytes) = mebibytes("PROFILE_HISTORY_BUFFER_MIB") {
         config.history_memory.write_buffer_bytes = bytes;
     }
-    let (pacing, history) = (config.pacing, config.history_memory);
+    // `PROFILE_CHANNEL_BURST=64 PROFILE_PAGE_CACHE_PAGES=4096` measures the daemon's start-up sizes.
+    if let Some(burst) = number("PROFILE_CHANNEL_BURST") {
+        config.sizing.channel_burst = burst;
+    }
+    if let Some(pages) = number("PROFILE_PAGE_CACHE_PAGES") {
+        config.sizing.page_cache_pages = pages;
+    }
+    let writes: usize = number("PROFILE_WRITES").unwrap_or(100);
+    let (pacing, history, sizing) = (config.pacing, config.history_memory, config.sizing);
+    let restart = config.clone();
     let memory_before_start = memory();
     let node = EmbeddedNode::start(config).await.unwrap();
     let memory_after_start = memory();
     let signer = BlsSigner::new(3u64.into(), chain_id).unwrap();
 
-    let mut latencies = Vec::with_capacity(WRITES);
-    for index in 0..WRITES {
+    let mut latencies = Vec::with_capacity(writes);
+    for index in 0..writes {
         latencies.push(certified_write(&node, &signer, index).await);
     }
     latencies.sort();
-    let percentile = |p: usize| latencies[(WRITES * p / 100).min(WRITES - 1)].as_secs_f64() * 1e3;
+    let percentile = |p: usize| latencies[(writes * p / 100).min(writes - 1)].as_secs_f64() * 1e3;
 
     let before = status(&node).await;
     let bytes_before = directory_bytes(directory.path());
@@ -203,6 +218,11 @@ async fn profile_solo_writes_and_idle_cost() {
     let memory_after_idle = memory();
     let after = status(&node).await;
     let bytes_after = directory_bytes(directory.path());
+    node.stop().await.unwrap();
+    let restarting = Instant::now();
+    let node = EmbeddedNode::start(restart).await.unwrap();
+    let restart_ms = restarting.elapsed().as_secs_f64() * 1e3;
+    let write_after_restart = certified_write(&node, &signer, writes).await;
     let blocks = after.finalized_height.unwrap() - before.finalized_height.unwrap();
     let nullified = after.nullified_count.unwrap_or(0) - before.nullified_count.unwrap_or(0);
 
@@ -211,7 +231,7 @@ async fn profile_solo_writes_and_idle_cost() {
         json!({
             "idle_wait_ms": pacing.map(|pacing| pacing.idle.as_millis() as u64),
             "batch_ms": pacing.map(|pacing| pacing.batch.as_millis() as u64),
-            "writes": WRITES,
+            "writes": writes,
             "certified_receipt_ms": {
                 "p50": percentile(50), "p95": percentile(95), "max": percentile(100)
             },
@@ -222,6 +242,10 @@ async fn profile_solo_writes_and_idle_cost() {
             "idle_disk_bytes_per_hour": (bytes_after.saturating_sub(bytes_before)) as f64
                 * 3600.0 / IDLE.as_secs_f64(),
             "history_disk_bytes": directory_bytes(&directory.path().join("history")),
+            "restart_ms": restart_ms,
+            "write_after_restart_ms": write_after_restart.as_secs_f64() * 1e3,
+            "channel_burst": sizing.channel_burst,
+            "page_cache_pages": sizing.page_cache_pages,
             "history_block_cache_bytes": history.block_cache_bytes,
             "history_write_buffer_bytes": history.write_buffer_bytes,
             "memory": {

@@ -8,7 +8,7 @@ Original texts are reproduced below and identified by SHA-256. For texts from
 upstream source trees, the source URL includes the reviewed revision. Aurora's
 package records a dirty source tree; see its package-specific notice below.
 
-Cargo.lock SHA-256: ebf98d0f390d819b0ee50efc25524c867d6b1f2fd95e4b77c8ae1e149e17989a
+Cargo.lock SHA-256: 8196d26661e34c100fdfd861037d44f1a0f7f4324e286c238948045b824b19c1
 Packages: 537
 
 PACKAGE INDEX
@@ -1136,7 +1136,7 @@ once_cell 1.21.4 | MIT OR Apache-2.0
 oorandom 11.1.5 | MIT
   e3f96201e81ea40ed151ec06694dd5b1d9e6b94a74f47a1c45779c4b8a293888  LICENSE-MIT
 
-openssl 0.10.75 | Apache-2.0
+openssl 0.10.82 | Apache-2.0
   f3d4287b4a21c5176fea2f9bd4ae800696004e2fb8e05cbc818be513f188a941  LICENSE
   c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08  LICENSE-APACHE
 
@@ -1148,7 +1148,7 @@ openssl-probe 0.2.1 | MIT OR Apache-2.0
   a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
   378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397  LICENSE-MIT
 
-openssl-sys 0.9.111 | MIT
+openssl-sys 0.9.118 | MIT
   378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397  LICENSE-MIT
 
 opentelemetry 0.32.0 | Apache-2.0

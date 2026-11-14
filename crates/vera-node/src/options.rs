@@ -35,6 +35,8 @@ pub struct NodeOptions {
     pub verification_threads: Option<std::num::NonZeroUsize>,
     /// Byte budgets of the finalized-history store. `None` keeps the store's defaults.
     pub history_memory: Option<crate::HistoryMemory>,
+    /// Sizes of the allocations made at start.
+    pub sizing: crate::NodeSizing,
 }
 
 /// Verification parallelism when the host does not choose one.
@@ -84,6 +86,7 @@ impl NodeOptions {
             solo_pacing: None,
             verification_threads: None,
             history_memory: None,
+            sizing: crate::NodeSizing::DAEMON,
         }
     }
 }

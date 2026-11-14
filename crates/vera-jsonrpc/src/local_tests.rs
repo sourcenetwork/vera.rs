@@ -32,7 +32,7 @@ async fn local_only_table_reports_method_errors_without_a_listener() {
     let local = RpcServer::new(NodeState::new(7, 0, 1), "127.0.0.1:0".parse().unwrap())
         .into_local()
         .unwrap();
-    assert!(local.method_names().any(|name| name == "vera_sendNativeTx"));
+    assert!(local.method_names().contains(&"vera_sendNativeTx"));
 
     let rejected = local
         .request::<serde_json::Value>("vera_sendNativeTx", vec![serde_json::json!("0x")])
@@ -107,6 +107,39 @@ fn calls_run_on_the_building_runtime_from_a_thread_without_one() {
     ));
     assert!(matches!(
         block_on(local.subscribe("vera_subscribeHeaders", Vec::new(), 4)),
+        Err(LocalRpcError::Stopped)
+    ));
+}
+
+#[tokio::test]
+async fn a_closed_table_is_released_for_every_clone() {
+    let held = std::sync::Arc::new(());
+    let witness = std::sync::Arc::downgrade(&held);
+    let mut module = jsonrpsee::RpcModule::new(());
+    module
+        .register_method("test_held", move |_, _, _| {
+            std::sync::Arc::strong_count(&held)
+        })
+        .unwrap();
+    let local = RpcServer::new(NodeState::new(7, 0, 1), "127.0.0.1:0".parse().unwrap())
+        .with_extra_module(module)
+        .into_local()
+        .unwrap();
+    let clone = local.clone();
+    assert_eq!(clone.call_empty::<usize>("test_held").await.unwrap(), 1);
+
+    local.close();
+
+    assert!(witness.upgrade().is_none());
+    assert!(clone.method_names().is_empty());
+    assert!(matches!(
+        clone.call_empty::<usize>("test_held").await,
+        Err(LocalRpcError::Stopped)
+    ));
+    assert!(matches!(
+        clone
+            .subscribe("vera_subscribeHeaders", Vec::new(), 4)
+            .await,
         Err(LocalRpcError::Stopped)
     ));
 }

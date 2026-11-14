@@ -1,7 +1,5 @@
 //! Retention of an embedded node's consensus archives and state journals.
 
-#![recursion_limit = "256"]
-
 mod support;
 
 use std::time::{Duration, Instant};

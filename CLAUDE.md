@@ -373,7 +373,11 @@ and, on Linux, inherits the CPU affinity it sets. `thread_budget()` reports the
 node, worker, blocking, verification and history-store thread counts.
 `EmbeddedConfig::history_memory` sets the history store's block-cache and
 write-buffer budgets, 8 MiB and 4 MiB by default; the daemon keeps Regolith's
-512 MiB and 64 MiB. The consensus listener always binds; `127.0.0.1:0` keeps
+512 MiB and 64 MiB. `EmbeddedConfig::sizing` sets the peer-channel burst and
+QMDB page cache allocated at start, 1 and 256 pages by default against the
+daemon's 64 and 4,096. A stopped node's directory is free even while clones of
+its `LocalRpc` survive, and starting on a directory in use fails with
+`EmbedError::DirectoryInUse`. The consensus listener always binds; `127.0.0.1:0` keeps
 it on loopback with a system-chosen port. An embedded node prunes consensus
 archives and state journals by default (`EmbeddedConfig::RETENTION`); finalized
 history is not pruned. See `docs/embedded-node.md`.

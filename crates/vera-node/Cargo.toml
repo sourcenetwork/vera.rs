@@ -68,6 +68,7 @@ tracing.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 alloy-sol-types.workspace = true
 ed25519-dalek.workspace = true
 p256.workspace = true
