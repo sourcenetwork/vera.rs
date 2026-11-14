@@ -122,15 +122,18 @@ impl Block {
     }
 }
 
-fn digest_for_block_id(id: &BlockId) -> crate::ConsensusDigest {
-    Sha256::hash(&[id.0.as_slice()])
+impl BlockId {
+    /// The consensus digest of the block this identifier names.
+    pub fn digest(&self) -> crate::ConsensusDigest {
+        Sha256::hash(&[self.0.as_slice()])
+    }
 }
 
 impl Digestible for Block {
     type Digest = crate::ConsensusDigest;
 
     fn digest(&self) -> Self::Digest {
-        digest_for_block_id(&self.id())
+        self.id().digest()
     }
 }
 
@@ -138,7 +141,7 @@ impl Committable for Block {
     type Commitment = crate::ConsensusDigest;
 
     fn commitment(&self) -> Self::Commitment {
-        digest_for_block_id(&self.id())
+        self.id().digest()
     }
 }
 
@@ -150,7 +153,7 @@ impl commonware_consensus::Heightable for Block {
 
 impl commonware_consensus::Block for Block {
     fn parent(&self) -> Self::Digest {
-        digest_for_block_id(&self.parent)
+        self.parent.digest()
     }
 }
 
@@ -663,7 +666,7 @@ mod tests {
         use commonware_consensus::Block as _;
         let block = sample_block();
         let parent_commitment = block.parent();
-        let expected = digest_for_block_id(&block.parent);
+        let expected = block.parent.digest();
         assert_eq!(parent_commitment, expected);
     }
 }

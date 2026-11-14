@@ -21,9 +21,14 @@ fn hash_key(prefix: u8, hash: &[u8; 32]) -> [u8; 33] {
     key
 }
 
-pub(super) fn index_execution(batch: &mut WriteBatch, block: &Block, receipts: &[StoredReceipt]) {
-    let height = block.height.to_be_bytes();
-    batch.put(hash_key(BLOCK_HASH, &block.id().0.0), height);
+pub(super) fn index_execution(
+    batch: &mut WriteBatch,
+    height: u64,
+    id: &BlockId,
+    receipts: &[StoredReceipt],
+) {
+    let height = height.to_be_bytes();
+    batch.put(hash_key(BLOCK_HASH, &id.0.0), height);
     for receipt in receipts {
         batch.put(hash_key(SUBMISSION_HASH, &receipt.hash), height);
     }

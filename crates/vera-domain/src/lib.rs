@@ -15,12 +15,6 @@ pub use limits::*;
 mod aliases;
 pub use aliases::{ConsensusContext, ConsensusDigest, PublicKey};
 
-mod commitment;
-pub use commitment::{AccountChange, StateChanges, StateChangesCfg};
-
-mod events;
-pub use events::{LedgerEvent, LedgerEvents};
-
 mod db_targets;
 pub use db_targets::{DbTarget, DbTargets};
 
@@ -47,7 +41,7 @@ mod module_id;
 pub use module_id::ModuleId;
 
 mod gossip;
-pub use gossip::{GOSSIP_HEADER_SIZE, GossipHeader};
+pub use gossip::GossipHeader;
 
 mod tx;
 pub use tx::{Tx, TxCfg};

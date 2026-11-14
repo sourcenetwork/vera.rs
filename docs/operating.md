@@ -113,6 +113,11 @@ A successful Linux job does not replace the other release gates.
 | `history/` | Durable execution and finalization records |
 | `native-genesis.bin` | Published after all seven partitions first seal |
 
+`config.toml` and `genesis.json` reject keys they do not define, so a misspelled
+section fails at startup instead of selecting its default. `genesis.json` must
+list at least one registry validator, each with a distinct address and consensus
+key.
+
 Retain `validator.key` and `secrets.json` together with independently provisioned
 genesis, configuration, and peer material. Recovering the remaining state depends
 on reachable peers and available authenticated state and history. A delayed

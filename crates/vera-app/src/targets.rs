@@ -7,7 +7,7 @@ use commonware_storage::{
 };
 use commonware_utils::non_empty_range;
 use vera_backend::{VeraMerkleized, VeraSyncTargets};
-use vera_domain::{ConsensusDigest, DbTarget, DbTargets};
+use vera_domain::{Block, ConsensusDigest, DbTarget, DbTargets};
 
 type SyncTarget = Target<mmr::Family, ConsensusDigest>;
 
@@ -17,6 +17,22 @@ pub(crate) fn target_from_sync(target: &SyncTarget) -> DbTarget {
         floor: *target.range.start(),
         tip: *target.range.end(),
     }
+}
+
+/// Whether a block-carried target names a non-empty range of valid locations.
+const fn well_formed(target: &DbTarget) -> bool {
+    target.floor < target.tip && Location::<mmr::Family>::new(target.tip).is_valid()
+}
+
+/// Whether every target a block carries can be turned into a sync target.
+pub(crate) fn block_targets_well_formed(block: &Block) -> bool {
+    let db = &block.db_targets;
+    block.native_targets.as_ref().is_some_and(|native| {
+        [&db.accounts, &db.storage, &db.code]
+            .into_iter()
+            .chain(native)
+            .all(well_formed)
+    })
 }
 
 pub(crate) fn sync_from_target(target: &DbTarget) -> SyncTarget {

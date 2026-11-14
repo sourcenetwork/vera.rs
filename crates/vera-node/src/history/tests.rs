@@ -1,4 +1,5 @@
 use super::*;
+use commonware_cryptography::Digestible as _;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},

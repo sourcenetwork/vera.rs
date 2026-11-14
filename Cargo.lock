@@ -7085,7 +7085,6 @@ version = "0.1.2"
 dependencies = [
  "commonware-codec",
  "parking_lot",
- "rstest",
  "tokio",
  "vera-domain",
 ]
@@ -7133,11 +7132,9 @@ dependencies = [
  "commonware-glue",
  "commonware-parallel",
  "commonware-utils",
- "futures",
  "hex",
  "k256 0.13.4",
  "k256 0.14.0",
- "parking_lot",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -7233,6 +7230,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.18",
  "vera-domain",
  "vera-modules",
 ]

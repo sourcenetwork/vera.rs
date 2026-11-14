@@ -28,7 +28,8 @@ impl<D: ApplicationState> std::fmt::Debug for StateExecution<D> {
 pub trait ApplicationState: DatabaseSet<Ctx> + Clone + Send + Sync + 'static {
     /// Whether the block carries commitments for this storage layout.
     fn accepts(block: &Block) -> bool;
-    /// Targets from a block whose storage layout has already been checked.
+    /// Targets a block commits to. Consensus asks for these before the block is
+    /// verified, so a block [`Self::accepts`] rejects yields a placeholder.
     fn targets(block: &Block) -> Self::SyncTargets;
     /// Attach execution receipts to their sealed proposal, outside storage commitments.
     fn with_receipts(
@@ -63,15 +64,18 @@ impl ApplicationState for OrderedState {
     }
 
     fn accepts(block: &Block) -> bool {
-        block.native_targets.is_some() && block.receipt_commitment.is_some()
+        block.receipt_commitment.is_some() && crate::targets::block_targets_well_formed(block)
     }
     fn targets(block: &Block) -> Self::SyncTargets {
-        let execution = crate::sync_targets(&block.db_targets);
-        let native = block
+        let Some(native) = block
             .native_targets
             .as_ref()
-            .expect("ordered block commitments")
-            .map(|target| crate::targets::sync_from_target(&target));
+            .filter(|_| crate::targets::block_targets_well_formed(block))
+        else {
+            return Self::initial_sync_targets();
+        };
+        let execution = crate::sync_targets(&block.db_targets);
+        let native = native.map(|target| crate::targets::sync_from_target(&target));
         (
             execution.0,
             execution.1,

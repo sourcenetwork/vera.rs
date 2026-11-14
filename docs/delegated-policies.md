@@ -157,6 +157,9 @@ same rule, so evidence captured for one spelling answers a request in any other.
 
 Provider actors (`did:opk:`), BLS worker DIDs, the wildcard and any `did:key`
 that is not a supported key in an accepted spelling are compared as written.
+A `did:key` whose multibase part exceeds 128 characters is never decoded: no
+supported key is that long, so it is always compared as written and cannot
+issue a token.
 Object identifiers outside the `actor` resource are opaque and never rewritten.
 
 Signed bindings cover the request as its caller wrote it. An operation

@@ -192,3 +192,18 @@ fn identifiers_with_one_spelling_are_recorded_as_written() {
         );
     }
 }
+
+#[test]
+fn an_over_long_identifier_is_compared_as_written_and_every_spelling_fits() {
+    let long = format!("did:key:z{}", "2".repeat(1 << 20));
+    assert!(matches!(canonical_did(&long), Cow::Borrowed(_)));
+    assert!(algorithm(&long).is_err());
+
+    let key = k256::ecdsa::SigningKey::from_slice(&[42; 32]).unwrap();
+    let mut bytes = vec![0xe7, 0x01];
+    bytes.extend_from_slice(key.verifying_key().to_encoded_point(false).as_bytes());
+    let uncompressed = crate::did_key::encode(&bytes);
+    assert!(uncompressed.len() <= crate::did_key::MAX_MULTIBASE_LEN);
+    let did = format!("did:key:{uncompressed}");
+    assert_ne!(canonical_did(&did), did);
+}

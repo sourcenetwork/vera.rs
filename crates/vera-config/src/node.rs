@@ -15,7 +15,7 @@ pub const DEFAULT_DATA_DIR: &str = "/var/lib/verad";
 
 /// Bounds for initial snapshot catch-up. Subsequent starts resume durable progress.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct SnapshotConfig {
     /// Maximum assembled execution record, including receipts (default 64 MiB).
     pub record_bytes: usize,
@@ -44,6 +44,7 @@ impl Default for SnapshotConfig {
 
 /// Coordinated consensus archive and state journal retention.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct PruningConfig {
     /// Finalized revisions between maintenance attempts.
     pub maintenance_interval: std::num::NonZeroUsize,
@@ -71,6 +72,7 @@ impl PruningConfig {
 
 /// Complete node configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct NodeConfig {
     /// Chain ID for the network.
     #[serde(default = "default_chain_id")]
@@ -295,6 +297,26 @@ mod tests {
         assert!(pruning.validate(epoch_length).is_err());
         pruning.retained_consensus_revisions = usize::MAX;
         assert!(pruning.validate(epoch_length).is_err());
+    }
+
+    #[test]
+    fn unknown_keys_and_sections_are_rejected() {
+        for text in [
+            "chain_identifier = 1",
+            "[prunning]\nmaintenance_interval = 1",
+            "[network]\nlisten = \"0.0.0.0:1\"",
+            "[rpc]\nhttp = \"0.0.0.0:1\"",
+            "[execution]\ngas = 1",
+            "[snapshot]\nlog = 1",
+            "[pruning]\nmaintenance_interval = 1\nretained_consensus_revisions = 18\nretained_state_revisions = 0\nretained = 1",
+        ] {
+            let error = NodeConfig::from_toml(text).expect_err(text);
+            assert!(
+                error.to_string().contains("unknown field"),
+                "{text}: {error}"
+            );
+        }
+        assert!(NodeConfig::from_json(r#"{"chain_id": 1, "datadir": "/tmp"}"#).is_err());
     }
 
     #[test]

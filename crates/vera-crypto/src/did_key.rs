@@ -1,7 +1,13 @@
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 
+/// Longest accepted multibase string. An uncompressed secp256k1 key with its
+/// multicodec prefix is 93 characters; base58 decoding is quadratic in length.
+pub(crate) const MAX_MULTIBASE_LEN: usize = 128;
+
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum DecodeError {
+    #[error("did:key encoding exceeds {MAX_MULTIBASE_LEN} characters")]
+    TooLong,
     #[error("unsupported did:key encoding")]
     UnsupportedEncoding,
     #[error("invalid base58btc: {0}")]
@@ -23,6 +29,9 @@ pub(crate) fn did(codec: u64, key: &[u8]) -> String {
 }
 
 pub(crate) fn decode(encoded: &str) -> Result<Vec<u8>, DecodeError> {
+    if encoded.len() > MAX_MULTIBASE_LEN {
+        return Err(DecodeError::TooLong);
+    }
     match encoded.as_bytes().first() {
         Some(b'z') => bs58::decode(&encoded[1..]).into_vec().map_err(Into::into),
         Some(b'u') => URL_SAFE_NO_PAD.decode(&encoded[1..]).map_err(Into::into),
@@ -46,5 +55,19 @@ mod tests {
         for invalid in ["", "z0", "u_", "uAA=", "f00", "🦀"] {
             assert!(decode(invalid).is_err(), "accepted {invalid:?}");
         }
+    }
+
+    #[test]
+    fn rejects_over_long_input_without_decoding_it() {
+        for prefix in ['z', 'u'] {
+            let longest = format!("{prefix}{}", "1".repeat(MAX_MULTIBASE_LEN - 1));
+            assert!(!matches!(decode(&longest), Err(DecodeError::TooLong)));
+            let over = format!("{prefix}{}", "1".repeat(MAX_MULTIBASE_LEN));
+            assert!(matches!(decode(&over), Err(DecodeError::TooLong)));
+        }
+        let started = std::time::Instant::now();
+        let huge = format!("z{}", "2".repeat(1 << 20));
+        assert!(matches!(decode(&huge), Err(DecodeError::TooLong)));
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
     }
 }

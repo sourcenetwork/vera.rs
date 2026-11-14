@@ -19,7 +19,7 @@ use std::marker::PhantomData;
 use tracing::{info, warn};
 use vera_backend::Ctx;
 use vera_consensus::{Mempool as _, TxId, components::InMemoryMempool};
-use vera_domain::{Block, ConsensusContext, PublicKey};
+use vera_domain::{Block, ConsensusContext, PublicKey, Tx};
 use vera_executor::{BlockContext, ExecutionReceipt, VeraExecutor, receipt_commitment};
 
 use crate::{AppError, ConsensusScheme, FinalizedSink, ReshareInput};
@@ -297,7 +297,10 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         let excluded = Self::pending_tx_ids(&pending);
         // This wait runs on the application actor, which also processes finalization.
         // Idling while an ancestor with requests is unfinalized would delay its receipts.
-        let settled = pending.iter().all(|block| block.txs.is_empty());
+        let settled = pending
+            .iter()
+            .filter(|block| block.height > finalized_height)
+            .all(|block| block.txs.is_empty());
         // Finalization is processed on this actor between proposals, so the
         // height moves only once a proposal made since the start has returned.
         let fresh = finalized_height > *self.started_at.get_or_init(|| finalized_height);
@@ -321,11 +324,7 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             input.provider.build_block(self.max_txs, &excluded)
         };
         if self.native_pipeline {
-            txs.retain(|tx| {
-                tx.bytes
-                    .first()
-                    .is_some_and(|byte| vera_domain::NativeTx::is_native_tx(*byte))
-            });
+            txs.retain(Tx::is_native);
         }
 
         let height = parent.height + 1;
@@ -387,15 +386,6 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             )),
             db_targets: executed.db_targets,
         };
-        if self.native_pipeline
-            && block.txs.iter().any(|tx| {
-                !tx.bytes
-                    .first()
-                    .is_some_and(|byte| vera_domain::NativeTx::is_native_tx(*byte))
-            })
-        {
-            return None;
-        }
         if !block.fits_wire_limits() {
             return None;
         }
@@ -403,9 +393,7 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             block_digest = ?block.digest(),
             height,
             txs = block.txs.len(),
-            snapshot_ms = 0u128,
             exec_ms,
-            root_ms = 0u128,
             total_ms = start.elapsed().as_millis(),
             "built block"
         );
@@ -427,13 +415,7 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         let block = ancestry.next().await?;
         let digest = block.digest();
         let block = block.inner_shared();
-        if self.native_pipeline
-            && block.txs.iter().any(|tx| {
-                !tx.bytes
-                    .first()
-                    .is_some_and(|byte| vera_domain::NativeTx::is_native_tx(*byte))
-            })
-        {
+        if self.native_pipeline && !block.txs.iter().all(Tx::is_native) {
             warn!(?digest, "legacy transaction in native-only block");
             return None;
         }
@@ -506,15 +488,14 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             }
             context.0.sleep(std::time::Duration::from_secs(wait)).await;
         }
+        let exec_start = Instant::now();
         match self.re_execute(&block, batches).await {
             Ok(merkleized) => {
                 info!(
                     ?digest,
                     height = block.height,
                     txs = block.txs.len(),
-                    snapshot_ms = 0u128,
-                    exec_ms = start.elapsed().as_millis(),
-                    root_ms = 0u128,
+                    exec_ms = exec_start.elapsed().as_millis(),
                     total_ms = start.elapsed().as_millis(),
                     "verified block"
                 );

@@ -13,14 +13,17 @@ use vera_indexer::{BlockIndex, IndexedBlock, IndexedLog, IndexedReceipt, Indexed
 use vera_jsonrpc::{BlockTransactions, RpcBlock, RpcLog};
 
 /// Index a finalized block into the block index.
+///
+/// `block_hash` is the block's identifier, which the caller computes once per
+/// finalized block: deriving it re-encodes and hashes the whole block.
 pub fn index_finalized_block(
     index: &BlockIndex,
     block: &Block,
+    block_hash: B256,
     gas_limit: u64,
     receipts: &[ExecutionReceipt],
     gas_used: u64,
 ) {
-    let block_hash = block.id().0;
     let header = alloy_consensus::Header {
         number: block.height,
         timestamp: block.timestamp,
@@ -176,16 +179,16 @@ pub fn index_finalized_block(
     trace!(height = block.height, "indexed finalized block");
 }
 
-/// Build RPC subscription data from a finalized block and its receipts.
+/// Build RPC subscription data from a finalized block, its identifier and its receipts.
 pub fn subscription_data(
     block: &Block,
+    block_hash: B256,
     gas_limit: u64,
     receipts: &[ExecutionReceipt],
     gas_used: u64,
 ) -> (RpcBlock, Vec<RpcLog>) {
     use alloy_primitives::{Bytes, U64};
 
-    let block_hash = block.id().0;
     let header = alloy_consensus::Header {
         number: block.height,
         timestamp: block.timestamp,

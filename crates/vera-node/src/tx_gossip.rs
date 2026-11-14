@@ -10,7 +10,7 @@ use commonware_p2p::{Receiver, Recipients, Sender};
 use commonware_runtime::{Clock, Spawner};
 use tokio::sync::Mutex;
 use tracing::{debug, trace, warn};
-use vera_consensus::{Mempool as _, components::InMemoryMempool};
+use vera_consensus::{Mempool as _, TxId, components::InMemoryMempool};
 use vera_domain::{NativeTx, Tx};
 use vera_executor::MempoolValidator;
 use vera_jsonrpc::TxSubmitError;
@@ -55,6 +55,19 @@ pub(crate) async fn admit(
     chain_id: u64,
     bytes: Bytes,
 ) -> Result<bool, TxSubmitError> {
+    Ok(admit_identified(mempool, validator, chain_id, bytes)
+        .await?
+        .is_some())
+}
+
+/// As [`admit`], returning the identifier of a newly inserted transaction so
+/// the caller does not hash the request again.
+async fn admit_identified(
+    mempool: &InMemoryMempool,
+    validator: &SharedValidator,
+    chain_id: u64,
+    bytes: Bytes,
+) -> Result<Option<TxId>, TxSubmitError> {
     if bytes.len() > vera_domain::MAX_TX_BYTES {
         return Err(TxSubmitError::Rejected(
             "signed request exceeds its byte limit".into(),
@@ -64,7 +77,7 @@ pub(crate) async fn admit(
     let tx = Tx::new(bytes.clone());
     let id = tx.id();
     if mempool.contains(&id) {
-        return Ok(false);
+        return Ok(None);
     }
     let is_native = !bytes.is_empty() && NativeTx::is_native_tx(bytes[0]);
     let pre = if is_native {
@@ -77,20 +90,20 @@ pub(crate) async fn admit(
     };
     let mut guard = validator.lock().await;
     if mempool.contains(&id) {
-        return Ok(false);
+        return Ok(None);
     }
-    if !mempool.can_insert(&tx) {
+    if !mempool.can_insert(&id, &tx) {
         return Err(TxSubmitError::AtCapacity);
     }
     guard
         .reserve(pre.as_ref(), &bytes)
         .await
         .map_err(|error| TxSubmitError::Rejected(error.to_string()))?;
-    let inserted = mempool.insert(tx);
+    let inserted = mempool.insert_with_id(id, tx);
     if inserted && let Some(pre) = pre {
         guard.remember(id, pre);
     }
-    Ok(inserted)
+    Ok(inserted.then_some(id))
 }
 
 impl<S: Sender, E: Clock> TxGossip<S, E> {
@@ -113,16 +126,15 @@ impl<S: Sender, E: Clock> TxGossip<S, E> {
 
     /// Admit a locally submitted transaction and forward it to every peer.
     pub async fn submit(&self, bytes: Bytes) -> Result<bool, TxSubmitError> {
-        let tx = Tx::new(bytes.clone());
-        let inserted = admit(&self.mempool, &self.validator, self.chain_id, bytes.clone()).await?;
-        if inserted {
-            self.forward_local(tx).await;
+        let inserted =
+            admit_identified(&self.mempool, &self.validator, self.chain_id, bytes.clone()).await?;
+        if let Some(id) = inserted {
+            self.forward(id, Tx::new(bytes)).await;
         }
-        Ok(inserted)
+        Ok(inserted.is_some())
     }
 
-    async fn forward_local(&self, tx: Tx) {
-        let id = tx.id();
+    async fn forward(&self, id: TxId, tx: Tx) {
         if !self.mempool.mark_local(&id, self.clock.current()) {
             return;
         }

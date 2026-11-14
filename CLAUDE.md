@@ -225,6 +225,11 @@ Missing genesis records alongside finalized history are rejected instead of
 resetting state. A persisted native genesis must contain the expected receipt
 commitment.
 
+`genesis.json` and `config.toml` reject keys they do not define. Genesis
+validators need distinct addresses and consensus keys, and a node does not start
+without at least one. The ValidatorRegistry slot layout is defined once, in
+`vera_modules::validator_registry::layout`, for execution and genesis.
+
 Seven authenticated peer resolvers serve bounded operation-log ranges. Fetches
 allow up to 64 operations, with eight-operation inspection batches and responses
 below the 4 MiB transport limit. Native keys are limited to 64 KiB; values and
@@ -297,8 +302,9 @@ See `docs/permission-proofs.md` for formats and limits.
 
 The application uses ordered QMDB partitions for execution and native modules.
 Native blocks select a tagged commitment encoding and carry four additional
-module log targets and a receipt commitment. Blocks lacking these commitments
-are rejected by the application. Legacy block decoding remains separate from the native application. Proofs
+module log targets and a receipt commitment. Blocks lacking these commitments,
+or carrying a target with an empty range, are rejected by the application
+without executing them. Legacy block decoding remains separate from the native application. Proofs
 use Commonware QMDB only; retired JMT proof formats are not supported.
 
 ### RPC surfaces
@@ -362,9 +368,11 @@ fixed epoch length. These cache limits do not bound total node history.
 
 A `LightBlock` carries the canonical block, the BLS threshold finalization
 certificate, and the epoch's group public key; `vera_domain::verify_light_block`
-verifies it with one aggregate signature. Native record, prefix and permission
-evidence authenticates module state against that finalized revision. Signed
-`GossipHeader`s stream through `vera_subscribeHeaders` as revisions finalize.
+verifies it with one aggregate signature, weighting the vote and seed signatures
+with operating-system randomness. Native record, prefix and permission
+evidence authenticates module state against that finalized revision.
+`GossipHeader`s carrying the finalization certificate stream through
+`vera_subscribeHeaders` as revisions finalize.
 The native stream is available with only the header broadcaster configured.
 Consumers authenticate headers against their configured finality trust; receiving a
 notification alone does not establish its authority.

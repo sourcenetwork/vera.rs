@@ -115,8 +115,26 @@ impl InMemoryMempool {
     }
 
     /// Check capacity while the caller holds the admission validator lock.
-    pub fn can_insert(&self, tx: &Tx) -> bool {
-        self.inner.read().accepts(&tx.id(), tx)
+    /// `id` is the transaction's identifier, computed once by the caller.
+    pub fn can_insert(&self, id: &TxId, tx: &Tx) -> bool {
+        self.inner.read().accepts(id, tx)
+    }
+
+    /// Insert a transaction under the identifier its caller already computed.
+    ///
+    /// Returns `true` if the transaction was newly inserted.
+    pub fn insert_with_id(&self, id: TxId, tx: Tx) -> bool {
+        debug_assert_eq!(id, tx.id());
+        let mut inner = self.inner.write();
+        if !inner.accepts(&id, &tx) || inner.txs.contains_key(&id) {
+            return false;
+        }
+        inner.bytes += tx.bytes.len();
+        inner.order.push_back(id);
+        inner.txs.insert(id, tx);
+        drop(inner);
+        self.changed.notify_waiters();
+        true
     }
 
     /// Select a prefix that fits the encoded transaction budget of one block.
@@ -210,17 +228,7 @@ impl Default for InMemoryMempool {
 
 impl Mempool for InMemoryMempool {
     fn insert(&self, tx: Tx) -> bool {
-        let id = tx.id();
-        let mut inner = self.inner.write();
-        if !inner.accepts(&id, &tx) || inner.txs.contains_key(&id) {
-            return false;
-        }
-        inner.bytes += tx.bytes.len();
-        inner.order.push_back(id);
-        inner.txs.insert(id, tx);
-        drop(inner);
-        self.changed.notify_waiters();
-        true
+        self.insert_with_id(tx.id(), tx)
     }
 
     fn build(&self, max_txs: usize, excluded: &std::collections::BTreeSet<TxId>) -> Vec<Tx> {
@@ -290,11 +298,11 @@ mod tests {
             assert!(pool.insert(tx.clone()));
         }
         let overflow = Tx::new(MAX_PENDING_TXS.to_be_bytes().to_vec().into());
-        assert!(!pool.can_insert(&overflow));
+        assert!(!pool.can_insert(&overflow.id(), &overflow));
         assert!(!pool.insert(overflow.clone()));
         assert_eq!(pool.build(usize::MAX, &Default::default()), accepted);
         pool.prune(&[accepted[0].id()]);
-        assert!(pool.can_insert(&overflow));
+        assert!(pool.can_insert(&overflow.id(), &overflow));
         assert!(pool.insert(overflow.clone()));
         let mut expected = accepted[1..].to_vec();
         expected.push(overflow);
@@ -310,7 +318,7 @@ mod tests {
         for tx in &txs[..5] {
             assert!(pool.insert(tx.clone()));
         }
-        assert!(!pool.can_insert(&txs[5]));
+        assert!(!pool.can_insert(&txs[5].id(), &txs[5]));
         assert!(!pool.insert(txs[5].clone()));
         let block = pool.build_block(64, &Default::default());
         assert_eq!(block.len(), 1);

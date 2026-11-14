@@ -8,7 +8,6 @@ use std::{
 };
 
 use commonware_codec::Encode as _;
-use commonware_cryptography::Digestible as _;
 use tokio::sync::broadcast;
 use tracing::trace;
 use vera_app::FinalizedSink;
@@ -210,7 +209,16 @@ impl FinalizedSink for NodeSink {
         self.node_state.set_backfilling(false);
 
         let gas_used = receipts.iter().map(|r| r.gas_used).sum();
-        index_finalized_block(&self.index, block, self.gas_limit, &receipts, gas_used);
+        // One identifier serves indexing, subscriptions, the header and the light index.
+        let id = block.id();
+        index_finalized_block(
+            &self.index,
+            block,
+            id.0,
+            self.gas_limit,
+            &receipts,
+            gas_used,
+        );
         self.node_state.record_finalized(
             block.height,
             block.context.round.epoch().get(),
@@ -230,7 +238,8 @@ impl FinalizedSink for NodeSink {
                 history_us = (persisted - lookup).as_micros(), index_us,
                 "finalized revision publication");
         }
-        let (rpc_block, rpc_logs) = subscription_data(block, self.gas_limit, &receipts, gas_used);
+        let (rpc_block, rpc_logs) =
+            subscription_data(block, id.0, self.gas_limit, &receipts, gas_used);
         if self.heads.send(rpc_block).is_err() {
             trace!(height = block.height, "no newHeads subscribers");
         }
@@ -240,10 +249,15 @@ impl FinalizedSink for NodeSink {
         restore_epoch(&self.light_index, block);
         let height = block.height;
         if let Some(artifacts) = artifacts {
-            let mut header = GossipHeader::from_block(block, self.chain_id, self.publisher_index);
+            let mut header = GossipHeader::from_block_with_hash(
+                block,
+                id.0,
+                self.chain_id,
+                self.publisher_index,
+            );
             header.set_signature(&artifacts.certificate);
             self.light_index.insert_finalization(
-                block.digest().0,
+                id.digest().0,
                 StoredFinalization {
                     epoch: artifacts.epoch,
                     bytes: artifacts.finalization,

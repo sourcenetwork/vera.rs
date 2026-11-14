@@ -206,6 +206,11 @@ async fn run_node_with_elector<
             "genesis has {count} {set}, but epoch length {blocks_per_epoch} and leader term {term_length} support at most {capacity}",
         );
     }
+    // The last block of every epoch reads the next participants from the registry.
+    anyhow::ensure!(
+        !genesis.validators.is_empty(),
+        "genesis.json lists no registry validators"
+    );
     let listen: std::net::SocketAddr = config.network.listen_addr.parse()?;
     let dial: std::net::SocketAddr = config
         .network
@@ -969,6 +974,7 @@ async fn run_node_with_elector<
             crate::index_finalized_block(
                 &index,
                 &execution.block,
+                execution.block.id().0,
                 execution.gas_limit,
                 &execution.receipts,
                 gas_used,

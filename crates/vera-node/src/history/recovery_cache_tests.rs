@@ -73,7 +73,14 @@ async fn recent_cache_recovery_matches_full_replay_and_preserves_archived_submis
     let index = BlockIndex::new();
     let expected = BlockIndex::new();
     for (block, receipts) in &fixture.executions {
-        index_finalized_block(&expected, block, 100, receipts, receipts.len() as u64);
+        index_finalized_block(
+            &expected,
+            block,
+            block.id().0,
+            100,
+            receipts,
+            receipts.len() as u64,
+        );
     }
     fixture
         .history

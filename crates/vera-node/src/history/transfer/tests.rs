@@ -1,6 +1,6 @@
 use super::*;
 use commonware_consensus::simplex::types::{Finalization, Finalize, Proposal};
-use commonware_cryptography::{Signer as _, ed25519};
+use commonware_cryptography::{Digestible as _, Signer as _, ed25519};
 use commonware_parallel::Sequential;
 use commonware_utils::non_empty;
 use std::sync::Arc;

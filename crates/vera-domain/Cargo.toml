@@ -32,15 +32,11 @@ k256-native = { package = "k256", version = "0.14", features = ["ecdsa"], option
 # RLP encoding
 alloy-rlp = { workspace = true }
 
-# Synchronization
-parking_lot.workspace = true
-
 # Error handling
 thiserror.workspace = true
 
 # General
 bytes.workspace = true
-futures.workspace = true
 hex.workspace = true
 serde.workspace = true
 

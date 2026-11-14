@@ -15,6 +15,7 @@ use vera_modules::acp::abi::IAcp;
 mod actor_spellings;
 mod application;
 mod checkpoint;
+mod idle_wait;
 mod peer_sync;
 mod permission;
 mod record;

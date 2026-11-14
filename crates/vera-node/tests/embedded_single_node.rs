@@ -205,7 +205,7 @@ async fn idle_node_keeps_a_slow_heartbeat_and_wakes_for_a_write() {
     let mut fastest = Duration::MAX;
     let mut height = after;
     for name in ["wake_a", "wake_b", "wake_c"] {
-        finalized_beyond(&node, height + 1).await;
+        finalized_beyond(&node, height).await;
         let started = std::time::Instant::now();
         let submission = create_policy(&node, &signer, name).await;
         height = verified_receipt(&node, submission).await.revision.height;
@@ -391,9 +391,13 @@ async fn a_rejected_request_does_not_stop_the_heartbeat() {
     let at = rejected.revision.height.max(before);
 
     // The node keeps finalizing: its heartbeat, and a later request.
-    let after = tokio::time::timeout(Duration::from_secs(20), finalized_beyond(&node, at + 1))
-        .await
-        .expect("the heartbeat continues after a rejected request");
+    // Two idle waits pass before the second block after the request is published.
+    let after = tokio::time::timeout(
+        EmbeddedConfig::HEARTBEAT * 3,
+        finalized_beyond(&node, at + 1),
+    )
+    .await
+    .expect("the heartbeat continues after a rejected request");
     assert!(after > at + 1);
     let accepted = create_policy(&node, &signer, "after_rejected").await;
     verified_receipt(&node, accepted).await;

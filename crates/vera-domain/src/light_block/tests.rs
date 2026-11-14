@@ -187,6 +187,33 @@ fn substituted_certificate_is_rejected() {
 }
 
 #[test]
+fn signatures_shifted_along_predictable_weights_are_rejected() {
+    use commonware_cryptography::bls12381::primitives::group::SmallScalar;
+
+    let mut light = light_fixture(42);
+    let mut finalization: Finalization<LightConsensusScheme, ConsensusDigest> =
+        Finalization::decode(commonware_codec::Copying(
+            decode_hex("finalization", &light.finalization)
+                .unwrap()
+                .as_slice(),
+        ))
+        .unwrap();
+    let mut pair = finalization.certificate.get().unwrap().clone();
+    let mut rng = TestRng::new(0);
+    let vote_weight = SmallScalar::random(&mut rng);
+    let seed_weight = SmallScalar::random(&mut rng);
+    let shift = pair.vote_signature;
+    pair.vote_signature += &(shift * &seed_weight);
+    pair.seed_signature -= &(shift * &vote_weight);
+    finalization.certificate.signature = pair.into();
+    light.finalization = encode_hex(&finalization.encode());
+    assert_eq!(
+        verify_light_block(&light, &trusted_key()),
+        Err(LightBlockError::InvalidCertificate)
+    );
+}
+
+#[test]
 fn json_round_trip_preserves_verifiability() {
     let light = light_fixture(42);
     let json = serde_json::to_string(&light).unwrap();

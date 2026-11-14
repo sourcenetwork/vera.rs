@@ -131,10 +131,8 @@ pub fn prepare_solo(
         let genesis = VeraGenesis {
             chain_id: identity.chain_id,
             operators: Some(identity.operators.clone()),
-            chain_name: "vera-solo".into(),
             timestamp: identity.timestamp,
             allocations: Vec::new(),
-            native_mint: Default::default(),
             validators: vec![validator(&local, &config.network.listen_addr)],
             contracts: Vec::new(),
             extra_storage: Vec::new(),

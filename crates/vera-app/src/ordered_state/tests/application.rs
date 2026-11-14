@@ -179,7 +179,7 @@ fn native_proposals_bind_every_target_and_isolate_competing_execution() {
                         .unwrap()
                         .is_empty()
                 );
-                for mutation in 0..7 {
+                for mutation in 0..10 {
                     let mut changed = proposal.block.clone();
                     match mutation {
                         0 => changed.native_targets.as_mut().unwrap()[0].root.0[0] ^= 1,
@@ -189,8 +189,16 @@ fn native_proposals_bind_every_target_and_isolate_competing_execution() {
                         4 => changed.native_targets = None,
                         5 => changed.receipt_commitment.as_mut().unwrap().0[0] ^= 1,
                         6 => changed.receipt_commitment = None,
+                        7 => changed.db_targets.accounts.floor = changed.db_targets.accounts.tip,
+                        8 => {
+                            let target = &mut changed.native_targets.as_mut().unwrap()[3];
+                            target.floor = target.tip;
+                        }
+                        9 => changed.db_targets.code.tip = u64::MAX,
                         _ => unreachable!(),
                     }
+                    // Consensus derives targets from a candidate before verifying it.
+                    let _ = App::sync_targets(&changed);
                     assert!(
                         app.process(
                             (context.child("reject"), changed.context.clone()),

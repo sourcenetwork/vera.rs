@@ -2,13 +2,10 @@
 
 use std::collections::BTreeSet;
 
-use vera_domain::{ConsensusDigest, Tx, TxId as DomainTxId};
+use vera_domain::{Tx, TxId as DomainTxId};
 
 /// Transaction identifier type.
 pub type TxId = DomainTxId;
-
-/// Consensus digest type.
-pub type Digest = ConsensusDigest;
 
 /// Mempool provides access to pending transactions for block building.
 ///

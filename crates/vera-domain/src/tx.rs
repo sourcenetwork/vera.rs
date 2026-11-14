@@ -1,8 +1,8 @@
 //! Transactions
 
-use alloy_primitives::{Bytes, keccak256};
+use alloy_primitives::{Bytes, Keccak256};
 use bytes::BufMut;
-use commonware_codec::{Encode, EncodeSize, Error as CodecError, RangeCfg, Read, Write};
+use commonware_codec::{Encode as _, EncodeSize, Error as CodecError, RangeCfg, Read, Write};
 
 use super::TxId;
 
@@ -13,9 +13,7 @@ pub struct TxCfg {
     pub max_tx_bytes: usize,
 }
 
-/// Raw transaction bytes for the example.
-///
-/// This is expected to contain a signed Ethereum transaction envelope.
+/// Raw request bytes: a native request or a signed Ethereum transaction envelope.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tx {
     /// Encoded transaction bytes.
@@ -25,7 +23,19 @@ pub struct Tx {
 impl Tx {
     /// Compute the transaction identifier from its encoded contents.
     pub fn id(&self) -> TxId {
-        TxId(keccak256(self.encode()))
+        // The encoding is the length prefix followed by the bytes; hashing the two
+        // parts in turn avoids copying the request.
+        let mut hasher = Keccak256::new();
+        hasher.update(self.bytes.len().encode());
+        hasher.update(&self.bytes);
+        TxId(hasher.finalize())
+    }
+
+    /// Whether the bytes carry the native request type rather than an Ethereum envelope.
+    pub fn is_native(&self) -> bool {
+        self.bytes
+            .first()
+            .is_some_and(|byte| crate::NativeTx::is_native_tx(*byte))
     }
 
     /// Create a new transaction from encoded bytes.
@@ -66,7 +76,8 @@ impl Read for Tx {
 
 #[cfg(test)]
 mod tests {
-    use commonware_codec::Decode;
+    use alloy_primitives::keccak256;
+    use commonware_codec::{Decode, Encode};
 
     use super::*;
 
@@ -82,6 +93,21 @@ mod tests {
         let id1 = tx.id();
         let id2 = tx.id();
         assert_eq!(id1, id2);
+    }
+
+    #[test]
+    fn tx_id_is_the_hash_of_the_encoding() {
+        for len in [0usize, 1, 127, 128, 300, 20_000] {
+            let tx = Tx::new(Bytes::from(vec![0xa5; len]));
+            assert_eq!(tx.id(), TxId(keccak256(tx.encode())), "length {len}");
+        }
+    }
+
+    #[test]
+    fn native_requests_are_told_apart_by_their_first_byte() {
+        assert!(Tx::new(Bytes::from_static(&[crate::NATIVE_TX_TYPE, 1])).is_native());
+        assert!(!Tx::new(Bytes::from_static(&[0x02, 1])).is_native());
+        assert!(!Tx::new(Bytes::new()).is_native());
     }
 
     #[test]

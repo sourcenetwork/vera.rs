@@ -24,14 +24,10 @@ pub struct VeraGenesis {
     /// Orbis node-demerit scores seeded directly.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub node_demerits: Vec<NodeDemeritSeed>,
-    /// Human-readable chain name.
-    pub chain_name: String,
     /// Genesis timestamp (unix seconds).
     pub timestamp: u64,
     /// Pre-funded accounts.
     pub allocations: Vec<GenesisAllocation>,
-    /// Native token mint configuration.
-    pub native_mint: NativeMintConfig,
     /// Initial validator set.
     #[serde(default)]
     pub validators: Vec<ValidatorConfig>,
@@ -76,19 +72,6 @@ pub struct ValidatorConfig {
     pub p2p_address: String,
 }
 
-/// Native token mint configuration.
-#[derive(Clone, Debug, Default, Serialize)]
-pub struct NativeMintConfig {
-    /// Address allowed to grant minter roles.
-    #[serde(default)]
-    pub admin: Option<String>,
-    /// Addresses allowed to mint.
-    #[serde(default)]
-    pub minters: Vec<String>,
-    /// Native token denomination.
-    pub denom: String,
-}
-
 /// Arbitrary contract bytecode injected at genesis.
 #[derive(Clone, Debug, Serialize)]
 pub struct GenesisContract {
@@ -116,9 +99,7 @@ pub struct GenesisBuilder {
     operators: Option<OperatorPolicy>,
     policies: Vec<PolicySeed>,
     node_demerits: Vec<NodeDemeritSeed>,
-    chain_name: String,
     allocations: Vec<GenesisAllocation>,
-    native_mint: NativeMintConfig,
     validators: Vec<ValidatorConfig>,
     contracts: Vec<GenesisContract>,
     extra_storage: Vec<GenesisStorage>,
@@ -134,9 +115,7 @@ impl Default for GenesisBuilder {
             operators: None,
             policies: Vec::new(),
             node_demerits: Vec::new(),
-            chain_name: "vera-test".to_string(),
             allocations: Vec::new(),
-            native_mint: NativeMintConfig::default(),
             validators: Vec::new(),
             contracts: Vec::new(),
             extra_storage: Vec::new(),
@@ -160,7 +139,6 @@ impl GenesisBuilder {
             operators: None,
             policies: Vec::new(),
             node_demerits: Vec::new(),
-            chain_name: "vera-devnet".to_string(),
             allocations: vec![
                 GenesisAllocation {
                     address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
@@ -171,11 +149,6 @@ impl GenesisBuilder {
                     balance: "1000000000000000000000".to_string(),
                 },
             ],
-            native_mint: NativeMintConfig {
-                admin: Some("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string()),
-                minters: vec!["0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string()],
-                denom: "abrl".to_string(),
-            },
             validators: Vec::new(),
             contracts: Vec::new(),
             extra_storage: Vec::new(),
@@ -234,13 +207,6 @@ impl GenesisBuilder {
         self
     }
 
-    /// Set the chain name.
-    #[must_use]
-    pub fn chain_name(mut self, name: impl Into<String>) -> Self {
-        self.chain_name = name.into();
-        self
-    }
-
     /// Add a pre-funded account allocation.
     #[must_use]
     pub fn allocation(mut self, address: &str, balance: &str) -> Self {
@@ -273,13 +239,6 @@ impl GenesisBuilder {
                 balance: balance.to_string(),
             });
         }
-        self
-    }
-
-    /// Set the native token mint configuration.
-    #[must_use]
-    pub fn native_mint(mut self, config: NativeMintConfig) -> Self {
-        self.native_mint = config;
         self
     }
 
@@ -352,13 +311,11 @@ impl GenesisBuilder {
             operators: self.operators.clone(),
             policies: self.policies,
             node_demerits: self.node_demerits,
-            chain_name: self.chain_name,
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("system clock before unix epoch")
                 .as_secs(),
             allocations: self.allocations,
-            native_mint: self.native_mint,
             validators: self.validators,
             contracts: self.contracts,
             extra_storage: self.extra_storage,
@@ -375,13 +332,11 @@ impl GenesisBuilder {
             operators: self.operators.clone(),
             policies: self.policies.clone(),
             node_demerits: self.node_demerits.clone(),
-            chain_name: self.chain_name.clone(),
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("system clock before unix epoch")
                 .as_secs(),
             allocations: self.allocations.clone(),
-            native_mint: self.native_mint.clone(),
             validators: self.validators.clone(),
             contracts: self.contracts.clone(),
             extra_storage: self.extra_storage.clone(),
@@ -405,7 +360,6 @@ mod tests {
         let genesis = GenesisBuilder::devnet().build();
         assert_eq!(genesis.chain_id, 9001);
         assert_eq!(genesis.allocations.len(), 2);
-        assert_eq!(genesis.native_mint.denom, "abrl");
     }
 
     #[test]

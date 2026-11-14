@@ -7,6 +7,7 @@ pub const DEFAULT_LISTEN_ADDR: &str = "0.0.0.0:30303";
 
 /// Network layer configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct NetworkConfig {
     /// Address to listen for P2P connections.
     #[serde(default = "default_listen_addr")]

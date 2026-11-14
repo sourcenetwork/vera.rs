@@ -410,7 +410,10 @@ pub fn verify_finalized_block(
     }
 
     let verifier = LightConsensusScheme::certificate_verifier(LIGHT_BLOCK_NAMESPACE, *trusted_key);
-    if !finalization.verify(&mut commonware_utils::test_rng(), &verifier, &Sequential) {
+    // The vote and seed signatures are checked as one random combination, which
+    // is sound only when the weights cannot be predicted.
+    let mut rng = commonware_utils::sys_rng();
+    if !finalization.verify(&mut rng, &verifier, &Sequential) {
         return Err(LightBlockError::InvalidCertificate);
     }
 

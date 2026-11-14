@@ -46,7 +46,7 @@ pub const BULLETIN_ADDRESS: Address = address_from_last_two_bytes(0x08, 0x11);
 pub const VERA_ADDRESS: Address = address_from_last_two_bytes(0x08, 0x12);
 
 /// ValidatorRegistry precompile address.
-pub const VALIDATOR_REGISTRY_ADDRESS: Address = address_from_last_two_bytes(0x08, 0x13);
+pub const VALIDATOR_REGISTRY_ADDRESS: Address = vera_modules::validator_registry::layout::ADDRESS;
 
 const fn address_from_last_two_bytes(hi: u8, lo: u8) -> Address {
     let mut bytes = [0u8; 20];

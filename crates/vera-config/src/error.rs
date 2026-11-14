@@ -56,14 +56,6 @@ pub enum ConfigError {
         source: std::io::Error,
     },
 
-    /// Invalid participant public key length.
-    #[error("invalid participant public key: expected 32 bytes, got {0}")]
-    InvalidParticipantKeyLength(usize),
-
-    /// Failed to parse participant public key.
-    #[error("invalid participant public key bytes")]
-    InvalidParticipantKey,
-
     /// Failed to decode a codec-encoded value.
     #[error("codec decode failed: {0}")]
     Codec(#[from] commonware_codec::Error),
@@ -118,21 +110,6 @@ mod tests {
             err.to_string(),
             "invalid validator key format: expected 32 bytes, got 16"
         );
-    }
-
-    #[test]
-    fn test_invalid_participant_key_length_display() {
-        let err = ConfigError::InvalidParticipantKeyLength(64);
-        assert_eq!(
-            err.to_string(),
-            "invalid participant public key: expected 32 bytes, got 64"
-        );
-    }
-
-    #[test]
-    fn test_invalid_participant_key_display() {
-        let err = ConfigError::InvalidParticipantKey;
-        assert_eq!(err.to_string(), "invalid participant public key bytes");
     }
 
     #[test]

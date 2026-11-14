@@ -7,7 +7,6 @@ use alloy_rlp::Decodable as _;
 use anyhow::{Context as _, Result, ensure};
 use borsh::{BorshDeserialize, BorshSerialize};
 use commonware_codec::{Decode as _, Encode as _};
-use commonware_cryptography::Digestible as _;
 use commonware_glue::dkg::types::Payload;
 use parking_lot::Mutex;
 use vera_domain::{Block, BlockId, EpochMaterial};
@@ -308,10 +307,12 @@ impl FinalizedHistory {
                 "execution conflicts with finalized proof block"
             );
         }
-        query::index_execution(&mut batch, block, &record.receipts);
+        // The identifier is the hash of the encoding the record already holds.
+        let id = BlockId(alloy_primitives::keccak256(&record.block));
+        query::index_execution(&mut batch, block.height, &id, &record.receipts);
         batch.put(key(RECORD, block.height), bytes);
         batch.delete(key(PROOF_BLOCK, block.height));
-        let head_bytes = borsh::to_vec(&(block.height, block.id().0.0))?;
+        let head_bytes = borsh::to_vec(&(block.height, id.0.0))?;
         batch.put(HEAD, &head_bytes);
         batch.put(QUERY_HEAD, &head_bytes);
         let writing = self.metrics.as_ref().map(|_| std::time::Instant::now());
@@ -321,7 +322,7 @@ impl FinalizedHistory {
                 .history_batch
                 .observe(writing.elapsed().as_secs_f64());
         }
-        *head = (block.height, block.id());
+        *head = (block.height, id);
         Ok(())
     }
 
@@ -358,7 +359,8 @@ impl FinalizedHistory {
         lookup: &FinalizationLookup,
     ) -> Result<()> {
         self.check_import_recovery(anchor)?;
-        let anchor_bytes = borsh::to_vec(&(anchor.height, anchor.id().0.0))?;
+        let anchor_id = anchor.id();
+        let anchor_bytes = borsh::to_vec(&(anchor.height, anchor_id.0.0))?;
         let rebuild_queries = self.db.get(QUERY_HEAD)?.as_deref() != Some(anchor_bytes.as_slice());
         let mut query_batch = WriteBatch::default();
         if rebuild_queries {
@@ -382,21 +384,22 @@ impl FinalizedHistory {
                 block.height == height && block.parent == previous,
                 "finalized history ancestry mismatch"
             );
+            let id = block.id();
             if height == anchor.height {
                 ensure!(
-                    block.id() == anchor.id(),
+                    id == anchor_id,
                     "finalized history does not match recovery anchor"
                 );
             }
             if rebuild_queries {
-                query::index_execution(&mut query_batch, &block, &record.receipts);
+                query::index_execution(&mut query_batch, height, &id, &record.receipts);
                 if query_batch.size_in_bytes() >= 1 << 20 {
                     write(&self.db, std::mem::take(&mut query_batch))?;
                 }
             }
             if height >= cache_start {
                 let gas_used = receipts.iter().map(|r| r.gas_used).sum();
-                index_finalized_block(index, &block, record.gas_limit, &receipts, gas_used);
+                index_finalized_block(index, &block, id.0, record.gas_limit, &receipts, gas_used);
             }
             restore_epoch(light, &block);
             let finalization = match self.db.get(key(CERTIFICATE, height))? {
@@ -409,7 +412,7 @@ impl FinalizedHistory {
             };
             if let Some((epoch, bytes)) = finalization {
                 light.insert_finalization(
-                    block.digest().0,
+                    id.digest().0,
                     StoredFinalization {
                         epoch,
                         bytes,
@@ -417,7 +420,7 @@ impl FinalizedHistory {
                     },
                 );
             }
-            previous = block.id();
+            previous = id;
         }
         let mut head = self.head.lock();
         ensure!(
@@ -432,10 +435,10 @@ impl FinalizedHistory {
                 batch.delete_range(key(prefix, next).as_slice(), &[prefix + 1]);
             }
         }
-        batch.put(HEAD, borsh::to_vec(&(anchor.height, anchor.id().0.0))?);
+        batch.put(HEAD, &anchor_bytes);
         batch.delete(transfer::IMPORT);
         write(&self.db, batch)?;
-        *head = (anchor.height, anchor.id());
+        *head = (anchor.height, anchor_id);
         Ok(())
     }
 }
