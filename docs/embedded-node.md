@@ -319,8 +319,21 @@ default has two parts:
 
   The heartbeat cannot be dropped: a client that verifies state against
   finalized headers refuses a state older than its freshness limit, which is
-  30 seconds in Backbone's light client. A host that lengthens the idle wait
-  must keep it inside the limit its clients use.
+  30 seconds in Backbone's light client. A header reaches clients one idle
+  wait after its block was proposed, because the node processes a block's
+  finalization only when the next proposal returns. With the 10 s default an
+  idle node's newest published state is therefore between 10 and 20 seconds
+  old, which leaves room for one late heartbeat. A host that lengthens the
+  idle wait must keep twice the wait inside the limit its clients use.
+
+  The wait does not apply until one block has been finalized since the start,
+  so a node that just started publishes a current state at once.
+
+  Block timestamps follow the device's clock. A solo genesis lifts the limit
+  on how far a timestamp may advance past its parent's
+  (`timestamp_step_secs`, five seconds on other deployments), which would
+  otherwise leave an idle or paused deployment further behind the clock at
+  every block.
 
   The leader timeout is also how long a lone validator waits before it tries
   again after a proposal it could not build.

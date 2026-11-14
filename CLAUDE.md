@@ -373,7 +373,9 @@ stops the node without exiting the host. `stop` holds back new proposals and
 waits up to two seconds for proposed blocks to finalize, so the next start
 does not wait out a view. A lone validator waits for a first
 request before proposing, with a ten-second heartbeat, unless a block carrying
-requests is still unfinalized. `EmbeddedConfig::thread_setup` runs on the node
+requests is still unfinalized. The wait starts once a block has been finalized
+since the start, and a solo genesis lifts the five-second limit on timestamp
+steps so an idle or paused deployment stays on the clock. `EmbeddedConfig::thread_setup` runs on the node
 thread before its runtime is built, so every node thread is created afterwards
 and, on Linux, inherits the CPU affinity it sets. `thread_budget()` reports the
 node, worker, blocking, verification and history-store thread counts.

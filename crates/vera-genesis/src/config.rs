@@ -62,6 +62,11 @@ pub struct VeraGenesis {
     /// Pipelined consensus parameters. Omission preserves rotating leaders.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub simplex: Option<vera_domain::SimplexParameters>,
+    /// Limit, in seconds, on how far a block's timestamp may advance past its
+    /// parent's; omission keeps the application default. A deployment that
+    /// finalizes less often than the limit, or pauses, falls behind the clock.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp_step_secs: Option<u64>,
 }
 
 const fn default_blocks_per_epoch() -> u64 {
@@ -321,6 +326,7 @@ impl VeraGenesis {
             epoch_info: None,
             blocks_per_epoch: 20,
             simplex: None,
+            timestamp_step_secs: None,
         }
     }
 }
@@ -531,6 +537,7 @@ mod tests {
             epoch_info: None,
             blocks_per_epoch: 20,
             simplex: None,
+            timestamp_step_secs: None,
         };
         let err = genesis.to_genesis_state().unwrap_err();
         assert!(err.to_string().contains("invalid address"));
@@ -552,6 +559,7 @@ mod tests {
             epoch_info: None,
             blocks_per_epoch: 20,
             simplex: None,
+            timestamp_step_secs: None,
         }
     }
 
