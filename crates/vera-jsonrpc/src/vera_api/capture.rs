@@ -18,13 +18,18 @@ use super::{
 pub(super) type ProofFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, BackendError>> + Send + 'a>>;
 
+/// Longest a current-evidence request waits for its revision and certificate.
+pub(super) const EVIDENCE_DEADLINE: Duration = Duration::from_secs(2);
+
 /// Revisions a caller's minimum may lead the published head and still wait
-/// for it; a larger lead cannot finalize within the evidence deadline.
-pub(super) const MINIMUM_HEIGHT_LEAD: u64 = 8;
+/// for it. No minimum interval separates revisions, so this is a policy and
+/// not a proof that a larger lead is unreachable: covering it inside the
+/// deadline takes more than 128 revisions a second.
+pub(super) const MINIMUM_HEIGHT_LEAD: u64 = 256;
 
 /// Whether the published head has reached `minimum_height`, read without the
-/// partition locks. A minimum beyond the waiting lead is refused at once, so
-/// it cannot hold a request slot for the whole deadline.
+/// partition locks. A minimum beyond the waiting lead is refused at once
+/// rather than held in a request slot for the deadline; its caller retries.
 pub(super) fn head_reaches(index: &BlockIndex, minimum_height: u64) -> RpcResult<bool> {
     if index.is_empty() {
         return Ok(false);
@@ -61,7 +66,7 @@ impl VeraApiImpl {
             .as_ref()
             .ok_or_else(|| error("finalized revision index unavailable"))?;
         let mut updates = self.state.proof_updates();
-        tokio::time::timeout(Duration::from_secs(2), async {
+        tokio::time::timeout(EVIDENCE_DEADLINE, async {
             let (selected, proof, permit) = loop {
                 // The index can trail a just-certified receipt; wait for the
                 // next publication instead of failing a read whose minimum is

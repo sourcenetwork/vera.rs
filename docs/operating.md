@@ -474,6 +474,10 @@ workloads and measurement boundaries.
 - Certificate and proof endpoints apply fixed budgets; a client exceeding
   them receives retryable `-32002` errors and must back off, not reconnect
   harder.
+- `eth_call` and `eth_estimateGas`, which carry the Rust client's typed
+  queries, run four at a time per node. Up to 64 more callers wait at most two
+  seconds for a slot; a caller beyond those, or one whose wait expires,
+  receives the same retryable `-32002`. The client does not retry it.
 
 ## Native consumer configuration
 

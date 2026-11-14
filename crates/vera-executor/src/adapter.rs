@@ -46,11 +46,7 @@ impl<S> StateDbAdapter<S> {
     }
 
     fn record<T>(&self, result: Result<T, StateDbError>) -> Result<T, StateDbError> {
-        if let Err(
-            error @ (StateDbError::Storage(_)
-            | StateDbError::LockPoisoned
-            | StateDbError::RootComputation(_)),
-        ) = &result
+        if let Err(error @ StateDbError::Storage(_)) = &result
             && let Some(failures) = &self.failures
         {
             let mut failures = failures.lock().expect("state failure lock poisoned");

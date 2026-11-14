@@ -3,10 +3,12 @@
 `vera_getLightBlock(height)` returns the requested revision with evidence that
 it is finalized. Verify it with `vera_domain::verify_light_block` and the
 consensus public key from authenticated deployment configuration.
-A request served from the finalization cache holds one of the eight shared
-proof slots while the response is assembled; a request served from durable
-history holds a history-read slot instead. Either returns a retryable -32002
-when its slots are occupied.
+Every request takes one of the eight shared proof slots while it looks in the
+finalization cache and assembles a cached response. A revision absent from the
+cache is then read from durable history under a history-read slot, with the
+proof slot released. A request returns a retryable -32002 when no proof slot is
+free, whichever source would have served it, or when its history read finds no
+free history-read slot.
 
 A revision can finalize through a descendant without receiving its own direct
 certificate. The response then includes `descendants`: canonical encoded

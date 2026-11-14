@@ -73,7 +73,7 @@ impl VeraApiImpl {
         let mut lock_time = Duration::ZERO;
         let mut proof_time = Duration::ZERO;
         let mut finality_time = Duration::ZERO;
-        let result = tokio::time::timeout(Duration::from_secs(2), async {
+        let result = tokio::time::timeout(super::capture::EVIDENCE_DEADLINE, async {
             let (selected, proof, _permit) = loop {
                 attempts += 1;
                 if !super::capture::head_reaches(index, minimum_height)? {

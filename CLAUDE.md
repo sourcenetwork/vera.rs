@@ -293,8 +293,9 @@ Historical native activity proofs are not retained.
 Proof RPCs share eight in-flight slots per node, including `vera_getLightBlock`
 while it assembles a cached revision; blocking historical certificate
 lookups have a separate eight-slot limit. A current-evidence request whose
-minimum height is more than eight revisions above the published head is refused
-with the retryable -32002 at once. Excess work returns JSON-RPC -32002
+minimum height is more than 256 revisions above the published head is refused
+with the retryable -32002 at once; the lead is a policy, since no minimum
+interval separates revisions. Excess work returns JSON-RPC -32002
 with `retryable: true` before starting, and so does exceeding the two-second
 current-evidence deadline: the certificate is delayed, not absent. The Rust client exposes these responses
 as `ResourceBusy`; `is_throttled()` also recognizes HTTP 429. Other -32002
@@ -351,9 +352,14 @@ native service.
 
 `eth_call` and `eth_estimateGas` execute on the blocking pool against a
 snapshot of module state, so they hold neither an async worker nor the lock
-finalization publishes under. Four run at a time per node; a fifth returns the
-retryable -32002, and a slot stays taken until its execution ends. An estimate
-is an upper bound within 1/64 of the smallest sufficient limit. Account state
+finalization publishes under. Four run at a time per node and up to 64 more
+wait at most two seconds for a slot; a caller beyond the 64, or one whose wait
+expires, gets the retryable -32002. A slot stays taken until its execution ends.
+An estimate is a limit the call succeeded with. The search stops within 1/64 of
+its upper bound and starts from the gas used at the cap, so a call that uses
+less gas under a lower limit can be estimated well above its smallest
+sufficient limit. `eth_getCode` returns empty bytes for an account without
+code. Account state
 reads answer for current state only: an explicit block number or `earliest`
 fails with -32004, as it does for `eth_call`.
 

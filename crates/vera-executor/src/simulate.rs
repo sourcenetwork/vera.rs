@@ -143,8 +143,11 @@ pub fn simulate_call<S: StateDbRead>(
 /// simulations that fail near the gas cap at six.
 const ESTIMATE_PRECISION: u64 = 64;
 
-/// Estimate a gas limit sufficient for a transaction: at most 1/64 above the
-/// smallest limit the search can distinguish.
+/// Estimate a gas limit the transaction succeeds with.
+///
+/// The search narrows downwards from the cap and never below the gas used
+/// there, so the result is near the smallest sufficient limit only when gas
+/// use does not shrink under a lower limit.
 pub fn estimate_gas<S: StateDbRead>(
     state: &S,
     chain_id: u64,
@@ -177,7 +180,8 @@ pub fn estimate_gas<S: StateDbRead>(
         ));
     }
 
-    // A limit below what the run at the cap consumed cannot succeed.
+    // Starting here skips the limits most calls fail under; a call that uses
+    // less gas under a lower limit is estimated above its smallest limit.
     let mut lo = BASE_TX_GAS.max(result.gas_used).saturating_sub(1);
     let mut hi = cap;
 

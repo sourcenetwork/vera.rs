@@ -88,10 +88,7 @@ impl ExecutionError {
         matches!(
             self,
             Self::State(
-                vera_traits::StateDbError::Storage(_)
-                    | vera_traits::StateDbError::CodeNotFound(_)
-                    | vera_traits::StateDbError::LockPoisoned
-                    | vera_traits::StateDbError::RootComputation(_)
+                vera_traits::StateDbError::Storage(_) | vera_traits::StateDbError::CodeNotFound(_)
             )
         )
     }
@@ -113,7 +110,7 @@ mod tests {
 
     #[test]
     fn test_state_error_from() {
-        let inner = StateDbError::LockPoisoned;
+        let inner = StateDbError::Storage("disk error".into());
         let err: ExecutionError = inner.into();
         assert!(matches!(err, ExecutionError::State(_)));
     }
@@ -124,10 +121,8 @@ mod tests {
             ExecutionError::State(StateDbError::Storage("disk error".into()))
                 .is_local_state_failure()
         );
-        assert!(ExecutionError::State(StateDbError::LockPoisoned).is_local_state_failure());
         assert!(
-            ExecutionError::State(StateDbError::RootComputation("unavailable".into()))
-                .is_local_state_failure()
+            ExecutionError::State(StateDbError::CodeNotFound(B256::ZERO)).is_local_state_failure()
         );
         assert!(!ExecutionError::InvalidTx("bad nonce".into()).is_local_state_failure());
         assert!(

@@ -84,6 +84,7 @@ pub fn demerits_key(ring_id: &str, node_key: &str) -> Result<Vec<u8>> {
 /// Genesis-only demerit seed, mirroring `vera`/x/orbis's genesis
 /// `NodeDemeritEntry` (Cosmos side).
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NodeDemeritSeed {
     pub ring_id: String,
     pub node_key: String,

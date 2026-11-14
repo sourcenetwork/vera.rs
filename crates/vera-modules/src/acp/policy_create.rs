@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 /// One genesis-seeded policy: definition text plus its marshaling format.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PolicySeed {
     /// The policy's source text, in `marshal_type`'s format.
     pub definition: String,
@@ -17,6 +18,7 @@ pub struct PolicySeed {
 /// The counter is part of the policy's identifier, so a deployment that
 /// already names a policy by an identifier can seed it under that one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PlacedPolicy {
     /// The policy's source text, in `marshal_type`'s format.
     pub definition: String,

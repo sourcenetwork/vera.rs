@@ -8,7 +8,8 @@ use vera_consensus::{Mempool as _, components::InMemoryMempool};
 use vera_domain::Block;
 use vera_executor::ExecutionReceipt;
 
-const IDLE: Duration = Duration::from_millis(400);
+/// Longer than the test may run, so only a request can end an idle wait.
+const IDLE: Duration = Duration::from_secs(3600);
 
 #[derive(Clone, Default)]
 struct HeightSink(Arc<AtomicU64>);
@@ -80,38 +81,36 @@ fn a_finalized_parent_with_requests_does_not_cut_the_idle_wait_short() {
                 mempool.prune(&[request.id()]);
 
                 round.round = Round::new(Epoch::zero(), View::new(2));
-                let unfinalized = std::time::Instant::now();
-                let second = app
-                    .propose(
+                let second = ::tokio::time::timeout(
+                    Duration::from_secs(120),
+                    app.propose(
                         (context.child("unfinalized"), round.clone()),
                         block_ancestry([first.block.clone(), genesis.clone()]),
                         OrderedState::fork_batches(&first.merkleized),
                         input(&mempool),
-                    )
-                    .await
-                    .unwrap();
+                    ),
+                )
+                .await
+                .expect("an unfinalized parent with requests must not be delayed")
+                .unwrap();
                 assert!(second.block.txs.is_empty());
-                assert!(
-                    unfinalized.elapsed() < IDLE,
-                    "an unfinalized parent with requests must not be delayed"
-                );
 
                 sink.0.store(first.block.height, Ordering::SeqCst);
-                let finalized = std::time::Instant::now();
-                let third = app
-                    .propose(
-                        (context.child("finalized"), round),
-                        block_ancestry([first.block.clone(), genesis]),
-                        OrderedState::fork_batches(&first.merkleized),
-                        input(&mempool),
-                    )
-                    .await
-                    .unwrap();
-                assert!(third.block.txs.is_empty());
+                let mut third = Box::pin(app.propose(
+                    (context.child("finalized"), round),
+                    block_ancestry([first.block.clone(), genesis]),
+                    OrderedState::fork_batches(&first.merkleized),
+                    input(&mempool),
+                ));
                 assert!(
-                    finalized.elapsed() >= IDLE,
+                    ::tokio::time::timeout(Duration::from_millis(200), &mut third)
+                        .await
+                        .is_err(),
                     "a finalized parent's requests are settled"
                 );
+                let late = policy(&BlsSigner::new(2u64.into(), DEPLOYMENT).unwrap(), "late");
+                assert!(mempool.insert(late.clone()));
+                assert_eq!(third.await.unwrap().block.txs, vec![late]);
             })
         },
     );

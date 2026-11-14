@@ -415,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_keys_are_rejected_at_every_level() {
+    fn unknown_keys_are_rejected_at_the_top_level_and_in_allocations() {
         let mut value = serde_json::to_value(VeraGenesis::devnet()).unwrap();
         value["operator"] = serde_json::Value::Null;
         let error = serde_json::from_value::<VeraGenesis>(value).unwrap_err();
@@ -424,6 +424,45 @@ mod tests {
         let mut value = serde_json::to_value(VeraGenesis::devnet()).unwrap();
         value["allocations"][0]["nonce"] = 1.into();
         assert!(serde_json::from_value::<VeraGenesis>(value).is_err());
+    }
+
+    #[test]
+    fn unknown_keys_are_rejected_in_seeded_records() {
+        let seeded = |section: &str, entry: serde_json::Value| {
+            let mut value = serde_json::to_value(VeraGenesis::devnet()).unwrap();
+            value[section] = serde_json::Value::Array(vec![entry]);
+            value
+        };
+        let policy =
+            serde_json::json!({ "definition": "name: seeded", "marshal_type": "ShortYaml" });
+        let placed = serde_json::json!({
+            "definition": "name: seeded",
+            "marshal_type": "ShortYaml",
+            "counter": 1,
+            "owner": "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+        });
+        let demerit = serde_json::json!({
+            "ring_id": "ring",
+            "node_key": "node",
+            "points": 1,
+            "window_started_at": 0,
+        });
+        for (section, entry, extra) in [
+            ("policies", policy, "owner"),
+            ("placed_policies", placed, "owners"),
+            ("node_demerits", demerit, "window"),
+        ] {
+            serde_json::from_value::<VeraGenesis>(seeded(section, entry.clone())).unwrap();
+            let mut entry = entry;
+            entry[extra] = 5.into();
+            let error = serde_json::from_value::<VeraGenesis>(seeded(section, entry)).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("unknown field `{extra}`")),
+                "{section}: {error}"
+            );
+        }
     }
 
     #[test]

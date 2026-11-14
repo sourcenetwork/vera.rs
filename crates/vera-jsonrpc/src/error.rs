@@ -67,7 +67,7 @@ pub enum RpcError {
     /// All blocking history readers are occupied.
     #[error("history service busy; retry later")]
     HistoryBusy,
-    /// All execution simulation slots are occupied.
+    /// No execution simulation slot freed in time, or too many callers are waiting for one.
     #[error("simulation service busy; retry later")]
     SimulationBusy,
     /// Request work or response exceeds the service budget.

@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use alloy_primitives::{Address, B256, Bytes, U64, U256};
+use alloy_primitives::{Address, B256, Bytes, KECCAK256_EMPTY, U64, U256};
 use async_trait::async_trait;
 use vera_indexer::{BlockIndex, IndexedBlock, IndexedReceipt, IndexedTransaction, LogFilter};
 use vera_traits::{StateDbError, StateDbRead};
@@ -17,6 +17,7 @@ use vera_executor::{
 
 use crate::{
     error::RpcError,
+    simulation_slots::SimulationSlots,
     state_provider::StateProvider,
     types::{
         BlockNumberOrTag, BlockTag, BlockTransactions, CallRequest, RpcBlock, RpcLog, RpcLogFilter,
@@ -38,11 +39,8 @@ pub struct IndexedStateProvider<S> {
     block_gas_limit: u64,
     modules: SharedModuleState,
     archive: Option<crate::ArchiveReader>,
-    simulations: Arc<tokio::sync::Semaphore>,
+    simulations: SimulationSlots,
 }
-
-/// Concurrent `eth_call` and `eth_estimateGas` executions per node.
-const SIMULATION_SLOTS: usize = 4;
 
 impl<S> IndexedStateProvider<S> {
     /// Creates a new indexed state provider.
@@ -63,7 +61,7 @@ impl<S> IndexedStateProvider<S> {
             block_gas_limit,
             modules,
             archive: None,
-            simulations: Arc::new(tokio::sync::Semaphore::new(SIMULATION_SLOTS)),
+            simulations: SimulationSlots::default(),
         }
     }
 }
@@ -86,7 +84,7 @@ impl<S: Clone> Clone for IndexedStateProvider<S> {
             block_gas_limit: self.block_gas_limit,
             modules: Arc::clone(&self.modules),
             archive: self.archive.clone(),
-            simulations: Arc::clone(&self.simulations),
+            simulations: self.simulations.clone(),
         }
     }
 }
@@ -125,6 +123,10 @@ impl<S: StateDbRead + Send + Sync + 'static> StateProvider for IndexedStateProvi
             .code_hash(&address)
             .await
             .map_err(state_error_to_rpc)?;
+        // An account without code has no code record to read.
+        if code_hash == KECCAK256_EMPTY || code_hash == B256::ZERO {
+            return Ok(Bytes::new());
+        }
         self.state
             .code(&code_hash)
             .await
@@ -312,16 +314,13 @@ impl<S: StateDbRead + Send + Sync + 'static> StateProvider for IndexedStateProvi
 impl<S: StateDbRead> IndexedStateProvider<S> {
     /// Run an execution off the async workers against a module snapshot, so it
     /// neither occupies a worker nor holds the lock finalization publishes under.
-    /// The slot stays taken until the execution ends, even if the caller leaves.
+    /// A caller waits briefly for a slot behind a bounded queue; the slot stays
+    /// taken until the execution ends, even if the caller leaves.
     async fn simulate<T: Send + 'static>(
         &self,
         run: impl FnOnce(&S, &ModuleState) -> Result<T, ExecutionError> + Send + 'static,
     ) -> Result<T, RpcError> {
-        let permit = self
-            .simulations
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| RpcError::SimulationBusy)?;
+        let permit = self.simulations.acquire().await?;
         let modules = self
             .modules
             .read()
@@ -405,8 +404,6 @@ fn state_error_to_rpc(err: StateDbError) -> RpcError {
         StateDbError::AccountNotFound(addr) => RpcError::AccountNotFound(addr.to_string()),
         StateDbError::CodeNotFound(hash) => RpcError::StateError(format!("code not found: {hash}")),
         StateDbError::Storage(msg) => RpcError::StateError(msg),
-        StateDbError::LockPoisoned => RpcError::Internal("lock poisoned".to_string()),
-        StateDbError::RootComputation(msg) => RpcError::StateError(msg),
     }
 }
 
@@ -505,6 +502,7 @@ mod tests {
     use vera_indexer::IndexedLog;
 
     use super::*;
+    use crate::simulation_slots::{SIMULATION_SLOTS, SIMULATION_WAITERS};
     use vera_executor::SpecId;
 
     #[tokio::test]
@@ -1135,7 +1133,7 @@ mod tests {
         }
 
         async fn code_hash(&self, _address: &Address) -> Result<B256, StateDbError> {
-            Ok(alloy_primitives::KECCAK256_EMPTY)
+            Ok(KECCAK256_EMPTY)
         }
 
         async fn code(&self, _code_hash: &B256) -> Result<Bytes, StateDbError> {
@@ -1176,21 +1174,101 @@ mod tests {
                 .try_write()
                 .expect("simulation must not hold the module lock"),
         );
-        let others = provider
-            .simulations
-            .clone()
-            .try_acquire_many_owned(SIMULATION_SLOTS as u32 - 1)
-            .unwrap();
-        let busy: jsonrpsee::types::ErrorObjectOwned = provider
-            .estimate_gas(request(), None)
-            .await
-            .unwrap_err()
-            .into();
+        let mut others = Vec::new();
+        for _ in 1..SIMULATION_SLOTS {
+            others.push(provider.simulations.acquire().await.unwrap());
+        }
+        let queued = provider.clone();
+        let estimate = tokio::spawn(async move { queued.estimate_gas(request(), None).await });
+        wait_for_waiters(&provider.simulations, 1).await;
+        assert!(!estimate.is_finished());
+        let waiters: Vec<_> = (1..SIMULATION_WAITERS)
+            .map(|_| {
+                let slots = provider.simulations.clone();
+                tokio::spawn(async move { slots.acquire().await.map(drop) })
+            })
+            .collect();
+        wait_for_waiters(&provider.simulations, SIMULATION_WAITERS).await;
+        let busy: jsonrpsee::types::ErrorObjectOwned = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            provider.call(request(), None),
+        )
+        .await
+        .expect("a full queue must refuse without waiting for a slot")
+        .unwrap_err()
+        .into();
         assert_eq!(busy.code(), crate::error::codes::RESOURCE_UNAVAILABLE);
         assert_eq!(busy.data().unwrap().get(), r#"{"retryable":true}"#);
         release.send(()).unwrap();
         assert!(call.await.unwrap().unwrap().is_empty());
+        assert!(estimate.await.unwrap().unwrap() >= 21_000);
         drop(others);
-        assert!(provider.estimate_gas(request(), None).await.unwrap() >= 21_000);
+        for waiter in waiters {
+            waiter.await.unwrap().unwrap();
+        }
+    }
+
+    /// Returns once `waiters` callers queue behind fully occupied slots.
+    async fn wait_for_waiters(slots: &SimulationSlots, waiters: usize) {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while slots.free_places() != SIMULATION_WAITERS - waiters {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    /// Holds accounts without code and no code records, as committed state does.
+    #[derive(Clone)]
+    struct CodelessState(B256);
+
+    impl StateDbRead for CodelessState {
+        async fn nonce(&self, _address: &Address) -> Result<u64, StateDbError> {
+            Ok(0)
+        }
+
+        async fn balance(&self, _address: &Address) -> Result<U256, StateDbError> {
+            Ok(U256::ZERO)
+        }
+
+        async fn code_hash(&self, _address: &Address) -> Result<B256, StateDbError> {
+            Ok(self.0)
+        }
+
+        async fn code(&self, code_hash: &B256) -> Result<Bytes, StateDbError> {
+            Err(StateDbError::CodeNotFound(*code_hash))
+        }
+
+        async fn storage(&self, _address: &Address, _slot: &U256) -> Result<U256, StateDbError> {
+            Ok(U256::ZERO)
+        }
+    }
+
+    #[tokio::test]
+    async fn an_account_without_code_reads_as_empty_code() {
+        for hash in [KECCAK256_EMPTY, B256::ZERO] {
+            let provider = IndexedStateProvider::new(
+                Arc::new(BlockIndex::new()),
+                CodelessState(hash),
+                1,
+                SpecId::CANCUN,
+                30_000_000,
+                default_modules(),
+            );
+            assert!(provider.code(Address::ZERO, None).await.unwrap().is_empty());
+        }
+        let missing = IndexedStateProvider::new(
+            Arc::new(BlockIndex::new()),
+            CodelessState(B256::repeat_byte(7)),
+            1,
+            SpecId::CANCUN,
+            30_000_000,
+            default_modules(),
+        );
+        assert!(matches!(
+            missing.code(Address::ZERO, None).await,
+            Err(RpcError::StateError(_))
+        ));
     }
 }
