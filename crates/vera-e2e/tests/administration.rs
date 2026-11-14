@@ -38,8 +38,7 @@ async fn operator_rotation_and_sequence_survive_replica_restart() {
     let client = VeraClient::new(cluster.node(0).rpc_url());
     let submitter = BlsSigner::new(42u64.into(), 9001).unwrap();
     let parameters = AcpParams {
-        policy_command_max_expiration_delta: 3600,
-        ..Default::default()
+        registrations_commitment_validity: vera_modules::types::Duration::Blocks(3600),
     };
     let approved = support::approve(
         &client,

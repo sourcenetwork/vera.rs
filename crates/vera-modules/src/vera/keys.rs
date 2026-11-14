@@ -1,6 +1,6 @@
 //! Vera module key prefixes and builders.
 //!
-//! Matches Go `x/vera/types/keys.go` byte-prefix convention.
+//! Each record family sits under a one-byte prefix; the singletons use named keys.
 
 use sha2::{Digest, Sha256};
 
@@ -22,8 +22,7 @@ pub const CHAIN_CONFIG_KEY: &[u8] = b"chain_config";
 /// Primary store key: `prefix + token_hash` (raw bytes, no length prefix).
 ///
 /// Token hashes are fixed-length hex strings (64 chars for SHA-256),
-/// so no length prefix is needed. Go's `JWSTokenKey()` with
-/// `MustLengthPrefix` is dead code — the keeper passes raw bytes.
+/// so no length prefix is needed.
 pub fn jws_token_key(token_hash: &str) -> Vec<u8> {
     let mut key = Vec::from(JWS_TOKEN_PREFIX);
     key.extend_from_slice(token_hash.as_bytes());

@@ -21,12 +21,14 @@ rejects a revision containing a request that cannot fit.
 
 Admission rejects an EVM request whose signed gas limit exceeds the configured
 revision limit, or whose gas cost plus value overflows, since no revision can
-hold it. Revalidation after finalization replays each sender's retained EVM
+hold it. Blob (type 3) requests are refused at admission and execution. Revalidation after finalization replays each sender's retained EVM
 requests in admission order, so a queued follow-up keeps its nonce and balance
 reservation. Construction also lists in `ExecutionOutcome::rejected_tx_indices`
 the EVM requests that do not decode or that fail transaction validation for a
 reason other than a nonce ahead of the account, and the proposer removes them
-from its pending pool. A request omitted for the budget, or for a nonce that is
+from its pending pool. It then rebuilds the EVM reservations from the requests
+that remain, so the sender of a removed request can resubmit at the same nonce
+without waiting for the next finalized revision. A request omitted for the budget, or for a nonce that is
 still ahead, stays pending.
 
 Every failed native dispatch consumes the full 1,000,000 units, including a

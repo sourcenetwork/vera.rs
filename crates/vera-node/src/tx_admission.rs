@@ -75,6 +75,25 @@ impl Admission {
         stale
     }
 
+    /// Rebuild EVM reservations from `pending` after requests left the pool
+    /// without a finalized block. Native reservations are kept.
+    ///
+    /// Returns the requests that no longer validate.
+    pub(crate) async fn release_evm(&mut self, pending: &[(TxId, Tx)]) -> Vec<TxId> {
+        self.validator.release_evm_reservations();
+        let mut stale = Vec::new();
+        for (id, tx) in pending {
+            if tx.is_native() {
+                continue;
+            }
+            if let Err(error) = self.validator.recheck_pending_tx(&tx.bytes).await {
+                trace!(tx_id = ?id, %error, "evicting stale tx");
+                stale.push(*id);
+            }
+        }
+        stale
+    }
+
     #[cfg(test)]
     pub(crate) fn remembered(&self) -> usize {
         self.native.len()

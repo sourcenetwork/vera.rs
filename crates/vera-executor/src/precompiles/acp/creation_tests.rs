@@ -304,3 +304,31 @@ fn creation_preflight_preserves_definition_and_token_limits() {
     let mut budget = vera_domain::MAX_TX_BYTES;
     leaf::validate(&input, &mut budget).unwrap();
 }
+
+#[test]
+fn a_malformed_derived_signer_is_a_node_fault_on_every_creation_route() {
+    let mut fixture = Fixture::new();
+    fixture.tx.signer = "malformed".into();
+    let before = fixture.state();
+    for input in [
+        direct(POLICY),
+        options(),
+        batch(vec![direct(POLICY)]),
+        batch(vec![options()]),
+    ] {
+        let fault = fixture.dispatch(&input, 10_000_000).unwrap_err();
+        assert!(internal_fault_reason(&fault).is_some(), "{fault}");
+    }
+    assert_eq!(fixture.state(), before);
+
+    fixture.tx.signer = String::new();
+    for input in [direct(POLICY), options()] {
+        let refusal = fixture.dispatch(&input, 10_000_000).unwrap();
+        assert!(refusal.precompile.status.is_revert());
+        assert!(
+            String::from_utf8_lossy(&refusal.precompile.bytes)
+                .contains("requires an authenticated caller")
+        );
+    }
+    assert_eq!(fixture.state(), before);
+}

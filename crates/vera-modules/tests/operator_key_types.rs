@@ -66,7 +66,6 @@ const fn request(sequence: u64) -> AdministrativeRequest {
         sequence,
         expires_at: 100,
         command: AdministrativeCommand::SetAcpParameters(AcpParams {
-            policy_command_max_expiration_delta: 90,
             registrations_commitment_validity: Duration::Blocks(12),
         }),
     }

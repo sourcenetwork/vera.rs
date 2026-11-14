@@ -130,7 +130,7 @@ impl VeraModule {
         self.get_params()
     }
 
-    // ── Internal keeper methods ─────────────────────────────────────────
+    // ── Token records ───────────────────────────────────────────────────
 
     /// Record a token on first use, or refresh its usage time when already stored.
     ///

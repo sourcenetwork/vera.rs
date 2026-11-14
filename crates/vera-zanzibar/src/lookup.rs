@@ -63,6 +63,14 @@ impl PolicyLookupTable {
             .is_some_and(|name| name == resource)
     }
 
+    /// Whether the policy's resource declares the relation.
+    pub fn declares(&self, policy_id: &str, resource: &str, relation: &str) -> bool {
+        self.policies
+            .get(policy_id)
+            .and_then(|resources| resources.get(resource))
+            .is_some_and(|relations| relations.contains_key(relation))
+    }
+
     pub fn get_expression(
         &self,
         policy_id: &str,

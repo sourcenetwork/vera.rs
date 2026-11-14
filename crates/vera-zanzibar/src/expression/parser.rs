@@ -1,4 +1,4 @@
-use super::{RelationExpression, MAX_EXPRESSION_DEPTH};
+use super::{RelationExpression, MAX_EXPRESSION_DEPTH, MAX_EXPRESSION_OPERANDS};
 use crate::error::{Error, Result};
 
 /// Maximum nesting of parentheses in a parsed expression.
@@ -18,16 +18,19 @@ impl RelationExpression {
     /// All operators have equal precedence and are evaluated left-to-right,
     /// matching Go zanzi behavior. Use parentheses to override.
     ///
-    /// The result nests at most [`MAX_EXPRESSION_DEPTH`] operators and the
-    /// input at most [`MAX_PARENTHESIS_DEPTH`] parentheses. A chain of one
-    /// repeated `+` or `&` is a single level whatever its length.
+    /// The result nests at most [`MAX_EXPRESSION_DEPTH`] operators and names
+    /// at most [`MAX_EXPRESSION_OPERANDS`] operands, and the input nests at
+    /// most [`MAX_PARENTHESIS_DEPTH`] parentheses. A chain of one repeated `+`
+    /// or `&` is a single level whatever its length.
     pub fn parse(input: &str) -> Result<Self> {
-        parse_group(input, MAX_PARENTHESIS_DEPTH).map(|(expression, _)| expression)
+        let mut operands = MAX_EXPRESSION_OPERANDS;
+        parse_group(input, MAX_PARENTHESIS_DEPTH, &mut operands).map(|(expression, _)| expression)
     }
 }
 
 /// Parse one parenthesis level, returning the expression and its depth.
-fn parse_group(input: &str, parentheses: usize) -> Result<Parsed> {
+/// `operands` is how many more operands the whole expression may name.
+fn parse_group(input: &str, parentheses: usize, operands: &mut usize) -> Result<Parsed> {
     let input = input.trim();
     if input.is_empty() {
         return Err(Error::InvalidExpression("empty expression".into()));
@@ -39,20 +42,24 @@ fn parse_group(input: &str, parentheses: usize) -> Result<Parsed> {
                 "expression nests more than {MAX_PARENTHESIS_DEPTH} parentheses"
             )));
         };
-        return parse_group(&input[1..input.len() - 1], parentheses);
+        return parse_group(&input[1..input.len() - 1], parentheses, operands);
     }
 
     let operators = top_level_operators(input);
+    if operators.len() >= *operands {
+        return Err(too_many_operands());
+    }
     if operators.is_empty() {
+        *operands -= 1;
         return parse_term(input).map(|term| (term, 0));
     }
 
-    let mut folded = parse_group(&input[..operators[0].0], parentheses)?;
+    let mut folded = parse_group(&input[..operators[0].0], parentheses, operands)?;
     for (index, (position, operator)) in operators.iter().enumerate() {
         let end = operators
             .get(index + 1)
             .map_or(input.len(), |(next, _)| *next);
-        let operand = parse_group(&input[position + 1..end], parentheses)?;
+        let operand = parse_group(&input[position + 1..end], parentheses, operands)?;
         folded = combine(*operator, folded, operand);
         if folded.1 > MAX_EXPRESSION_DEPTH {
             return Err(Error::InvalidExpression(format!(
@@ -63,19 +70,25 @@ fn parse_group(input: &str, parentheses: usize) -> Result<Parsed> {
     Ok(folded)
 }
 
+fn too_many_operands() -> Error {
+    Error::InvalidExpression(format!(
+        "expression names more than {MAX_EXPRESSION_OPERANDS} operands"
+    ))
+}
+
 type Parsed = (RelationExpression, usize);
 
 fn combine(operator: char, left: Parsed, right: Parsed) -> Parsed {
     match operator {
         '+' => {
-            let (operands, depth) = flatten([left, right], |expression| match expression {
+            let (operands, depth) = append(left, right, |expression| match expression {
                 RelationExpression::Union(inner) => Ok(inner),
                 other => Err(other),
             });
             (RelationExpression::Union(operands), depth)
         }
         '&' => {
-            let (operands, depth) = flatten([left, right], |expression| match expression {
+            let (operands, depth) = append(left, right, |expression| match expression {
                 RelationExpression::Intersection(inner) => Ok(inner),
                 other => Err(other),
             });
@@ -88,26 +101,28 @@ fn combine(operator: char, left: Parsed, right: Parsed) -> Parsed {
     }
 }
 
-/// Merge operands of one associative operator, splicing in those that are
-/// already that operator so a chain stays one level deep.
-fn flatten(
-    sides: [Parsed; 2],
+/// Merge two operands of one associative operator, splicing in a side that is
+/// already that operator so a chain stays one level deep. The left side's
+/// list is reused, so folding a chain costs its length once.
+fn append(
+    left: Parsed,
+    right: Parsed,
     same_operator: impl Fn(
         RelationExpression,
     ) -> std::result::Result<Vec<RelationExpression>, RelationExpression>,
 ) -> (Vec<RelationExpression>, usize) {
-    let mut operands = Vec::new();
-    let mut depth = 0;
-    for (expression, expression_depth) in sides {
-        match same_operator(expression) {
-            Ok(inner) => {
-                operands.extend(inner);
-                depth = depth.max(expression_depth);
-            }
-            Err(other) => {
-                operands.push(other);
-                depth = depth.max(expression_depth + 1);
-            }
+    let (mut operands, mut depth) = match same_operator(left.0) {
+        Ok(inner) => (inner, left.1),
+        Err(other) => (vec![other], left.1 + 1),
+    };
+    match same_operator(right.0) {
+        Ok(inner) => {
+            operands.extend(inner);
+            depth = depth.max(right.1);
+        }
+        Err(other) => {
+            operands.push(other);
+            depth = depth.max(right.1 + 1);
         }
     }
     (operands, depth)

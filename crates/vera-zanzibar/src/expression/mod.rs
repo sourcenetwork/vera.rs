@@ -10,6 +10,14 @@ use serde::{Deserialize, Serialize};
 /// level is one active evaluation against the engine's depth limit.
 pub const MAX_EXPRESSION_DEPTH: usize = 16;
 
+/// Maximum operands, counted at the leaves, in one relation's expression.
+///
+/// Evaluating an operand is at least one step, so an expression longer than
+/// the engine's step limit could never be evaluated in full.
+pub const MAX_EXPRESSION_OPERANDS: usize = 4096;
+
+const _: () = assert!(MAX_EXPRESSION_OPERANDS <= crate::engine::MAX_EVALUATION_STEPS);
+
 /// A relation expression defining how to compute membership.
 ///
 /// These expressions implement Zanzibar's userset rewrite rules:
@@ -82,6 +90,17 @@ impl RelationExpression {
 
     pub fn is_this(&self) -> bool {
         matches!(self, Self::This)
+    }
+
+    /// Number of leaves: stored-tuple lookups and relation references.
+    pub fn operands(&self) -> usize {
+        match self {
+            Self::This | Self::ComputedUserset { .. } | Self::TupleToUserset { .. } => 1,
+            Self::Union(exprs) | Self::Intersection(exprs) => {
+                exprs.iter().map(Self::operands).sum()
+            }
+            Self::Difference { base, subtract } => base.operands() + subtract.operands(),
+        }
     }
 
     /// Number of set operators on the longest path to a leaf.

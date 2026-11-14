@@ -203,7 +203,8 @@ Only a transaction's own call to a module carries its signer's authority. A call
 made by contract code, DELEGATECALL and CALLCODE included, has no signer, and a
 method that needs one refuses it.
 EVM transactions execute only in their canonical EIP-2718 encoding, and a legacy
-transaction must carry a chain ID. ACP and token lifecycle errors reject proposal execution and re-verification.
+transaction must carry a chain ID. Blob (type 3) transactions are refused at
+admission and execution. ACP and token lifecycle errors reject proposal execution and re-verification.
 Malformed token records encountered during reads or expiry are errors, including a mismatch between the storage key
 and the record's token hash. Failed lifecycle work cannot publish its module view. Token expiry uses an ordered
 deadline index, leaving invalidated and non-expiring tokens out of each revision's

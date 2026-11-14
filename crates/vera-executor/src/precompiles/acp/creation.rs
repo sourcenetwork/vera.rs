@@ -35,6 +35,9 @@ pub(super) fn dispatch(
     }
     let selector: [u8; 4] = input[..4].try_into().expect("dispatch checked selector");
     let result = create(module, vera, block, tx, selector, input, &budget);
+    if let Err(CreationError::Fault(fault)) = result {
+        return Err(fault);
+    }
     if budget.is_exhausted() {
         return Ok(oog_dispatch());
     }
@@ -81,6 +84,31 @@ pub(super) fn dispatch(
     Ok(ok_dispatch(gas, bytes, vec![log]))
 }
 
+/// Why a creation produced no record.
+#[derive(Debug, thiserror::Error)]
+enum CreationError {
+    /// The caller's request is refused and reverts.
+    #[error("{0}")]
+    Refused(String),
+    /// The node's own fault, which fails the block.
+    #[error("{0}")]
+    Fault(PrecompileError),
+}
+
+fn refused(reason: impl core::fmt::Display) -> CreationError {
+    CreationError::Refused(reason.to_string())
+}
+
+fn creator(tx: &TxExecCtx) -> Result<Did, CreationError> {
+    did_from_signer(&tx.signer).map_err(|error| {
+        if internal_fault_reason(&error).is_some() {
+            CreationError::Fault(error)
+        } else {
+            refused(error)
+        }
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn create(
     module: &mut AcpModule,
@@ -90,13 +118,13 @@ fn create(
     selector: [u8; 4],
     input: &[u8],
     budget: &PolicyCreateBudget,
-) -> Result<PolicyRecord, String> {
+) -> Result<PolicyRecord, CreationError> {
     match selector {
         IAcp::bearerCreatePolicyCall::SELECTOR => {
             let call = IAcp::bearerCreatePolicyCall::abi_decode(input)
-                .map_err(|error| decode_error(error).to_string())?;
+                .map_err(|error| refused(decode_error(error)))?;
             let policy = std::str::from_utf8(&call.policy)
-                .map_err(|_| "invalid UTF-8 in policy".to_string())?;
+                .map_err(|_| refused("invalid UTF-8 in policy"))?;
             module
                 .bearer_create_policy_with_budget(
                     vera,
@@ -107,32 +135,32 @@ fn create(
                     marshal_type_from_u8(call.marshalType),
                     budget,
                 )
-                .map_err(|error| error.to_string())
+                .map_err(refused)
         }
         IAcp::createPolicyCall::SELECTOR => {
             let call = IAcp::createPolicyCall::abi_decode(input)
-                .map_err(|error| decode_error(error).to_string())?;
+                .map_err(|error| refused(decode_error(error)))?;
             let request = PolicyCreation {
                 policy: String::from_utf8(call.policy.to_vec())
-                    .map_err(|_| "invalid UTF-8 in policy".to_string())?,
+                    .map_err(|_| refused("invalid UTF-8 in policy"))?,
                 marshal_type: marshal_type_from_u8(call.marshalType),
                 required_specification: None,
                 metadata: Default::default(),
             };
-            let actor = did_from_signer(&tx.signer).map_err(|error| error.to_string())?;
+            let actor = creator(tx)?;
             module
                 .execute_create_policy_with_budget(&actor, &request, block, tx, budget)
-                .map_err(|error| error.to_string())
+                .map_err(refused)
         }
         IAcp::createPolicyWithOptionsCall::SELECTOR => {
             let call = IAcp::createPolicyWithOptionsCall::abi_decode(input)
-                .map_err(|error| decode_error(error).to_string())?;
+                .map_err(|error| refused(decode_error(error)))?;
             let request = serde_json::from_slice(&call.request)
-                .map_err(|error| format!("invalid policy request: {error}"))?;
-            let actor = did_from_signer(&tx.signer).map_err(|error| error.to_string())?;
+                .map_err(|error| refused(format!("invalid policy request: {error}")))?;
+            let actor = creator(tx)?;
             module
                 .execute_create_policy_with_budget(&actor, &request, block, tx, budget)
-                .map_err(|error| error.to_string())
+                .map_err(refused)
         }
         _ => unreachable!("creation selector was checked"),
     }

@@ -186,6 +186,21 @@ pub(crate) async fn recheck(
     }
 }
 
+/// Release what admission reserved for requests the proposer dropped from
+/// the pool, so their senders are not held to a nonce that will never be used
+/// until the next finalized block.
+pub(crate) async fn release(mempool: &InMemoryMempool, validator: &SharedValidator) {
+    let Some(validator) = validator.get() else {
+        return;
+    };
+    let mut guard = validator.lock().await;
+    let evict = guard.release_evm(&mempool.pending()).await;
+    if !evict.is_empty() {
+        debug!(count = evict.len(), "evicted stale transactions");
+        mempool.prune(&evict);
+    }
+}
+
 /// Receive gossiped transactions from peers and admit them.
 pub fn spawn_tx_receiver<E: Spawner, R: Receiver + Send + 'static>(
     context: E,

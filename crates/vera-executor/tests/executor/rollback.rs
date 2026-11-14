@@ -338,6 +338,7 @@ fn unconfigured_membership_policy_cannot_be_claimed() {
 fn administrative_state_follows_outer_call_result(#[case] revert: bool) {
     use vera_modules::{
         acp::types::AcpParams,
+        types::Duration,
         vera::{abi::IVera, administration::*},
     };
     let key: PrivateKeySigner = "01".repeat(32).parse().unwrap();
@@ -360,8 +361,7 @@ fn administrative_state_follows_outer_call_result(#[case] revert: bool) {
         sequence: 0,
         expires_at: 100,
         command: AdministrativeCommand::SetAcpParameters(AcpParams {
-            policy_command_max_expiration_delta: 42,
-            ..Default::default()
+            registrations_commitment_validity: Duration::Blocks(42),
         }),
     };
     let signature = key
@@ -406,8 +406,8 @@ fn administrative_state_follows_outer_call_result(#[case] revert: bool) {
                 .acp
                 .query_params()
                 .unwrap()
-                .policy_command_max_expiration_delta,
-            42
+                .registrations_commitment_validity,
+            Duration::Blocks(42)
         );
     }
 }

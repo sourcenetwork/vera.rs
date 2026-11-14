@@ -23,7 +23,7 @@ use crate::{
     CommittedState, FinalizedHistory,
     finalize::{index_finalized_block, subscription_data},
     history::restore_epoch,
-    tx_gossip::{SharedValidator, recheck},
+    tx_gossip::{SharedValidator, recheck, release},
 };
 
 /// Encoded finalization artifacts fetched from marshal after a block commits.
@@ -153,6 +153,10 @@ impl FinalizedSink for NodeSink {
 
     fn proposed(&self, _block: &Block) {
         self.node_state.inc_proposed();
+    }
+
+    async fn rejected(&self) {
+        release(&self.mempool, &self.validator).await;
     }
 
     async fn finalized(&self, block: &Block, receipts: Vec<ExecutionReceipt>) {

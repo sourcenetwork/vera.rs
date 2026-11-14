@@ -1,10 +1,8 @@
-use std::collections::HashSet;
-
 use crate::did::Did;
 use crate::thread_bounds::MaybeBoxFuture;
 
 use super::cache::{CheckCache, CheckKey, NodeId, NodeTrail};
-use super::outcome::Outcome;
+use super::outcome::{Assumed, Outcome};
 use super::PermissionEngine;
 use crate::error::{Error, Result};
 use crate::expression::RelationExpression;
@@ -31,25 +29,23 @@ impl<S: ZanzibarStore + ?Sized> PermissionEngine<S> {
     ) -> MaybeBoxFuture<'a, Result<Outcome>> {
         Box::pin(async move {
             let node = NodeId::new(goal.resource, goal.object_id, relation);
-            if trail.contains(&node) {
-                return Ok(Outcome::truncated(node));
+            if let Some(position) = trail.position(&node) {
+                return Ok(Outcome::truncated(position));
             }
             let key = CheckKey::new(goal.policy_id, node.clone(), goal.subject);
-            if let Some(cached) = cache.get(&key).await {
+            if let Some(known) = cache.get(&key).await {
                 cache.budget.charge()?;
-                return Ok(Outcome::exact(cached));
+                return Ok(known);
             }
             let expression = self
                 .lookup
                 .get_expression(goal.policy_id, goal.resource, relation)?;
-            let trail = trail.with_node(node.clone());
+            let (trail, position) = trail.with_node(node)?;
             let outcome = self
                 .evaluate_expression(goal, relation, expression, &trail, cache)
                 .await?
-                .settle(&node);
-            if let Some(value) = outcome.as_exact() {
-                cache.set(key, value).await;
-            }
+                .settle(position);
+            cache.close(key, position, outcome).await;
             Ok(outcome)
         })
     }
@@ -86,17 +82,17 @@ impl<S: ZanzibarStore + ?Sized> PermissionEngine<S> {
                 }
 
                 RelationExpression::Union(exprs) => {
-                    let mut truncated = HashSet::new();
+                    let mut assumed = Assumed::default();
                     for expr in exprs {
                         match self
                             .evaluate_expression(goal, relation, expr, trail, cache)
                             .await?
                         {
                             Outcome::Granted => return Ok(Outcome::Granted),
-                            Outcome::Denied(nodes) => truncated.extend(nodes),
+                            Outcome::Denied(nodes) => assumed = assumed.union(nodes),
                         }
                     }
-                    Ok(Outcome::Denied(truncated))
+                    Ok(Outcome::Denied(assumed))
                 }
 
                 RelationExpression::Intersection(exprs) => {
@@ -159,7 +155,7 @@ impl<S: ZanzibarStore + ?Sized> PermissionEngine<S> {
         if subjects.iter().any(Subject::is_typed_wildcard) {
             return Ok(Outcome::Granted);
         }
-        let mut truncated = HashSet::new();
+        let mut assumed = Assumed::default();
         for target in &subjects {
             cache.budget.charge()?;
             let Subject::EntitySet {
@@ -185,10 +181,10 @@ impl<S: ZanzibarStore + ?Sized> PermissionEngine<S> {
             };
             match self.evaluate_node(target, relation, trail, cache).await? {
                 Outcome::Granted => return Ok(Outcome::Granted),
-                Outcome::Denied(nodes) => truncated.extend(nodes),
+                Outcome::Denied(nodes) => assumed = assumed.union(nodes),
             }
         }
-        Ok(Outcome::Denied(truncated))
+        Ok(Outcome::Denied(assumed))
     }
 
     async fn evaluate_tuple_to_userset(
@@ -211,7 +207,7 @@ impl<S: ZanzibarStore + ?Sized> PermissionEngine<S> {
         if subjects.iter().any(Subject::is_any_wildcard) {
             return Ok(Outcome::Granted);
         }
-        let mut truncated = HashSet::new();
+        let mut assumed = Assumed::default();
         for target in &subjects {
             cache.budget.charge()?;
             let Subject::EntitySet {
@@ -222,6 +218,15 @@ impl<S: ZanzibarStore + ?Sized> PermissionEngine<S> {
             else {
                 continue;
             };
+            // A tuple may name an actor as an object of the actor resource,
+            // which need not declare the computed relation.
+            if self.lookup.is_actor_resource(goal.policy_id, resource)
+                && !self
+                    .lookup
+                    .declares(goal.policy_id, resource, computed_relation)
+            {
+                continue;
+            }
             let target = Goal {
                 resource,
                 object_id,
@@ -232,9 +237,9 @@ impl<S: ZanzibarStore + ?Sized> PermissionEngine<S> {
                 .await?
             {
                 Outcome::Granted => return Ok(Outcome::Granted),
-                Outcome::Denied(nodes) => truncated.extend(nodes),
+                Outcome::Denied(nodes) => assumed = assumed.union(nodes),
             }
         }
-        Ok(Outcome::Denied(truncated))
+        Ok(Outcome::Denied(assumed))
     }
 }

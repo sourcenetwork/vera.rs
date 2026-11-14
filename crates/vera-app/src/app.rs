@@ -363,7 +363,10 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             .iter()
             .map(|&index| txs[index].id())
             .collect();
-        self.mempool.prune(&rejected);
+        if !rejected.is_empty() {
+            self.mempool.prune(&rejected);
+            self.sink.rejected().await;
+        }
         let txs = match &executed.outcome.executed_tx_indices {
             Some(indices) => indices.iter().map(|&i| txs[i].clone()).collect(),
             None => txs,

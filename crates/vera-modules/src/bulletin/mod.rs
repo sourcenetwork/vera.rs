@@ -47,6 +47,8 @@ pub const MAX_POST_PROOF_BYTES: usize = 64 * 1024;
 pub const MAX_POST_ARTIFACT_BYTES: usize = 1024;
 /// Maximum stored namespace identifier, including its `bulletin/` prefix.
 pub const MAX_NAMESPACE_ID_BYTES: usize = 256;
+/// Maximum collaborator DID, in the spelling the caller wrote.
+pub const MAX_COLLABORATOR_DID_BYTES: usize = 256;
 
 /// Bulletin module.
 ///
@@ -251,6 +253,7 @@ impl BulletinModule {
         collaborator_did: &str,
     ) -> Result<String> {
         validate_namespace(namespace)?;
+        validate_collaborator(collaborator_did)?;
         let collaborator_did = &*crate::actor::canonical_str(collaborator_did);
         let policy_id = self
             .get_policy_id()?
@@ -318,6 +321,7 @@ impl BulletinModule {
         collaborator_did: &str,
     ) -> Result<String> {
         validate_namespace(namespace)?;
+        validate_collaborator(collaborator_did)?;
         let collaborator_did = &*crate::actor::canonical_str(collaborator_did);
         let policy_id = self
             .get_policy_id()?
@@ -619,6 +623,15 @@ fn validate_namespace(namespace: &str) -> Result<()> {
     }
     if keys::namespace_id_len(namespace) > MAX_NAMESPACE_ID_BYTES {
         return Err(BulletinError::NamespaceTooLong(MAX_NAMESPACE_ID_BYTES));
+    }
+    Ok(())
+}
+
+const fn validate_collaborator(did: &str) -> Result<()> {
+    if did.len() > MAX_COLLABORATOR_DID_BYTES {
+        return Err(BulletinError::CollaboratorTooLong(
+            MAX_COLLABORATOR_DID_BYTES,
+        ));
     }
     Ok(())
 }

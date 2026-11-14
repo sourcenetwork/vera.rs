@@ -1,5 +1,6 @@
 use vera_zanzibar::{
-    expression::{MAX_EXPRESSION_DEPTH, MAX_PARENTHESIS_DEPTH},
+    engine::MAX_EVALUATION_STEPS,
+    expression::{MAX_EXPRESSION_DEPTH, MAX_EXPRESSION_OPERANDS, MAX_PARENTHESIS_DEPTH},
     Policy, Relation, RelationExpression, Resource,
 };
 
@@ -31,6 +32,55 @@ fn a_chain_of_one_associative_operator_is_a_single_level() {
         };
         assert_eq!(operands.len(), 4096);
     }
+}
+
+#[test]
+fn an_expression_names_a_bounded_number_of_operands() {
+    const { assert!(MAX_EXPRESSION_OPERANDS <= MAX_EVALUATION_STEPS) };
+    for operators in [&["+"][..], &["&"], &["+", "&"]] {
+        let longest = chain(operators, MAX_EXPRESSION_OPERANDS);
+        if operators.len() == 1 {
+            let parsed = RelationExpression::parse(&longest).unwrap();
+            assert_eq!(parsed.operands(), MAX_EXPRESSION_OPERANDS);
+        }
+        assert!(RelationExpression::parse(&format!("{longest} + a")).is_err());
+    }
+    let grouped = format!(
+        "({}) + ({})",
+        chain(&["&"], MAX_EXPRESSION_OPERANDS / 2),
+        chain(&["&"], MAX_EXPRESSION_OPERANDS / 2)
+    );
+    assert_eq!(
+        RelationExpression::parse(&grouped).unwrap().operands(),
+        MAX_EXPRESSION_OPERANDS
+    );
+    assert!(RelationExpression::parse(&format!("{grouped} + (a - a->a)")).is_err());
+
+    let a = || RelationExpression::computed_userset("a");
+    policy_with(RelationExpression::union(vec![
+        a();
+        MAX_EXPRESSION_OPERANDS
+    ]))
+    .validate()
+    .unwrap();
+    assert!(policy_with(RelationExpression::union(vec![
+        a();
+        MAX_EXPRESSION_OPERANDS + 1
+    ]))
+    .validate()
+    .is_err());
+}
+
+#[test]
+fn a_flat_chain_filling_a_policy_definition_is_refused_in_linear_time() {
+    let started = std::time::Instant::now();
+    for operator in ["a+", "a&", "a-"] {
+        let mut flat = operator.repeat(32 * 1024);
+        flat.truncate(64 * 1024 - 1);
+        assert_eq!(flat.len(), 64 * 1024 - 1);
+        assert!(RelationExpression::parse(&flat).is_err());
+    }
+    assert!(started.elapsed() < std::time::Duration::from_secs(1));
 }
 
 #[test]
@@ -85,10 +135,12 @@ fn operators_keep_equal_precedence_from_left_to_right() {
 
 #[test]
 fn a_stored_policy_at_the_depth_limit_decodes_again() {
-    let mut expression = RelationExpression::computed_userset("a");
+    let a = RelationExpression::computed_userset("a");
+    let mut expression = a.clone();
     for _ in 0..MAX_EXPRESSION_DEPTH {
-        expression = RelationExpression::difference(expression.clone(), expression);
+        expression = RelationExpression::difference(a.clone(), expression);
     }
+    assert_eq!(expression.depth(), MAX_EXPRESSION_DEPTH);
     let policy = policy_with(expression.clone());
     policy.validate().unwrap();
     let encoded = serde_json::to_vec(&policy).unwrap();

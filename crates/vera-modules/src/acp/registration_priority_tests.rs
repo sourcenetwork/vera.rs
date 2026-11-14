@@ -75,7 +75,7 @@ fn rejected(
 }
 
 #[test]
-fn a_transferor_cannot_take_the_object_back_with_the_revealed_commitment() {
+fn a_transferor_cannot_reveal_the_same_commitment_again_after_a_transfer() {
     let (mut module, first, second, policy, object) = setup();
     let commitment = commit(&mut module, &first, &policy, &object, 5);
     reveal(&mut module, &first, &policy, &commitment, 6).unwrap();

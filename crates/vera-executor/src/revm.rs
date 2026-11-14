@@ -81,26 +81,7 @@ pub fn decode_evm_tx(tx_bytes: &Bytes) -> Result<(revm::context::TxEnv, String),
                 .kind(convert_tx_kind(tx.to))
                 .access_list(convert_access_list(&tx.access_list));
         }
-        TxEnvelope::Eip4844(signed) => {
-            let tx = signed.tx().tx();
-            let caller = signed
-                .recover_signer()
-                .map_err(|e| ExecutionError::TxDecode(format!("failed to recover signer: {e}")))?;
-
-            builder = builder
-                .caller(caller)
-                .gas_limit(tx.gas_limit)
-                .gas_price(tx.max_fee_per_gas)
-                .gas_priority_fee(Some(tx.max_priority_fee_per_gas))
-                .value(tx.value)
-                .data(tx.input.clone())
-                .nonce(tx.nonce)
-                .chain_id(Some(tx.chain_id))
-                .kind(TxKind::Call(tx.to))
-                .access_list(convert_access_list(&tx.access_list))
-                .max_fee_per_blob_gas(tx.max_fee_per_blob_gas)
-                .blob_hashes(tx.blob_versioned_hashes.clone());
-        }
+        TxEnvelope::Eip4844(_) => return Err(crate::envelope::blob_transaction()),
         TxEnvelope::Eip7702(signed) => {
             let tx = signed.tx();
             let caller = signed

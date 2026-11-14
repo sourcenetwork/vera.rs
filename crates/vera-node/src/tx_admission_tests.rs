@@ -193,3 +193,90 @@ fn concurrent_duplicate_submissions_preserve_nonces_and_local_retry_tracking() {
         },
     );
 }
+
+fn free_transfer(signer: &alloy_signer_local::PrivateKeySigner, nonce: u64, to: u8) -> Bytes {
+    use alloy_consensus::{SignableTransaction as _, TxEip1559, TxEnvelope};
+    use alloy_eips::eip2718::Encodable2718 as _;
+    use alloy_signer::SignerSync as _;
+
+    let tx = TxEip1559 {
+        chain_id: CHAIN_ID,
+        nonce,
+        gas_limit: 21_000,
+        to: alloy_primitives::TxKind::Call(alloy_primitives::Address::repeat_byte(to)),
+        ..Default::default()
+    };
+    let signature = signer.sign_hash_sync(&tx.signature_hash()).unwrap();
+    TxEnvelope::Eip1559(tx.into_signed(signature))
+        .encoded_2718()
+        .into()
+}
+
+#[test]
+fn a_request_the_proposer_dropped_no_longer_holds_its_senders_nonce() {
+    let directory = tempfile::tempdir().unwrap();
+    runtime::Runner::new(runtime::Config::new().with_storage_directory(directory.path())).start(
+        |context| {
+            Box::pin(async move {
+                let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
+                let databases = VeraStateSet::init(
+                    context.child("release_state"),
+                    state_set_config("release", cache),
+                    None,
+                )
+                .await;
+                let sender = alloy_signer_local::PrivateKeySigner::random();
+                let other = alloy_signer_local::PrivateKeySigner::random();
+                let accounts = vera_genesis::GenesisState {
+                    genesis_alloc: [&sender, &other]
+                        .map(|signer| (signer.address(), alloy_primitives::U256::ZERO))
+                        .to_vec(),
+                    genesis_storage: vec![],
+                    genesis_code: vec![],
+                    participant_addresses: vec![],
+                };
+                vera_app::apply_genesis(&databases, &accounts)
+                    .await
+                    .unwrap();
+                let validator: SharedValidator = Arc::new(OnceLock::new());
+                validator
+                    .set(Mutex::new(Admission::new(MempoolValidator::new(
+                        CommittedState::new(databases),
+                        ExecutionConfig::new(CHAIN_ID),
+                        0,
+                    ))))
+                    .unwrap();
+                let pool = InMemoryMempool::new();
+                let admit = |bytes: Bytes| admit(&pool, &validator, CHAIN_ID, bytes);
+
+                let refused = free_transfer(&sender, 0, 1);
+                let queued = free_transfer(&other, 0, 1);
+                let native = signed_request(0);
+                for bytes in [&refused, &queued, &native] {
+                    assert!(admit(bytes.clone()).await.unwrap());
+                }
+                let corrected = free_transfer(&sender, 0, 2);
+                let held = admit(corrected.clone()).await.unwrap_err();
+                assert!(
+                    matches!(&held, TxSubmitError::Rejected(message)
+                        if message.contains("expected 1, got 0")),
+                    "{held}"
+                );
+
+                pool.prune(&[Tx::new(refused).id()]);
+                release(&pool, &validator).await;
+                assert!(admit(corrected).await.unwrap());
+                assert_eq!(pool.len(), 3);
+                let kept = admit(free_transfer(&other, 0, 2)).await.unwrap_err();
+                assert!(
+                    matches!(&kept, TxSubmitError::Rejected(message)
+                        if message.contains("expected 1, got 0")),
+                    "{kept}"
+                );
+                // The native signer's reserved sequence is untouched.
+                assert!(admit(signed_request(1)).await.unwrap());
+                assert_eq!(validator.get().unwrap().lock().await.remembered(), 2);
+            })
+        },
+    );
+}

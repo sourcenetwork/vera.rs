@@ -66,3 +66,52 @@ fn an_unrestricted_tuple_relation_needs_one_declaring_resource() {
     ]));
     policy(any, directory("viewer")).validate().unwrap();
 }
+
+/// A relation typed `[actor]` accepts an actor written as an object of the
+/// actor resource, which the policy need not give the computed relation.
+#[tokio::test]
+async fn a_tuple_naming_an_actor_without_the_computed_relation_grants_nothing() {
+    use std::sync::Arc;
+    use vera_zanzibar::{
+        store::{MemoryZanzibarStore, ZanzibarStore},
+        Did, PermissionEngine, Relationship, Subject,
+    };
+
+    let delegate = Did::new("did:key:delegate").unwrap();
+    let reader = Did::new("did:key:reader").unwrap();
+    for actor_relation in ["viewer", "editor"] {
+        let mut policy = Policy::new("p", "p").with_resource(
+            Resource::new("file")
+                .with_relation(
+                    Relation::direct("delegate").with_restriction(SubjectRestriction::Actor),
+                )
+                .with_relation(Relation::computed(
+                    "read",
+                    RelationExpression::parse("delegate->viewer").unwrap(),
+                )),
+        );
+        policy.actor = Some(Resource::new("actor").with_relation(Relation::direct(actor_relation)));
+        policy.validate().unwrap();
+
+        let store = Arc::new(MemoryZanzibarStore::new());
+        let mut engine = PermissionEngine::new(store.clone());
+        engine.add_policy(&policy);
+        for relationship in [
+            Relationship::new(
+                "file",
+                "report",
+                "delegate",
+                Subject::entity_set("actor", delegate.as_str(), ""),
+            ),
+            Relationship::with_entity("actor", delegate.as_str(), actor_relation, reader.clone()),
+        ] {
+            relationship.validate(&policy).unwrap();
+            store.store_relationship("p", &relationship).await.unwrap();
+        }
+        let reads = engine
+            .check("p", "file", "report", "read", &reader)
+            .await
+            .unwrap();
+        assert_eq!(reads, actor_relation == "viewer");
+    }
+}

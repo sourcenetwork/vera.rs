@@ -7,9 +7,6 @@ use vera_traits::StateDbRead;
 
 use crate::{ExecutionConfig, ExecutionError};
 
-/// Maximum number of blobs per transaction (EIP-4844).
-pub const MAX_BLOBS_PER_TX: usize = 6;
-
 /// Gas cost per byte of calldata (zero byte).
 pub const TX_DATA_ZERO_GAS: u64 = 4;
 
@@ -33,7 +30,6 @@ pub const ACCESS_LIST_STORAGE_KEY_GAS: u64 = 1900;
 pub struct TxValidator<'a> {
     config: &'a ExecutionConfig,
     base_fee: u64,
-    blob_base_fee: Option<u128>,
     block_gas_limit: u64,
 }
 
@@ -43,7 +39,6 @@ impl<'a> TxValidator<'a> {
         Self {
             config,
             base_fee,
-            blob_base_fee: None,
             block_gas_limit: u64::MAX,
         }
     }
@@ -52,13 +47,6 @@ impl<'a> TxValidator<'a> {
     #[must_use]
     pub const fn with_block_gas_limit(mut self, block_gas_limit: u64) -> Self {
         self.block_gas_limit = block_gas_limit;
-        self
-    }
-
-    /// Set the blob base fee for Cancun+ validation.
-    #[must_use]
-    pub const fn with_blob_base_fee(mut self, blob_base_fee: u128) -> Self {
-        self.blob_base_fee = Some(blob_base_fee);
         self
     }
 
@@ -147,27 +135,7 @@ impl<'a> TxValidator<'a> {
                     Some(&tx.access_list),
                 )
             }
-            TxEnvelope::Eip4844(signed) => {
-                let tx = signed.tx().tx();
-                let sender = signed.recover_signer().map_err(|e| {
-                    ExecutionError::InvalidTx(format!("failed to recover signer: {}", e))
-                })?;
-
-                self.validate_blob_tx_fields(&tx.blob_versioned_hashes, tx.max_fee_per_blob_gas)?;
-
-                (
-                    sender,
-                    Some(tx.chain_id),
-                    tx.nonce,
-                    tx.gas_limit,
-                    tx.max_fee_per_gas,
-                    tx.max_priority_fee_per_gas,
-                    tx.value,
-                    &tx.input,
-                    false,
-                    Some(&tx.access_list),
-                )
-            }
+            TxEnvelope::Eip4844(_) => return Err(crate::envelope::blob_transaction()),
             TxEnvelope::Eip7702(signed) => {
                 let tx = signed.tx();
                 let sender = signed.recover_signer().map_err(|e| {
@@ -278,47 +246,6 @@ impl<'a> TxValidator<'a> {
         }
 
         Ok(gas)
-    }
-
-    /// Validate blob transaction specific fields.
-    fn validate_blob_tx_fields(
-        &self,
-        blob_versioned_hashes: &[alloy_primitives::B256],
-        max_fee_per_blob_gas: u128,
-    ) -> Result<(), ExecutionError> {
-        if blob_versioned_hashes.is_empty() {
-            return Err(ExecutionError::InvalidTx(
-                "blob transaction must have at least one blob".to_string(),
-            ));
-        }
-
-        if blob_versioned_hashes.len() > MAX_BLOBS_PER_TX {
-            return Err(ExecutionError::InvalidTx(format!(
-                "blob transaction exceeds max blobs: {} > {}",
-                blob_versioned_hashes.len(),
-                MAX_BLOBS_PER_TX
-            )));
-        }
-
-        for hash in blob_versioned_hashes {
-            if hash[0] != 0x01 {
-                return Err(ExecutionError::InvalidTx(format!(
-                    "invalid blob version: expected 0x01, got 0x{:02x}",
-                    hash[0]
-                )));
-            }
-        }
-
-        if let Some(blob_base_fee) = self.blob_base_fee
-            && max_fee_per_blob_gas < blob_base_fee
-        {
-            return Err(ExecutionError::InvalidTx(format!(
-                "max fee per blob gas {} below blob base fee {}",
-                max_fee_per_blob_gas, blob_base_fee
-            )));
-        }
-
-        Ok(())
     }
 
     /// Validate access list entries.

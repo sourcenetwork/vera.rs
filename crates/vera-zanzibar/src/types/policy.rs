@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use super::relationship::Relationship;
 use super::resource::{Relation, Resource};
 use crate::error::{Error, Result};
-use crate::expression::{RelationExpression, MAX_EXPRESSION_DEPTH};
+use crate::expression::{RelationExpression, MAX_EXPRESSION_DEPTH, MAX_EXPRESSION_OPERANDS};
 
 /// Permission rules selected when a policy is created.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,6 +84,12 @@ impl Policy {
                 if relation.expression.depth() > MAX_EXPRESSION_DEPTH {
                     return Err(Error::InvalidPolicy(format!(
                         "relation '{}' in resource '{}' nests more than {MAX_EXPRESSION_DEPTH} operators",
+                        relation.name, resource.name
+                    )));
+                }
+                if relation.expression.operands() > MAX_EXPRESSION_OPERANDS {
+                    return Err(Error::InvalidPolicy(format!(
+                        "relation '{}' in resource '{}' names more than {MAX_EXPRESSION_OPERANDS} operands",
                         relation.name, resource.name
                     )));
                 }

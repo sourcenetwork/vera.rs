@@ -7,10 +7,19 @@ of the same revision does not outrank the registration, and a commitment that ha
 already been revealed cannot be revealed again to amend the record it created.
 The current owner cannot amend its own registration. The resulting owner
 record retains the commitment's creation timestamp, so a later commitment cannot
-override an earlier claim after an amendment. A transferred record keeps that
-timestamp, so a still-valid commitment older than it can amend the transferee's
-ownership, whoever holds it. Its submission ID and signer identify
-the reveal; the amendment event records the reveal's own execution timestamp.
+override an earlier claim after an amendment. Its submission ID and signer
+identify the reveal; the amendment event records the reveal's own execution
+timestamp.
+
+A transfer is not final while an older commitment is still valid. A transferred
+record keeps its creation timestamp, and commitments are neither consumed by a
+transfer nor tied to the record, so any still-valid commitment older than the
+record can amend the transferee's ownership, whoever holds it. That includes
+the transferor: an actor who committed to the object twice, or committed and
+then registered it directly, can transfer the object and afterwards reveal the
+commitment it held in reserve to own it again. Only the commitment that created
+the record is refused. The window closes when those commitments expire, ten
+minutes after they were made by default.
 
 Native and optional EVM execution supply this metadata through the same module
 command path. Delegated commands preserve the actor as owner and the worker as

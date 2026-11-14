@@ -61,3 +61,29 @@ fn object_calldata_preserves_ordinary_delegation_bytes_and_pet_attachment_bindin
     pet.pet_tag_proof = None;
     assert!(encode_threshold_object(&ThresholdObject::Document(pet), "signed-delegation").is_err());
 }
+
+fn document_of(bytes: usize) -> ThresholdObject {
+    let mut document = document();
+    let prefix = r#"{"enc_cmt":[1,2,3],"encrypted_data":["#;
+    let suffix = r#"4],"nonce":[0,0,0,0,0,0,0,0,0,0,0,0]}"#;
+    let filler = (bytes - prefix.len() - suffix.len()) / 2;
+    document.document = format!("{prefix}{}{suffix}", "4,".repeat(filler));
+    ThresholdObject::Document(document)
+}
+
+#[test]
+fn a_request_the_node_would_refuse_for_its_size_is_not_encoded() {
+    let fits = document_of(MAX_OBJECT_REQUEST_BYTES - 1024);
+    let bytes = encode_threshold_object(&fits, "signed-delegation").unwrap();
+    let call = IVera::storeThresholdObjectCall::abi_decode(&bytes).unwrap();
+    assert!(call.request.len() <= MAX_OBJECT_REQUEST_BYTES);
+
+    let oversized = document_of(MAX_OBJECT_REQUEST_BYTES);
+    oversized.validate().unwrap();
+    assert!(serde_json::to_vec(&oversized).unwrap().len() > MAX_OBJECT_REQUEST_BYTES);
+    let error = encode_threshold_object(&oversized, "signed-delegation").unwrap_err();
+    assert!(
+        matches!(&error, ClientError::Signing(reason) if reason.contains("above the")),
+        "{error}"
+    );
+}

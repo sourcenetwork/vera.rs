@@ -292,15 +292,12 @@ pub struct GenerateCommitmentResult {
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AcpParams {
-    /// Retained for the operator parameter encoding; commands carry no expiry to enforce.
-    pub policy_command_max_expiration_delta: u64,
     pub registrations_commitment_validity: Duration,
 }
 
 impl Default for AcpParams {
     fn default() -> Self {
         Self {
-            policy_command_max_expiration_delta: 12 * 60 * 60,
             registrations_commitment_validity: Duration::Seconds(10 * 60),
         }
     }

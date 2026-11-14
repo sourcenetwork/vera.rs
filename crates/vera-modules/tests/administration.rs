@@ -31,7 +31,6 @@ const fn request(sequence: u64) -> AdministrativeRequest {
         sequence,
         expires_at: 100,
         command: AdministrativeCommand::SetAcpParameters(AcpParams {
-            policy_command_max_expiration_delta: 90,
             registrations_commitment_validity: Duration::Blocks(12),
         }),
     }
@@ -71,8 +70,8 @@ fn quorum_changes_parameters_once_and_survives_serialization() {
     assert_eq!(
         acp.query_params()
             .unwrap()
-            .policy_command_max_expiration_delta,
-        90
+            .registrations_commitment_validity,
+        Duration::Blocks(12)
     );
     assert_eq!(vera.administration().unwrap().unwrap().sequence, 1);
     let bytes = vera.store().serialize();

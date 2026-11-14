@@ -1878,8 +1878,7 @@ resources:
         let authority = alice();
 
         let params = AcpParams {
-            policy_command_max_expiration_delta: 43200,
-            registrations_commitment_validity: crate::types::Duration::Seconds(600),
+            registrations_commitment_validity: crate::types::Duration::Seconds(1200),
         };
 
         assert!(module.update_params(&authority, params).is_err());

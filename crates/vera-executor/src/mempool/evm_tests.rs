@@ -124,3 +124,24 @@ async fn recheck_rebuilds_balance_reservations() {
     let message = rejection(validator.validate_tx(&unfunded).await);
     assert!(message.contains("insufficient balance"), "{message}");
 }
+
+#[tokio::test]
+async fn releasing_reservations_frees_the_nonce_of_a_dropped_transaction() {
+    let signer = PrivateKeySigner::random();
+    let other = PrivateKeySigner::random();
+    let state = funded(&signer, 0, 2).with_account(other.address(), 0, U256::from(COST));
+    let mut validator = MempoolValidator::new(state, test_config(), 0);
+    let dropped = sign(&signer, transfer(0, Address::ZERO));
+    let kept = sign(&other, transfer(0, Address::ZERO));
+    validator.validate_tx(&dropped).await.unwrap();
+    validator.validate_tx(&kept).await.unwrap();
+    let corrected = sign(&signer, transfer(0, Address::repeat_byte(1)));
+    let message = rejection(validator.validate_tx(&corrected).await);
+    assert!(message.contains("expected 1, got 0"), "{message}");
+
+    validator.release_evm_reservations();
+    validator.recheck_pending_tx(&kept).await.unwrap();
+    assert_eq!(validator.validate_tx(&corrected).await.unwrap().nonce, 0);
+    let message = rejection(validator.validate_tx(&kept).await);
+    assert!(message.contains("expected 1, got 0"), "{message}");
+}

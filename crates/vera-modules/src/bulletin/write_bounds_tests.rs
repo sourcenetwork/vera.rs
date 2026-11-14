@@ -69,6 +69,37 @@ fn namespace_identifiers_are_bounded_in_both_spellings() {
 }
 
 #[test]
+fn a_collaborator_did_is_bounded_before_state_is_read() {
+    let (mut module, mut acp) = registered("ns");
+    let longest = format!(
+        "did:key:{}",
+        "w".repeat(MAX_COLLABORATOR_DID_BYTES - "did:key:".len())
+    );
+    module
+        .add_collaborator(&mut acp, &tx(), &owner(), "ns", &longest)
+        .unwrap();
+    let before = (module.store().serialize(), acp.store().serialize());
+    let oversized = format!("{longest}w");
+    assert!(matches!(
+        module.add_collaborator(&mut acp, &tx(), &owner(), "ns", &oversized),
+        Err(BulletinError::CollaboratorTooLong(
+            MAX_COLLABORATOR_DID_BYTES
+        ))
+    ));
+    assert!(matches!(
+        module.remove_collaborator(&mut acp, &tx(), &owner(), "ns", &oversized),
+        Err(BulletinError::CollaboratorTooLong(_))
+    ));
+    assert_eq!(
+        (module.store().serialize(), acp.store().serialize()),
+        before
+    );
+    module
+        .remove_collaborator(&mut acp, &tx(), &owner(), "ns", &longest)
+        .unwrap();
+}
+
+#[test]
 fn post_fields_are_bounded_so_one_post_cannot_exhaust_the_read_budget() {
     let (mut module, acp) = registered("ns");
     let before = module.store().serialize();

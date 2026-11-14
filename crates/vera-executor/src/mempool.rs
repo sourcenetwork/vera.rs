@@ -102,6 +102,15 @@ impl<S: StateDbRead> MempoolValidator<S> {
         self.native_nonces = native_nonces;
     }
 
+    /// Forget every EVM sender's pending nonce and balance.
+    ///
+    /// Call when EVM transactions leave the pool without a finalized block,
+    /// then [`Self::recheck_pending_tx`] for each EVM transaction that stays,
+    /// in admission order. Native reservations are untouched.
+    pub fn release_evm_reservations(&mut self) {
+        self.evm_reserved.clear();
+    }
+
     /// Recheck immutable transactions already authenticated at admission.
     ///
     /// Call once per retained transaction, in admission order, after [`Self::reset`].

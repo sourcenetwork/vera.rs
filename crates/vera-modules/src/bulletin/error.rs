@@ -12,6 +12,9 @@ pub enum BulletinError {
     #[error("namespace identifier must not exceed {0} bytes")]
     NamespaceTooLong(usize),
 
+    #[error("collaborator DID must not exceed {0} bytes")]
+    CollaboratorTooLong(usize),
+
     #[error("post payload must be between 1 and {0} bytes")]
     PostPayloadTooLarge(usize),
 

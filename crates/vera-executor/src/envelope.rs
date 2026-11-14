@@ -11,7 +11,8 @@ use crate::ExecutionError;
 /// The transaction hash is the hash of these bytes, so trailing bytes and the
 /// string-wrapped network form would give one signed transaction many hashes.
 /// A legacy transaction without a chain ID is valid on every deployment and
-/// is refused.
+/// is refused. So is a blob transaction: nothing here stores blobs, and its
+/// pooled form carries a sidecar the signature does not cover.
 pub(crate) fn decode_envelope(tx_bytes: &[u8]) -> Result<TxEnvelope, ExecutionError> {
     let envelope = TxEnvelope::decode_2718_exact(tx_bytes)
         .map_err(|error| ExecutionError::TxDecode(error.to_string()))?;
@@ -20,12 +21,22 @@ pub(crate) fn decode_envelope(tx_bytes: &[u8]) -> Result<TxEnvelope, ExecutionEr
             "legacy transaction has no chain ID".to_string(),
         ));
     }
+    if matches!(envelope, TxEnvelope::Eip4844(_)) {
+        return Err(blob_transaction());
+    }
     Ok(envelope)
+}
+
+pub(crate) fn blob_transaction() -> ExecutionError {
+    ExecutionError::TxDecode("blob transactions are not supported".to_string())
 }
 
 #[cfg(test)]
 mod tests {
-    use alloy_consensus::{SignableTransaction, TxEip1559, TxLegacy};
+    use alloy_consensus::{
+        BlobTransactionSidecar, BlobTransactionSidecarVariant, SignableTransaction, TxEip1559,
+        TxEip4844, TxEip4844Variant, TxEip4844WithSidecar, TxLegacy,
+    };
     use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{Address, TxKind};
     use alloy_signer::SignerSync;
@@ -57,6 +68,44 @@ mod tests {
         };
         let signature = signer().sign_hash_sync(&tx.signature_hash()).unwrap();
         TxEnvelope::Eip1559(tx.into_signed(signature))
+    }
+
+    fn blob(sidecar: Option<BlobTransactionSidecar>) -> TxEnvelope {
+        let tx = TxEip4844 {
+            chain_id: 9001,
+            gas_limit: 21_000,
+            blob_versioned_hashes: vec![alloy_primitives::B256::with_last_byte(1)],
+            ..Default::default()
+        };
+        let signature = signer().sign_hash_sync(&tx.signature_hash()).unwrap();
+        let variant = match sidecar {
+            Some(sidecar) => TxEip4844Variant::TxEip4844WithSidecar(TxEip4844WithSidecar {
+                tx,
+                sidecar: BlobTransactionSidecarVariant::Eip4844(sidecar),
+            }),
+            None => TxEip4844Variant::TxEip4844(tx),
+        };
+        TxEnvelope::Eip4844(variant.into_signed(signature))
+    }
+
+    #[test]
+    fn a_blob_transaction_is_rejected_with_or_without_its_sidecar() {
+        let sidecar = BlobTransactionSidecar::new(
+            vec![Default::default()],
+            vec![Default::default()],
+            vec![Default::default()],
+        );
+        let plain = blob(None).encoded_2718();
+        let pooled = blob(Some(sidecar)).encoded_2718();
+        assert_ne!(plain, pooled);
+        for bytes in [plain, pooled] {
+            assert_eq!(bytes[0], 3);
+            TxEnvelope::decode_2718_exact(&bytes).unwrap();
+            assert!(matches!(
+                decode_envelope(&bytes),
+                Err(ExecutionError::TxDecode(reason)) if reason.contains("blob")
+            ));
+        }
     }
 
     #[test]

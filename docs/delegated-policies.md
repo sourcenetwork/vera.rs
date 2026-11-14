@@ -64,13 +64,17 @@ resource descriptions, relation/permission `doc`, and `meta` entries are retaine
 in compiled policy records. User metadata is separate from the policy description.
 A permission's compiled expression nests at most 16 set operators, counting the
 implicit union with `owner` and, for a Defra `read`, the union with `write`; a
-chain of one repeated `+` or `&` is a single level. Parentheses nest at most 32
-deep. A tuple reference `relation->permission` is unresolved unless every
+chain of one repeated `+` or `&` is a single level. It names at most 4,096
+operands, counting the implicit ones. Parentheses nest at most 32 deep. A tuple reference `relation->permission` is unresolved unless every
 resource the relation's `types` admit declares that permission; a relation
-without `types` needs one resource that declares it.
+without `types` needs one resource that declares it. A tuple that names
+an actor grants nothing through the reference unless `actor.relations` declares
+that permission.
 
 Permission evaluation resolves cycles among relationships, such as groups that
-are members of each other, to the membership that is actually reachable. An
+are members of each other, to the membership that is actually reachable. A
+group is walked once per check however many paths lead back to it, so groups
+that are all members of each other cost their relationships, not their paths. An
 exclusion fails as indeterminate only when its excluded side leads back to a
 permission still being evaluated above it.
 

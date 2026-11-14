@@ -548,7 +548,6 @@ fn reveal_checks_deadline_without_waiting_for_cleanup() {
         module
             .set_params(&AcpParams {
                 registrations_commitment_validity: validity,
-                ..AcpParams::default()
             })
             .unwrap();
         let generated = module
