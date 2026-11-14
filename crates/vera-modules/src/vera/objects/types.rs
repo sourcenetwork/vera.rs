@@ -133,9 +133,11 @@ impl ThresholdObject {
         }
     }
     pub fn validate(&self) -> Result<()> {
-        if serde_json::to_vec(self).map_err(invalid)?.len() > MAX_OBJECT_REQUEST_BYTES {
-            return Err(invalid("object request exceeds byte limit"));
-        }
+        self.validated_id().map(drop)
+    }
+
+    /// Validate the object and return its identity, parsing its content once.
+    pub fn validated_id(&self) -> Result<String> {
         identifier(self.ring_id())?;
         let (policy, resource, permission) = match self {
             Self::Document(d) => {
@@ -154,8 +156,7 @@ impl ThresholdObject {
         identifier(policy)?;
         text(resource, 256)?;
         text(permission, 256)?;
-        self.id()?;
-        Ok(())
+        self.id()
     }
 
     /// Canonical identity used by current Rust Orbis consumers, independent of JSON whitespace.
@@ -235,12 +236,16 @@ impl EncryptedDocument {
 
 impl ObjectRecord {
     pub fn validate(&self, kind: ObjectKind, id: &str) -> Result<()> {
-        self.object.validate()?;
+        if self.id != id || self.object.kind() != kind || self.object.validated_id()? != id {
+            return Err(invalid("object record identity or revision mismatch"));
+        }
+        self.validate_binding()
+    }
+
+    /// The checks that do not depend on the object's content.
+    pub(super) fn validate_binding(&self) -> Result<()> {
         vera_identity::Did::new(&self.creator).map_err(invalid)?;
-        if self.id != id
-            || crate::actor::canonical_str(&self.creator) != self.creator
-            || self.object.id()? != id
-            || self.object.kind() != kind
+        if crate::actor::canonical_str(&self.creator) != self.creator
             || self.deployment_root == [0; 32]
             || self.revision.block_height == 0
         {

@@ -56,7 +56,3 @@ indexes before publishing module state. Missing indexes, orphaned entries,
 invalid presence markers, malformed records, and mismatched identities stop
 recovery with an error. Configuration must also decode successfully. Validation
 does not repair or discard retained records.
-
-The token deletion helper removes the expiry entry together with the primary,
-issuer, and account entries. Otherwise, a deleted token's deadline would later
-make expiry processing fail when it could not find the primary record.

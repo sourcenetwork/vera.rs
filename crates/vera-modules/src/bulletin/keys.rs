@@ -22,12 +22,23 @@ pub const COLLABORATOR_PREFIX: &[u8] = b"collaborator/";
 /// Module parameters key.
 pub const PARAMS_KEY: &[u8] = b"p_bulletin";
 
+const NAMESPACE_ID_PREFIX: &str = "bulletin/";
+
 /// Accept a short namespace name or its stored identifier.
 pub fn namespace_id(namespace: &str) -> String {
-    if namespace.starts_with("bulletin/") {
+    if namespace.starts_with(NAMESPACE_ID_PREFIX) {
         namespace.to_owned()
     } else {
-        format!("bulletin/{namespace}")
+        format!("{NAMESPACE_ID_PREFIX}{namespace}")
+    }
+}
+
+/// Length of the stored identifier that [`namespace_id`] returns.
+pub fn namespace_id_len(namespace: &str) -> usize {
+    if namespace.starts_with(NAMESPACE_ID_PREFIX) {
+        namespace.len()
+    } else {
+        NAMESPACE_ID_PREFIX.len() + namespace.len()
     }
 }
 
@@ -192,20 +203,5 @@ mod tests {
         let encoded = borsh::to_vec(&post).unwrap();
         let decoded = Post::try_from_slice(&encoded).unwrap();
         assert_eq!(post, decoded);
-    }
-
-    #[test]
-    fn borsh_roundtrip_bulletin_actor() {
-        use borsh::BorshDeserialize;
-        use vera_identity::Did;
-
-        use crate::bulletin::types::BulletinActor;
-
-        let actor = BulletinActor(
-            Did::new("did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK").unwrap(),
-        );
-        let encoded = borsh::to_vec(&actor).unwrap();
-        let decoded = BulletinActor::try_from_slice(&encoded).unwrap();
-        assert_eq!(actor, decoded);
     }
 }

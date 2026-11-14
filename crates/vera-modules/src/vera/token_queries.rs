@@ -16,7 +16,6 @@ impl VeraModule {
     pub(super) fn collect_tokens(
         &self,
         prefix: &[u8],
-        indexed: bool,
         record_key: impl Fn(&JWSTokenRecord) -> Vec<u8>,
     ) -> Result<Vec<JWSTokenRecord>> {
         let mut records = Vec::new();
@@ -33,24 +32,19 @@ impl VeraModule {
                     "token query exceeds limit; use certified prefix pages".into(),
                 ));
             }
-            let value = if indexed {
-                let hash = extract_hash_from_index_suffix(&key[prefix.len()..])
-                    .ok_or_else(|| VeraError::State("invalid token index key".into()))?;
-                if value != [1] {
-                    return Err(VeraError::State("invalid token index value".into()));
-                }
-                let primary_key = keys::jws_token_key(&hash);
-                let value = self
-                    .store
-                    .get_ref(&primary_key)
-                    .ok_or_else(|| VeraError::State("indexed token missing".into()))?;
-                bytes = bytes
-                    .saturating_add(primary_key.len())
-                    .saturating_add(value.len());
-                value
-            } else {
-                value
-            };
+            let hash = extract_hash_from_index_suffix(&key[prefix.len()..])
+                .ok_or_else(|| VeraError::State("invalid token index key".into()))?;
+            if value != [1] {
+                return Err(VeraError::State("invalid token index value".into()));
+            }
+            let primary_key = keys::jws_token_key(&hash);
+            let value = self
+                .store
+                .get_ref(&primary_key)
+                .ok_or_else(|| VeraError::State("indexed token missing".into()))?;
+            bytes = bytes
+                .saturating_add(primary_key.len())
+                .saturating_add(value.len());
             if bytes > MAX_BYTES {
                 return Err(VeraError::State(
                     "token query exceeds byte limit; use certified prefix pages".into(),
@@ -123,10 +117,8 @@ mod tests {
             vera.get_jws_tokens_by_account("account").unwrap().len(),
             MAX_RECORDS
         );
-        assert_eq!(vera.get_all_jws_tokens().unwrap().len(), MAX_RECORDS);
         vera.set_jws_token(&record("extra")).unwrap();
         assert!(vera.get_jws_tokens_by_account("account").is_err());
-        assert!(vera.get_all_jws_tokens().is_err());
         let mut vera = VeraModule::new();
         vera.set_jws_token(&record("hash")).unwrap();
         let primary = keys::jws_token_key("hash");
@@ -146,7 +138,6 @@ mod tests {
         token.bearer_token = "a".repeat(MAX_BYTES);
         vera.set_jws_token(&token).unwrap();
         assert!(vera.get_jws_tokens_by_account("account").is_err());
-        assert!(vera.get_all_jws_tokens().is_err());
         token.bearer_token.clear();
         token.authorized_account = "other".into();
         vera.store

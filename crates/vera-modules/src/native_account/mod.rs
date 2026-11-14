@@ -29,11 +29,9 @@ pub enum NonceError {
     Malformed(String),
 }
 
-/// In-memory per-DID nonce store for native BLS transactions.
+/// Per-DID nonce store for native BLS transactions.
 ///
 /// Tracks the next expected nonce for each DID. New accounts start at 0.
-/// The executor clones this store per-block, so the `HashMap` backend
-/// fits the existing clone-per-block pattern.
 #[derive(Clone, Debug, Default)]
 pub struct NativeNonceStore {
     store: InMemoryKvStore,

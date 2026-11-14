@@ -70,7 +70,6 @@ fn main() {
         let mut total_records = 0;
         let mut total_value_bytes = 0;
         for (module, store) in [modules.acp.store(), modules.bulletin.store(), modules.vera.store(), modules.nonces.store()].into_iter().enumerate() {
-            assert!(store.dirty_entries().is_empty());
             hash.update(&[u8::try_from(module).unwrap()]);
             for (key, value) in store.prefix_iter(b"") {
                 hash.update(&(key.len() as u64).to_le_bytes());

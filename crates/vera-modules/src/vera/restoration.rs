@@ -165,8 +165,6 @@ mod tests {
             assert!(module.validate_restored_tokens().is_err());
             assert_eq!(module.store.serialize(), before);
         }
-        vera.delete_jws_token(&hash).unwrap();
-        vera.validate_restored_tokens().unwrap();
         VeraModule::new().validate_restored_tokens().unwrap();
     }
 }

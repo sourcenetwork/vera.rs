@@ -53,7 +53,7 @@ pub(super) fn dispatch(
             };
 
             let event = IBulletin::NamespaceCreated {
-                namespace: alloy_primitives::keccak256(call.namespace.as_bytes()),
+                namespace: alloy_primitives::keccak256(ns.id.as_bytes()),
                 owner: tx_ctx.signer.clone(),
             };
             let ret = IBulletin::registerNamespaceCall::abi_encode_returns(&json_bytes(&ns));
@@ -89,7 +89,7 @@ pub(super) fn dispatch(
             };
 
             let event = IBulletin::PostCreated {
-                namespace: alloy_primitives::keccak256(call.namespace.as_bytes()),
+                namespace: namespace_topic(&call.namespace),
                 postId: post_id,
                 artifact: call.artifact,
             };
@@ -120,7 +120,7 @@ pub(super) fn dispatch(
             };
 
             let event = IBulletin::CollaboratorAdded {
-                namespace: alloy_primitives::keccak256(call.namespace.as_bytes()),
+                namespace: namespace_topic(&call.namespace),
                 collaborator: collaborator_did.clone(),
             };
             let ret = IBulletin::addCollaboratorCall::abi_encode_returns(&collaborator_did);
@@ -151,7 +151,7 @@ pub(super) fn dispatch(
             };
 
             let event = IBulletin::CollaboratorRemoved {
-                namespace: alloy_primitives::keccak256(call.namespace.as_bytes()),
+                namespace: namespace_topic(&call.namespace),
                 collaborator: collaborator_did.clone(),
             };
             let ret = IBulletin::removeCollaboratorCall::abi_encode_returns(&collaborator_did);
@@ -308,6 +308,12 @@ pub(super) fn dispatch(
     }
 }
 
+/// Events index a namespace by its stored identifier, so both accepted
+/// spellings of one namespace produce the same topic.
+fn namespace_topic(namespace: &str) -> B256 {
+    alloy_primitives::keccak256(vera_modules::bulletin::keys::namespace_id(namespace).as_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -364,5 +370,58 @@ mod tests {
         let event = IBulletin::PostCreated::decode_log(&result.logs[0]).unwrap();
         assert_eq!(event.data.postId, expected);
         assert_eq!(event.data.artifact, create.artifact);
+    }
+
+    #[test]
+    fn both_spellings_of_a_namespace_share_one_event_topic() {
+        let mut module = BulletinModule::new();
+        let mut acp = AcpModule::new();
+        let block = BlockExecCtx::default();
+        let tx = TxExecCtx {
+            sequence: 0,
+            tx_hash: vec![1; 32],
+            signer: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK".into(),
+        };
+        let writer = "did:key:z6MkmjY8GnV5iJjM2BXSVn4MoDbZZbLffKHsygxC4BLd5v8P";
+        let mut topics = Vec::new();
+        let mut call = |input: Vec<u8>| {
+            let result = dispatch(&mut module, &mut acp, &block, &tx, &input, WRITE_GAS).unwrap();
+            assert!(!result.precompile.status.is_revert());
+            assert_eq!(result.logs.len(), 1);
+            topics.push(result.logs[0].topics()[1]);
+        };
+        call(
+            IBulletin::registerNamespaceCall {
+                namespace: "team".into(),
+            }
+            .abi_encode(),
+        );
+        for (namespace, payload) in [("team", "first"), ("bulletin/team", "second")] {
+            call(
+                IBulletin::createPostCall {
+                    namespace: namespace.into(),
+                    payload: payload.as_bytes().to_vec().into(),
+                    proof: Default::default(),
+                    artifact: String::new(),
+                }
+                .abi_encode(),
+            );
+        }
+        call(
+            IBulletin::addCollaboratorCall {
+                namespace: "bulletin/team".into(),
+                collaboratorDid: writer.into(),
+            }
+            .abi_encode(),
+        );
+        call(
+            IBulletin::removeCollaboratorCall {
+                namespace: "team".into(),
+                collaboratorDid: writer.into(),
+            }
+            .abi_encode(),
+        );
+        let stored = alloy_primitives::keccak256(b"bulletin/team");
+        assert_eq!(topics, vec![stored; 5]);
     }
 }

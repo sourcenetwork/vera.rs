@@ -134,68 +134,6 @@ mod tests {
     }
 
     #[test]
-    fn deleting_tokens_removes_deadlines_before_recovery() {
-        let mut vera = VeraModule::new();
-        for (name, expiry, invalidate) in [
-            ("active", 150, false),
-            ("invalid", 150, true),
-            ("permanent", 0, false),
-        ] {
-            let hash = token(&mut vera, name, expiry);
-            if invalidate {
-                vera.update_jws_token_status(
-                    &context(110),
-                    &hash,
-                    JWSTokenStatus::Invalid,
-                    "operator",
-                )
-                .unwrap();
-            }
-            vera.delete_jws_token(&hash).unwrap();
-            assert!(vera.get_jws_token(&hash).unwrap().is_none());
-            assert_eq!(
-                vera.store
-                    .prefix_iter(keys::JWS_TOKEN_EXPIRY_PREFIX)
-                    .count(),
-                0
-            );
-            assert!(
-                vera.get_jws_tokens_by_did(&Did::new("did:key:issuer").unwrap())
-                    .unwrap()
-                    .is_empty()
-            );
-            assert!(
-                vera.get_jws_tokens_by_account("account")
-                    .unwrap()
-                    .is_empty()
-            );
-            let before = vera.store.serialize();
-            assert!(matches!(
-                vera.delete_jws_token(&hash),
-                Err(VeraError::TokenNotFound { .. })
-            ));
-            assert_eq!(vera.store.serialize(), before);
-        }
-        let due = token(&mut vera, "remaining", 150);
-        let mut restored =
-            VeraModule::from_store(InMemoryKvStore::deserialize(&vera.store.serialize()).unwrap());
-        restored
-            .check_and_update_expired_tokens(&context(151))
-            .unwrap();
-        assert_eq!(
-            restored.get_jws_token(&due).unwrap().unwrap().status,
-            JWSTokenStatus::Invalid
-        );
-        assert_eq!(
-            restored
-                .store
-                .prefix_iter(keys::JWS_TOKEN_EXPIRY_PREFIX)
-                .count(),
-            0
-        );
-    }
-
-    #[test]
     fn token_expiry_retains_history_and_recovers_active_deadlines() {
         let mut vera = VeraModule::new();
         for id in 0..2000 {

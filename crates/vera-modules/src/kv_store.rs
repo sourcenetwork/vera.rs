@@ -1,6 +1,6 @@
 //! Module-level KV store trait and in-memory implementation.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 use bytes::Bytes;
 use futures::{TryStream, TryStreamExt as _};
@@ -36,22 +36,11 @@ pub trait ModuleKvStore: Clone + std::fmt::Debug + Default + Send + Sync {
 
 /// Ordered in-memory KV store with shared snapshots.
 ///
-/// Tracks dirty keys modified since the last `reset_dirty()` call (or clone).
-/// Writes copy the affected tree path and share unchanged values. Each clone
-/// starts with an empty dirty set so only that execution's mutations are captured.
-#[derive(Debug, Default)]
+/// Writes copy the affected tree path and share unchanged values. An execution's
+/// changes are the difference from the snapshot it was cloned from (`diff_from`).
+#[derive(Clone, Debug, Default)]
 pub struct InMemoryKvStore {
     data: OrdMap<Vec<u8>, Bytes>,
-    dirty: HashSet<Vec<u8>>,
-}
-
-impl Clone for InMemoryKvStore {
-    fn clone(&self) -> Self {
-        Self {
-            data: self.data.clone(),
-            dirty: HashSet::new(),
-        }
-    }
 }
 
 impl InMemoryKvStore {
@@ -88,18 +77,17 @@ impl InMemoryKvStore {
             .map(|(key, value)| (key.as_slice(), value.as_ref()))
     }
 
-    /// Construct a store from owned key-value pairs without marking them dirty.
+    /// Construct a store from owned key-value pairs.
     pub fn from_pairs(pairs: Vec<(Vec<u8>, Vec<u8>)>) -> Self {
         Self {
             data: pairs
                 .into_iter()
                 .map(|(key, value)| (key, Bytes::from(value)))
                 .collect(),
-            dirty: HashSet::new(),
         }
     }
 
-    /// Load owned records incrementally, without recording execution changes.
+    /// Load owned records incrementally.
     /// Returns no store if the stream fails; duplicate keys keep the last value.
     pub async fn try_from_stream<S>(records: S) -> Result<Self, S::Error>
     where
@@ -107,7 +95,6 @@ impl InMemoryKvStore {
     {
         Ok(Self {
             data: records.try_collect().await?,
-            dirty: HashSet::new(),
         })
     }
 
@@ -137,26 +124,10 @@ impl InMemoryKvStore {
         self.data.is_empty()
     }
 
-    /// Returns each dirty key and its current value (`None` if deleted).
-    pub fn dirty_entries(&self) -> Vec<(Vec<u8>, Option<Vec<u8>>)> {
-        self.dirty
-            .iter()
-            .map(|k| {
-                let val = self.data.get(k).map(|value| value.to_vec());
-                (k.clone(), val)
-            })
-            .collect()
-    }
-
-    /// Clear the dirty set.
-    pub fn reset_dirty(&mut self) {
-        self.dirty.clear();
-    }
-
     /// Whether all final record changes fit native key and value limits.
     ///
     /// Borrows changed entries without copying their keys or values. Comparing map
-    /// snapshots includes changes across nested clones that reset dirty tracking.
+    /// snapshots includes changes made through nested clones.
     /// Unchanged records and removed values are not writes and are not checked.
     pub fn changes_fit_native_bounds(&self, base: &Self) -> bool {
         base.data.diff(&self.data).all(|change| match change {
@@ -171,8 +142,7 @@ impl InMemoryKvStore {
     /// Compute the diff between `self` and `base`, returning all changed/added/deleted keys.
     ///
     /// Each entry is `(key, Some(value))` for additions/updates, `(key, None)` for deletions.
-    /// This captures ALL mutations regardless of clone boundaries, making it safe to use
-    /// when intermediate clones reset the dirty set (e.g. the precompile clone path).
+    /// This captures all mutations regardless of clone boundaries.
     pub fn diff_from(&self, base: &Self) -> Vec<(Vec<u8>, Option<Vec<u8>>)> {
         base.data
             .diff(&self.data)
@@ -197,12 +167,10 @@ impl ModuleKvStore for InMemoryKvStore {
     }
 
     fn put(&mut self, key: &[u8], value: Vec<u8>) {
-        self.dirty.insert(key.to_vec());
         self.data.insert(key.to_vec(), Bytes::from(value));
     }
 
     fn delete(&mut self, key: &[u8]) {
-        self.dirty.insert(key.to_vec());
         self.data.remove(key);
     }
 
@@ -307,7 +275,6 @@ mod tests {
         for key in 0_u32..2_048 {
             base.put(&key.to_be_bytes(), key.to_le_bytes().to_vec());
         }
-        base.reset_dirty();
         let original = base.serialize();
         let mut fork = base.clone();
         let mut expected: BTreeMap<_, _> = base.prefix_scan(b"").into_iter().collect();
@@ -329,7 +296,6 @@ mod tests {
         assert!(abandoned.is_empty());
         drop(abandoned);
         assert_eq!(base.serialize(), original);
-        assert!(base.dirty_entries().is_empty());
         assert_eq!(
             fork.prefix_scan(b""),
             expected.into_iter().collect::<Vec<_>>()
@@ -344,57 +310,6 @@ mod tests {
         assert_eq!(replayed.serialize(), fork.serialize());
         let restored = InMemoryKvStore::deserialize(&fork.serialize()).unwrap();
         assert!(restored.diff_from(&fork).is_empty());
-    }
-
-    #[test]
-    fn dirty_tracks_puts() {
-        let mut store = InMemoryKvStore::default();
-        store.put(b"a", b"1".to_vec());
-        store.put(b"b", b"2".to_vec());
-        let dirty = store.dirty_entries();
-        assert_eq!(dirty.len(), 2);
-        assert!(
-            dirty
-                .iter()
-                .any(|(k, v)| k == b"a" && v.as_deref() == Some(b"1".as_slice()))
-        );
-        assert!(
-            dirty
-                .iter()
-                .any(|(k, v)| k == b"b" && v.as_deref() == Some(b"2".as_slice()))
-        );
-    }
-
-    #[test]
-    fn dirty_tracks_deletes() {
-        let mut store = InMemoryKvStore::default();
-        store.put(b"key", b"val".to_vec());
-        store.reset_dirty();
-        store.delete(b"key");
-        let dirty = store.dirty_entries();
-        assert_eq!(dirty.len(), 1);
-        assert_eq!(dirty[0], (b"key".to_vec(), None));
-    }
-
-    #[test]
-    fn clone_resets_dirty() {
-        let mut store = InMemoryKvStore::default();
-        store.put(b"key", b"val".to_vec());
-        assert!(!store.dirty_entries().is_empty());
-        let fork = store.clone();
-        assert!(fork.dirty_entries().is_empty());
-        assert_eq!(fork.get(b"key").unwrap(), b"val");
-    }
-
-    #[test]
-    fn reset_dirty_clears() {
-        let mut store = InMemoryKvStore::default();
-        store.put(b"a", b"1".to_vec());
-        store.put(b"b", b"2".to_vec());
-        assert_eq!(store.dirty_entries().len(), 2);
-        store.reset_dirty();
-        assert!(store.dirty_entries().is_empty());
-        assert_eq!(store.get(b"a").unwrap(), b"1");
     }
 
     #[test]
@@ -423,17 +338,6 @@ mod tests {
     }
 
     #[test]
-    fn from_pairs_no_dirty() {
-        let store = InMemoryKvStore::from_pairs(vec![
-            (b"k1".to_vec(), b"v1".to_vec()),
-            (b"k2".to_vec(), b"v2".to_vec()),
-        ]);
-        assert!(store.dirty_entries().is_empty());
-        assert_eq!(store.get(b"k1").unwrap(), b"v1");
-        assert_eq!(store.get(b"k2").unwrap(), b"v2");
-    }
-
-    #[test]
     fn streamed_load_keeps_owned_values_and_stops_on_error() {
         futures::executor::block_on(async {
             let value = Bytes::from(vec![7; 4096]);
@@ -446,7 +350,6 @@ mod tests {
             .unwrap();
             assert_eq!(store.get_ref(b"shared").unwrap().as_ptr(), value.as_ptr());
             assert_eq!(store.get_ref(b"replace"), Some(b"new".as_slice()));
-            assert!(store.dirty_entries().is_empty());
             assert_eq!(
                 store.serialize(),
                 InMemoryKvStore::from_pairs(vec![
@@ -459,7 +362,7 @@ mod tests {
             store.put(b"replace", b"changed".to_vec());
             assert_eq!(snapshot.get_ref(b"replace"), Some(b"new".as_slice()));
             assert_eq!(
-                store.dirty_entries(),
+                store.diff_from(&snapshot),
                 vec![(b"replace".to_vec(), Some(b"changed".to_vec()))]
             );
 
@@ -482,7 +385,6 @@ mod tests {
             .await
             .unwrap();
             assert!(empty.is_empty());
-            assert!(empty.dirty_entries().is_empty());
         });
     }
 }

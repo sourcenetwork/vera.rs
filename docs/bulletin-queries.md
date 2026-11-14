@@ -56,3 +56,14 @@ Registration results can be passed directly to subsequent reads, posting, and
 collaborator changes. Both forms select the same namespace and authorization
 object; an already prefixed ID is preserved. Verified client reads use the same
 normalization and enforce limits on the resulting storage key.
+
+Bulletin events index a namespace by the keccak256 hash of its stored ID
+(`bulletin/team`), whichever form the caller wrote. A log filter for the
+namespace `team` therefore uses `keccak256("bulletin/team")` as the topic.
+
+Writes bound every caller-supplied field. A stored namespace ID, including its
+`bulletin/` prefix, is at most 256 bytes. A post payload is 1 byte to 64 KiB, a
+proof at most 64 KiB and an artifact label at most 1,024 bytes. Requests beyond
+a bound fail before policy state is read. A single post therefore stays well
+below the collection work budget; a namespace still exceeds it through the
+number of its posts.

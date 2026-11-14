@@ -256,7 +256,11 @@ Listings use the current-prefix page protocol above. Pass `None` for the first
 cursor, then use the returned continuation unchanged. Limits are 1–128 records;
 byte limits may shorten a page. Each page is independently certified. No snapshot
 or proof of namespace existence is implied by an empty post/collaborator page.
-Stored collaborator records do not enumerate owner authority. A post's opaque
+Stored collaborator records do not enumerate owner authority, and they reflect
+only changes made through bulletin: a `collaborator` relationship that the
+namespace owner sets or deletes directly through ACP changes who may post
+without changing these records, until a bulletin add or remove for that actor
+brings the two back together. A post's opaque
 `proof` bytes are authenticated as stored data; these reads do not validate the
 application protocol represented by those bytes.
 

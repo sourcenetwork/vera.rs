@@ -44,7 +44,6 @@ fn snapshots_preserve_the_existing_borsh_format() {
     ]);
     let store = InMemoryKvStore::deserialize(&borsh::to_vec(&model).unwrap()).unwrap();
     assert_snapshot(&store, &model);
-    assert!(store.dirty_entries().is_empty());
 }
 
 #[test]

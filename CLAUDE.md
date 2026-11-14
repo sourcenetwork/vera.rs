@@ -483,6 +483,9 @@ The e2e test (`vera_e2e_canonical`) is the baseline gate. It exercises both EVM 
 
 Bulletin posts require a nonempty payload and ACP create-post permission. Proof
 bytes are optional application data and are retained unchanged when supplied.
+Payloads and proofs are limited to 64 KiB each, artifact labels to 1,024 bytes
+and stored namespace IDs to 256 bytes. Bulletin event topics hash the stored
+namespace ID. See `docs/bulletin-queries.md`.
 Successful post creation returns and emits the stored content-derived post ID.
 The creation event also retains the submitted artifact label.
 

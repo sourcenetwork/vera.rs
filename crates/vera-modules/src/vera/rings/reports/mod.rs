@@ -94,7 +94,6 @@ pub struct NodeDemeritSeed {
 impl RingRecord {
     /// Hash the same report snapshot consumed by existing Orbis signers.
     pub fn report_state_hash(&self) -> Result<String> {
-        self.validate(&self.id)?;
         let RingState::Active { keys } = &self.state else {
             return Err(invalid("ring is not active"));
         };
@@ -190,9 +189,6 @@ impl VeraModule {
         context: &BlockExecCtx,
         signed: &SignedReport,
     ) -> Result<ReportOutcome> {
-        if serde_json::to_vec(signed).map_err(invalid)?.len() > MAX_REPORT_REQUEST_BYTES {
-            return Err(invalid("report request exceeds byte limit"));
-        }
         let report = &signed.report;
         let now = context.timestamp.seconds;
         report.validate_shape(now).map_err(invalid)?;
@@ -261,7 +257,8 @@ impl VeraModule {
         if node.info.peer_id != report.accused_peer_id {
             return Err(invalid("accused endpoint changed"));
         }
-        let id = report.report_id();
+        let canonical = report.canonical_bytes();
+        let id = hex::encode(Sha256::digest(&canonical));
         if id != signed.report_id {
             return Err(invalid("report identifier mismatch"));
         }
@@ -279,7 +276,7 @@ impl VeraModule {
         vera_crypto::threshold::verify(
             scheme,
             &hex::decode(&keys.public_key).map_err(invalid)?,
-            &report.canonical_bytes(),
+            &canonical,
             &signature,
         )
         .map_err(invalid)?;

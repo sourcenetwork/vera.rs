@@ -7,7 +7,6 @@ sol! {
     interface IVera {
         // ── Events ──────────────────────────────────────────────────────
 
-        event JWSTokenCreated(string indexed tokenHash, string issuerDid);
         event JWSTokenInvalidated(string indexed tokenHash, string issuerDid);
 
         // ── Write methods ───────────────────────────────────────────────

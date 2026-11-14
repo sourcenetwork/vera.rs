@@ -37,12 +37,6 @@ pub struct ChainConfig {
     pub ignore_bearer_auth: bool,
 }
 
-/// Native BLS transaction operations for the Vera module.
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
-pub enum VeraOp {
-    InvalidateJWS { token_hash: String },
-}
-
 /// Module-level parameters (governance-controlled).
 #[derive(
     Clone, Debug, Default, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize,

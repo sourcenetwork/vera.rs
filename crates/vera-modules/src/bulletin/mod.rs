@@ -16,7 +16,9 @@ use types::{BulletinParams, Collaborator, Namespace, Post};
 use vera_acp::{Relationship, Subject};
 use vera_identity::Did;
 
-use crate::acp::types::{AccessRequest, Actor, Object, Operation, PolicyCmd, PolicyMarshalingType};
+use crate::acp::types::{
+    AccessRequest, Actor, Object, Operation, PolicyCmd, PolicyCmdResult, PolicyMarshalingType,
+};
 use crate::kv_store::{InMemoryKvStore, ModuleKvStore};
 use crate::types::{BlockExecCtx, TxExecCtx};
 
@@ -36,9 +38,15 @@ resources:
 
 const MODULE_DID: &str = "did:key:bulletin";
 
-/// Maximum accepted post payload; keeps any single post far below the
-/// per-namespace read budget so reads cannot be bricked by one write.
-const MAX_POST_PAYLOAD_BYTES: usize = 64 * 1024;
+/// Maximum accepted post payload. Together with the proof and namespace
+/// bounds it keeps any single post far below the collection read budget.
+pub const MAX_POST_PAYLOAD_BYTES: usize = 64 * 1024;
+/// Maximum accepted post proof.
+pub const MAX_POST_PROOF_BYTES: usize = 64 * 1024;
+/// Maximum artifact label copied into the post creation event.
+pub const MAX_POST_ARTIFACT_BYTES: usize = 1024;
+/// Maximum stored namespace identifier, including its `bulletin/` prefix.
+pub const MAX_NAMESPACE_ID_BYTES: usize = 256;
 
 /// Bulletin module.
 ///
@@ -51,8 +59,9 @@ const MAX_POST_PAYLOAD_BYTES: usize = 64 * 1024;
 ///
 /// The module lazily creates a single ACP policy on the first
 /// `register_namespace` call (stored as `"policy_id"` in the KV store).
-/// The policy defines one resource type `namespace` with one relation
-/// `collaborator` and one permission `create_post = collaborator`.
+/// The policy defines one resource type `namespace` with the relations
+/// `owner` and `collaborator` and one permission
+/// `create_post = owner + collaborator`.
 ///
 /// Cross-module calls use direct parameter passing — the caller
 /// (application/executor) passes `&mut AcpModule` to methods that
@@ -84,7 +93,6 @@ pub struct BulletinModule {
     store: InMemoryKvStore,
 }
 
-#[allow(dead_code)]
 impl BulletinModule {
     /// Create a new Bulletin module instance.
     pub fn new() -> Self {
@@ -103,56 +111,8 @@ impl BulletinModule {
 
     // ── Msg handlers ────────────────────────────────────────────────────
 
-    /// Register a new namespace owned by the creator.
-    ///
-    /// # Flow
-    ///
-    /// 1. Call `ensure_policy(acp)` — on first call, invokes
-    ///    `acp.create_module_policy(BULLETIN_POLICY_YAML,
-    ///    PolicyMarshalingType_YAML, "bulletin")` and stores the
-    ///    returned policy ID under `"policy_id"` key. Subsequent
-    ///    calls read the stored ID.
-    /// 2. Compute `namespace_id = "bulletin/" + namespace`.
-    /// 3. Read `"namespace/" + namespace_id` — if present, return
-    ///    `NamespaceAlreadyExists`.
-    /// 4. Resolve `owner_did` from `tx_ctx.signer` via
-    ///    `acp.get_actor_did(msg.Creator)` (Go: `GetActorDID`).
-    ///    The shim layer pre-resolves this and passes it as `creator`.
-    /// 5. Call `acp.module_policy_cmd(policy_cap, RegisterObject(
-    ///    Object { resource: "namespace", id: namespace_id }),
-    ///    owner_did, signer)` (Go: `ModulePolicyCmdForActorDID` —
-    ///    requires both the DID and the original signer address,
-    ///    plus a policy capability fetched from the scoped keeper).
-    ///    This registers the namespace as an ACP object with the creator
-    ///    as owner (granting implicit manager rights over `collaborator`).
-    /// 6. Build `Namespace`:
-    ///    ```text
-    ///    id           = namespace_id
-    ///    creator      = tx_ctx.signer
-    ///    owner_did    = creator.to_string()
-    ///    created_at   = block_ctx.timestamp
-    ///    ```
-    /// 7. Write namespace to `"namespace/" + namespace_id`.
-    /// 8. Return the created `Namespace`.
-    ///
-    /// # Reads
-    /// - `"policy_id"` (ensure_policy check)
-    /// - `"namespace/" + namespace_id` (existence check)
-    ///
-    /// # Writes
-    /// - `"policy_id"` (first call only — ensure_policy)
-    /// - `"namespace/" + namespace_id`
-    /// - ACP via `acp.create_module_policy()` (first call) + `acp.module_policy_cmd(RegisterObject)`
-    ///
-    /// # Ctx
-    /// `block_ctx.timestamp` for created_at, `tx_ctx.signer` for creator.
-    /// Go resolves `owner_did` from `msg.Creator` via `GetActorDID` —
-    /// vera.rs expects the shim layer to pre-resolve and pass as `creator`.
-    ///
-    /// # Errors
-    /// - `PolicyInitFailed` — ACP policy creation failed
-    /// - `NamespaceAlreadyExists` — namespace already registered
-    /// - ACP errors from `module_policy_cmd`
+    /// Register a namespace owned by the creator, creating the module policy on
+    /// first use. The namespace becomes an ACP object whose owner is the creator.
     pub fn register_namespace(
         &mut self,
         acp: &mut super::acp::AcpModule,
@@ -194,6 +154,8 @@ impl BulletinModule {
 
     /// Store a nonempty payload after checking the creator's ACP permission.
     /// Optional proof bytes are preserved for application-level verification.
+    /// The artifact label is not stored; it is bounded because the caller
+    /// copies it into the creation event.
     #[allow(clippy::too_many_arguments)]
     pub fn create_post(
         &mut self,
@@ -203,9 +165,18 @@ impl BulletinModule {
         namespace: &str,
         payload: &[u8],
         proof: &[u8],
-        _artifact: &str,
+        artifact: &str,
     ) -> Result<String> {
         validate_namespace(namespace)?;
+        if payload.len() > MAX_POST_PAYLOAD_BYTES {
+            return Err(BulletinError::PostPayloadTooLarge(MAX_POST_PAYLOAD_BYTES));
+        }
+        if proof.len() > MAX_POST_PROOF_BYTES {
+            return Err(BulletinError::PostProofTooLarge(MAX_POST_PROOF_BYTES));
+        }
+        if artifact.len() > MAX_POST_ARTIFACT_BYTES {
+            return Err(BulletinError::PostArtifactTooLarge(MAX_POST_ARTIFACT_BYTES));
+        }
         let creator = &crate::actor::canonical(creator);
         let policy_id = self
             .get_policy_id()?
@@ -218,9 +189,6 @@ impl BulletinModule {
             });
         }
 
-        if payload.len() > MAX_POST_PAYLOAD_BYTES {
-            return Err(BulletinError::PostPayloadTooLarge(MAX_POST_PAYLOAD_BYTES));
-        }
         if payload.is_empty() {
             return Err(BulletinError::InvalidPostPayload);
         }
@@ -268,6 +236,9 @@ impl BulletinModule {
 
     /// Add a collaborator to a namespace.
     ///
+    /// ACP holds the grant and the bulletin record lists it. A grant made
+    /// directly through ACP is listed here instead of being reported as new.
+    ///
     /// A secp256k1 `collaborator_did` may use any accepted spelling of its key;
     /// the collaborator is recorded and returned under the canonical
     /// `did:key:zQ3s...` DID that public key recovery produces.
@@ -292,32 +263,39 @@ impl BulletinModule {
             });
         }
 
-        if self
+        let listed = self
             .get_collaborator(&namespace_id, collaborator_did)?
-            .is_some()
-        {
+            .is_some();
+        let collab_did_parsed = Did::new(collaborator_did)
+            .map_err(|e| BulletinError::State(format!("invalid collaborator DID: {}", e)))?;
+
+        let result = acp
+            .direct_policy_cmd(
+                creator,
+                &policy_id,
+                PolicyCmd::SetRelationship(Relationship {
+                    resource: "namespace".into(),
+                    object_id: namespace_id.clone(),
+                    relation: "collaborator".into(),
+                    subject: Subject::Entity(collab_did_parsed),
+                }),
+            )
+            .map_err(|e| BulletinError::Unauthorized {
+                reason: e.to_string(),
+            })?;
+        let granted = matches!(
+            result,
+            PolicyCmdResult::SetRelationship {
+                record_existed: true,
+                ..
+            }
+        );
+        if granted && listed {
             return Err(BulletinError::CollaboratorAlreadyExists {
                 namespace: namespace.to_string(),
                 did: collaborator_did.to_string(),
             });
         }
-
-        let collab_did_parsed = Did::new(collaborator_did)
-            .map_err(|e| BulletinError::State(format!("invalid collaborator DID: {}", e)))?;
-
-        acp.direct_policy_cmd(
-            creator,
-            &policy_id,
-            PolicyCmd::SetRelationship(Relationship {
-                resource: "namespace".into(),
-                object_id: namespace_id.clone(),
-                relation: "collaborator".into(),
-                subject: Subject::Entity(collab_did_parsed),
-            }),
-        )
-        .map_err(|e| BulletinError::Unauthorized {
-            reason: e.to_string(),
-        })?;
 
         let record = Collaborator {
             did: collaborator_did.to_string(),
@@ -327,7 +305,8 @@ impl BulletinModule {
         Ok(collaborator_did.to_string())
     }
 
-    /// Remove a collaborator from a namespace.
+    /// Remove a collaborator from a namespace, clearing a grant or a listing
+    /// that a direct ACP change left without its counterpart.
     ///
     /// Same DID format requirements as [`add_collaborator`](Self::add_collaborator).
     pub fn remove_collaborator(
@@ -351,32 +330,36 @@ impl BulletinModule {
             });
         }
 
-        if self
+        let listed = self
             .get_collaborator(&namespace_id, collaborator_did)?
-            .is_none()
-        {
+            .is_some();
+        let collab_did_parsed = Did::new(collaborator_did)
+            .map_err(|e| BulletinError::State(format!("invalid collaborator DID: {}", e)))?;
+
+        let result = acp
+            .direct_policy_cmd(
+                creator,
+                &policy_id,
+                PolicyCmd::DeleteRelationship(Relationship {
+                    resource: "namespace".into(),
+                    object_id: namespace_id.clone(),
+                    relation: "collaborator".into(),
+                    subject: Subject::Entity(collab_did_parsed),
+                }),
+            )
+            .map_err(|e| BulletinError::Unauthorized {
+                reason: e.to_string(),
+            })?;
+        let granted = matches!(
+            result,
+            PolicyCmdResult::DeleteRelationship { record_found: true }
+        );
+        if !granted && !listed {
             return Err(BulletinError::CollaboratorNotFound {
                 namespace: namespace.to_string(),
                 did: collaborator_did.to_string(),
             });
         }
-
-        let collab_did_parsed = Did::new(collaborator_did)
-            .map_err(|e| BulletinError::State(format!("invalid collaborator DID: {}", e)))?;
-
-        acp.direct_policy_cmd(
-            creator,
-            &policy_id,
-            PolicyCmd::DeleteRelationship(Relationship {
-                resource: "namespace".into(),
-                object_id: namespace_id.clone(),
-                relation: "collaborator".into(),
-                subject: Subject::Entity(collab_did_parsed),
-            }),
-        )
-        .map_err(|e| BulletinError::Unauthorized {
-            reason: e.to_string(),
-        })?;
 
         self.delete_collaborator(&namespace_id, collaborator_did);
         Ok(collaborator_did.to_string())
@@ -391,16 +374,7 @@ impl BulletinModule {
 
     // ── Query handlers ──────────────────────────────────────────────────
 
-    /// Look up a namespace by name.
-    ///
-    /// # Flow
-    ///
-    /// 1. Compute `namespace_id = "bulletin/" + namespace`.
-    /// 2. Read `"namespace/" + namespace_id`.
-    /// 3. Return the `Namespace` or `NamespaceNotFound`.
-    ///
-    /// # Reads
-    /// - `"namespace/" + namespace_id`
+    /// Look up a namespace by short name or stored identifier.
     pub fn query_namespace(&self, namespace: &str) -> Result<Namespace> {
         let namespace_id = keys::namespace_id(namespace);
         self.get_namespace(&namespace_id)?
@@ -448,23 +422,7 @@ impl BulletinModule {
         )
     }
 
-    /// Look up a post by namespace and ID.
-    ///
-    /// # Flow
-    ///
-    /// 1. Compute `namespace_id = "bulletin/" + namespace`.
-    /// 2. Verify namespace exists — read `"namespace/" + namespace_id`,
-    ///    return `NamespaceNotFound` if absent.
-    /// 3. Read `"post/" + sanitize(namespace_id) + "/" + sanitize(id)`.
-    /// 4. Return the `Post` or `PostNotFound`.
-    ///
-    /// # Reads
-    /// - `"namespace/" + namespace_id`
-    /// - `"post/" + sanitize(namespace_id) + "/" + sanitize(id)`
-    ///
-    /// # Errors
-    /// - `NamespaceNotFound` — namespace does not exist
-    /// - `PostNotFound` — post not found at that key
+    /// Look up a post by namespace and post identifier.
     pub fn query_post(&self, namespace: &str, id: &str) -> Result<Post> {
         let namespace_id = keys::namespace_id(namespace);
         if !self.has_namespace(&namespace_id)? {
@@ -509,29 +467,10 @@ impl BulletinModule {
         )
     }
 
-    /// Query current module parameters.
-    ///
-    /// # Flow
-    ///
-    /// 1. Read `"p_bulletin"` from the KV store.
-    /// 2. Deserialize and return `BulletinParams`.
-    ///    If not set, return `BulletinParams::default()`.
-    ///
-    /// # Reads
-    /// - `"p_bulletin"`
+    /// Query current module parameters; defaults apply when none are stored.
     pub fn query_params(&self) -> Result<BulletinParams> {
         self.get_params()
     }
-
-    // ── Storage access methods ──────────────────────────────────────────
-    //
-    // Bulletin uses raw Cosmos SDK prefix stores — no raccoondb, no
-    // secondary indexes. Three prefix namespaces (`namespace/`,
-    // `collaborator/`, `post/`), one singleton (`policy_id`), and one
-    // params key (`p_bulletin`).
-    //
-    // Key sanitization: `/` in component parts is replaced with `|` to
-    // prevent path collisions. Reversed on read (`|` → `/`).
 
     // ── Storage — Policy ID (singleton) ────────────────────────────────
 
@@ -589,13 +528,6 @@ impl BulletinModule {
                     .map_err(|e| BulletinError::State(format!("invalid bulletin parameters: {e}")))
             },
         )
-    }
-
-    fn set_params(&mut self, params: &BulletinParams) -> Result<()> {
-        let bytes = borsh::to_vec(params)
-            .map_err(|e| BulletinError::State(format!("serialize params: {e}")))?;
-        self.store.put(keys::PARAMS_KEY, bytes);
-        Ok(())
     }
 
     // ── Storage — Namespaces ───────────────────────────────────────────
@@ -681,15 +613,24 @@ fn glob_match(pattern: &str, value: &str) -> bool {
     true
 }
 
-const fn validate_namespace(namespace: &str) -> Result<()> {
+fn validate_namespace(namespace: &str) -> Result<()> {
     if namespace.is_empty() {
         return Err(BulletinError::InvalidNamespace);
+    }
+    if keys::namespace_id_len(namespace) > MAX_NAMESPACE_ID_BYTES {
+        return Err(BulletinError::NamespaceTooLong(MAX_NAMESPACE_ID_BYTES));
     }
     Ok(())
 }
 
 #[cfg(test)]
+mod collaborator_grant_tests;
+
+#[cfg(test)]
 mod glob_tests;
+
+#[cfg(test)]
+mod write_bounds_tests;
 
 #[cfg(test)]
 mod tests {

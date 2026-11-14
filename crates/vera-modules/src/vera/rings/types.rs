@@ -70,43 +70,14 @@ impl RingConfig {
         {
             return Err(invalid("invalid ring policy identifier"));
         }
-        keys(&self.peer_node_keys, false)?;
-        keys(&self.reporting.backup_node_keys, true)?;
-        if self.threshold == 0
-            || self.threshold as usize > self.peer_node_keys.len()
-            || self.pss_interval < 86400
-            || self.reporting.reset_interval_seconds == 0
-            || self.reporting.kick_threshold == 0
-            || self.reporting.node_offline_demerits == 0
-            || self.reporting.invalid_crypto_response_demerits == 0
-            || self.reporting.unauthorized_request_demerits == 0
-        {
-            return Err(invalid(
-                "invalid ring threshold, refresh interval or reporting bounds",
-            ));
-        }
-        if let Some(relays) = &self.trusted_auth_relay_dids {
-            if relays.len() > MAX_RING_MEMBERS || !sorted(relays) {
-                return Err(invalid("relay set must be bounded, sorted and unique"));
-            }
-            for did in relays {
-                if did.len() > 256 {
-                    return Err(invalid("relay identity exceeds byte limit"));
-                }
-                let encoded = did
-                    .strip_prefix("did:key:z")
-                    .ok_or_else(|| invalid("relay must be an Ed25519 key DID"))?;
-                let bytes = bs58::decode(encoded).into_vec().map_err(invalid)?;
-                if bytes.len() != 34
-                    || !bytes.starts_with(&[0xed, 0x01])
-                    || bs58::encode(&bytes).into_string() != encoded
-                {
-                    return Err(invalid("relay must be a canonical Ed25519 key DID"));
-                }
-            }
-        }
-        validate_pre_share_endpoints(&self.pre_share_endpoints)?;
-        Ok(())
+        validate_service(
+            &self.peer_node_keys,
+            self.threshold,
+            self.pss_interval,
+            &self.reporting,
+            self.trusted_auth_relay_dids.as_deref(),
+        )?;
+        validate_pre_share_endpoints(&self.pre_share_endpoints)
     }
 
     /// Bind the immutable identity to all creation parameters.
@@ -213,8 +184,8 @@ impl RingRecord {
                 keys: declared_keys,
                 confirmations,
             } => {
-                keys(confirmations, true)?;
-                if confirmations.len() >= self.config.peer_node_keys.len()
+                if !sorted(confirmations)
+                    || confirmations.len() >= self.config.peer_node_keys.len()
                     || confirmations
                         .iter()
                         .any(|key| self.config.peer_node_keys.binary_search(key).is_err())
@@ -336,16 +307,13 @@ impl RingSettings {
     }
 
     fn validate(&self, record: &RingRecord) -> Result<()> {
-        let mut config = record.config.clone();
-        config.peer_node_keys.clone_from(&self.peer_node_keys);
-        config.threshold = self.threshold;
-        config.pss_interval = self.pss_interval;
-        config.current_version = self.current_version;
-        config.reporting.clone_from(&self.reporting);
-        config
-            .trusted_auth_relay_dids
-            .clone_from(&self.trusted_auth_relay_dids);
-        config.validate()?;
+        validate_service(
+            &self.peer_node_keys,
+            self.threshold,
+            self.pss_interval,
+            &self.reporting,
+            self.trusted_auth_relay_dids.as_deref(),
+        )?;
         if self.current_version < record.config.current_version
             || self.trusted_auth_relay_dids.is_some()
                 != record.config.trusted_auth_relay_dids.is_some()
@@ -440,12 +408,61 @@ pub(super) fn sorted(values: &[String]) -> bool {
     values.windows(2).all(|pair| pair[0] < pair[1])
 }
 
+/// Checks the spelling of each key only. Every write also requires each key to
+/// be a registered node, and registration is where the curve check happens.
 pub(super) fn keys(values: &[String], empty: bool) -> Result<()> {
     if (!empty && values.is_empty()) || values.len() > MAX_RING_MEMBERS || !sorted(values) {
         return Err(invalid("node set must be bounded, sorted and unique"));
     }
     for key in values {
-        super::super::nodes::node_key(key).map_err(invalid)?;
+        super::super::nodes::key_shape(key).map_err(invalid)?;
+    }
+    Ok(())
+}
+
+/// Bounds shared by the creation configuration and the current settings.
+fn validate_service(
+    peer_node_keys: &[String],
+    threshold: u32,
+    pss_interval: u64,
+    reporting: &ReportingConfig,
+    relays: Option<&[String]>,
+) -> Result<()> {
+    keys(peer_node_keys, false)?;
+    keys(&reporting.backup_node_keys, true)?;
+    if threshold == 0
+        || threshold as usize > peer_node_keys.len()
+        || pss_interval < 86400
+        || reporting.reset_interval_seconds == 0
+        || reporting.kick_threshold == 0
+        || reporting.node_offline_demerits == 0
+        || reporting.invalid_crypto_response_demerits == 0
+        || reporting.unauthorized_request_demerits == 0
+    {
+        return Err(invalid(
+            "invalid ring threshold, refresh interval or reporting bounds",
+        ));
+    }
+    let Some(relays) = relays else {
+        return Ok(());
+    };
+    if relays.len() > MAX_RING_MEMBERS || !sorted(relays) {
+        return Err(invalid("relay set must be bounded, sorted and unique"));
+    }
+    for did in relays {
+        if did.len() > 256 {
+            return Err(invalid("relay identity exceeds byte limit"));
+        }
+        let encoded = did
+            .strip_prefix("did:key:z")
+            .ok_or_else(|| invalid("relay must be an Ed25519 key DID"))?;
+        let bytes = bs58::decode(encoded).into_vec().map_err(invalid)?;
+        if bytes.len() != 34
+            || !bytes.starts_with(&[0xed, 0x01])
+            || bs58::encode(&bytes).into_string() != encoded
+        {
+            return Err(invalid("relay must be a canonical Ed25519 key DID"));
+        }
     }
     Ok(())
 }
