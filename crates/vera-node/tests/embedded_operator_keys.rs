@@ -1,7 +1,5 @@
 //! A solo deployment administered by an account key and a device key of other key types.
 
-#![recursion_limit = "256"]
-
 use std::{net::SocketAddr, time::Duration};
 
 use alloy_sol_types::SolCall as _;

@@ -1,7 +1,5 @@
 //! The host's thread setup and the thread counts an embedded node reports.
 
-#![recursion_limit = "256"]
-
 mod support;
 
 use std::sync::{

@@ -44,6 +44,8 @@ pub use node::{run_node, run_node_with_options, run_node_with_rpc_listener};
 
 mod options;
 pub use options::{NodeOptions, RpcMode, SoloPacing, WatchdogMode};
+mod sizing;
+pub use sizing::NodeSizing;
 
 mod participants;
 pub use participants::{RegistryParticipants, validator_address};
