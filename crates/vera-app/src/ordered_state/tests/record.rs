@@ -77,6 +77,7 @@ fn native_record_rpc_keeps_the_captured_revision_across_finalization() {
                             .unwrap()
                             .get(&height)
                             .cloned()
+                            .map(Some)
                             .ok_or_else(|| "revision unavailable".into())
                     }))
                     .start_with_local(None)

@@ -8,6 +8,13 @@ struct ImportedFinality {
     material: Vec<u8>,
 }
 
+/// The revision is retained, but no certificate within the proof limits finalizes it yet.
+#[derive(Debug, thiserror::Error)]
+#[error("finalization certificate not found for height {height} within retained proof limits")]
+pub(super) struct CertificateNotFound {
+    height: u64,
+}
+
 impl FinalizedHistory {
     pub(super) fn retain_proof_suffix(
         &self,
@@ -238,9 +245,20 @@ impl FinalizedHistory {
                 return Ok(light);
             }
         }
-        anyhow::bail!(
-            "finalization certificate not found for height {height} within retained proof limits"
-        )
+        Err(CertificateNotFound { height }.into())
+    }
+
+    /// As [`Self::light_block`], with `None` while the revision has no retained certificate.
+    pub fn certified_light_block(
+        &self,
+        height: u64,
+        epochs: &LightBlockIndex,
+    ) -> Result<Option<LightBlock>> {
+        match self.light_block(height, epochs) {
+            Ok(light) => Ok(Some(light)),
+            Err(error) if error.is::<CertificateNotFound>() => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 }
 

@@ -178,9 +178,10 @@ ordering and atomic history batch are unchanged.
 Finalized history writes derived revision-hash and submission-hash mappings in
 the same atomic batch as execution records. Historical lookups require the query
 index head to match the durable history head and validate the selected record
-against the requested hash. Recovery rebuilds missing or rewound mappings in
+against the requested hash. Recovery rebuilds missing or mismatched mappings in
 batches, publishing their head only after completion; normal recovery reuses
-a matching index. These reads return execution data, with finality verified
+a matching index, and a rewind of at most 1,024 revisions removes only the
+discarded revisions' mappings together with the head rewind. These reads return execution data, with finality verified
 separately by proof consumers.
 
 The node uses `vera-app::OrderedState`: three execution partitions (accounts,
@@ -239,7 +240,9 @@ import API. The import selection and cursor are durable, and imported history
 remains unavailable until recovery at the matching state anchor completes.
 Starting an import selects metadata format 3 to prevent older binaries from
 discarding its unfinished records. The node serves chunks through Commonware's
-resolver on authenticated channel 16. `HistoryPeer::import_next_from` bounds
+resolver on authenticated channel 16, producing each chunk on the blocking pool,
+two at a time; further requests are dropped and retried by the importer.
+`HistoryPeer::import_next_from` bounds
 record and finality-proof assembly, verifies both before persistence and cancels
 pending fetches when dropped. Imported certificates retain their verifier material
 and any descendants beyond the recovery anchor without advancing execution.

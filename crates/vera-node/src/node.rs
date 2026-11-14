@@ -586,24 +586,6 @@ async fn run_node_with_elector<
         validator_index as u32,
         peers.participants.len() as u32,
     );
-    // The watchdog runs before any blocking startup await: the state-sync
-    // handoff below can itself stall, and that stall must be recoverable.
-    if config.watchdog_stall_seconds > 0 {
-        let stall = Duration::from_secs(config.watchdog_stall_seconds);
-        let watchdog_state = node_state.clone();
-        let has_durable_history = history.head_height() > 0;
-        let needed_peers = crate::watchdog::peers_for_quorum(peers.participants.len());
-        state_resolver_handles.push(context.child("watchdog").spawn(move |_| async move {
-            crate::run_watchdog(
-                watchdog_state,
-                stall,
-                has_durable_history,
-                needed_peers,
-                watchdog,
-            )
-            .await;
-        }));
-    }
     // A lone validator never has a peer to count, so it skips the sampling work.
     if peers.participants.len() > 1 {
         let state = node_state.clone();
@@ -857,6 +839,25 @@ async fn run_node_with_elector<
             recovered.inner().context.round.view().get(),
         );
     }
+    // The stall clock starts after the history scan, which finalizes nothing
+    // however long it runs, and before the stateful actor, whose state-sync
+    // handoff can itself stall and must stay recoverable.
+    if config.watchdog_stall_seconds > 0 {
+        let stall = Duration::from_secs(config.watchdog_stall_seconds);
+        let watchdog_state = node_state.clone();
+        let has_durable_history = history.head_height() > 0;
+        let needed_peers = crate::watchdog::peers_for_quorum(peers.participants.len());
+        state_resolver_handles.push(context.child("watchdog").spawn(move |_| async move {
+            crate::run_watchdog(
+                watchdog_state,
+                stall,
+                has_durable_history,
+                needed_peers,
+                watchdog,
+            )
+            .await;
+        }));
+    }
     let reshare_handle = reshare_actor.start(dkg_network);
     let stateful_handle = stateful_actor.start();
     state_resolver_handles.extend([
@@ -1008,14 +1009,6 @@ async fn run_node_with_elector<
                 .spawn(move |context| crate::diagnostics::run(context, history, index, proofs)),
         );
     }
-    if let Some(pruning) = prune_config {
-        let marshal = marshal.clone();
-        state_resolver_handles.push(context.child("marshal_floor").spawn(
-            move |context| async move {
-                crate::marshal_floor::run(context, marshal, pruning).await;
-            },
-        ));
-    }
 
     let rpc_server = RpcServer::with_state_provider(node_state, rpc_addr, chain_id, state_provider)
         .with_max_connections(config.rpc.max_connections.get())
@@ -1038,7 +1031,7 @@ async fn run_node_with_elector<
             let epochs = light_block_index.clone();
             Arc::new(move |height| {
                 history
-                    .light_block(height, &epochs)
+                    .certified_light_block(height, &epochs)
                     .map_err(|error| error.to_string())
             })
         })

@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 
 use anyhow::{Context as _, Result, ensure};
 use bytes::Bytes;
@@ -7,6 +7,7 @@ use commonware_resolver::{Consumer, Delivery, Outcome, Resolver as _, TargetedRe
 use commonware_runtime::{Handle, tokio::Context};
 use commonware_utils::{NZUsize, channel::oneshot, non_empty_vec, sequence::FixedBytes};
 use parking_lot::Mutex;
+use tokio::sync::Semaphore;
 use vera_domain::{LIGHT_BLOCK_RESPONSE_BYTES, LightBlock, PublicKey};
 use vera_indexer::LightBlockIndex;
 
@@ -55,21 +56,37 @@ impl Consumer for DeliverySlot {
     }
 }
 
+/// Chunk productions running at once. A request beyond this is dropped, which
+/// its requester sees as a failed fetch and retries.
+const PRODUCTIONS: usize = 2;
+/// Proofs kept so that the chunks of one proof, and importers at different
+/// heights, do not each rebuild it.
+const CACHED_PROOFS: usize = 4;
+
 #[derive(Clone)]
 struct HistoryProducer {
     history: Arc<FinalizedHistory>,
     epochs: Arc<LightBlockIndex>,
-    // One bounded response avoids rebuilding and hex-encoding a proof for every chunk.
-    proof: Arc<Mutex<Option<CachedProof>>>,
+    proofs: Arc<Mutex<VecDeque<CachedProof>>>,
+    productions: Arc<Semaphore>,
 }
 
 struct CachedProof {
     height: u64,
-    bytes: Vec<u8>,
+    bytes: Arc<Vec<u8>>,
 }
 
 impl HistoryProducer {
-    fn chunk(&mut self, kind: u8, height: u64, offset: u64) -> Result<HistoryChunk> {
+    fn new(history: Arc<FinalizedHistory>, epochs: Arc<LightBlockIndex>) -> Self {
+        Self {
+            history,
+            epochs,
+            proofs: Arc::default(),
+            productions: Arc::new(Semaphore::new(PRODUCTIONS)),
+        }
+    }
+
+    fn chunk(&self, kind: u8, height: u64, offset: u64) -> Result<HistoryChunk> {
         if kind == 0 {
             return self
                 .history
@@ -77,18 +94,8 @@ impl HistoryProducer {
         }
         ensure!(kind == 1, "unknown history resource");
         // A cached proof must not bypass the import publication barrier.
-        self.history.record_chunk(height, 0, 1)?;
-        let mut cached = self.proof.lock();
-        if cached.as_ref().is_none_or(|cached| cached.height != height) {
-            let proof = self.history.light_block(height, &self.epochs)?;
-            let bytes = serde_json::to_vec(&proof)?;
-            ensure!(
-                bytes.len() <= LIGHT_BLOCK_RESPONSE_BYTES,
-                "history finality response limit"
-            );
-            *cached = Some(CachedProof { height, bytes });
-        }
-        let bytes = &cached.as_ref().expect("proof was populated").bytes;
+        self.history.check_published(height)?;
+        let bytes = self.proof(height)?;
         let start = usize::try_from(offset)?;
         ensure!(start <= bytes.len(), "history offset exceeds proof");
         let end = start.saturating_add(HISTORY_CHUNK_BYTES).min(bytes.len());
@@ -98,22 +105,62 @@ impl HistoryProducer {
             bytes: bytes[start..end].to_vec(),
         })
     }
+
+    fn proof(&self, height: u64) -> Result<Arc<Vec<u8>>> {
+        let cached = self
+            .proofs
+            .lock()
+            .iter()
+            .find(|cached| cached.height == height)
+            .map(|cached| cached.bytes.clone());
+        if let Some(bytes) = cached {
+            return Ok(bytes);
+        }
+        let proof = self.history.light_block(height, &self.epochs)?;
+        let bytes = Arc::new(serde_json::to_vec(&proof)?);
+        ensure!(
+            bytes.len() <= LIGHT_BLOCK_RESPONSE_BYTES,
+            "history finality response limit"
+        );
+        let mut proofs = self.proofs.lock();
+        proofs.push_back(CachedProof {
+            height,
+            bytes: bytes.clone(),
+        });
+        let mut retained: usize = proofs.iter().map(|cached| cached.bytes.len()).sum();
+        while proofs.len() > CACHED_PROOFS
+            || (proofs.len() > 1 && retained > LIGHT_BLOCK_RESPONSE_BYTES)
+        {
+            let evicted = proofs.pop_front().expect("cache is not empty");
+            retained -= evicted.bytes.len();
+        }
+        Ok(bytes)
+    }
 }
 
 impl p2p::Producer for HistoryProducer {
     type Key = Key;
 
+    // The resolver engine calls this inline, so store reads and proof assembly
+    // run on the blocking pool instead of holding up its other fetches.
     fn produce(&mut self, key: Key) -> oneshot::Receiver<Bytes> {
         let (answer, receiver) = oneshot::channel();
-        let height = u64::from_be_bytes(key[1..9].try_into().expect("fixed key"));
-        let offset = u64::from_be_bytes(key[9..].try_into().expect("fixed key"));
-        if let Ok(chunk) = self.chunk(key[0], height, offset) {
-            let mut response = Vec::with_capacity(16 + chunk.bytes.len());
-            response.extend_from_slice(&chunk.total.to_be_bytes());
-            response.extend_from_slice(&chunk.offset.to_be_bytes());
-            response.extend_from_slice(&chunk.bytes);
-            let _ = answer.send(response.into());
-        }
+        let Ok(production) = self.productions.clone().try_acquire_owned() else {
+            return receiver;
+        };
+        let producer = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let _production = production;
+            let height = u64::from_be_bytes(key[1..9].try_into().expect("fixed key"));
+            let offset = u64::from_be_bytes(key[9..].try_into().expect("fixed key"));
+            if let Ok(chunk) = producer.chunk(key[0], height, offset) {
+                let mut response = Vec::with_capacity(16 + chunk.bytes.len());
+                response.extend_from_slice(&chunk.total.to_be_bytes());
+                response.extend_from_slice(&chunk.offset.to_be_bytes());
+                response.extend_from_slice(&chunk.bytes);
+                let _ = answer.send(response.into());
+            }
+        });
         receiver
     }
 }
@@ -195,11 +242,7 @@ impl HistoryPeer {
         let mut record = Vec::new();
         let mut total = None;
         loop {
-            let mut key = [0; 17];
-            key[0] = kind;
-            key[1..9].copy_from_slice(&height.to_be_bytes());
-            key[9..].copy_from_slice(&(record.len() as u64).to_be_bytes());
-            let key = Key::new(key);
+            let key = request_key(kind, height, record.len() as u64);
             let (answer, receiver) = oneshot::channel();
             *self.delivery.0.lock() = Some(Waiting {
                 key: key.clone(),
@@ -254,6 +297,30 @@ where
     S: Sender<PublicKey = PublicKey>,
     R: Receiver<PublicKey = PublicKey>,
 {
+    start(
+        context,
+        HistoryProducer::new(history, epochs),
+        peer_provider,
+        blocker,
+        me,
+        network,
+    )
+}
+
+fn start<D, B, S, R>(
+    context: Context,
+    producer: HistoryProducer,
+    peer_provider: D,
+    blocker: B,
+    me: PublicKey,
+    network: (S, R),
+) -> (HistoryPeer, Handle<()>)
+where
+    D: Provider<PublicKey = PublicKey>,
+    B: Blocker<PublicKey = PublicKey>,
+    S: Sender<PublicKey = PublicKey>,
+    R: Receiver<PublicKey = PublicKey>,
+{
     let delivery = DeliverySlot::default();
     let (engine, mailbox) = p2p::Engine::new(
         context,
@@ -262,11 +329,7 @@ where
             blocker,
             me: Some(me),
             consumer: delivery.clone(),
-            producer: HistoryProducer {
-                history,
-                epochs,
-                proof: Arc::default(),
-            },
+            producer,
             mailbox_size: NZUsize!(16),
             fetch_timeout: commonware_utils::NZDuration!(Duration::from_secs(2)),
             fetch_retry_delay: Duration::from_millis(100),
@@ -275,6 +338,14 @@ where
         },
     );
     (HistoryPeer { mailbox, delivery }, engine.start(network))
+}
+
+fn request_key(kind: u8, height: u64, offset: u64) -> Key {
+    let mut key = [0; 17];
+    key[0] = kind;
+    key[1..9].copy_from_slice(&height.to_be_bytes());
+    key[9..].copy_from_slice(&offset.to_be_bytes());
+    Key::new(key)
 }
 
 fn decode_chunk(value: &[u8], expected_offset: u64) -> Result<HistoryChunk> {

@@ -480,7 +480,7 @@ async fn indirect_proof_survives_reopen_and_uses_the_rpc_history_lookup() {
             Arc::new(move |height| {
                 calls.fetch_add(1, Ordering::Relaxed);
                 history
-                    .light_block(height, &epochs)
+                    .certified_light_block(height, &epochs)
                     .map_err(|error| error.to_string())
             })
         });

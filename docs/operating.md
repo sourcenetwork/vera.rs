@@ -233,7 +233,10 @@ rejected. Restore a complete compatible backup or use authenticated recovery.
   has lost its quorum is not restarted in a loop. A deployment whose only
   validator is this node needs no peer. The quorum size comes from the
   validator count in `peers.json` at startup, not from the active set after
-  operator changes. The check runs every 30 seconds. Multi-validator stalls
+  operator changes. The check runs every 30 seconds. The timer starts after
+  startup has validated finalized history, so the length of that scan does not
+  count as a stall; journal alignment and query-state hydration that follow do.
+  Multi-validator stalls
   have been exercised in unit tests only, not qualified on a deployment. Snapshot
   initialization has its separate deadline; supervised restart does not guarantee recovery.
 - **History backend**: Regolith with synchronous writes in every build. There
@@ -413,8 +416,10 @@ failure coverage alongside the completed-partition recovery matrix.
   Disabling diagnostics leaves backend statistics disabled. These counters are
   sampled independently and reset on reopening; compare intervals within one
   process. They do not measure physical-device writes or individual sync latency.
-- Consensus warnings (`floor not updated`, view skips) at `warn` are normal
-  during epoch transitions; sustained notarization timeouts are not.
+- View-skip warnings at `warn` are normal during epoch transitions; sustained
+  notarization timeouts are not. `floor not updated` can appear while snapshot
+  startup re-floors a stalled initialization. Pruning does not set the marshal
+  floor: the stateful actor prunes marshal from the same retention settings.
 
 ## Capacity reference
 

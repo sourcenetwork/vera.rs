@@ -2,7 +2,7 @@ use super::*;
 use std::{num::NonZeroU64, time::Instant};
 use vera_client::{ACP_ADDRESS, BlsSigner};
 use vera_domain::NativeTx;
-use vera_indexer::MAX_CACHED_REVISIONS;
+use vera_indexer::{MAX_CACHED_FINALIZATIONS, MAX_CACHED_REVISIONS};
 
 struct Fixture {
     history: FinalizedHistory,
@@ -120,6 +120,48 @@ async fn recent_cache_recovery_matches_full_replay_and_preserves_archived_submis
         .unwrap();
     assert_eq!(archived.block, *oldest);
     assert_eq!(archived.receipts[0].tx_hash, receipts[0].tx_hash);
+}
+
+#[tokio::test]
+async fn recovery_restores_certificates_only_inside_the_cache_window() {
+    let fixture = fixture(MAX_CACHED_FINALIZATIONS + 32, 0);
+    let last = fixture.executions.len() as u64;
+    for height in [1, last] {
+        fixture.history.db.delete(key(CERTIFICATE, height)).unwrap();
+    }
+    let looked_up = Arc::new(Mutex::new(Vec::new()));
+    let lookup: FinalizationLookup = {
+        let looked_up = looked_up.clone();
+        Arc::new(move |height| {
+            looked_up.lock().push(height);
+            Box::pin(async move { Some(artifacts(height)) })
+        })
+    };
+    let epochs = light();
+    fixture
+        .history
+        .recover(
+            &fixture.genesis,
+            &fixture.executions.last().unwrap().0,
+            &BlockIndex::new(),
+            &epochs,
+            &lookup,
+        )
+        .await
+        .unwrap();
+    assert_eq!(*looked_up.lock(), [last]);
+    let stored = |height| fixture.history.db.get(key(CERTIFICATE, height)).unwrap();
+    assert!(stored(1).is_none());
+    assert!(stored(last).is_some());
+    assert_eq!(epochs.stats().finalizations, MAX_CACHED_FINALIZATIONS);
+    let cached = |height: usize| {
+        epochs
+            .get_finalization(&fixture.executions[height - 1].0.digest().0)
+            .is_some()
+    };
+    assert!(!cached(32));
+    assert!(cached(33));
+    assert!(cached(last as usize));
 }
 
 #[tokio::test]

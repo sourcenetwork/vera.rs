@@ -32,7 +32,8 @@ use crate::{
 };
 
 /// Durable light-block lookup, executed outside the asynchronous RPC worker.
-pub type LightBlockLookup = Arc<dyn Fn(u64) -> Result<LightBlock, String> + Send + Sync>;
+/// `Ok(None)` means the revision has no finalization certificate yet.
+pub type LightBlockLookup = Arc<dyn Fn(u64) -> Result<Option<LightBlock>, String> + Send + Sync>;
 
 /// Durable receipt evidence lookup, executed on a bounded blocking worker.
 pub type ReceiptProofLookup =
@@ -444,7 +445,10 @@ impl VeraApiServer for VeraApiImpl {
         };
         match cached {
             Some(light) => Ok(light),
-            None => self.archived_light_block(height).await,
+            None => self
+                .archived_light_block(height)
+                .await?
+                .ok_or_else(|| light::certificate_not_found(height)),
         }
     }
 }

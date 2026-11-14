@@ -55,16 +55,8 @@ impl VeraApiImpl {
         &self,
         selected: &IndexedBlock,
     ) -> RpcResult<Option<LightBlock>> {
-        let revision = match self.light_block(selected.number).await {
-            Ok(revision) => revision,
-            Err(cause)
-                if cause
-                    .message()
-                    .contains("finalization certificate not found") =>
-            {
-                return Ok(None);
-            }
-            Err(cause) => return Err(cause),
+        let Some(revision) = self.certified_light_block(selected.number).await? else {
+            return Ok(None);
         };
         if revision.height != selected.number
             || revision.block_hash.parse::<B256>().map_err(error)? != selected.hash

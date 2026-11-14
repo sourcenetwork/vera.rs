@@ -39,7 +39,7 @@ pub use history::{
     HistoryMemory, HistoryPeer, start_history_peer,
 };
 
-mod marshal_floor;
+mod marshal;
 mod native_genesis;
 mod node;
 

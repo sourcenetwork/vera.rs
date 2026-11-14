@@ -39,13 +39,7 @@ async fn light_block_requests_share_the_proof_slots() {
     assert_eq!(busy.code(), codes::RESOURCE_UNAVAILABLE);
     assert_eq!(busy.data().unwrap().get(), r#"{"retryable":true}"#);
     // Evidence capture assembles its revision under the proof slot it already holds.
-    assert!(
-        api.light_block(1)
-            .await
-            .unwrap_err()
-            .message()
-            .contains("finalization certificate not found")
-    );
+    assert!(api.certified_light_block(1).await.unwrap().is_none());
     drop(proofs);
     assert!(
         api.get_light_block(U64::from(1))
@@ -175,7 +169,7 @@ async fn receipt_poll_does_not_wait_for_a_missing_certificate() {
     let mut api =
         VeraApiImpl::new(state.clone(), None).with_light_block_lookup(Arc::new(move |_| {
             calls.fetch_add(1, Ordering::Relaxed);
-            Err("finalization certificate not found".into())
+            Ok(None)
         }));
     api.index = Some(index);
     let _waiting: Vec<_> = (0..8)

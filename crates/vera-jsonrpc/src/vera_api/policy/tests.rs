@@ -281,7 +281,7 @@ fn captured_evidence_holds_capacity_but_releases_storage_during_finality() {
                 let signal = entered.clone();
                 Arc::get_mut(&mut api).unwrap().light_block_lookup = Some(Arc::new(move |_| {
                     signal.notify_one();
-                    Err("finalization certificate not found".into())
+                    Ok(None)
                 }));
                 let running = api.clone();
                 let task = tokio::spawn(async move { request(&running, kind, 1).await });
