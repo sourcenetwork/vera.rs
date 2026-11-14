@@ -9,6 +9,9 @@ pub enum EmbedError {
     /// The configuration cannot run.
     #[error("invalid configuration: {0}")]
     Config(&'static str),
+    /// Another node, or one that has not finished stopping, holds the directory.
+    #[error("node directory {} is in use", .0.display())]
+    DirectoryInUse(std::path::PathBuf),
     /// The node thread could not be spawned.
     #[error("cannot start node thread: {0}")]
     Thread(std::io::Error),
