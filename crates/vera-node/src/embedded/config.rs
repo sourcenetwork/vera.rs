@@ -44,6 +44,13 @@ pub struct EmbeddedConfig {
 }
 
 impl EmbeddedConfig {
+    /// Default interval between the empty blocks an idle deployment finalizes.
+    ///
+    /// A client that verifies state against finalized headers refuses a state
+    /// older than its freshness limit, 30 seconds in Backbone's light client,
+    /// so an idle deployment cannot stop finalizing altogether.
+    pub const HEARTBEAT: Duration = Duration::from_secs(10);
+
     /// Defaults for a lone validator: quiet when idle, with timeouts ordered below the genesis stall timeout.
     #[must_use]
     pub fn new(data_dir: impl Into<PathBuf>, genesis: SoloGenesis, p2p_listen: SocketAddr) -> Self {
@@ -52,14 +59,14 @@ impl EmbeddedConfig {
             genesis,
             p2p_listen,
             rpc_listen: None,
-            leader_timeout: Duration::from_secs(3),
-            certification_timeout: Duration::from_secs(4),
+            leader_timeout: Duration::from_secs(12),
+            certification_timeout: Duration::from_secs(13),
             timeout_retry: Duration::from_millis(500),
             pruning: None,
-            pacing: Some(SoloPacing::within(
-                Duration::from_secs(3),
-                Duration::from_millis(vera_domain::SimplexParameters::default().stall_timeout_ms),
-            )),
+            pacing: Some(SoloPacing {
+                idle: Self::HEARTBEAT,
+                batch: SoloPacing::BATCH,
+            }),
             worker_threads: None,
             max_blocking_threads: None,
             verification_threads: crate::options::default_verification_threads().get(),

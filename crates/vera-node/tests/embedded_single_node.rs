@@ -176,7 +176,7 @@ async fn invalid_timeouts_are_rejected_before_the_node_starts() {
     let mut inverted = valid.clone();
     inverted.certification_timeout = inverted.leader_timeout;
     let mut beyond_stall = valid;
-    beyond_stall.certification_timeout = Duration::from_secs(5);
+    beyond_stall.certification_timeout = Duration::from_millis(vera_node::SOLO_STALL_TIMEOUT_MS);
     for invalid in [inverted, beyond_stall] {
         assert!(matches!(
             EmbeddedNode::start(invalid).await,
@@ -197,9 +197,9 @@ async fn idle_node_keeps_a_slow_heartbeat_and_wakes_for_a_write() {
     let before = finalized_beyond(&node, 0).await;
     tokio::time::sleep(Duration::from_secs(6)).await;
     let after = finalized_beyond(&node, before).await;
-    // The default idle wait is 1.5 s; the daemon cadence would finalize dozens of blocks.
+    // The default heartbeat is 10 s; the daemon cadence would finalize dozens of blocks.
     assert!(
-        after - before <= 12,
+        after - before <= 2,
         "idle heartbeat finalized {} blocks in 6 s",
         after - before
     );

@@ -218,13 +218,22 @@ comparable with the table under [Proposal pacing](#proposal-pacing).
 ## Proposal pacing
 
 `EmbeddedConfig::pacing` controls how the lone validator paces proposals. The
-default, `SoloPacing::within(leader_timeout, stall_timeout)`, has two parts:
+default has two parts:
 
 - **Idle wait.** With no request pending and no unfinalized block that carries
-  requests, the proposer waits up to half the leader timeout (1.5 s by default)
-  for a first request, then proposes an empty block as a heartbeat. A request
-  ends the wait at once. The wait must stay below the leader timeout and the
-  genesis stall timeout; `start` rejects settings that would not.
+  requests, the proposer waits up to `EmbeddedConfig::HEARTBEAT` (10 s) for a
+  first request, then proposes an empty block as a heartbeat. A request ends
+  the wait at once. The wait must stay below the leader timeout, 12 s by
+  default, and that below the certification timeout and the solo genesis stall
+  timeout of 30 s; `start` rejects settings that would not.
+
+  The heartbeat cannot be dropped: a client that verifies state against
+  finalized headers refuses a state older than its freshness limit, which is
+  30 seconds in Backbone's light client. A host that lengthens the idle wait
+  must keep it inside the limit its clients use.
+
+  The leader timeout is also how long a lone validator waits before it tries
+  again after a proposal it could not build.
 - **Batch window.** Once a request has arrived the proposer collects more for
   50 ms. While a block that carries requests is unfinalized it keeps this
   cadence, because the wait runs on the actor that also processes finalization.
@@ -254,7 +263,7 @@ are not a capacity or multi-validator measurement.
 ## Limits
 
 - One validator. A stopped or lost device stops the deployment.
-- An idle deployment still produces a heartbeat block about every 1.5 s.
+- An idle deployment still produces a heartbeat block about every 10 s.
 - Memory was measured for one short workload on one machine; see
   [Memory](#memory). Growth over hours, larger states and Linux are not
   measured.

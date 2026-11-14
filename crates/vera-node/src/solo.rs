@@ -16,6 +16,13 @@ use crate::{FileSecretStore, PeerSet};
 /// Epoch length that leaves dealing slots for eight validators with default pipelined terms.
 pub const SOLO_BLOCKS_PER_EPOCH: u64 = 256;
 
+/// Finality stall, in milliseconds, after which a leader's term is abandoned in a solo deployment.
+///
+/// A lone validator has no successor, so this only bounds the timeouts and the
+/// idle wait a host may configure. It leaves room for a heartbeat well inside
+/// the 30 seconds a verifying client accepts a finalized state for.
+pub const SOLO_STALL_TIMEOUT_MS: u64 = 30_000;
+
 const GENESIS_FILE: &str = "solo-genesis.json";
 
 /// Identity of a deployment that starts with this device as its only validator.
@@ -130,7 +137,10 @@ pub fn prepare_solo(
             node_demerits: Vec::new(),
             epoch_info: Some(crate::epoch_info_hex(&epoch_info)),
             blocks_per_epoch: SOLO_BLOCKS_PER_EPOCH,
-            simplex: Some(vera_domain::SimplexParameters::default()),
+            simplex: Some(vera_domain::SimplexParameters {
+                stall_timeout_ms: SOLO_STALL_TIMEOUT_MS,
+                ..Default::default()
+            }),
         };
         // The share is stored first: a genesis record without its share cannot be recovered.
         store
