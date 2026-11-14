@@ -668,7 +668,12 @@ async fn run_node_with_elector<
             |pacing| pacing.batch,
         ),
     )
-    .with_idle_wait(solo_pacing.map_or(Duration::ZERO, |pacing| pacing.idle));
+    .with_idle_wait(solo_pacing.map_or(Duration::ZERO, |pacing| pacing.idle))
+    .with_timestamp_step(
+        genesis
+            .timestamp_step_secs
+            .unwrap_or(vera_app::MAX_TIMESTAMP_STEP_SECS),
+    );
     let vrf_elector = make_elector(application.vrf_seed_cache());
 
     let snapshot_history = crate::history::SnapshotHistory {
