@@ -295,7 +295,7 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
             );
             api.with_node_state((*node_state).clone())
         };
-        let net_api = NetApiImpl::new(chain_id);
+        let net_api = NetApiImpl::new(chain_id).with_node_state((*node_state).clone());
         let web3_api = Web3ApiImpl::new();
         let vera_api = {
             let mut api = VeraApiImpl::new(node_state, tx_submit);
@@ -680,7 +680,13 @@ impl<S: StateProvider + Clone + 'static> JsonRpcServer<S> {
                 api
             }
         };
-        let net_api = NetApiImpl::new(self.chain_id);
+        let net_api = {
+            let api = NetApiImpl::new(self.chain_id);
+            match &self.node_state {
+                Some(state) => api.with_node_state((**state).clone()),
+                None => api,
+            }
+        };
         let web3_api = Web3ApiImpl::new();
 
         let mut module = jsonrpsee::RpcModule::new(());

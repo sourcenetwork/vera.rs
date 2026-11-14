@@ -15,6 +15,7 @@ mod committed_state;
 pub use committed_state::CommittedState;
 
 mod config;
+mod connectivity;
 pub use config::{NodeSettings, PeerSet, PeerSetError, load_peers};
 
 mod consts;

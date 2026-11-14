@@ -28,11 +28,14 @@ struct NodeStateInner {
     proposed_count: AtomicU64,
     backfilling: AtomicBool,
     snapshot_revision: AtomicU64,
+    peer_count: AtomicU64,
     proof_requests: Arc<tokio::sync::Semaphore>,
     permission_reads: Arc<tokio::sync::Semaphore>,
     light_lookups: Arc<tokio::sync::Semaphore>,
     proof_progress: tokio::sync::watch::Sender<()>,
 }
+
+const PEERS_UNKNOWN: u64 = u64::MAX;
 
 #[derive(Clone, Copy, Debug)]
 struct FinalizedProgress {
@@ -68,6 +71,7 @@ impl NodeState {
                 proposed_count: AtomicU64::new(0),
                 backfilling: AtomicBool::new(false),
                 snapshot_revision: AtomicU64::new(0),
+                peer_count: AtomicU64::new(PEERS_UNKNOWN),
                 proof_requests: Arc::new(tokio::sync::Semaphore::new(8)),
                 permission_reads: Arc::new(tokio::sync::Semaphore::new(8)),
                 light_lookups: Arc::new(tokio::sync::Semaphore::new(8)),
@@ -161,6 +165,20 @@ impl NodeState {
         self.inner.finalized_count.load(Ordering::Relaxed)
     }
 
+    /// Publish the observed number of authenticated peer connections, including an observed zero.
+    pub fn set_peer_count(&self, count: u64) {
+        self.inner
+            .peer_count
+            .store(count.min(PEERS_UNKNOWN - 1), Ordering::Relaxed);
+    }
+
+    /// Authenticated peer connections last observed, or `None` before the first observation.
+    #[must_use]
+    pub fn peer_count(&self) -> Option<u64> {
+        let count = self.inner.peer_count.load(Ordering::Relaxed);
+        (count != PEERS_UNKNOWN).then_some(count)
+    }
+
     /// Get current node status.
     pub fn status(&self) -> NodeStatus {
         let snapshot_revision = self.inner.snapshot_revision.load(Ordering::Relaxed);
@@ -177,7 +195,7 @@ impl NodeState {
             finalized_count: self.inner.finalized_count.load(Ordering::Relaxed),
             proposed_count: self.inner.proposed_count.load(Ordering::Relaxed),
             nullified_count: None,
-            peer_count: None,
+            peer_count: self.peer_count(),
             is_leader: None,
             backfilling: self.inner.backfilling.load(Ordering::Relaxed),
             snapshot_revision: (snapshot_revision > 0).then_some(snapshot_revision),
@@ -225,6 +243,17 @@ pub struct NodeStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_published_peer_count_is_reported_including_zero() {
+        let state = NodeState::new(1337, 2, 4);
+        assert_eq!(state.peer_count(), None);
+        for observed in [0, 3, 0] {
+            state.set_peer_count(observed);
+            assert_eq!(state.peer_count(), Some(observed));
+            assert_eq!(state.status().peer_count, Some(observed));
+        }
+    }
 
     #[test]
     fn node_status_unobserved_fields_are_null() {

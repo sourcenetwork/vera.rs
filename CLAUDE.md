@@ -77,6 +77,9 @@ stops:
   `MempoolValidator` checked against committed state and forwards them to all
   validators. There is no leader prediction.
 - **RPC:** the `vera-jsonrpc` server over the live committed state (below).
+- **Watchdog:** a finality stall stops the node only while it is connected to
+  enough peers for a voting quorum, or is the only validator. The peer count
+  in `vera_nodeStatus` is sampled from the network's connection metric.
 
 The finalization callback persists execution and certificate history together
 in one durable batch before returning to Commonware's acknowledgement path. Disk writes run
