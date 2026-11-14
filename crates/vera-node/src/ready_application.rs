@@ -46,7 +46,10 @@ where
         ancestry: impl Ancestry<Self::Block>,
         input: Self::Input,
     ) -> Option<Digested<Self::Block>> {
-        if !*self.ready.borrow() {
+        // Declining here would cost the whole view: a validator that starts as
+        // leader would wait out the leader timeout before its next proposal.
+        // Consensus drops this request if recovery outlasts the view.
+        if self.ready.wait_for(|ready| *ready).await.is_err() {
             return None;
         }
         self.inner.propose(context, ancestry, input).await
@@ -115,31 +118,69 @@ mod tests {
     }
 
     #[test]
-    fn recovery_gates_both_prepared_and_ordinary_proposals() {
+    fn a_proposal_waits_for_recovery_instead_of_giving_up_its_view() {
         tokio::Runner::default().start(|context| async move {
             let inner = RecordingApp::default();
             let calls = inner.0.clone();
             let (mut app, ready) = ReadyApplication::new(inner);
-            for expected in [0, 2] {
-                let _ = app
-                    .prepare(
-                        (context.child("prepare"), Block::genesis_context()),
-                        ancestry::from_iter(std::iter::empty::<Digested<Block>>()),
-                        (),
-                    )
-                    .await;
-                assert!(
-                    app.propose(
-                        (context.child("propose"), Block::genesis_context()),
+            let _ = app
+                .prepare(
+                    (context.child("prepare"), Block::genesis_context()),
+                    ancestry::from_iter(std::iter::empty::<Digested<Block>>()),
+                    (),
+                )
+                .await;
+            assert_eq!(calls.load(Ordering::Relaxed), 0);
+
+            let mut proposer = app.clone();
+            let propose_context = context.child("propose");
+            let mut proposal = Box::pin(async move {
+                proposer
+                    .propose(
+                        (propose_context, Block::genesis_context()),
                         ancestry::from_iter(std::iter::empty::<Digested<Block>>()),
                         (),
                     )
                     .await
-                    .is_none()
-                );
-                assert_eq!(calls.load(Ordering::Relaxed), expected);
-                ready.send(true).unwrap();
-            }
+            });
+            let waited =
+                ::tokio::time::timeout(std::time::Duration::from_millis(50), proposal.as_mut())
+                    .await;
+            assert!(waited.is_err(), "a proposal was answered before recovery");
+            assert_eq!(calls.load(Ordering::Relaxed), 0);
+
+            ready.send(true).unwrap();
+            assert!(proposal.await.is_none());
+            assert_eq!(calls.load(Ordering::Relaxed), 1);
+
+            let _ = app
+                .prepare(
+                    (context.child("prepared"), Block::genesis_context()),
+                    ancestry::from_iter(std::iter::empty::<Digested<Block>>()),
+                    (),
+                )
+                .await;
+            assert_eq!(calls.load(Ordering::Relaxed), 2);
+        });
+    }
+
+    #[test]
+    fn a_proposal_is_declined_when_recovery_fails() {
+        tokio::Runner::default().start(|context| async move {
+            let inner = RecordingApp::default();
+            let calls = inner.0.clone();
+            let (mut app, ready) = ReadyApplication::new(inner);
+            drop(ready);
+            assert!(
+                app.propose(
+                    (context.child("propose"), Block::genesis_context()),
+                    ancestry::from_iter(std::iter::empty::<Digested<Block>>()),
+                    (),
+                )
+                .await
+                .is_none()
+            );
+            assert_eq!(calls.load(Ordering::Relaxed), 0);
         });
     }
 }
