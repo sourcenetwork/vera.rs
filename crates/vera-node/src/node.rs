@@ -579,17 +579,26 @@ async fn run_node_with_elector<
         let stall = Duration::from_secs(config.watchdog_stall_seconds);
         let watchdog_state = node_state.clone();
         let has_durable_history = history.head_height() > 0;
-        let lone_validator = peers.participants.len() == 1;
+        let needed_peers = crate::watchdog::peers_for_quorum(peers.participants.len());
         state_resolver_handles.push(context.child("watchdog").spawn(move |_| async move {
             crate::run_watchdog(
                 watchdog_state,
                 stall,
                 has_durable_history,
-                lone_validator,
+                needed_peers,
                 watchdog,
             )
             .await;
         }));
+    }
+    // A lone validator never has a peer to count, so it skips the sampling work.
+    if peers.participants.len() > 1 {
+        let state = node_state.clone();
+        state_resolver_handles.push(
+            context
+                .child("connectivity")
+                .spawn(move |context| crate::connectivity::run(context, state)),
+        );
     }
     if let Some(height) = completed_sync_height {
         node_state.set_snapshot_revision(height.get());

@@ -212,12 +212,16 @@ rejected. Restore a complete compatible backup or use authenticated recovery.
   (default 15, zero disables) bounds the quiet period before startup re-floors
   a stalled initialization from the newest stored gossiped finalization.
 - **Finality watchdog** (`watchdog_stall_seconds`, default 600, `0` disables):
-  remains unarmed while authenticated connectivity is unavailable. The current
-  Commonware integration does not expose that telemetry, so with more than one
-  validator this setting does not currently trigger supervised recovery. A
-  deployment whose only validator is this node needs no peer to finalize, so
-  there the watchdog trips on the stall alone. A watchdog that accounts for the
-  active voting quorum still requires implementation and qualification. Snapshot
+  a node that has finalized before exits with code 83 when it finalizes nothing
+  for this long while it holds authenticated connections to enough peers to form
+  a voting quorum with them: two of the three peers for four validators. With
+  fewer connections, or before the first connectivity sample, the stall does not
+  count and the timer restarts when the quorum returns, so a deployment that
+  has lost its quorum is not restarted in a loop. A deployment whose only
+  validator is this node needs no peer. The quorum size comes from the
+  validator count in `peers.json` at startup, not from the active set after
+  operator changes. The check runs every 30 seconds. Multi-validator stalls
+  have been exercised in unit tests only, not qualified on a deployment. Snapshot
   initialization has its separate deadline; supervised restart does not guarantee recovery.
 - **History backend**: Regolith with synchronous writes in every build. There
   is no backend-selection feature. Foreign directory layouts are rejected before
@@ -359,9 +363,13 @@ failure coverage alongside the completed-partition recovery matrix.
   durable history. They are null until observed. `snapshotRevision` separately
   records the recovered snapshot floor. Use height changes for progress alarms;
   `finalizedCount` counts callbacks in this process and is not a height.
-- `currentView`, `isLeader`, `peerCount` and `nullifiedCount` are null because
+- `peerCount` is the number of peers the node holds an authenticated connection
+  to, sampled every ten seconds from the network's connection metric. It is null
+  before the first sample and on a deployment with one validator. It counts
+  connections, not validators that are voting.
+- `currentView`, `isLeader` and `nullifiedCount` are null because
   this Commonware integration does not expose the corresponding live observations.
-  Null does not mean zero peers, no nullifications or a known non-leader.
+  Null does not mean no nullifications or a known non-leader.
   `validatorIndex` and `validatorCount` describe startup configuration, not the
   active membership after operator changes. Rust clients represent unavailable
   fields as `Option`; JSON consumers must accept null. The compatibility

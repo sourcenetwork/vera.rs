@@ -1009,8 +1009,8 @@ whether a bounded persistence pipeline is justified.
 
 A live view and a benchmark report answer different questions. The native RPC
 already exposes member status and finalized-header subscriptions. Those can show
-observed revision progress. Authenticated peer connectivity is not currently
-exposed: `peerCount` remains null, and reaching an RPC endpoint does not establish
+observed revision progress. `peerCount` reports the member's authenticated peer
+connections; reaching an RPC endpoint does not establish
 that the member can reach a voting quorum. A client must verify finality evidence
 against operator-provisioned trust before presenting authenticated results.
 

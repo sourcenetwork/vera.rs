@@ -90,6 +90,24 @@ async fn cluster_observability_canonical() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     };
 
+    // Connectivity is sampled every ten seconds, so it can trail the first blocks.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let peers: Vec<_> = state
+            .all_nodes()
+            .iter()
+            .map(|node| node.peer_count)
+            .collect();
+        if peers.iter().all(|count| *count == Some(n as u64 - 1)) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "every node should report an authenticated connection to each other validator: {peers:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
     // 7. Validate the same snapshots that satisfied the observer bounds.
     for (i, snap) in snapshots.iter().enumerate() {
         assert!(snap.is_healthy, "node{} should be healthy", i);
@@ -110,7 +128,6 @@ async fn cluster_observability_canonical() {
         assert!(snap.finalized_epoch.zip(snap.finalized_view).is_some());
         assert_eq!(snap.current_view, None, "live view is not yet instrumented");
         assert_eq!(snap.is_leader, None, "live leader is not yet instrumented");
-        assert_eq!(snap.peer_count, None, "peer count is not yet instrumented");
         assert_eq!(
             snap.nullified_count, None,
             "nullifications are not yet instrumented"

@@ -470,6 +470,7 @@ impl<S: StateProvider + 'static> EthApiServer for EthApiImpl<S> {
 pub struct NetApiImpl {
     chain_id: u64,
     peer_count: parking_lot::RwLock<Option<u64>>,
+    node_state: Option<NodeState>,
 }
 
 impl std::fmt::Debug for NetApiImpl {
@@ -487,7 +488,15 @@ impl NetApiImpl {
         Self {
             chain_id,
             peer_count: parking_lot::RwLock::new(None),
+            node_state: None,
         }
+    }
+
+    /// Report the peer count the node publishes in its status.
+    #[must_use]
+    pub fn with_node_state(mut self, node_state: NodeState) -> Self {
+        self.node_state = Some(node_state);
+        self
     }
 
     /// Publish an observed authenticated peer count, including an observed zero.
@@ -506,7 +515,12 @@ impl NetApiServer for NetApiImpl {
     }
 
     fn peer_count(&self) -> RpcResult<U64> {
-        let count = self.peer_count.read().ok_or_else(|| {
+        let observed = self
+            .node_state
+            .as_ref()
+            .and_then(NodeState::peer_count)
+            .or(*self.peer_count.read());
+        let count = observed.ok_or_else(|| {
             jsonrpsee::types::ErrorObjectOwned::owned(
                 crate::error::codes::RESOURCE_UNAVAILABLE,
                 "authenticated peer count is unavailable",
@@ -575,6 +589,15 @@ mod tests {
             api.set_peer_count(observed);
             assert_eq!(NetApiServer::peer_count(&api).unwrap(), U64::from(observed));
         }
+    }
+
+    #[test]
+    fn net_peer_count_follows_the_node_status() {
+        let state = NodeState::new(1337, 0, 4);
+        let api = NetApiImpl::new(1337).with_node_state(state.clone());
+        assert!(NetApiServer::peer_count(&api).is_err());
+        state.set_peer_count(3);
+        assert_eq!(NetApiServer::peer_count(&api).unwrap(), U64::from(3));
     }
 
     #[tokio::test]
