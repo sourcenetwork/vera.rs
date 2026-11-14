@@ -7532,7 +7532,6 @@ dependencies = [
  "vera-config",
  "vera-crypto",
  "vera-genesis",
- "vera-jsonrpc",
  "vera-node",
  "zeroize",
 ]

@@ -2,7 +2,10 @@
 
 use clap::Subcommand;
 
-use super::context::ClientContext;
+use super::{
+    context::ClientContext,
+    parse::{self, bytes_to_json},
+};
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum BulletinCommand {
@@ -182,11 +185,5 @@ fn parse_optional_hex(hex: &str) -> eyre::Result<Vec<u8>> {
     if hex.is_empty() {
         return Ok(Vec::new());
     }
-    let hex = hex.strip_prefix("0x").unwrap_or(hex);
-    hex::decode(hex).map_err(|e| eyre::eyre!("invalid hex: {e}"))
-}
-
-fn bytes_to_json(data: &[u8]) -> serde_json::Value {
-    serde_json::from_slice(data)
-        .unwrap_or_else(|_| serde_json::Value::String(format!("0x{}", hex::encode(data))))
+    parse::hex_bytes(hex)
 }

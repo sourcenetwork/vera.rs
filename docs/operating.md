@@ -23,6 +23,17 @@ dialable address. Two paths produce that material:
   trusted-dealer material locally; see [wan-gates.md](wan-gates.md) for a
   worked multi-host example.
 
+`testnet` and `devnet` write one chain ID into the genesis and every node
+configuration. A built-in genesis takes `--chain-id`; a genesis read from
+`--genesis`, or the one a devnet stored on its first run, keeps its own, and a
+different `--chain-id` is rejected before anything is written. Explicit
+`--base-p2p-port` and `--base-rpc-port` ranges must fit below port 65536 and
+must not overlap.
+
+`verad client` signs for the top-level `--chain-id`, which `--client-chain-id`
+may repeat but not contradict. Without either flag it uses `VERA_CHAIN_ID`,
+then 9001.
+
 Set the shared genesis `timestamp` to a nonzero Unix time near network launch.
 It is recorded in the genesis block and must remain unchanged for restarts.
 Nodes reject a zero timestamp or an existing genesis record that differs from

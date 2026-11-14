@@ -6,7 +6,6 @@
 
 use std::{
     collections::BTreeMap,
-    net::TcpListener,
     path::{Path, PathBuf},
     process::{Child, Command},
     time::Duration,
@@ -16,6 +15,8 @@ use commonware_codec::Encode;
 use commonware_cryptography::{Signer as _, ed25519};
 use tracing::info;
 use vera_genesis::{ValidatorConfig, VeraGenesis};
+
+mod ports;
 
 /// CLI arguments for the testnet command.
 #[derive(clap::Args, Debug)]
@@ -45,35 +46,12 @@ pub(crate) struct TestnetArgs {
     pub init_only: bool,
 }
 
-/// Allocate N unique ports by binding to port 0 and reading back the OS-assigned port.
-fn allocate_ports(n: usize) -> eyre::Result<Vec<u16>> {
-    let mut ports = Vec::with_capacity(n);
-    // Hold all listeners open until we've collected all ports,
-    // preventing the OS from reusing any of them.
-    let mut listeners = Vec::with_capacity(n);
-    for _ in 0..n {
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .map_err(|e| eyre::eyre!("Failed to allocate port: {}", e))?;
-        let port = listener.local_addr()?.port();
-        ports.push(port);
-        listeners.push(listener);
-    }
-    // Drop all listeners so the ports are free for validator processes.
-    drop(listeners);
-    Ok(ports)
-}
-
-/// Resolve ports: use explicit base+offset if non-zero, otherwise auto-allocate.
-fn resolve_ports(n: usize, base: u16) -> eyre::Result<Vec<u16>> {
-    if base == 0 {
-        allocate_ports(n)
-    } else {
-        Ok((0..n).map(|i| base + i as u16).collect())
-    }
-}
-
 /// Run the multi-node testnet.
-pub(crate) fn run(chain_id: u64, data_dir: PathBuf, args: &TestnetArgs) -> eyre::Result<()> {
+pub(crate) fn run(
+    chain_id: Option<u64>,
+    data_dir: PathBuf,
+    args: &TestnetArgs,
+) -> eyre::Result<()> {
     let n = args.nodes;
     if n < 4 {
         return Err(eyre::eyre!(
@@ -82,6 +60,22 @@ pub(crate) fn run(chain_id: u64, data_dir: PathBuf, args: &TestnetArgs) -> eyre:
         ));
     }
 
+    let mut genesis = if let Some(ref path) = args.genesis {
+        VeraGenesis::load(path).map_err(|e| eyre::eyre!("Failed to load genesis: {}", e))?
+    } else {
+        let mut genesis = VeraGenesis::devnet();
+        genesis.timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs();
+        genesis
+    };
+    genesis.validate_timestamp()?;
+    let chain_id = crate::chain_id::reconcile(&mut genesis, args.genesis.is_some(), chain_id)?;
+    let ports::Ports {
+        p2p: p2p_ports,
+        rpc: rpc_ports,
+    } = ports::resolve(n, args.base_p2p_port, args.base_rpc_port)?;
+
     info!(nodes = n, chain_id, data_dir = %data_dir.display(), "Setting up vera testnet");
 
     // Create base directory.
@@ -89,10 +83,6 @@ pub(crate) fn run(chain_id: u64, data_dir: PathBuf, args: &TestnetArgs) -> eyre:
 
     // Resolve seed upfront (used for both identity keys and threshold schemes).
     let seed = args.seed.unwrap_or_else(rand::random);
-
-    // Allocate ports upfront so we know all addresses before writing config.
-    let p2p_ports = resolve_ports(n, args.base_p2p_port)?;
-    let rpc_ports = resolve_ports(n, args.base_rpc_port)?;
 
     info!(
         p2p_ports = ?p2p_ports,
@@ -145,8 +135,6 @@ pub(crate) fn run(chain_id: u64, data_dir: PathBuf, args: &TestnetArgs) -> eyre:
         .collect();
 
     let peers_json = serde_json::json!({
-        "validators": n,
-        "threshold": threshold,
         "participants": participants_hex,
         "bootstrappers": bootstrappers,
     });
@@ -156,17 +144,6 @@ pub(crate) fn run(chain_id: u64, data_dir: PathBuf, args: &TestnetArgs) -> eyre:
 
     // ── Phase 3: Write genesis.json to each node ─────────────────────────────
 
-    let mut genesis = if let Some(ref path) = args.genesis {
-        VeraGenesis::load(path).map_err(|e| eyre::eyre!("Failed to load genesis: {}", e))?
-    } else {
-        VeraGenesis::devnet()
-    };
-    if args.genesis.is_none() {
-        genesis.timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs();
-    }
-    genesis.validate_timestamp()?;
     let (epoch_info, shares) = vera_node::trusted_setup(seed, participants.iter().cloned())
         .map_err(crate::cli::anyhow_to_eyre)?;
     genesis.epoch_info = Some(vera_node::epoch_info_hex(&epoch_info));
@@ -396,4 +373,52 @@ fn check_rpc_health(url: &str) -> bool {
         .send()
         .and_then(|r| r.error_for_status())
         .is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn init_only(genesis: Option<PathBuf>) -> TestnetArgs {
+        TestnetArgs {
+            nodes: 4,
+            base_p2p_port: 0,
+            base_rpc_port: 0,
+            genesis,
+            seed: Some(7),
+            init_only: true,
+        }
+    }
+
+    #[test]
+    fn generated_genesis_and_node_configuration_share_the_chain_id() {
+        let dir =
+            std::env::temp_dir().join(format!("verad-testnet-chain-id-{}", std::process::id()));
+        let chain_ids = |network: &Path| {
+            let node = network.join("node3");
+            (
+                VeraGenesis::load(&node.join("genesis.json"))
+                    .unwrap()
+                    .chain_id,
+                vera_config::NodeConfig::load(Some(&node.join("config.toml")))
+                    .unwrap()
+                    .chain_id,
+            )
+        };
+
+        let flagged = dir.join("flagged");
+        run(Some(1234), flagged.clone(), &init_only(None)).unwrap();
+        assert_eq!(chain_ids(&flagged), (1234, 1234));
+
+        let template = flagged.join("node0").join("genesis.json");
+        let inherited = dir.join("inherited");
+        run(None, inherited.clone(), &init_only(Some(template.clone()))).unwrap();
+        assert_eq!(chain_ids(&inherited), (1234, 1234));
+
+        let conflicting = dir.join("conflicting");
+        assert!(run(Some(9001), conflicting.clone(), &init_only(Some(template))).is_err());
+        assert!(!conflicting.exists());
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
