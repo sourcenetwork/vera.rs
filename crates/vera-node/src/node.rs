@@ -65,9 +65,9 @@ use crate::{
     BACKFILL_CHANNEL, BROADCAST_CHANNEL, CERTIFICATE_CHANNEL, CommittedState, DKG_CHANNEL,
     DKG_PROBE_CHANNEL, DynamicProvider, FileSecretStore, IO_BUFFER_SIZE, MAILBOX_SIZE,
     MAX_BLOCK_TXS, MAX_MESSAGE_SIZE, MAX_PARTICIPANTS, MAX_SUPPORTED_MODE, MAX_TX_BYTES,
-    MEMPOOL_CHANNEL, MESSAGE_RATE, NAMESPACE, NodeOptions, NodeSettings, P2P_SUFFIX,
-    PAGE_CACHE_SIZE, PAGE_SIZE, RESOLVER_CHANNEL, REVEAL, Registrar, RegistryParticipants, RpcMode,
-    SHARING_MODE, TxGossip, VOTE_CHANNEL, VrfElectorConfig,
+    MEMPOOL_CHANNEL, NAMESPACE, NodeOptions, NodeSettings, P2P_SUFFIX, PAGE_SIZE, RESOLVER_CHANNEL,
+    REVEAL, Registrar, RegistryParticipants, RpcMode, SHARING_MODE, TxGossip, VOTE_CHANNEL,
+    VrfElectorConfig,
     peer_capacity::PeerCapacity,
     rejoin,
     sink::{FinalizationArtifacts, FinalizationLookup, NodeSink, SinkParts},
@@ -124,6 +124,7 @@ async fn run_node_with_elector<
         solo_pacing,
         verification_threads,
         history_memory,
+        sizing,
     } = options;
     if let RpcMode::Network(Some(listener)) = &rpc {
         anyhow::ensure!(
@@ -208,7 +209,7 @@ async fn run_node_with_elector<
         .dialable_addr
         .as_deref()
         .map_or(Ok(listen), str::parse)?;
-    let page_cache = CacheRef::new(PAGE_SIZE, PAGE_CACHE_SIZE);
+    let page_cache = CacheRef::new(PAGE_SIZE, sizing.page_cache_pages);
 
     // Network.
     let bootstrappers = peers
@@ -237,16 +238,17 @@ async fn run_node_with_elector<
         MAILBOX_SIZE,
     );
     p2p_config.mailbox_size = MAILBOX_SIZE;
+    let channel_rate = sizing.channel_rate();
     let (mut p2p, oracle) = discovery::Network::new(context.child("network"), p2p_config);
-    let vote_network = p2p.register(VOTE_CHANNEL, MESSAGE_RATE);
-    let certificate_network = p2p.register(CERTIFICATE_CHANNEL, MESSAGE_RATE);
-    let resolver_network = p2p.register(RESOLVER_CHANNEL, MESSAGE_RATE);
-    let backfill_network = p2p.register(BACKFILL_CHANNEL, MESSAGE_RATE);
-    let broadcast_network = p2p.register(BROADCAST_CHANNEL, MESSAGE_RATE);
-    let dkg_network = p2p.register(DKG_CHANNEL, MESSAGE_RATE);
-    let dkg_probe_network = p2p.register(DKG_PROBE_CHANNEL, MESSAGE_RATE);
-    let (mempool_sender, mempool_receiver) = p2p.register(MEMPOOL_CHANNEL, MESSAGE_RATE);
-    let history_network = p2p.register(crate::HISTORY_CHANNEL, MESSAGE_RATE);
+    let vote_network = p2p.register(VOTE_CHANNEL, channel_rate);
+    let certificate_network = p2p.register(CERTIFICATE_CHANNEL, channel_rate);
+    let resolver_network = p2p.register(RESOLVER_CHANNEL, channel_rate);
+    let backfill_network = p2p.register(BACKFILL_CHANNEL, channel_rate);
+    let broadcast_network = p2p.register(BROADCAST_CHANNEL, channel_rate);
+    let dkg_network = p2p.register(DKG_CHANNEL, channel_rate);
+    let dkg_probe_network = p2p.register(DKG_PROBE_CHANNEL, channel_rate);
+    let (mempool_sender, mempool_receiver) = p2p.register(MEMPOOL_CHANNEL, channel_rate);
+    let history_network = p2p.register(crate::HISTORY_CHANNEL, channel_rate);
     let mut state_resolver_handles = Vec::new();
     macro_rules! state_channel {
         ($id:literal, $db:ty) => {{
@@ -266,7 +268,7 @@ async fn run_node_with_elector<
                 },
             );
             state_resolver_handles
-                .push(actor.start(p2p.register(crate::QMDB_CHANNELS[$id], MESSAGE_RATE)));
+                .push(actor.start(p2p.register(crate::QMDB_CHANNELS[$id], channel_rate)));
             StateResolver::<$db>::new(mailbox)
         }};
     }
@@ -575,8 +577,16 @@ async fn run_node_with_elector<
         let stall = Duration::from_secs(config.watchdog_stall_seconds);
         let watchdog_state = node_state.clone();
         let has_durable_history = history.head_height() > 0;
+        let lone_validator = peers.participants.len() == 1;
         state_resolver_handles.push(context.child("watchdog").spawn(move |_| async move {
-            crate::run_watchdog(watchdog_state, stall, has_durable_history, watchdog).await;
+            crate::run_watchdog(
+                watchdog_state,
+                stall,
+                has_durable_history,
+                lone_validator,
+                watchdog,
+            )
+            .await;
         }));
     }
     if let Some(height) = completed_sync_height {

@@ -22,7 +22,8 @@ rejected, as are small-order Ed25519 keys.
 A secp256k1 issuer uses Base58BTC (`z`) or unpadded Base64URL (`u`), with a
 compressed or uncompressed public key. All four spellings name one actor, which
 Vera records under its canonical DID: Base58BTC over the multicodec and the
-compressed key. See [one actor per key](#one-actor-per-key). Older builds
+compressed key. Other encodings of the point, such as the SEC1 compact form,
+are rejected. See [one actor per key](#one-actor-per-key). Older builds
 accepted additional multibase encodings when decoding keys. Those encodings are
 not accepted by this version, so replace them before upgrading.
 

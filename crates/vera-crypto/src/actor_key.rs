@@ -45,6 +45,12 @@ impl ActorKey {
                         key.len()
                     )));
                 }
+                // SEC1 also defines a 33-byte compact form, which would be a fifth spelling.
+                if !matches!((key.len(), key[0]), (33, 0x02 | 0x03) | (65, 0x04)) {
+                    return Err(JwtError::InvalidIssuer(
+                        "expected a compressed or uncompressed point".into(),
+                    ));
+                }
                 return k256::ecdsa::VerifyingKey::from_sec1_bytes(key)
                     .map(Self::Secp256k1)
                     .map_err(|e| JwtError::InvalidIssuer(format!("invalid secp256k1 key: {e}")));

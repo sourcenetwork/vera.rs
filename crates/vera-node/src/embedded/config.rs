@@ -5,7 +5,7 @@ use std::{net::SocketAddr, path::PathBuf, time::Duration};
 use vera_config::PruningConfig;
 
 use super::{ThreadBudget, ThreadSetup};
-use crate::{HistoryMemory, SoloGenesis, SoloPacing};
+use crate::{HistoryMemory, NodeSizing, SoloGenesis, SoloPacing};
 
 /// Configuration of an embedded single-validator node.
 #[derive(Clone, Debug)]
@@ -41,6 +41,8 @@ pub struct EmbeddedConfig {
     pub thread_setup: Option<ThreadSetup>,
     /// Byte budgets of the finalized-history store.
     pub history_memory: HistoryMemory,
+    /// Sizes of the allocations made at start.
+    pub sizing: NodeSizing,
 }
 
 impl EmbeddedConfig {
@@ -72,6 +74,7 @@ impl EmbeddedConfig {
             verification_threads: crate::options::default_verification_threads().get(),
             thread_setup: None,
             history_memory: HistoryMemory::EMBEDDED,
+            sizing: NodeSizing::EMBEDDED,
         }
     }
 

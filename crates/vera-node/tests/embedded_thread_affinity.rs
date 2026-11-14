@@ -3,7 +3,6 @@
 //! This is the only test in its binary: another test's threads would count as gained.
 
 #![cfg(target_os = "linux")]
-#![recursion_limit = "256"]
 
 mod support;
 

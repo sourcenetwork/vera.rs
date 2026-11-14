@@ -144,6 +144,35 @@ fn secp256k1_keeps_its_spellings_and_one_canonical_did() {
     }
 }
 
+#[test]
+fn secp256k1_is_refused_in_any_other_point_encoding() {
+    let compressed =
+        hex_point("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798");
+    let key = k256::ecdsa::VerifyingKey::from_sec1_bytes(&compressed).unwrap();
+    let uncompressed = key.to_encoded_point(false).as_bytes().to_vec();
+    let retagged = |point: &[u8], tag: u8| [&[tag][..], &point[1..]].concat();
+    // 0x05 is the SEC1 compact form of an even-y point; 0x06 and 0x07 are hybrid forms.
+    let others = [
+        retagged(&compressed, 0x05),
+        retagged(&uncompressed, 0x06),
+        retagged(&uncompressed, 0x07),
+    ];
+    for point in others {
+        let mut buffer = unsigned_varint::encode::u64_buffer();
+        let codec = unsigned_varint::encode::u64(SECP256K1_MULTICODEC, &mut buffer);
+        let base64url = URL_SAFE_NO_PAD.encode([codec, &point[..]].concat());
+        for spelling in [
+            did(SECP256K1_MULTICODEC, &point),
+            format!("did:key:u{base64url}"),
+        ] {
+            assert!(
+                ActorKey::from_did(&spelling).is_err(),
+                "accepted {spelling}"
+            );
+        }
+    }
+}
+
 fn hex_point(value: &str) -> Vec<u8> {
     (0..value.len())
         .step_by(2)

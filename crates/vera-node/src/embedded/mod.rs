@@ -5,11 +5,17 @@
 //! the same recovery path as an interrupted daemon.
 
 mod config;
+mod directory;
 mod error;
 mod thread_budget;
 mod thread_setup;
 
-use std::{net::SocketAddr, thread::JoinHandle};
+use std::{
+    net::SocketAddr,
+    pin::Pin,
+    sync::{Arc, OnceLock},
+    thread::JoinHandle,
+};
 
 use commonware_runtime::Runner as _;
 use tokio::sync::oneshot;
@@ -42,6 +48,10 @@ pub struct EmbeddedNode {
 impl EmbeddedNode {
     /// Create or reopen the deployment and return once the node serves requests.
     pub async fn start(config: EmbeddedConfig) -> Result<Self, EmbedError> {
+        launch(config).await
+    }
+
+    async fn launch(config: EmbeddedConfig) -> Result<Self, EmbedError> {
         let threads = config.thread_budget();
         if let Some(reason) = config.history_memory.rejection() {
             return Err(EmbedError::Config(reason));
@@ -102,6 +112,7 @@ impl EmbeddedNode {
             timeout_retry: config.timeout_retry,
         };
         let (ready_tx, ready_rx) = oneshot::channel();
+        let (table_tx, table_rx) = oneshot::channel::<LocalRpc>();
         let (stop_tx, stop_rx) = oneshot::channel();
         let (exit_tx, mut exit_rx) = oneshot::channel();
         let options = NodeOptions {
@@ -110,10 +121,11 @@ impl EmbeddedNode {
                 None => RpcMode::Local,
             },
             watchdog: WatchdogMode::Report,
-            ready: Some(ready_tx),
+            ready: Some(table_tx),
             solo_pacing: config.pacing,
             verification_threads,
             history_memory: Some(config.history_memory),
+            sizing: config.sizing,
         };
         let thread_setup = config.thread_setup;
         let storage = config.data_dir.join("commonware");
@@ -121,6 +133,7 @@ impl EmbeddedNode {
             path: storage.clone(),
             source,
         })?;
+        directory::refuse_held(&storage)?;
         let thread = std::thread::Builder::new()
             .name("vera-node".into())
             .stack_size(NODE_STACK_BYTES)
@@ -136,8 +149,16 @@ impl EmbeddedNode {
                     .with_storage_directory(storage)
                     .with_worker_threads(threads.workers)
                     .with_max_blocking_threads(threads.max_blocking);
+                let table = Arc::new(OnceLock::new());
+                let served = table.clone();
                 let result =
                     commonware_runtime::tokio::Runner::new(runtime).start(|context| async move {
+                        ::tokio::spawn(async move {
+                            if let Ok(rpc) = table_rx.await {
+                                let _ = served.set(rpc.clone());
+                                let _ = ready_tx.send(rpc);
+                            }
+                        });
                         ::tokio::select! {
                             result = crate::run_node_with_options(context, settings, options) => {
                                 Err(EmbedError::Stopped(result.map_or_else(
@@ -148,6 +169,11 @@ impl EmbeddedNode {
                             _ = stop_rx => Ok(()),
                         }
                     });
+                // The table holds the node's state, and that state holds the directory.
+                // A host's clone may outlive the node, so the directory is freed here.
+                if let Some(rpc) = table.get() {
+                    rpc.close();
+                }
                 // A host that dropped the node no longer observes the outcome.
                 let _ = exit_tx.send(result);
             })
@@ -221,6 +247,17 @@ impl Drop for EmbeddedNode {
             let _ = stop.send(());
         }
     }
+}
+
+/// Builds the start future in this crate.
+///
+/// A host that instantiated it would compute the layout of the whole actor
+/// graph and need a raised recursion limit; here it sees only a pointer.
+#[inline(never)]
+fn launch(
+    config: EmbeddedConfig,
+) -> Pin<Box<dyn Future<Output = Result<EmbeddedNode, EmbedError>> + Send>> {
+    Box::pin(EmbeddedNode::launch(config))
 }
 
 fn joined(
