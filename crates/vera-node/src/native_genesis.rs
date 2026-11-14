@@ -1,7 +1,7 @@
-use std::{fs, io::Write as _, path::Path};
+use std::{fs, path::Path};
 
 use alloy_primitives::keccak256;
-use anyhow::{Context as _, ensure};
+use anyhow::ensure;
 use commonware_codec::{Decode as _, Encode as _};
 use commonware_glue::stateful::db::DatabaseSet as _;
 use commonware_runtime::{Supervisor as _, buffer::paged::CacheRef, tokio};
@@ -92,7 +92,7 @@ pub(super) async fn load_or_create(
                 && native.committed_targets().await == NativeStateSet::initial_sync_targets(),
             "existing journals have no native genesis or initialization intent"
         );
-        persist(&intent, fingerprint.as_slice())?;
+        vera_cli::write_durable(&intent, fingerprint.as_slice())?;
     }
     let (root, targets) = vera_app::apply_genesis(&execution, &genesis.to_genesis_state()?).await?;
     let mut modules = ModuleState::default();
@@ -154,7 +154,7 @@ pub(super) async fn load_or_create(
     );
     let mut record = fingerprint.to_vec();
     record.extend_from_slice(&block.encode());
-    persist(&path, &record)?;
+    vera_cli::write_durable(&path, &record)?;
     fs::remove_file(intent)?;
     fs::File::open(data_dir)?.sync_all()?;
     Ok(block)
@@ -166,16 +166,6 @@ fn marker_exists(path: &Path) -> std::io::Result<bool> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error),
     }
-}
-
-fn persist(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
-    let temporary = path.with_extension("tmp");
-    let mut file = fs::File::create(&temporary)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
-    fs::rename(temporary, path)?;
-    fs::File::open(path.parent().context("genesis directory missing")?)?.sync_all()?;
-    Ok(())
 }
 
 #[cfg(test)]

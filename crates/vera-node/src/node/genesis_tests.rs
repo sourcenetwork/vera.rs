@@ -81,8 +81,8 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
         let genesis = &genesis;
         if stage > 0 {
             tokio::Runner::new(runtime.clone()).start(|context| async move {
-                persist(
-                    &directory.join("native-genesis.intent"),
+                vera_cli::write_durable(
+                    directory.join("native-genesis.intent"),
                     crate::native_genesis::fingerprint(genesis)
                         .unwrap()
                         .as_slice(),
@@ -178,7 +178,7 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
             );
             let mut legacy = keccak256(serde_json::to_vec(genesis).unwrap()).to_vec();
             legacy.extend_from_slice(&block.encode());
-            persist(&directory.join("native-genesis.bin"), &legacy).unwrap();
+            vera_cli::write_durable(directory.join("native-genesis.bin"), &legacy).unwrap();
             assert!(
                 load_or_create(&context, directory, genesis, &cache)
                     .await
@@ -196,7 +196,7 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
                 .unwrap()
                 .to_vec();
             record.extend_from_slice(&old.encode());
-            persist(&directory.join("native-genesis.bin"), &record).unwrap();
+            vera_cli::write_durable(directory.join("native-genesis.bin"), &record).unwrap();
             assert!(
                 load_or_create(&context, directory, genesis, &cache)
                     .await
@@ -273,8 +273,8 @@ fn legacy_state_and_missing_genesis_with_history_require_recovery() {
         }
         let genesis = configured_genesis();
         let genesis = &genesis;
-        persist(
-            &directory.join("native-genesis.intent"),
+        vera_cli::write_durable(
+            directory.join("native-genesis.intent"),
             crate::native_genesis::fingerprint(genesis)
                 .unwrap()
                 .as_slice(),
@@ -404,7 +404,7 @@ fn incompatible_genesis_markers_are_rejected_unchanged() {
     ] {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path();
-        persist(&path.join(marker), incompatible_fingerprint.as_slice()).unwrap();
+        vera_cli::write_durable(path.join(marker), incompatible_fingerprint.as_slice()).unwrap();
         let runtime = tokio::Config::new().with_storage_directory(path.join("commonware"));
         let genesis = &genesis;
         tokio::Runner::new(runtime).start(|context| async move {

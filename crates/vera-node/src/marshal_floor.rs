@@ -9,13 +9,13 @@ use std::time::Duration;
 /// bounds how far behind the maintenance lag can drift while idle.
 const TICK: Duration = Duration::from_secs(5);
 
-/// Advance the marshal floor to `processed_height - retained`, which lets the
-/// actor prune finalized blocks and finalizations below the new floor.
 pub(crate) type VeraMarshal = Mailbox<
     vera_app::ConsensusScheme,
     commonware_consensus::marshal::standard::Standard<vera_domain::Block>,
 >;
 
+/// Advance the marshal floor to `processed_height - retained`, which lets the
+/// actor prune finalized blocks and finalizations below the new floor.
 pub(crate) async fn run<E: commonware_runtime::Clock>(
     context: E,
     marshal: VeraMarshal,

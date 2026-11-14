@@ -144,6 +144,19 @@ async fn run_node_with_elector<
         certification_timeout,
         timeout_retry,
     } = settings;
+    crate::consensus_timeouts::validate(
+        leader_timeout,
+        certification_timeout,
+        timeout_retry,
+        genesis
+            .simplex
+            .map(|parameters| Duration::from_millis(parameters.stall_timeout_ms)),
+    )
+    .map_err(|error| {
+        anyhow::anyhow!(
+            "{error}; check --leader-timeout-ms, --notarization-timeout-ms and --nullify-retry-ms"
+        )
+    })?;
     let chain_id = config.chain_id;
     anyhow::ensure!(
         chain_id == genesis.chain_id,
@@ -436,7 +449,7 @@ async fn run_node_with_elector<
                 }
                 Err(_) => {
                     return Err(anyhow::anyhow!(
-                        "no peers answered the epoch probe within {}s; check peers.json                          bootstrappers and network reachability",
+                        "no peers answered the epoch probe within {}s; check peers.json bootstrappers and network reachability",
                         wait.as_secs()
                     ));
                 }
@@ -645,12 +658,7 @@ async fn run_node_with_elector<
         let index = block_index.clone();
         move || index.head_block_number()
     });
-    let participant_addresses = peers
-        .participants
-        .iter()
-        .cloned()
-        .zip(genesis.to_genesis_state()?.participant_addresses)
-        .collect();
+    let participant_addresses = crate::beneficiaries::from_genesis(&genesis)?;
     let application = StatefulVeraApp::<_, OrderedState>::new(
         executor.clone(),
         genesis_block.clone(),

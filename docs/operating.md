@@ -41,6 +41,19 @@ verad --config nodeN/config.toml --data-dir nodeN \
      --chain-id <id> validator --peers peers.json
 ```
 
+`peers.json` is rejected when a `participants` entry is not a hexadecimal key
+string or when a key is listed twice. Block beneficiaries come from the
+validator entries of `genesis.json`, not from the order of `peers.json`.
+
+`--leader-timeout-ms`, `--notarization-timeout-ms` and `--nullify-retry-ms`
+must satisfy 0 < leader < notarization and retry > 0. When the genesis selects
+pipelining, the notarization timeout must also be below its `stall_timeout_ms`.
+A node given other values stops before opening storage.
+
+`verad genesis` replaces `genesis.json` through a synced temporary file and a
+rename, so an interrupted ceremony leaves the original document or the
+completed one.
+
 `validator.key` and `secrets.json` in the data directory are the node's
 identity: they are created owner-only and must never be regenerated for an
 existing participant identity. Validator key creation rejects existing paths,

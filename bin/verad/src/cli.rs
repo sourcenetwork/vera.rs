@@ -239,12 +239,7 @@ impl Cli {
         genesis.epoch_info = Some(vera_node::epoch_info_hex(&epoch_info));
         if args.genesis.is_none() && !stored_genesis.exists() {
             let bytes = serde_json::to_vec_pretty(&genesis)?;
-            let temporary = config.data_dir.join("devnet-genesis.json.tmp");
-            let mut file = std::fs::File::create(&temporary)?;
-            std::io::Write::write_all(&mut file, &bytes)?;
-            file.sync_all()?;
-            std::fs::rename(&temporary, &stored_genesis)?;
-            std::fs::File::open(&config.data_dir)?.sync_all()?;
+            vera_cli::write_durable(&stored_genesis, &bytes)?;
         }
         let secrets_path = config.data_dir.join("secrets.json");
         let store = vera_node::FileSecretStore::load(&secrets_path).map_err(anyhow_to_eyre)?;
