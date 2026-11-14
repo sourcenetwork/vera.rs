@@ -120,6 +120,7 @@ fn peer_import_rejects_bad_records_and_resumes_after_cancellation() {
                 .unwrap();
             let mut handles = Vec::new();
             let mut clients = Vec::new();
+            let mut productions = Vec::new();
             for (i, (key, listener)) in keys.into_iter().zip(listeners).enumerate() {
                 let mut cfg = lookup::Config::local(
                     Cups::<_, ChaCha20Poly1305>::new(
@@ -143,10 +144,11 @@ fn peer_import_rejects_bad_records_and_resumes_after_cancellation() {
                 let (mut network, mut oracle) =
                     lookup::Network::new(peer_context.child("network"), cfg);
                 oracle.track(0, membership.clone());
-                let (client, handle) = start_history_peer(
+                let producer = HistoryProducer::new(histories[i].clone(), epochs.clone());
+                productions.push(producer.productions.clone());
+                let (client, handle) = start(
                     peer_context.child("history"),
-                    histories[i].clone(),
-                    epochs.clone(),
+                    producer,
                     oracle.clone(),
                     oracle,
                     identities[i].clone(),
@@ -213,6 +215,16 @@ fn peer_import_rejects_bad_records_and_resumes_after_cancellation() {
                     .contains("certificate verification failed")
             );
             assert_eq!(histories[2].import_next().unwrap(), Some((2, second.id())));
+            // A saturated source drops requests; the importer's retries succeed once it frees.
+            let busy: Vec<_> = (0..PRODUCTIONS)
+                .map(|_| productions[0].clone().try_acquire_owned().unwrap())
+                .collect();
+            let saturated = Duration::from_millis(400);
+            let started = std::time::Instant::now();
+            ::tokio::spawn(async move {
+                ::tokio::time::sleep(saturated).await;
+                drop(busy);
+            });
             for expected in [2, 1] {
                 assert_eq!(
                     client
@@ -227,6 +239,7 @@ fn peer_import_rejects_bad_records_and_resumes_after_cancellation() {
                     Some(expected)
                 );
             }
+            assert!(started.elapsed() >= saturated);
             assert_eq!(histories[2].import_next().unwrap(), None);
             let lookup: crate::FinalizationLookup =
                 Arc::new(|_| panic!("imported history must not use local certificate lookup"));
@@ -264,4 +277,37 @@ fn peer_import_rejects_bad_records_and_resumes_after_cancellation() {
         .await
         .expect("history peer test deadline");
     });
+}
+
+mod production {
+    use super::super::*;
+    use crate::history::transfer::tests::revision;
+    use alloy_primitives::B256;
+    use commonware_resolver::p2p::Producer as _;
+    use vera_domain::BlockId;
+
+    #[tokio::test]
+    async fn saturated_producer_drops_requests_and_serves_again_once_a_slot_frees() {
+        let directory = tempfile::tempdir().unwrap();
+        let (genesis, _) = revision(0, BlockId(B256::ZERO));
+        let (first, receipts) = revision(1, genesis.id());
+        let history = Arc::new(FinalizedHistory::open(directory.path(), &genesis).unwrap());
+        history.append(&first, &receipts, 100).unwrap();
+        let epochs = Arc::new(LightBlockIndex::new(std::num::NonZeroU64::new(20).unwrap()));
+        let mut producer = HistoryProducer::new(history.clone(), epochs);
+        let busy: Vec<_> = (0..PRODUCTIONS)
+            .map(|_| producer.productions.clone().try_acquire_owned().unwrap())
+            .collect();
+        assert!(producer.produce(request_key(0, 1, 0)).await.is_err());
+        drop(busy);
+        let response = producer.produce(request_key(0, 1, 0)).await.unwrap();
+        let expected = history.record_chunk(1, 0, HISTORY_CHUNK_BYTES).unwrap();
+        assert_eq!(decode_chunk(&response, 0).unwrap().bytes, expected.bytes);
+        // A production that fails drops its answer and still returns its slot.
+        assert!(producer.produce(request_key(1, 1, 0)).await.is_err());
+        assert!(producer.produce(request_key(2, 1, 0)).await.is_err());
+        while producer.productions.available_permits() < PRODUCTIONS {
+            tokio::task::yield_now().await;
+        }
+    }
 }

@@ -17,7 +17,6 @@ pub mod bulletin;
 mod client;
 /// Certified access decisions bound to an expected request.
 pub mod decisions;
-mod document_acp;
 mod error;
 mod native_tx;
 /// Signed threshold-service node commands and certified records.
@@ -65,7 +64,6 @@ pub use client::{
     ACP_ADDRESS, BULLETIN_ADDRESS, VALIDATOR_REGISTRY_ADDRESS, VERA_ADDRESS, VeraClient,
     parse_policy_id,
 };
-pub use document_acp::VeraDocumentACP;
 pub use error::ClientError;
 /// Signing key for native service and authorization requests.
 pub use k256_native::ecdsa::SigningKey as Secp256k1SigningKey;

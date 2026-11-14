@@ -3,6 +3,7 @@
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     num::NonZeroU64,
+    sync::Arc,
 };
 
 use parking_lot::RwLock;
@@ -23,7 +24,7 @@ const MAX_FINALIZATION_PAYLOAD_BYTES: usize = 64 << 20;
 
 #[derive(Debug, Default)]
 struct FinalizationCache {
-    entries: HashMap<[u8; 32], StoredFinalization>,
+    entries: HashMap<[u8; 32], Arc<StoredFinalization>>,
     order: VecDeque<[u8; 32]>,
     payload_bytes: usize,
 }
@@ -132,12 +133,13 @@ impl LightBlockIndex {
         }
         cache.payload_bytes += bytes;
         cache.order.push_back(digest);
-        cache.entries.insert(digest, finalization);
+        cache.entries.insert(digest, Arc::new(finalization));
     }
 
-    /// Retrieve an encoded finalization by proposal payload digest.
+    /// Retrieve an encoded finalization by proposal payload digest, sharing
+    /// the cached buffers instead of copying them.
     #[must_use]
-    pub fn get_finalization(&self, digest: &[u8; 32]) -> Option<StoredFinalization> {
+    pub fn get_finalization(&self, digest: &[u8; 32]) -> Option<Arc<StoredFinalization>> {
         self.finalizations.read().entries.get(digest).cloned()
     }
 
@@ -196,7 +198,10 @@ mod tests {
         };
 
         index.insert_finalization(digest, finalization.clone());
-        assert_eq!(index.get_finalization(&digest), Some(finalization));
+        assert_eq!(
+            index.get_finalization(&digest).as_deref(),
+            Some(&finalization)
+        );
     }
 
     #[test]

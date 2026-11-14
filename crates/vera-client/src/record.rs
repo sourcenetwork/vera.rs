@@ -76,6 +76,26 @@ impl VeraClient {
         trusted: &ConsensusPublicKey,
         maximum_bytes: usize,
     ) -> Result<vera_permission::PrefixPageResponse, ClientError> {
+        let (response, _) = self
+            .verified_prefix_page(request, minimum_height, trusted, maximum_bytes)
+            .await?;
+        Ok(response)
+    }
+
+    /// Fetch one page and keep the entries its single verification produced.
+    pub(crate) async fn verified_prefix_page(
+        &self,
+        request: &vera_permission::PrefixPageRequest,
+        minimum_height: u64,
+        trusted: &ConsensusPublicKey,
+        maximum_bytes: usize,
+    ) -> Result<
+        (
+            vera_permission::PrefixPageResponse,
+            vera_permission::VerifiedPrefixPage,
+        ),
+        ClientError,
+    > {
         request.validate()?;
         let maximum_bytes = maximum_bytes.min(vera_permission::PAGE_PROOF_BYTES);
         let response: vera_permission::PrefixPageResponse = self
@@ -85,7 +105,7 @@ impl VeraClient {
                 vera_domain::LIGHT_BLOCK_RESPONSE_BYTES + maximum_bytes + 1024,
             )
             .await?;
-        response.verify(request, minimum_height, trusted, maximum_bytes)?;
-        Ok(response)
+        let page = response.verify(request, minimum_height, trusted, maximum_bytes)?;
+        Ok((response, page))
     }
 }

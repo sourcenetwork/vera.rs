@@ -177,9 +177,9 @@ pub async fn run_bootstrap(
     info.next_players = participants;
     settings.genesis.epoch_info = Some(epoch_info_hex(&info));
     let genesis_path = settings.config.data_dir.join("genesis.json");
-    std::fs::write(
+    vera_cli::write_durable(
         genesis_path,
-        serde_json::to_string_pretty(&settings.genesis)?,
+        serde_json::to_string_pretty(&settings.genesis)?.as_bytes(),
     )?;
     Ok(info)
 }

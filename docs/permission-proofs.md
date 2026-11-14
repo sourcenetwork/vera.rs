@@ -150,7 +150,7 @@ corresponding `PERMISSION_RESPONSE_BYTES` transport bound.
 
 `vera_getPermissionProof(policy, request, height)` returns the policy and relationship evidence needed to evaluate an `AccessRequest` at the requested finalized revision. The request contains an actor DID and one or more operations, each naming an object resource, object ID and permission. The response contains tagged point and complete-prefix reads. It carries no authoritative allow/deny flag.
 
-`vera_permission::verify_permission_proof` authenticates every read against the caller's trusted module root and height, then runs the shared ACP evaluator on the caller's policy ID, actor and operations. The evaluator names the actor, and any object of the policy's `actor` resource, by its [canonical DID](delegated-policies.md#one-actor-per-key) when capturing and when replaying evidence, so a request in any accepted spelling of a secp256k1 key gets the same reads and the same decision. Missing coverage remains an error, including within an exclusion. Proven policy absence returns false. Duplicate reads, mixed revisions and malformed records are rejected. Repeated reads consume the evaluation budget even when they use the same evidence.
+`vera_permission::verify_permission_proof` authenticates every read against the caller's trusted module root, then runs the shared ACP evaluator on the caller's policy ID, actor and operations. The evaluator names the actor, and any object of the policy's `actor` resource, by its [canonical DID](delegated-policies.md#one-actor-per-key) when capturing and when replaying evidence, so a request in any accepted spelling of a secp256k1 key gets the same reads and the same decision. Missing coverage remains an error, including within an exclusion. Proven policy absence returns false. Duplicate reads, mixed revisions and malformed records are rejected. Repeated reads consume the evaluation budget even when they use the same evidence.
 
 Permission capture includes object-state point reads through the shared evaluator.
 These points consume the existing read budgets and authenticate at the same root
@@ -175,6 +175,10 @@ evidence. Captured evidence retains that slot through finality lookup and respon
 size checks; storage guards are released before finality waits. Cancellation,
 deadline expiry and failed attempts release their slots. Capacity exhaustion
 returns a retryable resource-unavailable error, not an authorization result.
+A minimum height more than eight revisions above the published head is refused
+with the same retryable error at once instead of waiting out the deadline; a
+node that has published no revision yet still waits. Waiting requests read the
+published head without taking the storage read locks.
 
 The server captures reads from one immutable current module snapshot, generates evidence at the requested revision and verifies the resulting request before returning it. Changes in membership or policy can make historical evidence unavailable. Every successful response nevertheless evaluates entirely against the requested revision. Client verification is independent of the server's capture decisions.
 

@@ -48,7 +48,11 @@ before accepting requests; see `snapshot-recovery.md`.
 snapshot into a response and reports the full record length and offset. The
 caller must bound record assembly before allocating for the advertised length.
 The native node serves these chunks on authenticated peer channel 16 using
-Commonware's resolver. Pinned reads avoid copying the
+Commonware's resolver. Each request is produced on the blocking pool, two at a
+time per node; a request arriving while both are busy is dropped, which the
+importer sees as a failed fetch and retries. The four most recent finality
+proofs are kept, within one proof response's byte limit, so the chunks of a
+proof are sliced from one assembly. Pinned reads avoid copying the
 entire stored value into a Rust buffer; Regolith's own resource use still applies.
 
 `begin_import` verifies the selected revision against the caller's independent

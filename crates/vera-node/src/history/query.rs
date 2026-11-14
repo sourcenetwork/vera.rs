@@ -15,7 +15,7 @@ pub struct HistoricalExecution {
     pub gas_limit: u64,
 }
 
-fn hash_key(prefix: u8, hash: &[u8; 32]) -> [u8; 33] {
+pub(super) fn hash_key(prefix: u8, hash: &[u8; 32]) -> [u8; 33] {
     let mut key = [prefix; 33];
     key[1..].copy_from_slice(hash);
     key
@@ -27,14 +27,29 @@ pub(super) fn index_execution(
     id: &BlockId,
     receipts: &[StoredReceipt],
 ) {
-    let height = height.to_be_bytes();
-    batch.put(hash_key(BLOCK_HASH, &id.0.0), height);
+    batch.put(hash_key(BLOCK_HASH, &id.0.0), height.to_be_bytes());
     for receipt in receipts {
-        batch.put(hash_key(SUBMISSION_HASH, &receipt.hash), height);
+        index_submission(batch, &receipt.hash, height);
+    }
+}
+
+pub(super) fn index_submission(batch: &mut WriteBatch, hash: &[u8; 32], height: u64) {
+    batch.put(hash_key(SUBMISSION_HASH, hash), height.to_be_bytes());
+}
+
+pub(super) fn unindex_execution(batch: &mut WriteBatch, block: &Block, receipts: &[StoredReceipt]) {
+    batch.delete(hash_key(BLOCK_HASH, &block.id().0.0));
+    for receipt in receipts {
+        batch.delete(hash_key(SUBMISSION_HASH, &receipt.hash));
     }
 }
 
 impl FinalizedHistory {
+    #[cfg(test)]
+    pub(super) fn execution_by_hash(&self, hash: B256) -> Result<Option<HistoricalExecution>> {
+        self.execution(IndexQuery::RevisionHash(hash))
+    }
+
     /// Assemble complete receipt evidence from durable execution and finality records.
     pub fn receipt_proof(
         &self,
@@ -44,16 +59,8 @@ impl FinalizedHistory {
         let Some(execution) = self.execution_by_submission(hash)? else {
             return Ok(None);
         };
-        let revision = match self.light_block(execution.block.height, epochs) {
-            Ok(revision) => revision,
-            Err(error)
-                if error
-                    .to_string()
-                    .starts_with("finalization certificate not found for height ") =>
-            {
-                return Ok(None);
-            }
-            Err(error) => return Err(error),
+        let Some(revision) = self.certified_light_block(execution.block.height, epochs)? else {
+            return Ok(None);
         };
         ensure!(
             revision.block_hash.parse::<B256>()? == execution.block.id().0,
@@ -66,18 +73,15 @@ impl FinalizedHistory {
         }))
     }
 
-    /// Read an execution by revision hash after startup has reconciled history.
-    pub fn execution_by_hash(&self, hash: B256) -> Result<Option<HistoricalExecution>> {
-        self.execution(IndexQuery::RevisionHash(hash))
-    }
-
-    /// Read the revision containing a submission, including unsuccessful execution.
-    pub fn execution_by_submission(&self, hash: B256) -> Result<Option<HistoricalExecution>> {
+    pub(super) fn execution_by_submission(
+        &self,
+        hash: B256,
+    ) -> Result<Option<HistoricalExecution>> {
         self.execution(IndexQuery::Submission(hash))
     }
 
-    /// Read a retained execution by revision or hash.
-    pub fn execution(&self, query: IndexQuery) -> Result<Option<HistoricalExecution>> {
+    /// One record's bytes are bounded by the block and receipt limits.
+    fn execution(&self, query: IndexQuery) -> Result<Option<HistoricalExecution>> {
         let mut remaining_bytes = usize::MAX;
         self.execution_bounded(query, &mut remaining_bytes)
     }
@@ -155,6 +159,44 @@ mod tests {
     use super::*;
     use crate::history::tests::block;
     use std::{num::NonZeroU64, sync::Arc};
+
+    #[test]
+    fn uncertified_revision_is_pending_evidence_not_a_failed_lookup() {
+        let dir = tempfile::tempdir().unwrap();
+        let genesis = block(0, BlockId(B256::ZERO));
+        let mut first = block(1, genesis.id());
+        first.txs.push(vera_domain::Tx::new(vec![1].into()));
+        let receipt = ExecutionReceipt::new(B256::repeat_byte(7), true, 3, 3, vec![], None);
+        first.native_targets = Some([vera_domain::DbTarget::default(); 4]);
+        first.receipt_commitment = Some(vera_executor::receipt_commitment(
+            100,
+            std::slice::from_ref(&receipt),
+        ));
+        let history = FinalizedHistory::open(dir.path(), &genesis).unwrap();
+        history
+            .append_finalized(&first, std::slice::from_ref(&receipt), 100, None)
+            .unwrap();
+        let epochs = LightBlockIndex::new(NonZeroU64::new(20).unwrap());
+        assert!(history.certified_light_block(1, &epochs).unwrap().is_none());
+        assert!(
+            history
+                .receipt_proof(receipt.tx_hash, &epochs)
+                .unwrap()
+                .is_none()
+        );
+        // Clients match this text; added context must not hide the condition.
+        let error = history.light_block(1, &epochs).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "finalization certificate not found for height 1 within retained proof limits"
+        );
+        assert!(
+            error
+                .context("assemble proof")
+                .is::<proof::CertificateNotFound>()
+        );
+        assert!(history.certified_light_block(2, &epochs).is_err());
+    }
 
     #[tokio::test]
     async fn durable_queries_survive_reopen_rebuild_and_rewind() {

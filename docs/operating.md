@@ -23,6 +23,17 @@ dialable address. Two paths produce that material:
   trusted-dealer material locally; see [wan-gates.md](wan-gates.md) for a
   worked multi-host example.
 
+`testnet` and `devnet` write one chain ID into the genesis and every node
+configuration. A built-in genesis takes `--chain-id`; a genesis read from
+`--genesis`, or the one a devnet stored on its first run, keeps its own, and a
+different `--chain-id` is rejected before anything is written. Explicit
+`--base-p2p-port` and `--base-rpc-port` ranges must fit below port 65536 and
+must not overlap.
+
+`verad client` signs for the top-level `--chain-id`, which `--client-chain-id`
+may repeat but not contradict. Without either flag it uses `VERA_CHAIN_ID`,
+then 9001.
+
 Set the shared genesis `timestamp` to a nonzero Unix time near network launch.
 It is recorded in the genesis block and must remain unchanged for restarts.
 Nodes reject a zero timestamp or an existing genesis record that differs from
@@ -40,6 +51,19 @@ Run a node with:
 verad --config nodeN/config.toml --data-dir nodeN \
      --chain-id <id> validator --peers peers.json
 ```
+
+`peers.json` is rejected when a `participants` entry is not a hexadecimal key
+string or when a key is listed twice. Block beneficiaries come from the
+validator entries of `genesis.json`, not from the order of `peers.json`.
+
+`--leader-timeout-ms`, `--notarization-timeout-ms` and `--nullify-retry-ms`
+must satisfy 0 < leader < notarization and retry > 0. When the genesis selects
+pipelining, the notarization timeout must also be below its `stall_timeout_ms`.
+A node given other values stops before opening storage.
+
+`verad genesis` replaces `genesis.json` through a synced temporary file and a
+rename, so an interrupted ceremony leaves the original document or the
+completed one.
 
 `validator.key` and `secrets.json` in the data directory are the node's
 identity: they are created owner-only and must never be regenerated for an
@@ -225,7 +249,10 @@ rejected. Restore a complete compatible backup or use authenticated recovery.
   has lost its quorum is not restarted in a loop. A deployment whose only
   validator is this node needs no peer. The quorum size comes from the
   validator count in `peers.json` at startup, not from the active set after
-  operator changes. The check runs every 30 seconds. Multi-validator stalls
+  operator changes. The check runs every 30 seconds. The timer starts after
+  startup has validated finalized history, so the length of that scan does not
+  count as a stall; journal alignment and query-state hydration that follow do.
+  Multi-validator stalls
   have been exercised in unit tests only, not qualified on a deployment. Snapshot
   initialization has its separate deadline; supervised restart does not guarantee recovery.
 - **History backend**: Regolith with synchronous writes in every build. There
@@ -236,7 +263,8 @@ rejected. Restore a complete compatible backup or use authenticated recovery.
   startup uses that address and port; `--rpc-port` changes only its port, preserving
   the interface. Without a config file, validators retain the indexed default
   port (`8545 + validator_index`); devnet defaults to 8545. Malformed listen
-  addresses fail startup instead of falling back to a wildcard interface.
+  addresses fail startup instead of falling back to a wildcard interface, and
+  so does an RPC address that cannot be bound.
   The JSON-RPC server enforces its own batch, subscription and body-size limits (see
   [permission-proofs.md](permission-proofs.md) for proof-path budgets).
 
@@ -404,8 +432,10 @@ failure coverage alongside the completed-partition recovery matrix.
   Disabling diagnostics leaves backend statistics disabled. These counters are
   sampled independently and reset on reopening; compare intervals within one
   process. They do not measure physical-device writes or individual sync latency.
-- Consensus warnings (`floor not updated`, view skips) at `warn` are normal
-  during epoch transitions; sustained notarization timeouts are not.
+- View-skip warnings at `warn` are normal during epoch transitions; sustained
+  notarization timeouts are not. `floor not updated` can appear while snapshot
+  startup re-floors a stalled initialization. Pruning does not set the marshal
+  floor: the stateful actor prunes marshal from the same retention settings.
 
 ## Capacity reference
 

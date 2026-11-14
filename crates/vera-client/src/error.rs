@@ -1,5 +1,7 @@
 //! Client error types.
 
+use alloy_primitives::B256;
+
 use crate::types::TransactionReceipt;
 
 /// Errors returned by [`VeraClient`](crate::VeraClient) methods.
@@ -36,10 +38,22 @@ pub enum ClientError {
     },
 
     /// Receipt polling exhausted without finding the receipt.
-    #[error("receipt not available after {attempts} attempts")]
+    /// The submission was accepted and may still execute.
+    #[error("receipt for {tx_hash} not available after {attempts} attempts")]
     ReceiptTimeout {
+        /// Accepted submission whose receipt can still be read later.
+        tx_hash: B256,
         /// Number of poll attempts made.
         attempts: u32,
+    },
+
+    /// Receipt polling failed after the submission was accepted, which may still execute.
+    #[error("receipt for {tx_hash} could not be read: {source}")]
+    ReceiptUnavailable {
+        /// Accepted submission whose receipt can still be read later.
+        tx_hash: B256,
+        /// Failure of the last poll.
+        source: Box<Self>,
     },
 
     /// Transaction signing failed.
@@ -169,8 +183,17 @@ mod tests {
 
     #[test]
     fn receipt_timeout_display() {
-        let err = ClientError::ReceiptTimeout { attempts: 10 };
-        assert_eq!(err.to_string(), "receipt not available after 10 attempts");
+        let err = ClientError::ReceiptTimeout {
+            tx_hash: B256::repeat_byte(0xab),
+            attempts: 10,
+        };
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "receipt for 0x{} not available after 10 attempts",
+                "ab".repeat(32)
+            )
+        );
     }
 
     #[test]

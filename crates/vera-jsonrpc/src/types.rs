@@ -304,16 +304,6 @@ pub struct CallRequest {
     pub chain_id: Option<U64>,
 }
 
-impl CallRequest {
-    /// Get the input data, preferring `input` over `data`.
-    pub fn input_data(&self) -> Bytes {
-        self.input
-            .clone()
-            .or_else(|| self.data.clone())
-            .unwrap_or_default()
-    }
-}
-
 /// Sync status for eth_syncing.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -441,31 +431,6 @@ mod tests {
     fn block_transactions_default() {
         let default = BlockTransactions::default();
         assert!(matches!(default, BlockTransactions::Hashes(v) if v.is_empty()));
-    }
-
-    #[test]
-    fn call_request_input_data_prefers_input() {
-        let req = CallRequest {
-            input: Some(Bytes::from_static(&[0x01, 0x02])),
-            data: Some(Bytes::from_static(&[0x03, 0x04])),
-            ..Default::default()
-        };
-        assert_eq!(req.input_data(), Bytes::from_static(&[0x01, 0x02]));
-    }
-
-    #[test]
-    fn call_request_input_data_falls_back_to_data() {
-        let req = CallRequest {
-            data: Some(Bytes::from_static(&[0x03, 0x04])),
-            ..Default::default()
-        };
-        assert_eq!(req.input_data(), Bytes::from_static(&[0x03, 0x04]));
-    }
-
-    #[test]
-    fn call_request_input_data_returns_empty_if_none() {
-        let req = CallRequest::default();
-        assert!(req.input_data().is_empty());
     }
 
     #[test]

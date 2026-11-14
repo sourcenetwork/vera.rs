@@ -7037,7 +7037,6 @@ dependencies = [
  "ark-ff 0.4.2",
  "ark-serialize 0.4.2",
  "ark-std 0.4.0",
- "async-trait",
  "base64",
  "borsh",
  "ed25519-dalek",
@@ -7513,7 +7512,6 @@ dependencies = [
  "vera-config",
  "vera-crypto",
  "vera-genesis",
- "vera-jsonrpc",
  "vera-node",
  "zeroize",
 ]

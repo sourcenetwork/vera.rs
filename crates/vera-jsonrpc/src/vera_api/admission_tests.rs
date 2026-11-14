@@ -31,6 +31,57 @@ async fn missing_storage_releases_current_evidence_waiting_permit() {
 }
 
 #[tokio::test]
+async fn light_block_requests_share_the_proof_slots() {
+    let state = Arc::new(NodeState::new(1, 0, 1));
+    let api = VeraApiImpl::new(state.clone(), None);
+    let proofs: Vec<_> = (0..8).map(|_| state.proof_permit().unwrap()).collect();
+    let busy = api.get_light_block(U64::from(1)).await.unwrap_err();
+    assert_eq!(busy.code(), codes::RESOURCE_UNAVAILABLE);
+    assert_eq!(busy.data().unwrap().get(), r#"{"retryable":true}"#);
+    // Evidence capture assembles its revision under the proof slot it already holds.
+    assert!(api.certified_light_block(1).await.unwrap().is_none());
+    drop(proofs);
+    assert!(
+        api.get_light_block(U64::from(1))
+            .await
+            .unwrap_err()
+            .message()
+            .contains("finalization certificate not found")
+    );
+    assert_eq!(state.proof_permit().iter().count(), 1);
+}
+
+#[test]
+fn the_waiting_lead_bounds_minimums_only_once_a_head_is_published() {
+    use vera_indexer::IndexedBlock;
+
+    let index = Arc::new(BlockIndex::new());
+    index.insert_block(
+        IndexedBlock {
+            hash: B256::repeat_byte(1),
+            number: 1,
+            parent_hash: B256::ZERO,
+            state_root: B256::ZERO,
+            module_state_root: B256::ZERO,
+            timestamp: 1,
+            gas_limit: 100,
+            gas_used: 0,
+            base_fee_per_gas: None,
+            prevrandao: B256::ZERO,
+            transaction_hashes: vec![],
+        },
+        vec![],
+        vec![],
+    );
+    assert!(!capture::head_reaches(&BlockIndex::new(), u64::MAX).unwrap());
+    assert!(capture::head_reaches(&index, 1).unwrap());
+    assert!(!capture::head_reaches(&index, 1 + capture::MINIMUM_HEIGHT_LEAD).unwrap());
+    let error = capture::head_reaches(&index, 2 + capture::MINIMUM_HEIGHT_LEAD).unwrap_err();
+    assert_eq!(error.code(), codes::RESOURCE_UNAVAILABLE);
+    assert_eq!(error.data().unwrap().get(), r#"{"retryable":true}"#);
+}
+
+#[tokio::test]
 async fn cancelled_lookup_keeps_its_permit_until_blocking_work_finishes() {
     let state = Arc::new(NodeState::new(1, 0, 1));
     let _held: Vec<_> = (0..7)
@@ -118,7 +169,7 @@ async fn receipt_poll_does_not_wait_for_a_missing_certificate() {
     let mut api =
         VeraApiImpl::new(state.clone(), None).with_light_block_lookup(Arc::new(move |_| {
             calls.fetch_add(1, Ordering::Relaxed);
-            Err("finalization certificate not found".into())
+            Ok(None)
         }));
     api.index = Some(index);
     let _waiting: Vec<_> = (0..8)

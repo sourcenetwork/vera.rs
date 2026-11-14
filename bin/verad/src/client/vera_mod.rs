@@ -3,7 +3,10 @@
 use alloy_primitives::Address;
 use clap::Subcommand;
 
-use super::context::ClientContext;
+use super::{
+    context::ClientContext,
+    parse::{self, bytes_to_json},
+};
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum VeraCommand {
@@ -52,12 +55,7 @@ impl VeraCommand {
                 trusted_key,
                 minimum_revision,
             } => {
-                let bytes = hex::decode(trusted_key.strip_prefix("0x").unwrap_or(&trusted_key))
-                    .map_err(|error| eyre::eyre!("invalid --trusted-key hex: {error}"))?;
-                let trusted = commonware_codec::DecodeExt::decode(commonware_codec::Copying(
-                    bytes.as_slice(),
-                ))
-                .map_err(|error| eyre::eyre!("invalid --trusted-key: {error}"))?;
+                let trusted = parse::trusted_key(&trusted_key)?;
                 let record = ctx
                     .client
                     .read_relay_grant(&issuer, minimum_revision, &trusted)
@@ -109,9 +107,4 @@ impl VeraCommand {
         }
         Ok(())
     }
-}
-
-fn bytes_to_json(data: &[u8]) -> serde_json::Value {
-    serde_json::from_slice(data)
-        .unwrap_or_else(|_| serde_json::Value::String(format!("0x{}", hex::encode(data))))
 }

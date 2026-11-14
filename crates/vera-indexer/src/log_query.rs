@@ -3,6 +3,11 @@
 use crate::{IndexedLog, IndexerError, LogFilter};
 use alloy_primitives::B256;
 
+/// Most alternatives one address or topic selector may list.
+pub const MAX_LOG_SELECTOR_ALTERNATIVES: usize = 64;
+/// Topic positions a log carries, and so the most a filter may constrain.
+pub const MAX_LOG_TOPIC_POSITIONS: usize = 4;
+
 /// Whole-query scan and result accounting, shared by memory and archive reads.
 #[derive(Debug)]
 pub struct LogQuery {
@@ -32,12 +37,12 @@ impl LogQuery {
             || filter
                 .address
                 .as_ref()
-                .is_some_and(|values| values.len() > 64)
+                .is_some_and(|values| values.len() > MAX_LOG_SELECTOR_ALTERNATIVES)
             || filter
                 .topics
                 .iter()
                 .flatten()
-                .any(|values| values.len() > 64)
+                .any(|values| values.len() > MAX_LOG_SELECTOR_ALTERNATIVES)
         {
             return Err(IndexerError::LogQueryLimit);
         }

@@ -100,7 +100,6 @@ impl PolicyPrefixPageResponse {
         validate_policy_prefix(policy, &request.prefix)?;
         request.validate()?;
         encoded_size(&self.revision, LIGHT_BLOCK_RESPONSE_BYTES)?;
-        encoded_size(&self.proof, maximum_bytes.min(PAGE_PROOF_BYTES))?;
         let (_, root) = verify_light_block(&self.revision, trusted)?;
         if self.revision.height < minimum_height {
             return Err(PermissionError::Invalid(

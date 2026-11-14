@@ -67,17 +67,12 @@ pub enum RpcError {
     /// All blocking history readers are occupied.
     #[error("history service busy; retry later")]
     HistoryBusy,
+    /// All execution simulation slots are occupied.
+    #[error("simulation service busy; retry later")]
+    SimulationBusy,
     /// Request work or response exceeds the service budget.
     #[error("request limit exceeded: {0}")]
     LimitExceeded(String),
-
-    /// Block not found.
-    #[error("block not found")]
-    BlockNotFound,
-
-    /// Transaction not found.
-    #[error("transaction not found")]
-    TransactionNotFound,
 
     /// Account not found.
     #[error("account not found: {0}")]
@@ -122,7 +117,7 @@ pub enum RpcError {
 impl From<RpcError> for ErrorObjectOwned {
     fn from(err: RpcError) -> Self {
         match &err {
-            RpcError::HistoryBusy => ErrorObjectOwned::owned(
+            RpcError::HistoryBusy | RpcError::SimulationBusy => ErrorObjectOwned::owned(
                 codes::RESOURCE_UNAVAILABLE,
                 err.to_string(),
                 Some(serde_json::json!({"retryable": true})),
@@ -133,8 +128,6 @@ impl From<RpcError> for ErrorObjectOwned {
             _ => {
                 let (code, message) = match &err {
                     RpcError::LimitExceeded(_) => (codes::LIMIT_EXCEEDED, err.to_string()),
-                    RpcError::BlockNotFound => (codes::RESOURCE_NOT_FOUND, err.to_string()),
-                    RpcError::TransactionNotFound => (codes::RESOURCE_NOT_FOUND, err.to_string()),
                     RpcError::AccountNotFound(_) => (codes::RESOURCE_NOT_FOUND, err.to_string()),
                     RpcError::InvalidBlockNumber(_) => (codes::INVALID_PARAMS, err.to_string()),
                     RpcError::InvalidTransaction(_) => (codes::INVALID_PARAMS, err.to_string()),
@@ -143,7 +136,9 @@ impl From<RpcError> for ErrorObjectOwned {
                     RpcError::StateError(_) => (codes::INTERNAL_ERROR, err.to_string()),
                     RpcError::Internal(_) => (codes::INTERNAL_ERROR, err.to_string()),
                     RpcError::NotImplemented => (codes::METHOD_NOT_SUPPORTED, err.to_string()),
-                    RpcError::ExecutionReverted { .. } | RpcError::HistoryBusy => unreachable!(),
+                    RpcError::ExecutionReverted { .. }
+                    | RpcError::HistoryBusy
+                    | RpcError::SimulationBusy => unreachable!(),
                 };
                 ErrorObjectOwned::owned(code, message, None::<()>)
             }
@@ -189,18 +184,6 @@ mod tests {
     }
 
     #[test]
-    fn rpc_error_display_block_not_found() {
-        let err = RpcError::BlockNotFound;
-        assert_eq!(err.to_string(), "block not found");
-    }
-
-    #[test]
-    fn rpc_error_display_transaction_not_found() {
-        let err = RpcError::TransactionNotFound;
-        assert_eq!(err.to_string(), "transaction not found");
-    }
-
-    #[test]
     fn rpc_error_display_account_not_found() {
         let err = RpcError::AccountNotFound("0x1234".to_string());
         assert_eq!(err.to_string(), "account not found: 0x1234");
@@ -240,22 +223,6 @@ mod tests {
     fn rpc_error_display_not_implemented() {
         let err = RpcError::NotImplemented;
         assert_eq!(err.to_string(), "method not implemented");
-    }
-
-    #[test]
-    fn rpc_error_to_error_object_block_not_found() {
-        let err = RpcError::BlockNotFound;
-        let obj: ErrorObjectOwned = err.into();
-        assert_eq!(obj.code(), codes::RESOURCE_NOT_FOUND);
-        assert_eq!(obj.message(), "block not found");
-    }
-
-    #[test]
-    fn rpc_error_to_error_object_transaction_not_found() {
-        let err = RpcError::TransactionNotFound;
-        let obj: ErrorObjectOwned = err.into();
-        assert_eq!(obj.code(), codes::RESOURCE_NOT_FOUND);
-        assert_eq!(obj.message(), "transaction not found");
     }
 
     #[test]
@@ -302,6 +269,16 @@ mod tests {
     }
 
     #[test]
+    fn busy_services_are_retryable() {
+        for err in [RpcError::HistoryBusy, RpcError::SimulationBusy] {
+            let obj: ErrorObjectOwned = err.into();
+            assert_eq!(obj.code(), codes::RESOURCE_UNAVAILABLE);
+            let data: serde_json::Value = serde_json::from_str(obj.data().unwrap().get()).unwrap();
+            assert_eq!(data, serde_json::json!({"retryable": true}));
+        }
+    }
+
+    #[test]
     fn rpc_error_to_error_object_not_implemented() {
         let err = RpcError::NotImplemented;
         let obj: ErrorObjectOwned = err.into();
@@ -310,8 +287,8 @@ mod tests {
 
     #[test]
     fn rpc_error_debug() {
-        let err = RpcError::BlockNotFound;
+        let err = RpcError::NotImplemented;
         let debug_str = format!("{:?}", err);
-        assert!(debug_str.contains("BlockNotFound"));
+        assert!(debug_str.contains("NotImplemented"));
     }
 }

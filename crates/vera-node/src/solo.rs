@@ -1,9 +1,6 @@
 //! Single-validator deployments owned by one account.
 
-use std::{
-    io::Write as _,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use commonware_consensus::types::Epoch;
 use commonware_cryptography::Signer as _;
@@ -24,6 +21,8 @@ pub const SOLO_BLOCKS_PER_EPOCH: u64 = 256;
 pub const SOLO_STALL_TIMEOUT_MS: u64 = 30_000;
 
 const GENESIS_FILE: &str = "solo-genesis.json";
+/// A genesis written before its share is stored, published once the share is durable.
+const PENDING_FILE: &str = "solo-genesis.pending";
 
 /// Identity of a deployment that starts with this device as its only validator.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,6 +72,7 @@ pub enum SoloError {
 ///
 /// The first call deals the consensus share from operating-system randomness and
 /// records the genesis. Later calls reuse both and reject a different identity.
+/// A first call interrupted before the genesis is published is finished by the next.
 pub fn prepare_solo(
     config: &NodeConfig,
     identity: &SoloGenesis,
@@ -89,73 +89,41 @@ pub fn prepare_solo(
     let store = FileSecretStore::load(directory.join("secrets.json"))
         .map_err(|error| SoloError::Share(format!("{error:#}")))?;
     let stored = directory.join(GENESIS_FILE);
-    let genesis = if stored.exists() {
-        let genesis =
-            VeraGenesis::load(&stored).map_err(|error| SoloError::Genesis(error.to_string()))?;
-        if genesis.chain_id != identity.chain_id {
-            return Err(SoloError::Mismatch("chain identifier"));
-        }
-        if genesis.operators.as_ref() != Some(&identity.operators) {
-            return Err(SoloError::Mismatch("operator policy"));
-        }
-        if genesis.placed_policies != identity.policies {
-            return Err(SoloError::Mismatch("seeded policies"));
-        }
-        let expected = validator(&local, &config.network.listen_addr);
-        let same_validator = matches!(genesis.validators.as_slice(), [only]
-            if only.consensus_pubkey == expected.consensus_pubkey
-                && only.evm_address == expected.evm_address);
-        if !same_validator {
-            return Err(SoloError::Mismatch("validator key"));
-        }
-        if !store.has_shares() {
-            return Err(SoloError::Incomplete("consensus share is missing"));
-        }
-        genesis
-    } else {
+    if !stored.exists() {
+        let pending = directory.join(PENDING_FILE);
         if store.has_shares() {
-            return Err(SoloError::Incomplete(
-                "consensus shares exist without a genesis",
-            ));
+            if !pending.exists() {
+                return Err(SoloError::Incomplete(
+                    "consensus shares exist without a genesis",
+                ));
+            }
+        } else {
+            create(config, identity, &local, &store, &pending)?;
         }
-        identity
-            .operators
-            .validate()
-            .map_err(|error| SoloError::Genesis(error.to_string()))?;
-        let (epoch_info, shares) = crate::bootstrap::random_setup([local.clone()])
-            .map_err(|error| SoloError::Share(format!("{error:#}")))?;
-        let share = shares
-            .get_value(&local)
-            .cloned()
-            .ok_or_else(|| SoloError::Share("dealer produced no share".into()))?;
-        let genesis = VeraGenesis {
-            chain_id: identity.chain_id,
-            operators: Some(identity.operators.clone()),
-            timestamp: identity.timestamp,
-            allocations: Vec::new(),
-            validators: vec![validator(&local, &config.network.listen_addr)],
-            contracts: Vec::new(),
-            extra_storage: Vec::new(),
-            policies: Vec::new(),
-            placed_policies: identity.policies.clone(),
-            node_demerits: Vec::new(),
-            epoch_info: Some(crate::epoch_info_hex(&epoch_info)),
-            blocks_per_epoch: SOLO_BLOCKS_PER_EPOCH,
-            simplex: Some(vera_domain::SimplexParameters {
-                stall_timeout_ms: SOLO_STALL_TIMEOUT_MS,
-                ..Default::default()
-            }),
-            // A lone validator proposes every block from its own clock, and
-            // an idle or paused device must not fall behind it.
-            timestamp_step_secs: Some(u64::MAX),
-        };
-        // The share is stored first: a genesis record without its share cannot be recovered.
-        store
-            .put_initial_share(Epoch::zero(), share)
-            .map_err(|error| SoloError::Share(format!("{error:#}")))?;
-        write_genesis(directory, &stored, &genesis)?;
-        genesis
-    };
+        std::fs::rename(&pending, &stored).map_err(|source| io(&stored, source))?;
+        vera_cli::sync_parent(&stored).map_err(|source| io(directory, source))?;
+    }
+    let genesis =
+        VeraGenesis::load(&stored).map_err(|error| SoloError::Genesis(error.to_string()))?;
+    if genesis.chain_id != identity.chain_id {
+        return Err(SoloError::Mismatch("chain identifier"));
+    }
+    if genesis.operators.as_ref() != Some(&identity.operators) {
+        return Err(SoloError::Mismatch("operator policy"));
+    }
+    if genesis.placed_policies != identity.policies {
+        return Err(SoloError::Mismatch("seeded policies"));
+    }
+    let expected = validator(&local, &config.network.listen_addr);
+    let same_validator = matches!(genesis.validators.as_slice(), [only]
+        if only.consensus_pubkey == expected.consensus_pubkey
+            && only.evm_address == expected.evm_address);
+    if !same_validator {
+        return Err(SoloError::Mismatch("validator key"));
+    }
+    if !store.has_shares() {
+        return Err(SoloError::Incomplete("consensus share is missing"));
+    }
     genesis
         .validate_timestamp()
         .map_err(|error| SoloError::Genesis(error.to_string()))?;
@@ -164,6 +132,57 @@ pub fn prepare_solo(
         bootstrappers: vec![(local, listen)],
     };
     Ok((genesis, peers))
+}
+
+/// Deal a share and record the genesis it belongs to under its pending name.
+///
+/// The pending genesis is durable before the share, so a start interrupted
+/// after the share is stored still finds the genesis that share was dealt for;
+/// one interrupted earlier holds no share and deals again.
+fn create(
+    config: &NodeConfig,
+    identity: &SoloGenesis,
+    local: &commonware_cryptography::ed25519::PublicKey,
+    store: &FileSecretStore,
+    pending: &Path,
+) -> Result<(), SoloError> {
+    identity
+        .operators
+        .validate()
+        .map_err(|error| SoloError::Genesis(error.to_string()))?;
+    let (epoch_info, shares) = crate::bootstrap::random_setup([local.clone()])
+        .map_err(|error| SoloError::Share(format!("{error:#}")))?;
+    let share = shares
+        .get_value(local)
+        .cloned()
+        .ok_or_else(|| SoloError::Share("dealer produced no share".into()))?;
+    let genesis = VeraGenesis {
+        chain_id: identity.chain_id,
+        operators: Some(identity.operators.clone()),
+        timestamp: identity.timestamp,
+        allocations: Vec::new(),
+        validators: vec![validator(local, &config.network.listen_addr)],
+        contracts: Vec::new(),
+        extra_storage: Vec::new(),
+        policies: Vec::new(),
+        placed_policies: identity.policies.clone(),
+        node_demerits: Vec::new(),
+        epoch_info: Some(crate::epoch_info_hex(&epoch_info)),
+        blocks_per_epoch: SOLO_BLOCKS_PER_EPOCH,
+        simplex: Some(vera_domain::SimplexParameters {
+            stall_timeout_ms: SOLO_STALL_TIMEOUT_MS,
+            ..Default::default()
+        }),
+        // A lone validator proposes every block from its own clock, and
+        // an idle or paused device must not fall behind it.
+        timestamp_step_secs: Some(u64::MAX),
+    };
+    let bytes = serde_json::to_vec_pretty(&genesis)
+        .map_err(|error| SoloError::Genesis(error.to_string()))?;
+    vera_cli::write_durable(pending, &bytes).map_err(|source| io(pending, source))?;
+    store
+        .put_initial_share(Epoch::zero(), share)
+        .map_err(|error| SoloError::Share(format!("{error:#}")))
 }
 
 /// The registry entry for a deployment's only validator.
@@ -179,23 +198,13 @@ fn validator(
     }
 }
 
-fn write_genesis(directory: &Path, path: &Path, genesis: &VeraGenesis) -> Result<(), SoloError> {
-    let bytes = serde_json::to_vec_pretty(genesis)
-        .map_err(|error| SoloError::Genesis(error.to_string()))?;
-    let temporary = path.with_extension("json.tmp");
-    let mut file = std::fs::File::create(&temporary).map_err(|source| io(&temporary, source))?;
-    file.write_all(&bytes)
-        .map_err(|source| io(&temporary, source))?;
-    file.sync_all().map_err(|source| io(&temporary, source))?;
-    std::fs::rename(&temporary, path).map_err(|source| io(path, source))?;
-    std::fs::File::open(directory)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|source| io(directory, source))
-}
-
 fn io(path: &Path, source: std::io::Error) -> SoloError {
     SoloError::Io {
         path: path.to_path_buf(),
         source,
     }
 }
+
+#[cfg(test)]
+#[path = "solo_tests.rs"]
+mod tests;

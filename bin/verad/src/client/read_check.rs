@@ -2,9 +2,10 @@
 
 use std::{num::NonZeroU64, time::SystemTime};
 
-use commonware_codec::Copying;
 use serde::Serialize;
 use vera_client::{ClientError, VeraClient};
+
+use super::parse::{self, TrustedKeyError};
 
 #[derive(clap::Args, Debug)]
 pub(crate) struct ReadCheckArgs {
@@ -27,10 +28,8 @@ pub(crate) struct ReadCheckArgs {
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ReadCheckError {
-    #[error("invalid trusted consensus key hex")]
-    KeyHex(#[from] hex::FromHexError),
-    #[error("invalid trusted consensus key encoding")]
-    KeyEncoding(#[from] commonware_codec::Error),
+    #[error(transparent)]
+    TrustedKey(#[from] TrustedKeyError),
     #[error(transparent)]
     Client(#[from] ClientError),
     #[error("selected policy is absent at the certified revision")]
@@ -55,12 +54,7 @@ pub(crate) struct ReadCheckReport {
 impl ReadCheckArgs {
     pub(crate) async fn run(&self, client: &VeraClient) -> Result<ReadCheckReport, ReadCheckError> {
         let policy = vera_client::parse_policy_id(&self.policy_id)?;
-        let bytes = hex::decode(
-            self.trusted_key
-                .strip_prefix("0x")
-                .unwrap_or(&self.trusted_key),
-        )?;
-        let trusted = commonware_codec::DecodeExt::decode(Copying(bytes.as_slice()))?;
+        let trusted = parse::trusted_key(&self.trusted_key)?;
         let record = client
             .read_policy(policy, self.minimum_revision.get(), &trusted)
             .await?;
@@ -140,12 +134,12 @@ mod tests {
         };
         assert!(matches!(
             args.run(&client).await,
-            Err(ReadCheckError::KeyHex(_))
+            Err(ReadCheckError::TrustedKey(TrustedKeyError::Hex(_)))
         ));
         args.trusted_key = "00".into();
         assert!(matches!(
             args.run(&client).await,
-            Err(ReadCheckError::KeyEncoding(_))
+            Err(ReadCheckError::TrustedKey(TrustedKeyError::Encoding(_)))
         ));
     }
 

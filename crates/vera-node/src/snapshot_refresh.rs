@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use commonware_consensus::{marshal::Identifier, types::Height};
 
-use crate::marshal_floor::VeraMarshal;
+use crate::marshal::VeraMarshal;
 
 /// Watches marshal progress while snapshot initialization waits for databases
 /// and re-floors from the newest stored finalization once processing stalls.

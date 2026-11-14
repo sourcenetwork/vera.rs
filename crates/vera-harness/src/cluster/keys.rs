@@ -117,8 +117,6 @@ impl KeySet {
             .collect();
 
         let peers_json = serde_json::json!({
-            "validators": self.node_count(),
-            "threshold": self.threshold,
             "participants": participants_hex,
             "bootstrappers": bootstrappers,
         });

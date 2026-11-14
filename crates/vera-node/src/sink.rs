@@ -211,7 +211,7 @@ impl FinalizedSink for NodeSink {
         let gas_used = receipts.iter().map(|r| r.gas_used).sum();
         // One identifier serves indexing, subscriptions, the header and the light index.
         let id = block.id();
-        index_finalized_block(
+        let tx_hashes = index_finalized_block(
             &self.index,
             block,
             id.0,
@@ -238,13 +238,15 @@ impl FinalizedSink for NodeSink {
                 history_us = (persisted - lookup).as_micros(), index_us,
                 "finalized revision publication");
         }
-        let (rpc_block, rpc_logs) =
-            subscription_data(block, id.0, self.gas_limit, &receipts, gas_used);
-        if self.heads.send(rpc_block).is_err() {
-            trace!(height = block.height, "no newHeads subscribers");
-        }
-        if !rpc_logs.is_empty() && self.logs.send(rpc_logs).is_err() {
-            trace!(height = block.height, "no logs subscribers");
+        if self.heads.receiver_count() > 0 || self.logs.receiver_count() > 0 {
+            let (rpc_block, rpc_logs) =
+                subscription_data(block, id.0, self.gas_limit, &receipts, gas_used, &tx_hashes);
+            if self.heads.send(rpc_block).is_err() {
+                trace!(height = block.height, "no newHeads subscribers");
+            }
+            if !rpc_logs.is_empty() && self.logs.send(rpc_logs).is_err() {
+                trace!(height = block.height, "no logs subscribers");
+            }
         }
         restore_epoch(&self.light_index, block);
         let height = block.height;

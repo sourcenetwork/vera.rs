@@ -37,15 +37,7 @@ pub(super) async fn check_permissions(
         let mut missing = proof.clone();
         missing.reads.remove(index);
         assert!(
-            verify_permission_proof(
-                root,
-                revision.height,
-                policy,
-                &request,
-                &missing,
-                PERMISSION_LIMITS
-            )
-            .is_err()
+            verify_permission_proof(root, policy, &request, &missing, PERMISSION_LIMITS).is_err()
         );
     }
     let mut wrong_request = request.clone();
@@ -55,39 +47,20 @@ pub(super) async fn check_permissions(
             .unwrap(),
     );
     assert!(!matches!(
-        verify_permission_proof(
-            root,
-            revision.height,
-            policy,
-            &wrong_request,
-            &proof,
-            PERMISSION_LIMITS
-        ),
+        verify_permission_proof(root, policy, &wrong_request, &proof, PERMISSION_LIMITS),
         Ok(true)
     ));
     let mut duplicate = proof.clone();
     duplicate.reads.push(proof.reads[0].clone());
     assert!(
-        verify_permission_proof(
-            root,
-            revision.height,
-            policy,
-            &request,
-            &duplicate,
-            PERMISSION_LIMITS
-        )
-        .is_err()
+        verify_permission_proof(root, policy, &request, &duplicate, PERMISSION_LIMITS).is_err()
     );
     let mut limits = PERMISSION_LIMITS;
     limits.proof_bytes = 1;
-    assert!(
-        verify_permission_proof(root, revision.height, policy, &request, &proof, limits).is_err()
-    );
+    assert!(verify_permission_proof(root, policy, &request, &proof, limits).is_err());
     limits = PERMISSION_LIMITS;
     limits.reads.reads = 1;
-    assert!(
-        verify_permission_proof(root, revision.height, policy, &request, &proof, limits).is_err()
-    );
+    assert!(verify_permission_proof(root, policy, &request, &proof, limits).is_err());
 
     let register = IAcp::registerObjectCall {
         policyId: parse_policy_id(policy),
@@ -160,29 +133,13 @@ pub(super) async fn check_permissions(
             .1
     );
     assert!(
-        verify_permission_proof(
-            denied_root,
-            denied_revision.height,
-            policy,
-            &request,
-            &proof,
-            PERMISSION_LIMITS
-        )
-        .is_err()
+        verify_permission_proof(denied_root, policy, &request, &proof, PERMISSION_LIMITS).is_err()
     );
     let blocked_prefix = relation_prefix(&denied, policy, "blocked", Some("blocked"));
     assert_eq!(prefix(&denied, &blocked_prefix).entries.len(), 1);
     remove_prefix_records(&mut denied, &blocked_prefix);
     assert!(
-        verify_permission_proof(
-            denied_root,
-            denied_revision.height,
-            policy,
-            &request,
-            &denied,
-            PERMISSION_LIMITS
-        )
-        .is_err()
+        verify_permission_proof(denied_root, policy, &request, &denied, PERMISSION_LIMITS).is_err()
     );
 }
 

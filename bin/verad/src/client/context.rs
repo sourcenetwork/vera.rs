@@ -2,6 +2,8 @@
 
 use vera_client::{BlsSigner, EvmSigner, Secp256k1SigningKey, VeraClient};
 
+use super::parse;
+
 #[derive(Debug, thiserror::Error)]
 pub(super) enum KeyError {
     #[error("--key is required for write commands")]
@@ -64,24 +66,13 @@ impl ClientContext {
 }
 
 fn parse_signing_key(hex_key: &str) -> Result<Secp256k1SigningKey, KeyError> {
-    let hex_key = hex_key.strip_prefix("0x").unwrap_or(hex_key);
-    let bytes = hex::decode(hex_key)?;
+    let bytes = parse::decode_hex(hex_key)?;
     Secp256k1SigningKey::from_slice(&bytes).map_err(|_| KeyError::InvalidKey)
 }
 
 fn parse_bls_signer(hex_key: &str, chain_id: u64) -> eyre::Result<BlsSigner> {
-    let hex_key = hex_key.strip_prefix("0x").unwrap_or(hex_key);
-    let bytes = hex::decode(hex_key).map_err(|e| eyre::eyre!("invalid --bls-key hex: {e}"))?;
-    if bytes.len() != 32 {
-        return Err(eyre::eyre!(
-            "BLS secret key must be 32 bytes, got {}",
-            bytes.len()
-        ));
-    }
-    let mut arr = [0u8; 32];
-    arr.copy_from_slice(&bytes);
-    let fr = <ark_bls12_381::Fr as ark_ff::PrimeField>::from_le_bytes_mod_order(&arr);
-    BlsSigner::new(fr, chain_id).map_err(|e| eyre::eyre!("BLS signer init: {e}"))
+    BlsSigner::new(parse::bls_scalar(hex_key)?, chain_id)
+        .map_err(|e| eyre::eyre!("BLS signer init: {e}"))
 }
 
 #[cfg(test)]

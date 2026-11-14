@@ -24,7 +24,7 @@ async fn local_and_network_callers_reach_the_same_methods() {
         serde_json::to_value(&in_process).unwrap(),
         serde_json::to_value(&over_network).unwrap()
     );
-    handle.abort();
+    handle.stop();
 }
 
 #[tokio::test]

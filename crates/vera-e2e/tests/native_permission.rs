@@ -105,7 +105,6 @@ fn evaluate(
     let block = verify_finalized_block(light, trusted).unwrap();
     verify_permission_proof(
         block.module_state_root,
-        block.height,
         policy,
         request,
         proof,
@@ -355,7 +354,6 @@ async fn permission_lifecycle(pipelined: bool) {
         assert!(
             verify_permission_proof(
                 block.module_state_root,
-                denied,
                 &policy,
                 &request,
                 &proof,

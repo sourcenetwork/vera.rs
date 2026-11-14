@@ -149,6 +149,6 @@ impl StateProvider for NoopStateProvider {
     }
 
     async fn block_number(&self) -> Result<u64, RpcError> {
-        Err(RpcError::NotImplemented)
+        Ok(0)
     }
 }

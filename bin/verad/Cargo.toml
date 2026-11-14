@@ -21,7 +21,6 @@ vera-genesis.workspace = true
 vera-cli.workspace = true
 vera-client.workspace = true
 vera-config.workspace = true
-vera-jsonrpc.workspace = true
 vera-node.workspace = true
 
 alloy-primitives.workspace = true

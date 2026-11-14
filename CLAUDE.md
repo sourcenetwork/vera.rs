@@ -178,9 +178,10 @@ ordering and atomic history batch are unchanged.
 Finalized history writes derived revision-hash and submission-hash mappings in
 the same atomic batch as execution records. Historical lookups require the query
 index head to match the durable history head and validate the selected record
-against the requested hash. Recovery rebuilds missing or rewound mappings in
+against the requested hash. Recovery rebuilds missing or mismatched mappings in
 batches, publishing their head only after completion; normal recovery reuses
-a matching index. These reads return execution data, with finality verified
+a matching index, and a rewind of at most 1,024 revisions removes only the
+discarded revisions' mappings together with the head rewind. These reads return execution data, with finality verified
 separately by proof consumers.
 
 The node uses `vera-app::OrderedState`: three execution partitions (accounts,
@@ -251,7 +252,9 @@ import API. The import selection and cursor are durable, and imported history
 remains unavailable until recovery at the matching state anchor completes.
 Starting an import selects metadata format 3 to prevent older binaries from
 discarding its unfinished records. The node serves chunks through Commonware's
-resolver on authenticated channel 16. `HistoryPeer::import_next_from` bounds
+resolver on authenticated channel 16, producing each chunk on the blocking pool,
+two at a time; further requests are dropped and retried by the importer.
+`HistoryPeer::import_next_from` bounds
 record and finality-proof assembly, verifies both before persistence and cancels
 pending fetches when dropped. Imported certificates retain their verifier material
 and any descendants beyond the recovery anchor without advancing execution.
@@ -286,12 +289,18 @@ Deleted policies and archived records are unregistered; retained cleanup records
 cannot establish ownership. See `docs/native-relationship-keys.md` for the fresh-state cutover. `vera_getStateProof` and `vera_getRelationProof` are not registered. Record and
 complete-prefix reads use the authenticated native endpoints.
 Historical native activity proofs are not retained.
-Proof RPCs share eight in-flight slots per node; blocking historical certificate
-lookups have a separate eight-slot limit. Excess work returns JSON-RPC -32002
+Proof RPCs share eight in-flight slots per node, including `vera_getLightBlock`
+while it assembles a cached revision; blocking historical certificate
+lookups have a separate eight-slot limit. A current-evidence request whose
+minimum height is more than eight revisions above the published head is refused
+with the retryable -32002 at once. Excess work returns JSON-RPC -32002
 with `retryable: true` before starting, and so does exceeding the two-second
 current-evidence deadline: the certificate is delayed, not absent. The Rust client exposes these responses
 as `ResourceBusy`; `is_throttled()` also recognizes HTTP 429. Other -32002
 errors remain ordinary RPC errors, and submissions are not automatically retried.
+The client's sign-and-submit helpers advance a signer's sequence only after the
+node admits the request; receipt polling rides out connection failures within
+its time budget, and its errors name the accepted submission.
 Receipt polls return no evidence yet when the finalization certificate is absent,
 without holding a proof slot while waiting or assembling receipt payloads.
 All Rust client RPC calls share bounded response decoding, request-ID/protocol
@@ -324,7 +333,11 @@ it does not populate the global memory index. Archive errors propagate, and
 occupied history-read slots return a retryable -32002 response.
 
 Log queries inspect at most 10,000 revisions and 10,000 log entries, accept at
-most 64 alternatives per address/topic selector, and return at most 1,000 logs.
+most 64 alternatives per address/topic selector over at most four topic
+positions, and return at most 1,000 logs. `eth_subscribe("logs")` applies the
+same selector limits and rejects a larger filter with -32602. A `blockHash`
+filter selects that one revision; it cannot be combined with a range, and an
+unknown hash fails with -32602.
 The result budget charges 1 MiB for record structures, topics and payload bytes.
 Ranges combine resident revisions with archive fallback under shared budgets.
 Each range holds one history-read slot and decodes at most 64 MiB of encoded
@@ -334,6 +347,14 @@ Queries exceeding a budget fail with RPC code -32005; clients must narrow their
 range or filter. Reversed ranges fail with -32602. Results are never silently
 truncated. These limits also apply when compatibility methods are enabled on a
 native service.
+
+`eth_call` and `eth_estimateGas` execute on the blocking pool against a
+snapshot of module state, so they hold neither an async worker nor the lock
+finalization publishes under. Four run at a time per node; a fifth returns the
+retryable -32002, and a slot stays taken until its execution ends. An estimate
+is an upper bound within 1/64 of the smallest sufficient limit. Account state
+reads answer for current state only: an explicit block number or `earliest`
+fails with -32004, as it does for `eth_call`.
 
 `vera-jsonrpc` limits each batch to 64 calls and each connection to eight
 subscriptions, eight queued output messages and eight WebSocket request tasks.
@@ -374,6 +395,8 @@ evidence authenticates module state against that finalized revision.
 `GossipHeader`s carrying the finalization certificate stream through
 `vera_subscribeHeaders` as revisions finalize.
 The native stream is available with only the header broadcaster configured.
+A subscriber more than 64 headers behind resumes at the oldest retained header;
+the skipped heights are not replayed.
 Consumers authenticate headers against their configured finality trust; receiving a
 notification alone does not establish its authority.
 
@@ -402,7 +425,8 @@ write-buffer budgets, 8 MiB and 4 MiB by default; the daemon keeps Regolith's
 QMDB page cache allocated at start, 1 and 256 pages by default against the
 daemon's 64 and 4,096. A stopped node's directory is free even while clones of
 its `LocalRpc` survive, and starting on a directory in use fails with
-`EmbedError::DirectoryInUse`. The consensus listener always binds; `127.0.0.1:0` keeps
+`EmbedError::DirectoryInUse`. An RPC address that cannot be bound fails the
+start. The consensus listener always binds; `127.0.0.1:0` keeps
 it on loopback with a system-chosen port. An embedded node prunes consensus
 archives and state journals by default (`EmbeddedConfig::RETENTION`); finalized
 history is not pruned. See `docs/embedded-node.md`.

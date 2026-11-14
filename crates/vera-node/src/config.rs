@@ -48,9 +48,19 @@ pub fn load_peers(path: &Path) -> Result<PeerSet, PeerSetError> {
         .as_array()
         .ok_or_else(|| PeerSetError::Invalid("missing participants".into()))?
         .iter()
-        .filter_map(|v| v.as_str())
-        .map(parse_key)
+        .map(|entry| {
+            entry
+                .as_str()
+                .ok_or_else(|| PeerSetError::Invalid("participant is not a string".into()))
+                .and_then(parse_key)
+        })
         .collect::<Result<Vec<_>, _>>()?;
+    let mut seen = std::collections::HashSet::new();
+    if let Some(duplicate) = participants.iter().find(|key| !seen.insert(*key)) {
+        return Err(PeerSetError::Invalid(format!(
+            "duplicate participant {duplicate}"
+        )));
+    }
     let mut bootstrappers = Vec::new();
     for (hex_key, addr) in json["bootstrappers"]
         .as_object()
@@ -89,3 +99,7 @@ pub struct NodeSettings {
     /// Retry interval for timed-out rounds.
     pub timeout_retry: Duration,
 }
+
+#[cfg(test)]
+#[path = "config_tests.rs"]
+mod tests;

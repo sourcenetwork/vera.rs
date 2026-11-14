@@ -34,11 +34,11 @@ fn object_retirement_is_proven_without_reviving_grants_or_losing_page_continuati
             };
             let initial = apply(&set, state.diff_from(&ModuleState::default())).await;
             let allowed = permission_proof(&set, initial, state.acp.store().clone(), id, &request, PERMISSION_LIMITS).await.unwrap();
-            assert!(verify_permission_proof(initial, 0, id, &request, &allowed, PERMISSION_LIMITS).unwrap());
+            assert!(verify_permission_proof(initial, id, &request, &allowed, PERMISSION_LIMITS).unwrap());
             assert!(allowed.reads.iter().any(|read| matches!(read, PermissionRead::CurrentPoint { key, value: None, .. } if key.as_ref() == state_key)));
             let mut missing = allowed.clone();
             missing.reads.retain(|read| !matches!(read, PermissionRead::CurrentPoint { key, .. } if key.as_ref() == state_key));
-            assert!(verify_permission_proof(initial, 0, id, &request, &missing, PERMISSION_LIMITS).is_err());
+            assert!(verify_permission_proof(initial, id, &request, &missing, PERMISSION_LIMITS).is_err());
             let initial_page = {
                 let (a, b, h, n) = futures::join!(set.0.read(), set.1.read(), set.2.read(), set.3.read());
                 let dbs: [&crate::native::NativeDb; 4] = [&a, &b, &h, &n];
@@ -56,13 +56,13 @@ fn object_retirement_is_proven_without_reviving_grants_or_losing_page_continuati
             }
             let retired = apply(&set, state.diff_from(&before)).await;
             let denied = permission_proof(&set, retired, state.acp.store().clone(), id, &request, PERMISSION_LIMITS).await.unwrap();
-            assert!(!verify_permission_proof(retired, 0, id, &request, &denied, PERMISSION_LIMITS).unwrap());
-            assert!(verify_permission_proof(retired, 0, id, &request, &allowed, PERMISSION_LIMITS).is_err());
+            assert!(!verify_permission_proof(retired, id, &request, &denied, PERMISSION_LIMITS).unwrap());
+            assert!(verify_permission_proof(retired, id, &request, &allowed, PERMISSION_LIMITS).is_err());
             let before = state.clone();
             state.acp.direct_policy_cmd(&owner, id, PolicyCmd::SetRelationship(relation)).unwrap();
             let current = apply(&set, state.diff_from(&before)).await;
             let fresh = permission_proof(&set, current, state.acp.store().clone(), id, &request, PERMISSION_LIMITS).await.unwrap();
-            assert!(verify_permission_proof(current, 0, id, &request, &fresh, PERMISSION_LIMITS).unwrap());
+            assert!(verify_permission_proof(current, id, &request, &fresh, PERMISSION_LIMITS).unwrap());
             let (a, b, h, n) = futures::join!(set.0.read(), set.1.read(), set.2.read(), set.3.read());
             let dbs: [&crate::native::NativeDb; 4] = [&a, &b, &h, &n];
             assert!(policy_prefix_proof_at(dbs, current, id, &prefix).await.is_err());

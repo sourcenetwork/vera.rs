@@ -8,8 +8,8 @@ use vera_permission::{
 };
 
 use super::{
-    U64, VeraApiImpl, VeraApiServer,
-    permission::{error, request_error, retryable},
+    VeraApiImpl,
+    permission::{error, request_error},
 };
 
 impl VeraApiImpl {
@@ -22,72 +22,22 @@ impl VeraApiImpl {
         if key.len() > MAX_KEY_BYTES {
             return Err(request_error(PermissionError::Limit));
         }
-        let databases = self
-            .native_modules
-            .as_ref()
-            .ok_or_else(|| error("native module storage unavailable"))?;
-        let index = self
-            .index
-            .as_ref()
-            .ok_or_else(|| error("finalized revision index unavailable"))?;
-        let mut updates = self.state.proof_updates();
-        tokio::time::timeout(Duration::from_secs(2), async {
-            let (selected, record, _permit) = loop {
-                let captured = {
-                    let [a, b, h, n] = vera_backend::native::read_partitions([
-                        &databases.0,
-                        &databases.1,
-                        &databases.2,
-                        &databases.3,
-                    ])
-                    .await;
-                    let selected = match index.latest_block() {
-                        Some(selected) => selected,
-                        None => {
-                            drop((a, b, h, n));
-                            super::record::wait_for_proof_progress(&mut updates).await;
-                            continue;
-                        }
-                    };
-                    if selected.number < minimum_height {
-                        // The index can trail a just-certified receipt; wait
-                        // for the next publication instead of failing a read
-                        // whose minimum is already finalized elsewhere.
-                        drop((a, b, h, n));
-                        super::record::wait_for_proof_progress(&mut updates).await;
-                        continue;
-                    }
-                    let permit = self.state.proof_permit()?;
-                    match vera_backend::native::record_proof_at(
-                        [&a, &b, &h, &n],
-                        selected.module_state_root,
-                        module,
-                        key,
-                    )
-                    .await
-                    {
-                        Ok(record) => Some((selected, record, permit)),
-                        Err(vera_backend::BackendError::Permission(PermissionError::Invalid(
-                            "selected module root changed",
-                        ))) => None,
-                        Err(vera_backend::BackendError::Permission(PermissionError::Limit)) => {
-                            return Err(request_error(PermissionError::Limit));
-                        }
-                        Err(cause) => return Err(error(cause)),
-                    }
-                };
-                if let Some(captured) = captured {
-                    break captured;
-                }
-                super::record::wait_for_proof_progress(&mut updates).await;
-            };
-            let revision = self.captured_revision(&selected).await?;
-            let response = RecordResponse { revision, record };
-            encoded_size(&response, RECORD_RESPONSE_BYTES - 1024).map_err(request_error)?;
-            Ok(response)
-        })
-        .await
-        .map_err(|_| retryable("current record evidence deadline exceeded"))?
+        let key = key.to_vec();
+        let (revision, record, _permit) = self
+            .capture_current(
+                minimum_height,
+                "current record evidence deadline exceeded",
+                move |databases, root| {
+                    let key = key.clone();
+                    Box::pin(async move {
+                        vera_backend::native::record_proof_at(databases, root, module, &key).await
+                    })
+                },
+            )
+            .await?;
+        let response = RecordResponse { revision, record };
+        encoded_size(&response, RECORD_RESPONSE_BYTES - 1024).map_err(request_error)?;
+        Ok(response)
     }
 
     // Called after releasing storage guards, under the enclosing request deadline.
@@ -105,16 +55,8 @@ impl VeraApiImpl {
         &self,
         selected: &IndexedBlock,
     ) -> RpcResult<Option<LightBlock>> {
-        let revision = match self.get_light_block(U64::from(selected.number)).await {
-            Ok(revision) => revision,
-            Err(cause)
-                if cause
-                    .message()
-                    .contains("finalization certificate not found") =>
-            {
-                return Ok(None);
-            }
-            Err(cause) => return Err(cause),
+        let Some(revision) = self.certified_light_block(selected.number).await? else {
+            return Ok(None);
         };
         if revision.height != selected.number
             || revision.block_hash.parse::<B256>().map_err(error)? != selected.hash
