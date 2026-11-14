@@ -1,6 +1,6 @@
 //! Keep speculative DKG work behind recovered execution state.
 
-use commonware_consensus::{Application, Handoff, marshal::ancestry::Ancestry};
+use commonware_consensus::{Application, Handoff, Heightable as _, marshal::ancestry::Ancestry};
 use commonware_cryptography::Digested;
 use commonware_runtime::tokio::Context;
 use tokio::sync::watch;
@@ -9,12 +9,13 @@ use tokio::sync::watch;
 pub(crate) struct ReadyApplication<A> {
     inner: A,
     ready: watch::Receiver<bool>,
+    hold: crate::ProposalHold,
 }
 
 impl<A> ReadyApplication<A> {
-    pub(crate) fn new(inner: A) -> (Self, watch::Sender<bool>) {
+    pub(crate) fn new(inner: A, hold: crate::ProposalHold) -> (Self, watch::Sender<bool>) {
         let (sender, ready) = watch::channel(false);
-        (Self { inner, ready }, sender)
+        (Self { inner, ready, hold }, sender)
     }
 }
 
@@ -52,7 +53,17 @@ where
         if self.ready.wait_for(|ready| *ready).await.is_err() {
             return None;
         }
-        self.inner.propose(context, ancestry, input).await
+        // A host that is stopping must not be left with a vote whose
+        // certificate it has not stored; consensus drops the unanswered request.
+        let proposal = tokio::select! {
+            biased;
+            () = self.hold.held() => return std::future::pending().await,
+            proposal = self.inner.propose(context, ancestry, input) => proposal,
+        };
+        if let Some(block) = &proposal {
+            self.hold.record(block.height().get());
+        }
+        proposal
     }
 
     async fn verify(
@@ -122,7 +133,7 @@ mod tests {
         tokio::Runner::default().start(|context| async move {
             let inner = RecordingApp::default();
             let calls = inner.0.clone();
-            let (mut app, ready) = ReadyApplication::new(inner);
+            let (mut app, ready) = ReadyApplication::new(inner, crate::ProposalHold::default());
             let _ = app
                 .prepare(
                     (context.child("prepare"), Block::genesis_context()),
@@ -169,7 +180,7 @@ mod tests {
         tokio::Runner::default().start(|context| async move {
             let inner = RecordingApp::default();
             let calls = inner.0.clone();
-            let (mut app, ready) = ReadyApplication::new(inner);
+            let (mut app, ready) = ReadyApplication::new(inner, crate::ProposalHold::default());
             drop(ready);
             assert!(
                 app.propose(

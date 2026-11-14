@@ -281,7 +281,10 @@ fn a_host_without_an_async_runtime_follows_finalized_headers() {
         block_on(rpc.call_empty::<vera_jsonrpc::NodeStatus>("vera_nodeStatus")),
         Err(vera_jsonrpc::LocalRpcError::Stopped)
     ));
-    assert!(block_on(headers.next::<vera_domain::GossipHeader>()).is_none());
+    // Headers finalized before the stop are still delivered; then the stream ends.
+    while let Some(header) = block_on(headers.next::<vera_domain::GossipHeader>()) {
+        header.unwrap();
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

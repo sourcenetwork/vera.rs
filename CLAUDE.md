@@ -43,6 +43,7 @@ Related repositories are independent checkouts; discover their paths rather than
 The development toolchain is pinned to Rust 1.99.1 in `rust-toolchain.toml`.
 Linux native-service CI covers module/storage checks, native lifecycle and
 recovery, crash injection, and a normal release build.
+A hosted macOS arm64 job runs the embedded node's test targets.
 
 ## Architecture
 
@@ -365,7 +366,9 @@ program on a dedicated thread and Commonware runtime. Hosts call the node's
 method table in-process through `vera_jsonrpc::LocalRpc`; an RPC listener is
 optional. The deployment's authority is the account's operator policy, its
 consensus share comes from operating-system randomness, and a tripped watchdog
-stops the node without exiting the host. A lone validator waits for a first
+stops the node without exiting the host. `stop` holds back new proposals and
+waits up to two seconds for proposed blocks to finalize, so the next start
+does not wait out a view. A lone validator waits for a first
 request before proposing, with a ten-second heartbeat, unless a block carrying
 requests is still unfinalized. `EmbeddedConfig::thread_setup` runs on the node
 thread before its runtime is built, so every node thread is created afterwards
@@ -378,7 +381,9 @@ QMDB page cache allocated at start, 1 and 256 pages by default against the
 daemon's 64 and 4,096. A stopped node's directory is free even while clones of
 its `LocalRpc` survive, and starting on a directory in use fails with
 `EmbedError::DirectoryInUse`. The consensus listener always binds; `127.0.0.1:0` keeps
-it on loopback with a system-chosen port. See `docs/embedded-node.md`.
+it on loopback with a system-chosen port. An embedded node prunes consensus
+archives and state journals by default (`EmbeddedConfig::RETENTION`); finalized
+history is not pruned. See `docs/embedded-node.md`.
 
 ## Crate Structure
 

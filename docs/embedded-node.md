@@ -138,17 +138,31 @@ What a thread passes on to the threads it creates depends on the platform:
   hold.
 - **Windows.** A thread affinity mask applies to the thread it is set on; new
   threads start from the process affinity mask. `thread_setup` therefore places
-  only the node thread. Vera's CI does not build or test on Windows.
+  only the node thread.
+
+CI runs the embedded test targets on Linux and on macOS arm64. Windows is not a
+supported host: nothing builds or tests the node there.
 
 The inventory covers the default build. The optional `nuclei-rpc` transport
 uses a process-global proactor and is not covered.
 
 ## Shutdown
 
-`stop` ends the node and waits for its thread. Stopping drops the runtime
-without a separate shutdown protocol, so durability relies on the same recovery
-path as an interrupted daemon. Dropping an `EmbeddedNode` requests the same stop
-without waiting.
+`stop` ends the node between views and waits for its thread. It first holds
+back new proposals, then waits up to two seconds for the blocks already
+proposed to finalize, and only then drops the runtime. Dropping an
+`EmbeddedNode` requests the same stop without waiting.
+
+The wait matters for the next start. Commonware does not replay a validator's
+own votes after a restart, so a lone validator that stopped after voting for a
+block and before storing that block's certificate waits out the certification
+timeout, 4 s by default, before its next block. A stop that outlasts the two
+seconds, a crash and a killed process can still leave the node there; the
+node recovers by itself and loses nothing, but the first write after that
+start is late by the timeout.
+
+Stopping still has no storage shutdown protocol: the stores rely on the same
+recovery path as an interrupted daemon.
 
 Once the node has stopped, by `stop` or by itself, its directory is free and
 another node can start on it. That holds while clones of its `LocalRpc` are
@@ -181,6 +195,33 @@ host reserves no port and nothing outside the machine can connect. A
 connection from the same machine is accepted only from a peer the node tracks,
 after the authenticated handshake. Use another address only when other
 validators must reach the node.
+
+## Disk
+
+`EmbeddedConfig::pruning` sets how much consensus archive and state journal the
+node keeps. The default, `EmbeddedConfig::RETENTION`, keeps 512 revisions of
+consensus archives (two epochs) and 256 of state journals, pruned every 64
+revisions. `None` keeps everything, as the daemon does without a `[pruning]`
+section. A lone validator has no peer that needs older consensus data from it.
+
+Finalized history, which serves receipts and historical lookups, is not
+pruned by this setting or any other. It is what still grows.
+
+Measured on an Apple M5 Max with a release build: an idle node at the daemon
+cadence (`pacing: None`, about 6.6 revisions a second) for five minutes, about
+1,970 empty revisions, one run each.
+
+| Retention | Directory after 5 min | Growth per revision | Of which finalized history |
+| --- | --- | --- | --- |
+| none | 10.6 MB | about 5.1 kB | about 1.05 kB |
+| 512 consensus, 256 state | 5.3 MB and levelling off | about 1.05 kB once the window is full | about 1.05 kB |
+
+At the default heartbeat of one revision every 10 s, 360 an hour, that is
+about 1.8 MB an hour without retention and about 0.4 MB an hour with it, all
+of it finalized history. Both figures are computed from the per-revision
+growth above, not measured at this cadence; the retention window takes about
+85 minutes of idling to fill, and until then the node grows at the first
+rate. Revisions that carry requests are larger.
 
 ## Memory
 
@@ -306,12 +347,15 @@ then 30 seconds idle. Reproduce with
 
 The idle wait was 1.5 s when those rows were measured. The 10 s default was
 compared with it afterwards on an Apple M5 Max, with the same 100 writes and
-five minutes idle (`PROFILE_IDLE_SECONDS=300`), one run each:
+five minutes idle (`PROFILE_IDLE_SECONDS=300`), one run each. The 1.5 s row
+ran without retention; the 10 s row ran with the default retention, whose
+512-revision window does not fill in a run this short, so neither row shows
+pruning at work:
 
 | Idle wait | Batch window | Receipt p50 | Receipt p95 | Idle blocks/s | Idle disk growth |
 | --- | --- | --- | --- | --- | --- |
 | 1.5 s | 50 ms | 194 ms | 260 ms | 0.65 | 14.9 MB/h |
-| 10 s (default) | 50 ms | 199 ms | 274 ms | 0.10 | 2.3 MB/h |
+| 10 s (default) | 50 ms | 187 ms | 253 ms | 0.10 | 2.4 MB/h |
 
 No run abandoned a view. Below roughly 25 ms the receipt latency rises again
 on this machine; that point depends on how fast the disk commits, so the
@@ -321,7 +365,9 @@ are not a capacity or multi-validator measurement.
 ## Limits
 
 - One validator. A stopped or lost device stops the deployment.
-- An idle deployment still produces a heartbeat block about every 10 s.
+- An idle deployment still produces a heartbeat block about every 10 s, and
+  finalized history has no retention, so the directory grows without bound;
+  see [Disk](#disk).
 - Memory was measured for short workloads on one machine; see
   [Memory](#memory). Growth over hours, larger states and Linux are not
   measured, and the embedded page cache has not been measured against a state

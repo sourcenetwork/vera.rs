@@ -24,7 +24,9 @@ pub struct EmbeddedConfig {
     pub certification_timeout: Duration,
     /// Interval between repeated view-abandonment votes.
     pub timeout_retry: Duration,
-    /// Consensus history pruning. `None` retains all history.
+    /// Retention of consensus archives and state journals. `None` retains all of both.
+    ///
+    /// Finalized history, which serves receipts, is kept in full either way.
     pub pruning: Option<PruningConfig>,
     /// Proposal pacing for the lone validator. `None` keeps the daemon's cadence.
     pub pacing: Option<SoloPacing>,
@@ -53,6 +55,16 @@ impl EmbeddedConfig {
     /// so an idle deployment cannot stop finalizing altogether.
     pub const HEARTBEAT: Duration = Duration::from_secs(10);
 
+    /// Default retention: two epochs of consensus archives and one of state journals.
+    ///
+    /// A lone validator has no peer to serve older consensus data to, and an
+    /// idle one would otherwise add about 5 KiB to its directory per heartbeat.
+    pub const RETENTION: PruningConfig = PruningConfig {
+        maintenance_interval: std::num::NonZeroUsize::new(64).unwrap(),
+        retained_consensus_revisions: 512,
+        retained_state_revisions: 256,
+    };
+
     /// Defaults for a lone validator: quiet when idle, with timeouts ordered below the genesis stall timeout.
     #[must_use]
     pub fn new(data_dir: impl Into<PathBuf>, genesis: SoloGenesis, p2p_listen: SocketAddr) -> Self {
@@ -64,7 +76,7 @@ impl EmbeddedConfig {
             leader_timeout: Duration::from_secs(12),
             certification_timeout: Duration::from_secs(13),
             timeout_retry: Duration::from_millis(500),
-            pruning: None,
+            pruning: Some(Self::RETENTION),
             pacing: Some(SoloPacing {
                 idle: Self::HEARTBEAT,
                 batch: SoloPacing::BATCH,

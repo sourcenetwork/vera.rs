@@ -136,6 +136,41 @@ jobs:
       - name: Build verad
         run: cargo build --frozen -p verad
 
+  macos-embedded:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    name: macOS embedded node
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: hosted-macos-embedded
+
+      - name: Fetch locked dependencies
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
+        run: cargo fetch --locked
+
+      - name: In-process RPC tests
+        run: cargo test --frozen -p vera-jsonrpc --lib local
+
+      - name: Embedded node tests
+        run: |
+          targets=()
+          for file in crates/vera-node/tests/embedded_*.rs; do
+            targets+=(--test "$(basename "$file" .rs)")
+          done
+          cargo test --frozen -p vera-node "${targets[@]}"
+
   e2e-canonical:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: "E2E (canonical)"

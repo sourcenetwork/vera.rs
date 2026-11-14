@@ -52,6 +52,8 @@ pub use participants::{RegistryParticipants, validator_address};
 
 mod peer_capacity;
 
+mod proposal_hold;
+pub use proposal_hold::ProposalHold;
 mod provider;
 mod ready_application;
 mod rejoin;

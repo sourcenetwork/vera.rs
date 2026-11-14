@@ -37,6 +37,8 @@ pub struct NodeOptions {
     pub history_memory: Option<crate::HistoryMemory>,
     /// Sizes of the allocations made at start.
     pub sizing: crate::NodeSizing,
+    /// Lets the host stop the node between views.
+    pub hold: Option<crate::ProposalHold>,
 }
 
 /// Verification parallelism when the host does not choose one.
@@ -78,6 +80,7 @@ impl NodeOptions {
             verification_threads: None,
             history_memory: None,
             sizing: crate::NodeSizing::DAEMON,
+            hold: None,
         }
     }
 }
