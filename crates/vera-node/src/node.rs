@@ -125,7 +125,9 @@ async fn run_node_with_elector<
         verification_threads,
         history_memory,
         sizing,
+        hold,
     } = options;
+    let hold = hold.unwrap_or_default();
     if let RpcMode::Network(Some(listener)) = &rpc {
         anyhow::ensure!(
             listener.local_addr()? == settings.rpc_addr,
@@ -630,6 +632,10 @@ async fn run_node_with_elector<
         validator: validator.clone(),
     })
     .with_metrics(finalization_metrics);
+    hold.attach({
+        let index = block_index.clone();
+        move || index.head_block_number()
+    });
     let participant_addresses = peers
         .participants
         .iter()
@@ -732,12 +738,14 @@ async fn run_node_with_elector<
         },
     );
 
-    let (application, application_ready) =
-        crate::ready_application::ReadyApplication::new(reshare::Application::new(
+    let (application, application_ready) = crate::ready_application::ReadyApplication::new(
+        reshare::Application::new(
             stateful_mailbox.clone(),
             reshare_mailbox.clone(),
             blocks_per_epoch,
-        ));
+        ),
+        hold,
+    );
     let deferred = Deferred::new(
         context.child("deferred"),
         application,

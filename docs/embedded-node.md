@@ -145,10 +145,21 @@ uses a process-global proactor and is not covered.
 
 ## Shutdown
 
-`stop` ends the node and waits for its thread. Stopping drops the runtime
-without a separate shutdown protocol, so durability relies on the same recovery
-path as an interrupted daemon. Dropping an `EmbeddedNode` requests the same stop
-without waiting.
+`stop` ends the node between views and waits for its thread. It first holds
+back new proposals, then waits up to two seconds for the blocks already
+proposed to finalize, and only then drops the runtime. Dropping an
+`EmbeddedNode` requests the same stop without waiting.
+
+The wait matters for the next start. Commonware does not replay a validator's
+own votes after a restart, so a lone validator that stopped after voting for a
+block and before storing that block's certificate waits out the certification
+timeout, 4 s by default, before its next block. A stop that outlasts the two
+seconds, a crash and a killed process can still leave the node there; the
+node recovers by itself and loses nothing, but the first write after that
+start is late by the timeout.
+
+Stopping still has no storage shutdown protocol: the stores rely on the same
+recovery path as an interrupted daemon.
 
 Once the node has stopped, by `stop` or by itself, its directory is free and
 another node can start on it. That holds while clones of its `LocalRpc` are
