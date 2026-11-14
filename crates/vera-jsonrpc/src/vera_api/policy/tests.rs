@@ -189,6 +189,52 @@ fn future_evidence_waiters_leave_proof_capacity_until_revision_is_eligible() {
 }
 
 #[test]
+fn a_minimum_beyond_the_waiting_lead_is_refused_without_waiting() {
+    use crate::vera_api::capture::MINIMUM_HEIGHT_LEAD;
+    let directory = tempfile::tempdir().unwrap();
+    runtime::Runner::new(runtime::Config::new().with_storage_directory(directory.path())).start(
+        |context| async move {
+            let (api, set, _) = fixture(context).await;
+            for kind in ProofKind::ALL {
+                for minimum in [MINIMUM_HEIGHT_LEAD + 2, u64::MAX] {
+                    let mut refused = Box::pin(request(&api, kind, minimum));
+                    let Poll::Ready(result) = poll(refused.as_mut()) else {
+                        panic!("an unreachable minimum must not wait");
+                    };
+                    let error = result.unwrap_err();
+                    assert!(error.message().contains("ahead of finalized revision 1"));
+                    assert_busy(error);
+                }
+                let mut waiting = Box::pin(request(&api, kind, MINIMUM_HEIGHT_LEAD + 1));
+                assert!(poll(waiting.as_mut()).is_pending());
+                assert_writable(&set).await;
+            }
+            let permission = vera_permission::AccessRequest {
+                actor: vera_permission::Actor(
+                    "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+                        .parse()
+                        .unwrap(),
+                ),
+                operations: vec![vera_permission::Operation {
+                    object: vera_permission::Object {
+                        resource: "file".into(),
+                        id: "readme".into(),
+                    },
+                    permission: "read".into(),
+                }],
+            };
+            let error = api
+                .get_current_permission_proof("ab".repeat(32), permission, U64::MAX)
+                .await
+                .unwrap_err();
+            assert!(error.message().contains("ahead of finalized revision 1"));
+            assert_busy(error);
+            assert_capacity(&api.state, 8, 8);
+        },
+    );
+}
+
+#[test]
 fn evidence_waiter_cancellation_and_deadline_release_admission() {
     let directory = tempfile::tempdir().unwrap();
     runtime::Runner::new(runtime::Config::new().with_storage_directory(directory.path())).start(

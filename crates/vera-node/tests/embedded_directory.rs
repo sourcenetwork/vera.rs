@@ -66,3 +66,22 @@ async fn a_directory_in_use_is_refused_instead_of_waited_for() {
     assert!(matches!(second, Err(EmbedError::DirectoryInUse(_))));
     node.stop().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_occupied_rpc_address_fails_the_start_and_frees_the_directory() {
+    let directory = tempfile::tempdir().unwrap();
+    let occupant = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut occupied = config(directory.path());
+    occupied.rpc_listen = Some(occupant.local_addr().unwrap());
+
+    let refused = tokio::time::timeout(Duration::from_secs(60), EmbeddedNode::start(occupied))
+        .await
+        .expect("start deadline");
+
+    let Err(EmbedError::Stopped(reason)) = refused else {
+        panic!("a node without its requested listener must not report a start");
+    };
+    assert!(reason.contains("failed to bind server"), "{reason}");
+    let node = start(directory.path()).await.unwrap();
+    node.stop().await.unwrap();
+}

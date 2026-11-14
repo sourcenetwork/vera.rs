@@ -6,7 +6,7 @@ use std::{
 };
 use vera_client::{ModuleId, RECORD_PROOF_BYTES, VeraClient};
 use vera_indexer::BlockIndex;
-use vera_jsonrpc::{JsonRpcServer, NodeState};
+use vera_jsonrpc::{NodeState, RpcServer};
 
 #[test]
 fn native_record_rpc_keeps_the_captured_revision_across_finalization() {
@@ -54,35 +54,34 @@ fn native_record_rpc_keeps_the_captured_revision_across_finalization() {
                     let gate = Arc::new(Mutex::new(None::<Gate>));
                     let lookup_gate = gate.clone();
                     let db = &set.databases;
-                    let (server, address) =
-                        JsonRpcServer::new("127.0.0.1:0".parse().unwrap(), DEPLOYMENT)
-                            .with_node_state(Arc::new(NodeState::new(DEPLOYMENT, 0, 4)))
-                            .with_vera_index_and_modules(
-                                index.clone(),
-                                set.executor.modules().clone(),
-                            )
-                            .with_vera_native_modules(
-                                (db.3.clone(), db.4.clone(), db.5.clone(), db.6.clone()),
-                                set.executor.modules().clone(),
-                            )
-                            .with_vera_light_block_lookup(Arc::new(move |height| {
-                                if let Some((entered, release)) = lookup_gate.lock().unwrap().take()
-                                {
-                                    entered.send(()).unwrap();
-                                    release
-                                        .recv_timeout(Duration::from_secs(2))
-                                        .map_err(|e| e.to_string())?;
-                                }
-                                lookup
-                                    .read()
-                                    .unwrap()
-                                    .get(&height)
-                                    .cloned()
-                                    .ok_or_else(|| "revision unavailable".into())
-                            }))
-                            .start()
-                            .await
-                            .unwrap();
+                    let (server, _local) = RpcServer::with_state_provider(
+                        NodeState::new(DEPLOYMENT, 0, 4),
+                        "127.0.0.1:0".parse().unwrap(),
+                        DEPLOYMENT,
+                        vera_jsonrpc::NoopStateProvider,
+                    )
+                    .with_vera_index_and_modules(index.clone(), set.executor.modules().clone())
+                    .with_vera_native_modules(
+                        (db.3.clone(), db.4.clone(), db.5.clone(), db.6.clone()),
+                        set.executor.modules().clone(),
+                    )
+                    .with_vera_light_block_lookup(Arc::new(move |height| {
+                        if let Some((entered, release)) = lookup_gate.lock().unwrap().take() {
+                            entered.send(()).unwrap();
+                            release
+                                .recv_timeout(Duration::from_secs(2))
+                                .map_err(|e| e.to_string())?;
+                        }
+                        lookup
+                            .read()
+                            .unwrap()
+                            .get(&height)
+                            .cloned()
+                            .ok_or_else(|| "revision unavailable".into())
+                    }))
+                    .start_with_local(None)
+                    .unwrap();
+                    let address = server.local_addr();
                     let client = VeraClient::new(format!("http://{address}"));
                     let record = client
                         .read_current_record(ModuleId::Acp, &key, 1, &trusted, RECORD_PROOF_BYTES)
@@ -194,7 +193,7 @@ fn native_record_rpc_keeps_the_captured_revision_across_finalization() {
                         .await
                         .unwrap();
                     assert_eq!(current.revision.height, 2);
-                    server.stop().unwrap();
+                    server.stop();
                 })
                 .await
                 .unwrap();

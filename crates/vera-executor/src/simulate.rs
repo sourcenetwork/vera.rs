@@ -139,7 +139,12 @@ pub fn simulate_call<S: StateDbRead>(
     }
 }
 
-/// Estimate the minimum gas required for a transaction via binary search.
+/// Estimates stop within this fraction of the upper bound, which caps the
+/// simulations that fail near the gas cap at six.
+const ESTIMATE_PRECISION: u64 = 64;
+
+/// Estimate a gas limit sufficient for a transaction: at most 1/64 above the
+/// smallest limit the search can distinguish.
 pub fn estimate_gas<S: StateDbRead>(
     state: &S,
     chain_id: u64,
@@ -172,10 +177,11 @@ pub fn estimate_gas<S: StateDbRead>(
         ));
     }
 
-    let mut lo = BASE_TX_GAS;
+    // A limit below what the run at the cap consumed cannot succeed.
+    let mut lo = BASE_TX_GAS.max(result.gas_used).saturating_sub(1);
     let mut hi = cap;
 
-    while lo + 1 < hi {
+    while lo + 1 < hi && hi - lo > hi / ESTIMATE_PRECISION {
         let mid = lo + (hi - lo) / 2;
         req_at_cap.gas = Some(mid);
         let result = simulate_call(
@@ -253,6 +259,7 @@ mod tests {
 
         let gas = estimate_gas(&state, 1, SpecId::CANCUN, &request, 30_000_000, None).unwrap();
         assert!(gas >= BASE_TX_GAS);
+        assert!(gas <= BASE_TX_GAS + BASE_TX_GAS / (ESTIMATE_PRECISION - 1));
     }
 
     #[test]

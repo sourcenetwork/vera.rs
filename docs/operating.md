@@ -231,7 +231,8 @@ rejected. Restore a complete compatible backup or use authenticated recovery.
   startup uses that address and port; `--rpc-port` changes only its port, preserving
   the interface. Without a config file, validators retain the indexed default
   port (`8545 + validator_index`); devnet defaults to 8545. Malformed listen
-  addresses fail startup instead of falling back to a wildcard interface.
+  addresses fail startup instead of falling back to a wildcard interface, and
+  so does an RPC address that cannot be bound.
   The JSON-RPC server enforces its own batch, subscription and body-size limits (see
   [permission-proofs.md](permission-proofs.md) for proof-path budgets).
 

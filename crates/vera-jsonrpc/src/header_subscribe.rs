@@ -1,5 +1,6 @@
 use jsonrpsee::{PendingSubscriptionSink, proc_macros::rpc};
 use tokio::sync::broadcast;
+use tracing::warn;
 use vera_domain::GossipHeader;
 
 #[rpc(server, namespace = "vera")]
@@ -33,7 +34,13 @@ pub(crate) async fn stream_headers(
                 () = sink.closed() => break,
                 result = receiver.recv() => match result {
                     Ok(header) => header,
-                    Err(_) => break,
+                    // The stream resumes at the oldest retained header; each
+                    // header names its height, so the consumer sees the gap.
+                    Err(broadcast::error::RecvError::Lagged(missed)) => {
+                        warn!(missed, "header subscriber lagged; resuming after a gap");
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
                 },
             };
             let Ok(message) = serde_json::value::to_raw_value(&header) else {
@@ -99,14 +106,63 @@ mod tests {
         );
     }
 
+    fn header(height: u64) -> GossipHeader {
+        GossipHeader {
+            chain_id: 1,
+            height,
+            block_hash: Default::default(),
+            parent_hash: Default::default(),
+            timestamp: 123,
+            state_root: Default::default(),
+            module_state_root: Default::default(),
+            tx_count: 2,
+            publisher_index: 0,
+            signature: vec![3; 96],
+        }
+    }
+
+    #[tokio::test]
+    async fn a_lagging_subscriber_resumes_after_the_gap() {
+        let headers = broadcast::channel(4).0;
+        let module = HeaderSubscriptionApiImpl(headers.clone()).into_rpc();
+        let (_, mut stream) = module
+            .raw_json_request(
+                r#"{"jsonrpc":"2.0","method":"vera_subscribeHeaders","params":[],"id":1}"#,
+                1,
+            )
+            .await
+            .unwrap();
+        // The unread stream holds one notification and the task a second,
+        // so the broadcast buffer of four overruns well before height 32.
+        for height in 1..=32 {
+            headers.send(header(height)).unwrap();
+            tokio::task::yield_now().await;
+        }
+        let mut heights = Vec::new();
+        while heights.last() != Some(&32) {
+            let notification = tokio::time::timeout(Duration::from_secs(2), stream.recv())
+                .await
+                .expect("a lagging subscription keeps delivering")
+                .unwrap();
+            let notification: serde_json::Value = serde_json::from_str(notification.get()).unwrap();
+            heights.push(notification["params"]["result"]["height"].as_u64().unwrap());
+        }
+        assert!(heights.is_sorted());
+        assert!(heights.len() < 32, "the overrun must have skipped headers");
+        assert_eq!(headers.receiver_count(), 1);
+    }
+
     #[tokio::test]
     async fn native_headers_stream_and_release_idle_subscription() {
         let headers = broadcast::channel(4).0;
-        let (handle, addr) = crate::JsonRpcServer::new("127.0.0.1:0".parse().unwrap(), 1)
-            .with_headers_subscription(headers.clone())
-            .start()
-            .await
-            .unwrap();
+        let (handle, _local) = crate::RpcServer::new(
+            crate::NodeState::new(1, 0, 1),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .with_headers_subscription(headers.clone())
+        .start_with_local(None)
+        .unwrap();
+        let addr = handle.local_addr();
         let client = jsonrpsee::ws_client::WsClientBuilder::default()
             .build(format!("ws://{addr}"))
             .await
@@ -183,7 +239,7 @@ mod tests {
             .insert("net_version", jsonrpsee::rpc_params![])
             .unwrap();
         assert!(client.batch_request::<String>(batch).await.is_err());
-        handle.stop().unwrap();
+        handle.stop();
         handle.stopped().await;
     }
 }

@@ -98,11 +98,14 @@ async fn http_rejects_aggregate_body_before_dispatch() {
             true
         })
         .unwrap();
-    let (handle, addr) = crate::JsonRpcServer::new("127.0.0.1:0".parse().unwrap(), 1)
-        .with_extra_module(module)
-        .start()
-        .await
-        .unwrap();
+    let (handle, _local) = crate::RpcServer::new(
+        crate::NodeState::new(1, 0, 1),
+        "127.0.0.1:0".parse().unwrap(),
+    )
+    .with_extra_module(module)
+    .start_with_local(None)
+    .unwrap();
+    let addr = handle.local_addr();
     let limit = vera_domain::SUBMISSION_REQUEST_BYTES as usize;
     let first = request(1, limit / 2);
     let second = request(2, limit / 2);
@@ -134,7 +137,7 @@ async fn http_rejects_aggregate_body_before_dispatch() {
     assert_eq!(status, 200);
     assert_eq!(response["result"], true);
     assert_eq!(dispatched.load(Ordering::SeqCst), 4);
-    handle.stop().unwrap();
+    handle.stop();
     handle.stopped().await;
 }
 
@@ -155,11 +158,14 @@ async fn websocket_dispatch_applies_backpressure() {
             }
         })
         .unwrap();
-    let (handle, addr) = crate::JsonRpcServer::new("127.0.0.1:0".parse().unwrap(), 1)
-        .with_extra_module(module)
-        .start()
-        .await
-        .unwrap();
+    let (handle, _local) = crate::RpcServer::new(
+        crate::NodeState::new(1, 0, 1),
+        "127.0.0.1:0".parse().unwrap(),
+    )
+    .with_extra_module(module)
+    .start_with_local(None)
+    .unwrap();
+    let addr = handle.local_addr();
     let client = Arc::new(
         jsonrpsee::ws_client::WsClientBuilder::default()
             .build(format!("ws://{addr}"))
@@ -200,7 +206,7 @@ async fn websocket_dispatch_applies_backpressure() {
     })
     .await
     .unwrap();
-    handle.stop().unwrap();
+    handle.stop();
     tokio::time::timeout(Duration::from_secs(5), handle.stopped())
         .await
         .unwrap();
@@ -227,12 +233,15 @@ async fn non_reader(stop_before_timeout: bool) {
             "x".repeat(4 << 20)
         })
         .unwrap();
-    let (handle, addr) = crate::JsonRpcServer::new("127.0.0.1:0".parse().unwrap(), 1)
-        .with_max_connections(1)
-        .with_extra_module(module)
-        .start()
-        .await
-        .unwrap();
+    let (handle, _local) = crate::RpcServer::new(
+        crate::NodeState::new(1, 0, 1),
+        "127.0.0.1:0".parse().unwrap(),
+    )
+    .with_max_connections(1)
+    .with_extra_module(module)
+    .start_with_local(None)
+    .unwrap();
+    let addr = handle.local_addr();
     let mut socket = tokio::net::TcpStream::connect(addr).await.unwrap();
     socket.write_all(format!(
         "GET / HTTP/1.1\r\nHost: {addr}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
@@ -279,7 +288,7 @@ async fn non_reader(stop_before_timeout: bool) {
         .await
         .expect("the timed-out writer must release its connection slot");
     }
-    handle.stop().unwrap();
+    handle.stop();
     tokio::time::timeout(Duration::from_secs(15), handle.stopped())
         .await
         .expect("a non-reading socket must not prevent server shutdown");

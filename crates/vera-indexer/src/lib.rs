@@ -20,7 +20,7 @@ mod store;
 pub use store::{BlockIndex, IndexedRevision, MAX_CACHED_REVISIONS};
 
 mod log_query;
-pub use log_query::LogQuery;
+pub use log_query::{LogQuery, MAX_LOG_SELECTOR_ALTERNATIVES, MAX_LOG_TOPIC_POSITIONS};
 
 mod types;
 pub use types::{

@@ -175,6 +175,10 @@ evidence. Captured evidence retains that slot through finality lookup and respon
 size checks; storage guards are released before finality waits. Cancellation,
 deadline expiry and failed attempts release their slots. Capacity exhaustion
 returns a retryable resource-unavailable error, not an authorization result.
+A minimum height more than eight revisions above the published head is refused
+with the same retryable error at once instead of waiting out the deadline; a
+node that has published no revision yet still waits. Waiting requests read the
+published head without taking the storage read locks.
 
 The server captures reads from one immutable current module snapshot, generates evidence at the requested revision and verifies the resulting request before returning it. Changes in membership or policy can make historical evidence unavailable. Every successful response nevertheless evaluates entirely against the requested revision. Client verification is independent of the server's capture decisions.
 

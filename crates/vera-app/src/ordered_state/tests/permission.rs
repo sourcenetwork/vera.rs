@@ -9,7 +9,7 @@ use vera_client::{
     AccessRequest, Actor, Object, Operation, PERMISSION_LIMITS, PermissionResponse, VeraClient,
 };
 use vera_indexer::{BlockIndex, IndexedBlock};
-use vera_jsonrpc::{JsonRpcServer, NodeState};
+use vera_jsonrpc::{NodeState, RpcServer};
 
 pub(super) const POLICY: &str = "\
 name: documents
@@ -161,35 +161,34 @@ fn synchronized_permission_rpc_verifies_native_evidence_and_subsequent_denial() 
                     let gate = Arc::new(Mutex::new(None::<Gate>));
                     let lookup_gate = gate.clone();
                     let db = &replica.databases;
-                    let (server, address) =
-                        JsonRpcServer::new("127.0.0.1:0".parse().unwrap(), DEPLOYMENT)
-                            .with_node_state(Arc::new(NodeState::new(DEPLOYMENT, 0, 4)))
-                            .with_vera_index_and_modules(
-                                index.clone(),
-                                replica.executor.modules().clone(),
-                            )
-                            .with_vera_native_modules(
-                                (db.3.clone(), db.4.clone(), db.5.clone(), db.6.clone()),
-                                replica.executor.modules().clone(),
-                            )
-                            .with_vera_light_block_lookup(Arc::new(move |height| {
-                                if let Some((entered, release)) = lookup_gate.lock().unwrap().take()
-                                {
-                                    entered.send(()).unwrap();
-                                    release
-                                        .recv_timeout(Duration::from_secs(2))
-                                        .map_err(|e| e.to_string())?;
-                                }
-                                lookup
-                                    .read()
-                                    .unwrap()
-                                    .get(&height)
-                                    .cloned()
-                                    .ok_or_else(|| "revision unavailable".into())
-                            }))
-                            .start()
-                            .await
-                            .unwrap();
+                    let (server, _local) = RpcServer::with_state_provider(
+                        NodeState::new(DEPLOYMENT, 0, 4),
+                        "127.0.0.1:0".parse().unwrap(),
+                        DEPLOYMENT,
+                        vera_jsonrpc::NoopStateProvider,
+                    )
+                    .with_vera_index_and_modules(index.clone(), replica.executor.modules().clone())
+                    .with_vera_native_modules(
+                        (db.3.clone(), db.4.clone(), db.5.clone(), db.6.clone()),
+                        replica.executor.modules().clone(),
+                    )
+                    .with_vera_light_block_lookup(Arc::new(move |height| {
+                        if let Some((entered, release)) = lookup_gate.lock().unwrap().take() {
+                            entered.send(()).unwrap();
+                            release
+                                .recv_timeout(Duration::from_secs(2))
+                                .map_err(|e| e.to_string())?;
+                        }
+                        lookup
+                            .read()
+                            .unwrap()
+                            .get(&height)
+                            .cloned()
+                            .ok_or_else(|| "revision unavailable".into())
+                    }))
+                    .start_with_local(None)
+                    .unwrap();
+                    let address = server.local_addr();
                     let client = VeraClient::new(format!("http://{address}"));
                     let request = AccessRequest {
                         actor: Actor(actor.parse().unwrap()),
@@ -382,7 +381,7 @@ fn synchronized_permission_rpc_verifies_native_evidence_and_subsequent_denial() 
                             .await
                             .unwrap()
                     );
-                    server.stop().unwrap();
+                    server.stop();
                     server.stopped().await;
                 })
                 .await

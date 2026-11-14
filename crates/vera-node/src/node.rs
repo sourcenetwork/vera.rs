@@ -1038,6 +1038,7 @@ async fn run_node_with_elector<
     let local = match rpc {
         RpcMode::Network(listener) => {
             let (rpc_handle, local) = rpc_server.start_with_local(listener)?;
+            let rpc_addr = rpc_handle.local_addr();
             context.child("rpc").spawn(move |_| async move {
                 rpc_handle.stopped().await;
                 error!("RPC server stopped unexpectedly");

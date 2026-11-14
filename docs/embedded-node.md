@@ -71,10 +71,13 @@ Tokio, and from any thread. After the node stops they fail with
   in-process.
 - `subscribe` returns a `LocalSubscription`; `vera_subscribeHeaders` delivers
   each finalized header. Dropping the subscription ends it, and it ends when the
-  node stops.
+  node stops. A consumer that falls more than 64 headers behind skips to the
+  oldest retained header and keeps receiving; heights show the gap, and
+  `vera_getLightBlock` fills it.
 
 Set `EmbeddedConfig::rpc_listen` to also serve the same methods over the
-network. It is off by default.
+network. It is off by default. The address is bound during start, so an
+address in use fails the start.
 
 ## Threads
 
