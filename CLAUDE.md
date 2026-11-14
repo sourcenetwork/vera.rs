@@ -374,7 +374,9 @@ node, worker, blocking, verification and history-store thread counts.
 `EmbeddedConfig::history_memory` sets the history store's block-cache and
 write-buffer budgets, 8 MiB and 4 MiB by default; the daemon keeps Regolith's
 512 MiB and 64 MiB. The consensus listener always binds; `127.0.0.1:0` keeps
-it on loopback with a system-chosen port. See `docs/embedded-node.md`.
+it on loopback with a system-chosen port. An embedded node prunes consensus
+archives and state journals by default (`EmbeddedConfig::RETENTION`); finalized
+history is not pruned. See `docs/embedded-node.md`.
 
 ## Crate Structure
 
