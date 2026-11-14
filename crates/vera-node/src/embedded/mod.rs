@@ -34,6 +34,12 @@ use crate::{NodeOptions, NodeSettings, RpcMode, WatchdogMode};
 /// The node's root future is polled on this thread and needs more than a spawned thread's default stack.
 const NODE_STACK_BYTES: usize = 16 * 1024 * 1024;
 
+/// Longest a stop waits for the blocks already proposed to finalize.
+///
+/// A block normally finalizes within a few hundred milliseconds. A stop that
+/// gives up here is recovered like an interruption.
+const STOP_SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// A running embedded node.
 #[derive(Debug)]
 pub struct EmbeddedNode {
@@ -115,6 +121,7 @@ impl EmbeddedNode {
         let (table_tx, table_rx) = oneshot::channel::<LocalRpc>();
         let (stop_tx, stop_rx) = oneshot::channel();
         let (exit_tx, mut exit_rx) = oneshot::channel();
+        let hold = crate::ProposalHold::default();
         let options = NodeOptions {
             rpc: match config.rpc_listen {
                 Some(_) => RpcMode::Network(None),
@@ -126,6 +133,7 @@ impl EmbeddedNode {
             verification_threads,
             history_memory: Some(config.history_memory),
             sizing: config.sizing,
+            hold: Some(hold.clone()),
         };
         let thread_setup = config.thread_setup;
         let storage = config.data_dir.join("commonware");
@@ -159,14 +167,23 @@ impl EmbeddedNode {
                                 let _ = ready_tx.send(rpc);
                             }
                         });
+                        let stopped = |result: anyhow::Result<()>| {
+                            Err(EmbedError::Stopped(result.map_or_else(
+                                |error| format!("{error:#}"),
+                                |()| "node actors exited".into(),
+                            )))
+                        };
+                        let mut node = std::pin::pin!(crate::run_node_with_options(
+                            context, settings, options
+                        ));
                         ::tokio::select! {
-                            result = crate::run_node_with_options(context, settings, options) => {
-                                Err(EmbedError::Stopped(result.map_or_else(
-                                    |error| format!("{error:#}"),
-                                    |()| "node actors exited".into(),
-                                )))
-                            }
-                            _ = stop_rx => Ok(()),
+                            result = &mut node => return stopped(result),
+                            _ = stop_rx => {}
+                        }
+                        // The node keeps running until the views in flight have finalized.
+                        ::tokio::select! {
+                            result = &mut node => stopped(result),
+                            _ = hold.settle(STOP_SETTLE) => Ok(()),
                         }
                     });
                 // The table holds the node's state, and that state holds the directory.

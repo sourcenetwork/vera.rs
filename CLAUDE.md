@@ -366,7 +366,9 @@ program on a dedicated thread and Commonware runtime. Hosts call the node's
 method table in-process through `vera_jsonrpc::LocalRpc`; an RPC listener is
 optional. The deployment's authority is the account's operator policy, its
 consensus share comes from operating-system randomness, and a tripped watchdog
-stops the node without exiting the host. A lone validator waits for a first
+stops the node without exiting the host. `stop` holds back new proposals and
+waits up to two seconds for proposed blocks to finalize, so the next start
+does not wait out a view. A lone validator waits for a first
 request before proposing, with a bounded heartbeat, unless a block carrying
 requests is still unfinalized. `EmbeddedConfig::thread_setup` runs on the node
 thread before its runtime is built, so every node thread is created afterwards
