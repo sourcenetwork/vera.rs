@@ -97,22 +97,6 @@ pub enum Error {
     /// Subject restriction violation
     #[error("subject restriction violated: {message}")]
     SubjectRestrictionViolation { message: String },
-
-    /// DPI compliance violation: missing owner relation
-    #[error("DPI violation: resource '{resource}' must have an 'owner' relation")]
-    DpiMissingOwner { resource: String },
-
-    /// DPI compliance violation: expression doesn't include owner access
-    #[error("DPI violation: permission '{relation}' on resource '{resource}' must include 'owner' in its expression")]
-    DpiExpressionMissingOwner { resource: String, relation: String },
-
-    /// DPI compliance violation: disallowed operation
-    #[error("DPI violation: resource '{resource}' relation '{relation}' uses disallowed operation '{operation}'")]
-    DpiDisallowedOperation {
-        resource: String,
-        relation: String,
-        operation: String,
-    },
 }
 
 impl From<vera_zanzibar::error::Error> for Error {
@@ -134,27 +118,6 @@ impl From<vera_zanzibar::error::Error> for Error {
             }
             vera_zanzibar::error::Error::SubjectRestrictionViolation { message } => {
                 Error::SubjectRestrictionViolation { message }
-            }
-            vera_zanzibar::error::Error::DpiMissingOwner { resource } => {
-                Error::DpiMissingOwner { resource }
-            }
-            vera_zanzibar::error::Error::DpiExpressionMissingOwner { resource, relation } => {
-                Error::DpiExpressionMissingOwner { resource, relation }
-            }
-            vera_zanzibar::error::Error::DpiDisallowedOperation {
-                resource,
-                relation,
-                operation,
-            } => Error::DpiDisallowedOperation {
-                resource,
-                relation,
-                operation,
-            },
-            vera_zanzibar::error::Error::InvalidRelationshipField { field, reason } => {
-                Error::Storage(format!(
-                    "invalid relationship field '{}': {}",
-                    field, reason
-                ))
             }
             _ => Error::Storage(e.to_string()),
         }

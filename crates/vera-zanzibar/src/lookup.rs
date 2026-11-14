@@ -80,37 +80,6 @@ impl PolicyLookupTable {
                 relation: relation.to_string(),
             })
     }
-
-    pub fn has_policy(&self, policy_id: &str) -> bool {
-        self.policies.contains_key(policy_id)
-    }
-
-    pub fn has_resource(&self, policy_id: &str, resource: &str) -> bool {
-        self.policies
-            .get(policy_id)
-            .map(|r| r.contains_key(resource))
-            .unwrap_or(false)
-    }
-
-    pub fn has_relation(&self, policy_id: &str, resource: &str, relation: &str) -> bool {
-        self.policies
-            .get(policy_id)
-            .and_then(|r| r.get(resource))
-            .map(|rel| rel.contains_key(relation))
-            .unwrap_or(false)
-    }
-
-    pub fn get_relations(&self, policy_id: &str, resource: &str) -> Option<Vec<String>> {
-        self.policies
-            .get(policy_id)
-            .and_then(|r| r.get(resource).map(|rel| rel.keys().cloned().collect()))
-    }
-
-    pub fn get_resources(&self, policy_id: &str) -> Option<Vec<String>> {
-        self.policies
-            .get(policy_id)
-            .map(|r| r.keys().cloned().collect())
-    }
 }
 
 #[cfg(test)]
@@ -141,11 +110,13 @@ mod tests {
 
         table.add_policy(&policy);
 
-        assert!(table.has_policy("policy1"));
-        assert!(table.has_resource("policy1", "document"));
-        assert!(table.has_resource("policy1", "folder"));
-        assert!(table.has_relation("policy1", "document", "owner"));
-        assert!(table.has_relation("policy1", "document", "reader"));
+        for (resource, relation) in [
+            ("document", "owner"),
+            ("document", "reader"),
+            ("folder", "owner"),
+        ] {
+            table.get_expression("policy1", resource, relation).unwrap();
+        }
     }
 
     #[test]
@@ -192,35 +163,10 @@ mod tests {
         let policy = test_policy();
 
         table.add_policy(&policy);
-        assert!(table.has_policy("policy1"));
-
         table.remove_policy("policy1");
-        assert!(!table.has_policy("policy1"));
-    }
-
-    #[test]
-    fn test_get_relations() {
-        let mut table = PolicyLookupTable::new();
-        let policy = test_policy();
-
-        table.add_policy(&policy);
-
-        let relations = table.get_relations("policy1", "document").unwrap();
-        assert_eq!(relations.len(), 2);
-        assert!(relations.contains(&"owner".to_string()));
-        assert!(relations.contains(&"reader".to_string()));
-    }
-
-    #[test]
-    fn test_get_resources() {
-        let mut table = PolicyLookupTable::new();
-        let policy = test_policy();
-
-        table.add_policy(&policy);
-
-        let resources = table.get_resources("policy1").unwrap();
-        assert_eq!(resources.len(), 2);
-        assert!(resources.contains(&"document".to_string()));
-        assert!(resources.contains(&"folder".to_string()));
+        assert!(matches!(
+            table.get_expression("policy1", "document", "owner"),
+            Err(Error::PolicyNotFound(_))
+        ));
     }
 }

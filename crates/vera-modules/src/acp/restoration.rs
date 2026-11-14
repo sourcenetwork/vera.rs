@@ -348,7 +348,7 @@ mod tests {
         let owner_relation = Relationship::with_entity("file", "report", "owner", owner.clone());
         let canonical =
             keys::relationship_key(&policy, &keys::relationship_storage_key(&owner_relation, 0));
-        let legacy = keys::relationship_key(&policy, &owner_relation.storage_key());
+        let legacy = keys::relationship_key(&policy, "/rel/file/report/owner/0000000000000000");
         let mut legacy_store = original.clone();
         legacy_store.put(&legacy, legacy_store.get(&canonical).unwrap());
         legacy_store.delete(&canonical);

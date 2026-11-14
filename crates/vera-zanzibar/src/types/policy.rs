@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use super::relationship::Relationship;
 use super::resource::{Relation, Resource};
 use crate::error::{Error, Result};
-use crate::expression::RelationExpression;
+use crate::expression::{RelationExpression, MAX_EXPRESSION_DEPTH};
 
 /// Permission rules selected when a policy is created.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,85 +81,48 @@ impl Policy {
     pub fn validate(&self) -> Result<()> {
         for resource in self.resources.iter().chain(self.actor.iter()) {
             for relation in &resource.relations {
+                if relation.expression.depth() > MAX_EXPRESSION_DEPTH {
+                    return Err(Error::InvalidPolicy(format!(
+                        "relation '{}' in resource '{}' nests more than {MAX_EXPRESSION_DEPTH} operators",
+                        relation.name, resource.name
+                    )));
+                }
                 self.validate_expression(&resource.name, &relation.expression)?;
             }
         }
         Ok(())
     }
 
-    pub fn validate_dpi(&self) -> Result<()> {
-        for resource in &self.resources {
-            if resource.get_relation("owner").is_none() {
-                return Err(Error::DpiMissingOwner {
-                    resource: resource.name.clone(),
-                });
-            }
-
-            for relation in &resource.relations {
-                if relation.name == "owner" {
-                    continue;
-                }
-
-                if relation.expression.is_this() {
-                    continue;
-                }
-
-                if !Self::expression_includes_owner(&relation.expression) {
-                    return Err(Error::DpiExpressionMissingOwner {
-                        resource: resource.name.clone(),
-                        relation: relation.name.clone(),
-                    });
-                }
-
-                if let Some(op) = Self::find_disallowed_operation(&relation.expression) {
-                    return Err(Error::DpiDisallowedOperation {
-                        resource: resource.name.clone(),
-                        relation: relation.name.clone(),
-                        operation: op,
-                    });
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn expression_includes_owner(expr: &RelationExpression) -> bool {
-        match expr {
-            RelationExpression::This => false,
-            RelationExpression::ComputedUserset { relation } => relation == "owner",
-            RelationExpression::TupleToUserset {
-                computed_relation, ..
-            } => computed_relation == "owner",
-            RelationExpression::Union(exprs) => exprs.iter().any(Self::expression_includes_owner),
-            // Intersection requires `owner` in EVERY branch. An actor only gains
-            // access through an intersection if they satisfy all branches, so the
-            // "owner always has access" guarantee holds only when each branch grants
-            // the owner (e.g. `(owner + a) & (owner + b)`). Using `.any()` here would
-            // let `owner & reader` pass DPI while leaving a pure owner without access.
-            RelationExpression::Intersection(exprs) => {
-                exprs.iter().all(Self::expression_includes_owner)
-            }
-            RelationExpression::Difference { base, subtract } => {
-                Self::expression_includes_owner(base) || Self::expression_includes_owner(subtract)
-            }
-        }
-    }
-
-    fn find_disallowed_operation(expr: &RelationExpression) -> Option<String> {
-        match expr {
-            RelationExpression::This => None,
-            RelationExpression::ComputedUserset { .. } => None,
-            RelationExpression::TupleToUserset { .. } => None,
-            RelationExpression::Union(exprs) => {
-                exprs.iter().find_map(Self::find_disallowed_operation)
-            }
-            RelationExpression::Intersection(exprs) => {
-                exprs.iter().find_map(Self::find_disallowed_operation)
-            }
-            RelationExpression::Difference { base, subtract } => {
-                Self::find_disallowed_operation(base)
-                    .or_else(|| Self::find_disallowed_operation(subtract))
-            }
+    /// Every resource the tuple relation can point at must declare the
+    /// computed relation, or following the tuple fails at evaluation.
+    fn validate_computed_relation(
+        &self,
+        resource_name: &str,
+        tuple: &Relation,
+        computed_relation: &str,
+    ) -> Result<()> {
+        let mut targets = Vec::new();
+        let unrestricted = tuple
+            .subject_restriction
+            .as_ref()
+            .is_none_or(|restriction| restriction.entity_set_resources(&mut targets));
+        let declared = |resource: &str| self.get_relation(resource, computed_relation).is_some();
+        let missing = if unrestricted {
+            let any = self
+                .resources
+                .iter()
+                .chain(self.actor.iter())
+                .any(|resource| declared(&resource.name));
+            (!any).then_some("any resource")
+        } else {
+            targets.into_iter().find(|resource| !declared(resource))
+        };
+        match missing {
+            Some(resource) => Err(Error::InvalidPolicy(format!(
+                "TupleToUserset '{}->{}' in resource '{}' references a relation that {} does not declare",
+                tuple.name, computed_relation, resource_name, resource
+            ))),
+            None => Ok(()),
         }
     }
 
@@ -179,14 +142,13 @@ impl Policy {
                 tuple_relation,
                 computed_relation,
             } => {
-                if self.get_relation(resource_name, tuple_relation).is_none() {
+                let Some(tuple) = self.get_relation(resource_name, tuple_relation) else {
                     return Err(Error::InvalidPolicy(format!(
                         "TupleToUserset references non-existent tuple relation '{}' in resource '{}'",
                         tuple_relation, resource_name
                     )));
-                }
-                let _ = computed_relation;
-                Ok(())
+                };
+                self.validate_computed_relation(resource_name, tuple, computed_relation)
             }
             RelationExpression::Union(exprs) => {
                 for e in exprs {

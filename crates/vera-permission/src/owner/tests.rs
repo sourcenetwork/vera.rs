@@ -1,5 +1,6 @@
 use super::*;
 use vera_modules::{acp::types::RecordMetadata, types::Timestamp};
+use vera_zanzibar::Relationship;
 
 fn object() -> Object {
     Object {
@@ -112,26 +113,13 @@ fn owner_records_and_queries_cannot_change_the_selected_object() {
     assert!(owner([(b"key".as_slice(), b"{".as_slice())], "policy", &object()).is_err());
     for value in ["", "a/b", "a\\b"] {
         assert!(object_owner_prefix(value, &object()).is_err());
-        assert!(
-            object_owner_prefix(
-                "policy",
-                &Object {
-                    resource: value.into(),
-                    id: "report".into()
-                }
-            )
-            .is_err()
-        );
-        assert!(
-            object_owner_prefix(
-                "policy",
-                &Object {
-                    resource: "document".into(),
-                    id: value.into()
-                }
-            )
-            .is_err()
-        );
+    }
+    for (resource, id) in [("", "report"), ("document", "")] {
+        let object = Object {
+            resource: resource.into(),
+            id: id.into(),
+        };
+        assert!(object_owner_prefix("policy", &object).is_err());
     }
     assert!(
         object_owner_prefix(
@@ -150,4 +138,28 @@ fn owner_records_cannot_select_a_nonzero_incarnation() {
     let mut record = record();
     record.incarnation = 1;
     assert!(read(&[record]).is_err());
+}
+
+#[test]
+fn path_like_object_identifiers_have_an_owner() {
+    for id in ["report/child", "reports\\2026\\q3"] {
+        let object = Object {
+            resource: "document".into(),
+            id: id.into(),
+        };
+        let mut record = record();
+        record.relationship.object_id = id.into();
+        let key = keys::relationship_key(
+            "policy",
+            &keys::relationship_storage_key(&record.relationship, 0),
+        );
+        assert!(key.starts_with(&object_owner_prefix("policy", &object).unwrap()));
+        assert!(!key.starts_with(&object_owner_prefix("policy", &self::object()).unwrap()));
+        let value = serde_json::to_vec(&record).unwrap();
+        let owner = owner([(key.as_slice(), value.as_slice())], "policy", &object).unwrap();
+        assert_eq!(
+            owner.unwrap().0.as_str(),
+            "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH"
+        );
+    }
 }

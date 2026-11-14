@@ -6,7 +6,7 @@ use vera_zanzibar::{
     engine::EvaluationMeter,
     error::{Error, Result},
     store::MemoryZanzibarStore,
-    Did, PermissionCheckRequest, PermissionEngine, Policy, Relation, Resource,
+    Did, PermissionEngine, Policy, Relation, RelationExpression, Resource,
 };
 
 #[derive(Debug)]
@@ -26,8 +26,14 @@ fn engine(steps: usize) -> (PermissionEngine<MemoryZanzibarStore>, Arc<Meter>) {
     let mut engine = PermissionEngine::new(Arc::new(MemoryZanzibarStore::new()))
         .with_evaluation_meter(meter.clone());
     engine.add_policy(
-        &Policy::new("p", "p")
-            .with_resource(Resource::new("group").with_relation(Relation::direct("member"))),
+        &Policy::new("p", "p").with_resource(
+            Resource::new("group")
+                .with_relation(Relation::direct("member"))
+                .with_relation(Relation::computed(
+                    "twice",
+                    RelationExpression::parse("member + member").unwrap(),
+                )),
+        ),
     );
     (engine, meter)
 }
@@ -49,35 +55,22 @@ fn caller_allowance_survives_separate_blocking_checks() {
     ));
 }
 
-#[tokio::test]
-async fn cached_batch_checks_charge_the_same_caller_allowance() {
-    let (engine, meter) = engine(2);
-    let actor = Did::new("did:key:actor").unwrap();
-    let requests = vec![PermissionCheckRequest::new("p", "group", "a", "member", &actor); 3];
-    let results = engine.check_many(&requests).await;
-    assert!(matches!(results[0], Ok(false)));
-    assert!(matches!(results[1], Ok(false)));
-    assert!(matches!(
-        results[2],
-        Err(Error::EvaluationLimitExceeded("caller allowance"))
-    ));
-    assert_eq!(meter.0.load(Ordering::Relaxed), 0);
-}
+/// The union, its two operands and the first `member` lookup each take a
+/// step; the second operand is answered from the cache and still charged.
+const TWICE_STEPS: usize = 5;
 
-#[tokio::test]
-async fn explanations_propagate_caller_exhaustion_instead_of_denial() {
-    let (engine, meter) = engine(1);
+#[test]
+fn a_cached_revisit_charges_the_caller_allowance() {
     let actor = Did::new("did:key:actor").unwrap();
-    assert!(
-        !engine
-            .explain("p", "group", "a", "member", &actor)
-            .await
-            .unwrap()
-            .granted
-    );
+    let (engine, meter) = engine(TWICE_STEPS);
+    assert!(!engine
+        .check_blocking("p", "group", "a", "twice", &actor)
+        .unwrap());
     assert_eq!(meter.0.load(Ordering::Relaxed), 0);
+
+    let (engine, _) = self::engine(TWICE_STEPS - 1);
     assert!(matches!(
-        engine.explain("p", "group", "a", "member", &actor).await,
+        engine.check_blocking("p", "group", "a", "twice", &actor),
         Err(Error::EvaluationLimitExceeded("caller allowance"))
     ));
 }

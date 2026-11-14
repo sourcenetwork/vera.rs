@@ -38,22 +38,6 @@ pub enum Error {
     #[error("subject restriction violated: {message}")]
     SubjectRestrictionViolation { message: String },
 
-    #[error("DPI violation: resource '{resource}' must have an 'owner' relation")]
-    DpiMissingOwner { resource: String },
-
-    #[error("DPI violation: permission '{relation}' on resource '{resource}' must include 'owner' in its expression")]
-    DpiExpressionMissingOwner { resource: String, relation: String },
-
-    #[error("DPI violation: resource '{resource}' relation '{relation}' uses disallowed operation '{operation}'")]
-    DpiDisallowedOperation {
-        resource: String,
-        relation: String,
-        operation: String,
-    },
-
-    #[error("invalid relationship field '{field}': {reason}")]
-    InvalidRelationshipField { field: String, reason: String },
-
     #[error("serialization error: {0}")]
     Serialization(String),
 

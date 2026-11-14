@@ -3,7 +3,7 @@ use vera_modules::acp::{
     keys,
     types::{RelationPair, RelationshipRecord},
 };
-use vera_zanzibar::{Relationship, Subject};
+use vera_zanzibar::Subject;
 
 use crate::{
     Actor, Object, PERMISSION_LIMITS, PermissionError, PolicyPrefixResponse, RECORD_PROOF_BYTES,
@@ -16,7 +16,9 @@ pub fn object_owner_prefix(policy: &str, object: &Object) -> Result<Vec<u8>, Per
     if policy.is_empty() || policy.contains(['/', '\\']) {
         return Err(PermissionError::Invalid("invalid policy identifier"));
     }
-    Relationship::try_new(&object.resource, &object.id, "owner", Subject::Wildcard)?;
+    if object.resource.is_empty() || object.id.is_empty() {
+        return Err(PermissionError::Invalid("invalid object identifier"));
+    }
     let prefix = keys::relationship_storage_prefix(
         policy,
         &keys::relation_prefix(&object.resource, &object.id, "owner", 0),

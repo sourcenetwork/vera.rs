@@ -23,24 +23,14 @@ pub(crate) struct NodeTrail {
 }
 
 impl NodeTrail {
-    pub(crate) fn new() -> Self {
-        Self {
-            visited: HashSet::new(),
-        }
-    }
-
     pub(crate) fn contains(&self, node: &NodeId) -> bool {
         self.visited.contains(node)
     }
 
-    pub(crate) fn insert(&mut self, node: NodeId) {
-        self.visited.insert(node);
-    }
-
     pub(crate) fn with_node(&self, node: NodeId) -> Self {
-        let mut new_trail = self.clone();
-        new_trail.insert(node);
-        new_trail
+        let mut trail = self.clone();
+        trail.visited.insert(node);
+        trail
     }
 }
 
@@ -48,18 +38,8 @@ impl NodeTrail {
 pub(crate) struct CheckKey(String, NodeId, Did);
 
 impl CheckKey {
-    pub(crate) fn new(
-        policy: &str,
-        resource: &str,
-        object: &str,
-        relation: &str,
-        subject: &Did,
-    ) -> Self {
-        Self(
-            policy.to_owned(),
-            NodeId::new(resource, object, relation),
-            subject.clone(),
-        )
+    pub(crate) fn new(policy: &str, node: NodeId, subject: &Did) -> Self {
+        Self(policy.to_owned(), node, subject.clone())
     }
 }
 
@@ -95,7 +75,7 @@ mod tests {
         let first = NodeId::new("resource", "object#nested", "relation");
         let second = NodeId::new("resource", "object", "nested#relation");
         assert_ne!(first, second);
-        let trail = NodeTrail::new().with_node(first);
+        let trail = NodeTrail::default().with_node(first);
         assert!(!trail.contains(&second));
         assert_ne!(NodeId::new("a/b", "c", "d"), NodeId::new("a", "b/c", "d"));
     }

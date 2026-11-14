@@ -33,8 +33,8 @@ The builders live in [`vera_modules::acp::keys`](../crates/vera-modules/src/acp/
 selects one. `relationship_generation_key` and `relationship_generation_prefix`
 select a validated relation pair. `relationship_key` and
 `relationship_storage_prefix` select only the permanent owner pair `(0, 0)`;
-owners also always use incarnation zero. Callers must not use the shared engine's
-`Relationship::storage_key()` to construct native keys. Defra's own persisted
+owners also always use incarnation zero. The shared engine has no key format of
+its own; these builders are the only source of native keys. Defra's own persisted
 relationship format is unchanged.
 
 `PolicyRecord.relations` binds target and userset relation generations. Surviving

@@ -5,7 +5,7 @@ use std::{borrow::Cow, sync::RwLock};
 use async_trait::async_trait;
 use vera_identity::Did;
 use vera_zanzibar::error::Result;
-use vera_zanzibar::{ObjectRef, Policy, Relationship, Subject, ZanzibarStore};
+use vera_zanzibar::{Policy, Relationship, Subject, ZanzibarStore};
 
 use super::record_store::RecordStore;
 use super::types::{
@@ -474,14 +474,7 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
             return Ok(true);
         }
         let wildcard = Relationship::new(resource, object_id, relation, Subject::Wildcard);
-        if self.is_live(policy_id, &wildcard)? {
-            return Ok(true);
-        }
-        // Any typed wildcard on this object#relation grants every subject.
-        Ok(self
-            .live_records(policy_id, resource, object_id, relation)?
-            .iter()
-            .any(|rec| rec.relationship.subject.is_typed_wildcard()))
+        self.is_live(policy_id, &wildcard)
     }
 
     async fn get_relation_subjects(
@@ -495,27 +488,6 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
             .live_records(policy_id, resource, object_id, relation)?
             .into_iter()
             .map(|rec| rec.relationship.subject)
-            .collect())
-    }
-
-    async fn get_relation_targets(
-        &self,
-        policy_id: &str,
-        resource: &str,
-        object_id: &str,
-        relation: &str,
-    ) -> Result<Vec<ObjectRef>> {
-        Ok(self
-            .live_records(policy_id, resource, object_id, relation)?
-            .into_iter()
-            .filter_map(|rec| match rec.relationship.subject {
-                Subject::EntitySet {
-                    resource,
-                    object_id,
-                    ..
-                } => Some(ObjectRef::new(resource, object_id)),
-                _ => None,
-            })
             .collect())
     }
 
@@ -664,7 +636,6 @@ mod tests {
         let store = adapter();
         let original = Relationship::with_entity("document", "parent/path", "reader", did(ALICE));
         let collision = Relationship::with_entity("document", "parent", "path/reader", did(ALICE));
-        assert_eq!(original.storage_key(), collision.storage_key());
         block_on(store.store_relationship(POLICY, &original)).unwrap();
         let before = store.store.read().unwrap().serialize();
         assert!(block_on(store.store_relationship(POLICY, &collision)).is_err());
@@ -708,11 +679,6 @@ mod tests {
         );
         assert!(
             block_on(store.get_relation_subjects(POLICY, "document", "doc", "reader"))
-                .unwrap()
-                .is_empty()
-        );
-        assert!(
-            block_on(store.get_relation_targets(POLICY, "document", "doc", "reader"))
                 .unwrap()
                 .is_empty()
         );
@@ -766,7 +732,6 @@ mod tests {
         assert!(
             block_on(store.get_relation_subjects(POLICY, "document", "doc", "reader")).is_err()
         );
-        assert!(block_on(store.get_relation_targets(POLICY, "document", "doc", "reader")).is_err());
     }
 
     #[test]
@@ -833,31 +798,6 @@ mod tests {
         assert_eq!(subjects, vec![live.subject]);
     }
 
-    #[test]
-    fn get_relation_targets_returns_entityset_objectrefs_only() {
-        let mut kv = InMemoryKvStore::default();
-        let entity = Relationship::with_entity(
-            "document",
-            "doc1",
-            "parent",
-            did("did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"),
-        );
-        let parent = Relationship::new(
-            "document",
-            "doc1",
-            "parent",
-            Subject::entity_set("collection", "col1", "reader"),
-        );
-        seed(&mut kv, &entity, false);
-        seed(&mut kv, &parent, false);
-
-        let store = QmdbZanzibarStore::new(kv);
-        let targets =
-            block_on(store.get_relation_targets(POLICY, "document", "doc1", "parent")).unwrap();
-
-        assert_eq!(targets, vec![ObjectRef::new("collection", "col1")]);
-    }
-
     const ALICE: &str = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 
     #[test]
@@ -894,7 +834,7 @@ mod tests {
     }
 
     #[test]
-    fn check_permission_direct_matches_wildcard_and_typed_wildcard() {
+    fn check_permission_direct_matches_wildcard_and_leaves_typed_wildcards_to_the_engine() {
         let mut wild = InMemoryKvStore::default();
         seed(
             &mut wild,
@@ -925,17 +865,29 @@ mod tests {
             ),
             false,
         );
-        let tstore = QmdbZanzibarStore::new(typed);
+        let tstore = std::sync::Arc::new(QmdbZanzibarStore::new(typed));
         assert!(
-            block_on(tstore.check_permission_direct(
+            !block_on(tstore.check_permission_direct(
                 POLICY,
                 "document",
                 "doc1",
                 "reader",
                 &did(ALICE)
             ))
-            .unwrap(),
+            .unwrap()
+        );
+        let mut engine = vera_zanzibar::PermissionEngine::new(tstore);
+        engine.add_policy(&fixture_policy());
+        assert!(
+            engine
+                .check_blocking(POLICY, "document", "doc1", "reader", &did(ALICE))
+                .unwrap(),
             "typed wildcard grants everyone"
+        );
+        assert!(
+            !engine
+                .check_blocking(POLICY, "document", "doc2", "reader", &did(ALICE))
+                .unwrap()
         );
     }
 
@@ -1279,9 +1231,6 @@ mod tests {
         );
         assert!(
             block_on(store.get_relation_subjects(POLICY, "document", "doc1", "reader")).is_err()
-        );
-        assert!(
-            block_on(store.get_relation_targets(POLICY, "document", "doc1", "reader")).is_err()
         );
     }
     // Install the same policy/directory transition as a committed edit, retaining

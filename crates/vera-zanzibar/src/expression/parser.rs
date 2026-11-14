@@ -1,5 +1,8 @@
-use super::RelationExpression;
+use super::{RelationExpression, MAX_EXPRESSION_DEPTH};
 use crate::error::{Error, Result};
+
+/// Maximum nesting of parentheses in a parsed expression.
+pub const MAX_PARENTHESIS_DEPTH: usize = 32;
 
 impl RelationExpression {
     /// Parse an expression from string format.
@@ -14,42 +17,100 @@ impl RelationExpression {
     ///
     /// All operators have equal precedence and are evaluated left-to-right,
     /// matching Go zanzi behavior. Use parentheses to override.
+    ///
+    /// The result nests at most [`MAX_EXPRESSION_DEPTH`] operators and the
+    /// input at most [`MAX_PARENTHESIS_DEPTH`] parentheses. A chain of one
+    /// repeated `+` or `&` is a single level whatever its length.
     pub fn parse(input: &str) -> Result<Self> {
-        Self::parse_bounded(input, 128)
+        parse_group(input, MAX_PARENTHESIS_DEPTH).map(|(expression, _)| expression)
+    }
+}
+
+/// Parse one parenthesis level, returning the expression and its depth.
+fn parse_group(input: &str, parentheses: usize) -> Result<Parsed> {
+    let input = input.trim();
+    if input.is_empty() {
+        return Err(Error::InvalidExpression("empty expression".into()));
     }
 
-    fn parse_bounded(input: &str, remaining: usize) -> Result<Self> {
-        if remaining == 0 {
-            return Err(Error::InvalidExpression(
-                "expression exceeds nesting limit of 128".into(),
-            ));
-        }
-        let input = input.trim();
-        if input.is_empty() {
-            return Err(Error::InvalidExpression("empty expression".into()));
-        }
-
-        if input.starts_with('(') && input.ends_with(')') && is_fully_parenthesized(input) {
-            return Self::parse_bounded(&input[1..input.len() - 1], remaining - 1);
-        }
-
-        if let Some((pos, op)) = find_rightmost_operator(input) {
-            let left = Self::parse_bounded(&input[..pos], remaining - 1)?;
-            let right = Self::parse_bounded(&input[pos + 1..], remaining - 1)?;
-
-            return match op {
-                '+' => Ok(merge_union(left, right)),
-                '&' => Ok(merge_intersection(left, right)),
-                '-' => Ok(Self::Difference {
-                    base: Box::new(left),
-                    subtract: Box::new(right),
-                }),
-                _ => unreachable!(),
-            };
-        }
-
-        parse_term(input)
+    if is_fully_parenthesized(input) {
+        let Some(parentheses) = parentheses.checked_sub(1) else {
+            return Err(Error::InvalidExpression(format!(
+                "expression nests more than {MAX_PARENTHESIS_DEPTH} parentheses"
+            )));
+        };
+        return parse_group(&input[1..input.len() - 1], parentheses);
     }
+
+    let operators = top_level_operators(input);
+    if operators.is_empty() {
+        return parse_term(input).map(|term| (term, 0));
+    }
+
+    let mut folded = parse_group(&input[..operators[0].0], parentheses)?;
+    for (index, (position, operator)) in operators.iter().enumerate() {
+        let end = operators
+            .get(index + 1)
+            .map_or(input.len(), |(next, _)| *next);
+        let operand = parse_group(&input[position + 1..end], parentheses)?;
+        folded = combine(*operator, folded, operand);
+        if folded.1 > MAX_EXPRESSION_DEPTH {
+            return Err(Error::InvalidExpression(format!(
+                "expression nests more than {MAX_EXPRESSION_DEPTH} operators"
+            )));
+        }
+    }
+    Ok(folded)
+}
+
+type Parsed = (RelationExpression, usize);
+
+fn combine(operator: char, left: Parsed, right: Parsed) -> Parsed {
+    match operator {
+        '+' => {
+            let (operands, depth) = flatten([left, right], |expression| match expression {
+                RelationExpression::Union(inner) => Ok(inner),
+                other => Err(other),
+            });
+            (RelationExpression::Union(operands), depth)
+        }
+        '&' => {
+            let (operands, depth) = flatten([left, right], |expression| match expression {
+                RelationExpression::Intersection(inner) => Ok(inner),
+                other => Err(other),
+            });
+            (RelationExpression::Intersection(operands), depth)
+        }
+        _ => (
+            RelationExpression::difference(left.0, right.0),
+            left.1.max(right.1) + 1,
+        ),
+    }
+}
+
+/// Merge operands of one associative operator, splicing in those that are
+/// already that operator so a chain stays one level deep.
+fn flatten(
+    sides: [Parsed; 2],
+    same_operator: impl Fn(
+        RelationExpression,
+    ) -> std::result::Result<Vec<RelationExpression>, RelationExpression>,
+) -> (Vec<RelationExpression>, usize) {
+    let mut operands = Vec::new();
+    let mut depth = 0;
+    for (expression, expression_depth) in sides {
+        match same_operator(expression) {
+            Ok(inner) => {
+                operands.extend(inner);
+                depth = depth.max(expression_depth);
+            }
+            Err(other) => {
+                operands.push(other);
+                depth = depth.max(expression_depth + 1);
+            }
+        }
+    }
+    (operands, depth)
 }
 
 fn is_fully_parenthesized(input: &str) -> bool {
@@ -74,28 +135,23 @@ fn is_fully_parenthesized(input: &str) -> bool {
     true
 }
 
-fn find_rightmost_operator(input: &str) -> Option<(usize, char)> {
+/// Byte positions of the operators outside every parenthesis, in order.
+fn top_level_operators(input: &str) -> Vec<(usize, char)> {
     let mut depth = 0;
-    let chars: Vec<(usize, char)> = input.char_indices().collect();
-    let mut rightmost: Option<(usize, char)> = None;
-
-    for i in 0..chars.len() {
-        match chars[i].1 {
+    let mut operators = Vec::new();
+    let mut chars = input.char_indices().peekable();
+    while let Some((position, c)) = chars.next() {
+        match c {
             '(' => depth += 1,
             ')' => depth -= 1,
-            '+' | '&' if depth == 0 => {
-                rightmost = Some((chars[i].0, chars[i].1));
-            }
-            '-' if depth == 0 => {
-                if i + 1 < chars.len() && chars[i + 1].1 == '>' {
-                    continue;
-                }
-                rightmost = Some((chars[i].0, '-'));
+            '+' | '&' if depth == 0 => operators.push((position, c)),
+            '-' if depth == 0 && chars.peek().is_none_or(|(_, next)| *next != '>') => {
+                operators.push((position, c));
             }
             _ => {}
         }
     }
-    rightmost
+    operators
 }
 
 fn parse_term(input: &str) -> Result<RelationExpression> {
@@ -158,36 +214,4 @@ fn validate_identifier(s: &str) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn merge_union(left: RelationExpression, right: RelationExpression) -> RelationExpression {
-    let mut exprs = Vec::new();
-
-    match left {
-        RelationExpression::Union(inner) => exprs.extend(inner),
-        other => exprs.push(other),
-    }
-
-    match right {
-        RelationExpression::Union(inner) => exprs.extend(inner),
-        other => exprs.push(other),
-    }
-
-    RelationExpression::Union(exprs)
-}
-
-fn merge_intersection(left: RelationExpression, right: RelationExpression) -> RelationExpression {
-    let mut exprs = Vec::new();
-
-    match left {
-        RelationExpression::Intersection(inner) => exprs.extend(inner),
-        other => exprs.push(other),
-    }
-
-    match right {
-        RelationExpression::Intersection(inner) => exprs.extend(inner),
-        other => exprs.push(other),
-    }
-
-    RelationExpression::Intersection(exprs)
 }

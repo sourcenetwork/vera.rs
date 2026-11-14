@@ -1554,7 +1554,6 @@ resources:
         }
         let original = Relationship::with_entity("document", "parent/path", "reader", bob());
         let collision = Relationship::with_entity("document", "parent", "path/reader", bob());
-        assert_eq!(original.storage_key(), collision.storage_key());
         module
             .direct_policy_cmd(&bob(), &policy, PolicyCmd::SetRelationship(original))
             .unwrap();

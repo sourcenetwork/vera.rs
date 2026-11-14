@@ -6942,7 +6942,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2 0.10.9",
- "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "vera-identity",
@@ -7276,7 +7275,6 @@ dependencies = [
 name = "vera-identity"
 version = "0.1.2"
 dependencies = [
- "hex",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -7501,7 +7499,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
  "vera-identity",
 ]
 

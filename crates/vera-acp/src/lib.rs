@@ -19,7 +19,6 @@ pub use permission::DocumentPermission;
 
 // Re-export key zanzibar engine types from the standalone zanzibar crate
 pub use ::vera_zanzibar::{
-    EvaluationStep, EvaluationTrace, MemoryZanzibarStore, PermissionCheckRequest, PermissionEngine,
-    PermissionExplanation, Policy, Relation, RelationExpression, Relationship, Resource,
-    StepResult, StorePolicyOptions, Subject, SubjectRestriction, ZanzibarStore,
+    MemoryZanzibarStore, PermissionEngine, Policy, Relation, RelationExpression, Relationship,
+    Resource, Subject, SubjectRestriction, ZanzibarStore,
 };
