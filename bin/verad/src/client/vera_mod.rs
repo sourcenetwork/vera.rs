@@ -1,4 +1,4 @@
-//! Vera module subcommands (chain config, params, JWS tokens).
+//! Vera module subcommands (relay grants, JWS tokens).
 
 use alloy_primitives::Address;
 use clap::Subcommand;
@@ -21,10 +21,6 @@ pub(crate) enum VeraCommand {
         #[arg(long, default_value_t = 0)]
         minimum_revision: u64,
     },
-    /// Fetch chain configuration.
-    ChainConfig,
-    /// Fetch current Vera module parameters.
-    Params,
     /// Look up a JWS token by hash.
     GetToken {
         /// Token hash string.
@@ -65,17 +61,6 @@ impl VeraCommand {
                     "timestamp": record.timestamp,
                     "grant": record.value,
                 }))?;
-            }
-
-            Self::ChainConfig => {
-                let data = ctx.client.get_chain_config().await?;
-                let json = bytes_to_json(&data);
-                ctx.print_json(&json)?;
-            }
-            Self::Params => {
-                let data = ctx.client.get_hub_params().await?;
-                let json = bytes_to_json(&data);
-                ctx.print_json(&json)?;
             }
             Self::GetToken { token_hash } => {
                 let (found, record) = ctx.client.get_jws_token(&token_hash).await?;

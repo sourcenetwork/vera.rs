@@ -1,6 +1,6 @@
 //! Vera module key prefixes and builders.
 //!
-//! Each record family sits under a one-byte prefix; the singletons use named keys.
+//! Each record family sits under a one-byte prefix.
 
 use sha2::{Digest, Sha256};
 
@@ -14,10 +14,6 @@ pub const JWS_TOKEN_BY_DID_PREFIX: &[u8] = &[0x02];
 pub const JWS_TOKEN_BY_ACCOUNT_PREFIX: &[u8] = &[0x03];
 /// Ordered expiry deadlines for active tokens.
 pub const JWS_TOKEN_EXPIRY_PREFIX: &[u8] = &[0x04];
-/// Module parameters key.
-pub const PARAMS_KEY: &[u8] = b"p_hub";
-/// Write-once chain configuration key.
-pub const CHAIN_CONFIG_KEY: &[u8] = b"chain_config";
 
 /// Primary store key: `prefix + token_hash` (raw bytes, no length prefix).
 ///
@@ -163,20 +159,5 @@ mod tests {
         let encoded = borsh::to_vec(&record).unwrap();
         let decoded = JWSTokenRecord::try_from_slice(&encoded).unwrap();
         assert_eq!(record, decoded);
-    }
-
-    #[test]
-    fn borsh_roundtrip_chain_config() {
-        use borsh::BorshDeserialize;
-
-        use crate::vera::types::ChainConfig;
-
-        let config = ChainConfig {
-            allow_zero_fee_txs: true,
-            ignore_bearer_auth: false,
-        };
-        let encoded = borsh::to_vec(&config).unwrap();
-        let decoded = ChainConfig::try_from_slice(&encoded).unwrap();
-        assert_eq!(config, decoded);
     }
 }

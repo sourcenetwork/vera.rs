@@ -606,7 +606,10 @@ fn delegated_policy_lifecycle_preserves_ownership_and_revocation() {
 fn delegated_policy_creation_rolls_back_when_usage_cannot_be_recorded() {
     use vera_modules::{
         kv_store::{InMemoryKvStore, ModuleKvStore},
-        vera::VeraModule,
+        vera::{
+            VeraModule,
+            types::{JWSTokenRecord, JWSTokenStatus},
+        },
     };
 
     let key = SigningKey::from_slice(&[42; 32]).unwrap();
@@ -648,8 +651,30 @@ fn delegated_policy_creation_rolls_back_when_usage_cannot_be_recorded() {
             block_height: 1,
         },
     };
+    // The stored deadline has passed although the signed claims are still valid, so
+    // authorization succeeds and only the usage update after the operation fails.
+    let hash = vera_modules::vera::keys::hash_jws_token(&token);
+    let lapsed = JWSTokenRecord {
+        token_hash: hash.clone(),
+        bearer_token: token.clone(),
+        issuer_did: issuer,
+        authorized_account: worker.to_string(),
+        issued_at: Timestamp::default(),
+        expires_at: Timestamp {
+            seconds: 15,
+            block_height: 0,
+        },
+        status: JWSTokenStatus::Valid,
+        first_used_at: None,
+        last_used_at: None,
+        invalidated_at: None,
+        invalidated_by: String::new(),
+    };
     let mut store = InMemoryKvStore::default();
-    store.put(vera_modules::vera::keys::CHAIN_CONFIG_KEY, vec![0xff]);
+    store.put(
+        &vera_modules::vera::keys::jws_token_key(&hash),
+        borsh::to_vec(&lapsed).unwrap(),
+    );
     let mut vera = VeraModule::from_store(store);
     let mut module = AcpModule::new();
     let before = module.store().serialize();

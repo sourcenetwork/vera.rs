@@ -66,7 +66,7 @@ enum ClientCommand {
     #[command(subcommand)]
     Bulletin(bulletin::BulletinCommand),
 
-    /// Vera module operations (chain config, JWS tokens).
+    /// Vera module operations (relay grants, JWS tokens).
     #[command(subcommand)]
     Vera(vera_mod::VeraCommand),
 

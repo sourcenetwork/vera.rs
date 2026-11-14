@@ -12,7 +12,7 @@ mod storage;
 pub mod types;
 
 use error::BulletinError;
-use types::{BulletinParams, Collaborator, Namespace, Post};
+use types::{Collaborator, Namespace, Post};
 use vera_acp::{Relationship, Subject};
 use vera_identity::Did;
 
@@ -84,7 +84,6 @@ pub const MAX_COLLABORATOR_DID_BYTES: usize = 256;
 /// "namespace/" + namespaceId                           → Namespace
 /// "collaborator/" + sanitize(namespaceId) + "/" + sanitize(did) → Collaborator
 /// "post/" + sanitize(namespaceId) + "/" + sanitize(postId)     → Post
-/// "p_bulletin"                                         → BulletinParams
 /// ```
 ///
 /// Component encoding escapes `%` and literal `|`, then replaces `/` with `|`.
@@ -369,13 +368,6 @@ impl BulletinModule {
         Ok(collaborator_did.to_string())
     }
 
-    /// Reject legacy parameter writes without operator approvals.
-    pub fn update_params(&mut self, _authority: &Did, _params: BulletinParams) -> Result<()> {
-        Err(BulletinError::Unauthorized {
-            reason: "operator approvals are required".into(),
-        })
-    }
-
     // ── Query handlers ──────────────────────────────────────────────────
 
     /// Look up a namespace by short name or stored identifier.
@@ -471,11 +463,6 @@ impl BulletinModule {
         )
     }
 
-    /// Query current module parameters; defaults apply when none are stored.
-    pub fn query_params(&self) -> Result<BulletinParams> {
-        self.get_params()
-    }
-
     // ── Storage — Policy ID (singleton) ────────────────────────────────
 
     /// Read the module's ACP policy ID.
@@ -520,18 +507,6 @@ impl BulletinModule {
         let policy_id = record.policy.id;
         self.set_policy_id(&policy_id);
         Ok(policy_id)
-    }
-
-    // ── Storage — Params ───────────────────────────────────────────────
-
-    fn get_params(&self) -> Result<BulletinParams> {
-        self.store.get_ref(keys::PARAMS_KEY).map_or_else(
-            || Ok(BulletinParams::default()),
-            |bytes| {
-                borsh::from_slice(bytes)
-                    .map_err(|e| BulletinError::State(format!("invalid bulletin parameters: {e}")))
-            },
-        )
     }
 
     // ── Storage — Namespaces ───────────────────────────────────────────
@@ -738,15 +713,6 @@ mod tests {
         };
         m.set_collaborator(&collab);
         m
-    }
-
-    #[test]
-    fn unauthenticated_parameter_update_is_rejected() {
-        let mut m = BulletinModule::default();
-        let did = make_did("did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK");
-        assert!(m.update_params(&did, BulletinParams {}).is_err());
-        let p = m.query_params().unwrap();
-        assert_eq!(p, BulletinParams {});
     }
 
     #[test]

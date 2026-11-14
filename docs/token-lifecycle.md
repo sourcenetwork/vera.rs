@@ -1,7 +1,8 @@
 # Token lifecycle
 
-Token records remain queryable after invalidation. An ordered index contains only
-tokens with an expiry and a status other than invalid. Its key is `0x04`, followed
+Token records remain queryable after invalidation. Every token names an authorized
+account and an expiry time. An ordered index contains the tokens whose status is
+not invalid. Its key is `0x04`, followed
 by the expiry time as a big-endian 64-bit integer and the token hash's UTF-8 bytes;
 its value is empty. The primary record and existing issuer/account indexes retain
 their formats. A record and its index keys name a secp256k1 issuer or account by
@@ -12,8 +13,7 @@ Every token write updates the expiry index. Usage updates retain one entry;
 revocation removes it. The end-of-revision sweep visits at most 128 due entries
 and stops at the first deadline greater than or equal to the execution time.
 The stored status remains unchanged at the exact deadline; authorization also
-checks the signed token claims. A zero timestamp means no expiry and has no index
-entry. Automatic invalidation records its execution timestamp; later sweeps do
+checks the signed token claims. Automatic invalidation records its execution timestamp; later sweeps do
 not overwrite an operator's invalidation metadata.
 
 The sweep validates due entries before updating records. Missing records, malformed
@@ -54,5 +54,5 @@ new operation.
 Native recovery validates token records and their issuer, account, and expiry
 indexes before publishing module state. Missing indexes, orphaned entries,
 invalid presence markers, malformed records, and mismatched identities stop
-recovery with an error. Configuration must also decode successfully. Validation
-does not repair or discard retained records.
+recovery with an error. A record without an authorized account is malformed.
+Validation does not repair or discard retained records.

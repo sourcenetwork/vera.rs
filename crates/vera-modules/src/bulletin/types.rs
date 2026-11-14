@@ -32,9 +32,3 @@ pub struct Collaborator {
     pub did: String,
     pub namespace: String,
 }
-
-/// Module-level parameters (governance-controlled).
-#[derive(
-    Clone, Debug, Default, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize,
-)]
-pub struct BulletinParams {}

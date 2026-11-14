@@ -29,16 +29,3 @@ pub struct JWSTokenRecord {
     pub invalidated_at: Option<Timestamp>,
     pub invalidated_by: String,
 }
-
-/// Write-once chain configuration (set at genesis).
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
-pub struct ChainConfig {
-    pub allow_zero_fee_txs: bool,
-    pub ignore_bearer_auth: bool,
-}
-
-/// Module-level parameters (governance-controlled).
-#[derive(
-    Clone, Debug, Default, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize,
-)]
-pub struct VeraParams {}

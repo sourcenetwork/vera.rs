@@ -4,7 +4,7 @@ const EXPIRY_BATCH_SIZE: usize = 128;
 
 impl VeraModule {
     pub(super) fn token_expiry_key(record: &JWSTokenRecord) -> Option<Vec<u8>> {
-        if record.status == JWSTokenStatus::Invalid || record.expires_at == Timestamp::default() {
+        if record.status == JWSTokenStatus::Invalid {
             return None;
         }
         Some(
@@ -143,13 +143,13 @@ mod tests {
         }
         let due = token(&mut vera, "due", 150);
         let future = token(&mut vera, "future", 160);
-        let permanent = token(&mut vera, "permanent", 0);
+        let distant = token(&mut vera, "distant", u64::MAX);
         vera.record_jws_token_usage(&context(110), &due).unwrap();
         assert_eq!(
             vera.store
                 .prefix_iter(keys::JWS_TOKEN_EXPIRY_PREFIX)
                 .count(),
-            2
+            3
         );
         let mut vera =
             VeraModule::from_store(InMemoryKvStore::deserialize(&vera.store.serialize()).unwrap());
@@ -166,7 +166,7 @@ mod tests {
             vera.store
                 .prefix_iter(keys::JWS_TOKEN_EXPIRY_PREFIX)
                 .count(),
-            1
+            2
         );
         assert_eq!(vera.store.prefix_iter(keys::JWS_TOKEN_PREFIX).count(), 2003);
         assert_eq!(
@@ -174,7 +174,7 @@ mod tests {
             JWSTokenStatus::Valid
         );
         assert_eq!(
-            vera.get_jws_token(&permanent).unwrap().unwrap().status,
+            vera.get_jws_token(&distant).unwrap().unwrap().status,
             JWSTokenStatus::Valid
         );
         vera.update_jws_token_status(&context(152), &future, JWSTokenStatus::Invalid, "operator")
@@ -183,9 +183,13 @@ mod tests {
             vera.store
                 .prefix_iter(keys::JWS_TOKEN_EXPIRY_PREFIX)
                 .count(),
-            0
+            1
         );
         vera.check_and_update_expired_tokens(&context(200)).unwrap();
+        assert_eq!(
+            vera.get_jws_token(&distant).unwrap().unwrap().status,
+            JWSTokenStatus::Valid
+        );
         assert_eq!(
             vera.get_jws_token(&future).unwrap().unwrap().invalidated_by,
             "operator"

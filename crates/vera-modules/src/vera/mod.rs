@@ -1,4 +1,4 @@
-//! Vera module — identity management, JWS token lifecycle, and chain configuration.
+//! Vera module — identity management and JWS token lifecycle.
 
 /// Solidity ABI interface for the Vera precompile.
 pub mod abi;
@@ -27,7 +27,7 @@ mod token_queries;
 pub mod types;
 
 use error::VeraError;
-use types::{ChainConfig, JWSTokenRecord, JWSTokenStatus, VeraParams};
+use types::{JWSTokenRecord, JWSTokenStatus};
 use vera_identity::Did;
 
 use crate::kv_store::{InMemoryKvStore, ModuleKvStore};
@@ -37,8 +37,7 @@ type Result<T> = std::result::Result<T, VeraError>;
 
 /// Vera module.
 ///
-/// Manages JWS token invalidation, token lifecycle tracking, and
-/// chain configuration.
+/// Manages JWS token invalidation and token lifecycle tracking.
 ///
 /// # KV store layout
 ///
@@ -46,8 +45,7 @@ type Result<T> = std::result::Result<T, VeraError>;
 /// 0x01 || token_hash                                 → JWSTokenRecord (primary)
 /// 0x02 || len_prefix(did) || len_prefix(token_hash)  → 0x01 (DID index)
 /// 0x03 || len_prefix(acct) || len_prefix(token_hash) → 0x01 (account index)
-/// "p_hub"                                            → VeraParams
-/// "chain_config"                                     → ChainConfig (write-once)
+/// 0x04 || expiry_seconds_be || token_hash           → empty (expiry index)
 /// ```
 ///
 /// Token hash: `hex(sha256(raw_bearer_jws_string))`.
@@ -101,8 +99,8 @@ impl VeraModule {
             });
         }
         let is_issuer = vera_crypto::jwt::matches_issuer(&record.issuer_did, creator.as_ref());
-        let is_authorized_account = !record.authorized_account.is_empty()
-            && record.authorized_account == crate::actor::canonical_str(&tx_ctx.signer);
+        let is_authorized_account =
+            record.authorized_account == crate::actor::canonical_str(&tx_ctx.signer);
         if !is_issuer && !is_authorized_account {
             return Err(VeraError::Unauthorized {
                 reason: "caller is neither issuer DID nor authorized account".to_string(),
@@ -116,26 +114,11 @@ impl VeraModule {
         )
     }
 
-    /// Reject legacy parameter writes without operator approvals.
-    pub fn update_params(&mut self, _authority: &Did, _params: VeraParams) -> Result<()> {
-        Err(VeraError::Unauthorized {
-            reason: "operator approvals are required".into(),
-        })
-    }
-
-    // ── Query handlers ──────────────────────────────────────────────────
-
-    /// Query current module parameters; defaults apply when none are stored.
-    pub fn query_params(&self) -> Result<VeraParams> {
-        self.get_params()
-    }
-
     // ── Token records ───────────────────────────────────────────────────
 
     /// Record a token on first use, or refresh its usage time when already stored.
     ///
-    /// A new token that has already expired at block time is rejected; a zero
-    /// expiry means the token does not expire.
+    /// A new token that has already expired at block time is rejected.
     pub fn store_or_update_jws_token(
         &mut self,
         block_ctx: &BlockExecCtx,
@@ -149,8 +132,7 @@ impl VeraModule {
         if self.get_jws_token(&token_hash)?.is_some() {
             return self.record_jws_token_usage(block_ctx, &token_hash);
         }
-        let zero = Timestamp::default();
-        if expires_at != zero && expires_at.seconds < block_ctx.timestamp.seconds {
+        if expires_at.seconds < block_ctx.timestamp.seconds {
             return Err(VeraError::InvalidJws {
                 reason: "token already expired at block time".to_string(),
             });
@@ -183,8 +165,7 @@ impl VeraModule {
                     token_hash: token_hash.to_string(),
                 })?;
         if record.status != JWSTokenStatus::Valid
-            || (record.expires_at.seconds != 0
-                && record.expires_at.seconds < block_ctx.timestamp.seconds)
+            || record.expires_at.seconds < block_ctx.timestamp.seconds
         {
             return Err(VeraError::InvalidJws {
                 reason: "token is invalid or expired".into(),
@@ -255,45 +236,18 @@ impl VeraModule {
         Ok(record)
     }
 
-    /// Set the chain configuration; it can be written once.
-    pub fn set_chain_config(&mut self, config: ChainConfig) -> Result<()> {
-        if self.store.has(keys::CHAIN_CONFIG_KEY) {
-            return Err(VeraError::ChainConfigAlreadySet);
-        }
-        let bytes = borsh::to_vec(&config).map_err(|e| VeraError::State(e.to_string()))?;
-        self.store.put(keys::CHAIN_CONFIG_KEY, bytes);
-        Ok(())
-    }
-
-    /// Read the chain configuration; both settings default to false.
-    pub fn get_chain_config(&self) -> Result<ChainConfig> {
-        self.store.get(keys::CHAIN_CONFIG_KEY).map_or(
-            Ok(ChainConfig {
-                allow_zero_fee_txs: false,
-                ignore_bearer_auth: false,
-            }),
-            |bytes| {
-                borsh::from_slice(&bytes)
-                    .map_err(|e: std::io::Error| VeraError::State(e.to_string()))
-            },
-        )
-    }
-
     // ── Storage — JWS Token (primary + indexes) ────────────────────────
 
     /// Write a token record together with its issuer, account and expiry index entries.
     fn set_jws_token(&mut self, record: &JWSTokenRecord) -> Result<()> {
         Self::validate_token_selector(&record.token_hash)?;
         Self::validate_token_selector(&record.issuer_did)?;
-        if !record.authorized_account.is_empty() {
-            Self::validate_token_selector(&record.authorized_account)?;
-        }
-        let config = self.get_chain_config()?;
-        if !config.ignore_bearer_auth && record.authorized_account.is_empty() {
+        if record.authorized_account.is_empty() {
             return Err(VeraError::InvalidJws {
-                reason: "authorized_account required when bearer auth is enforced".to_string(),
+                reason: "authorized_account required".to_string(),
             });
         }
+        Self::validate_token_selector(&record.authorized_account)?;
         let bytes = borsh::to_vec(record).map_err(|e| VeraError::State(e.to_string()))?;
         if let Some(previous) = self.get_jws_token(&record.token_hash)?
             && let Some(key) = Self::token_expiry_key(&previous)
@@ -307,24 +261,10 @@ impl VeraModule {
             .put(&keys::jws_token_key(&record.token_hash), bytes);
         let did_key = keys::jws_token_by_did_key(&record.issuer_did, &record.token_hash);
         self.store.put(&did_key, vec![0x01]);
-        if !record.authorized_account.is_empty() {
-            let acct_key =
-                keys::jws_token_by_account_key(&record.authorized_account, &record.token_hash);
-            self.store.put(&acct_key, vec![0x01]);
-        }
+        let acct_key =
+            keys::jws_token_by_account_key(&record.authorized_account, &record.token_hash);
+        self.store.put(&acct_key, vec![0x01]);
         Ok(())
-    }
-
-    // ── Storage — Params ───────────────────────────────────────────────
-
-    fn get_params(&self) -> Result<VeraParams> {
-        self.store.get_ref(keys::PARAMS_KEY).map_or_else(
-            || Ok(VeraParams::default()),
-            |bytes| {
-                borsh::from_slice(bytes)
-                    .map_err(|e| VeraError::State(format!("invalid vera parameters: {e}")))
-            },
-        )
     }
 
     // ── Storage — Utility ──────────────────────────────────────────────
@@ -358,6 +298,12 @@ mod tests {
     use super::*;
     use crate::types::Timestamp;
 
+    const ACCOUNT: &str = "0xAccount1";
+    const NEVER_DUE: Timestamp = Timestamp {
+        seconds: u64::MAX,
+        block_height: 0,
+    };
+
     fn block_ctx(seconds: u64) -> BlockExecCtx {
         BlockExecCtx {
             genesis_id: [0; 32],
@@ -384,104 +330,62 @@ mod tests {
                 seconds: 1,
                 block_height: 1,
             },
-            Timestamp::default(),
+            NEVER_DUE,
         )
         .unwrap();
         keys::hash_jws_token("bearer-token-abc")
     }
 
     #[test]
-    fn set_and_get_chain_config() {
-        let mut vera = VeraModule::new();
-        let config = ChainConfig {
-            allow_zero_fee_txs: true,
-            ignore_bearer_auth: false,
-        };
-        vera.set_chain_config(config.clone()).unwrap();
-        assert_eq!(vera.get_chain_config().unwrap(), config);
-    }
-
-    #[test]
-    fn chain_config_write_once() {
-        let mut vera = VeraModule::new();
-        let config = ChainConfig {
-            allow_zero_fee_txs: false,
-            ignore_bearer_auth: true,
-        };
-        vera.set_chain_config(config.clone()).unwrap();
-        let err = vera.set_chain_config(config).unwrap_err();
-        assert!(matches!(err, VeraError::ChainConfigAlreadySet));
-    }
-
-    #[test]
-    fn chain_config_default_when_absent() {
-        let vera = VeraModule::new();
-        let config = vera.get_chain_config().unwrap();
-        assert!(!config.allow_zero_fee_txs);
-        assert!(!config.ignore_bearer_auth);
-    }
-
-    #[test]
-    fn malformed_parameters_return_errors() {
-        let mut vera = VeraModule::default();
-        vera.store.put(keys::PARAMS_KEY, vec![0]);
-        assert!(vera.query_params().is_err());
-    }
-
-    #[test]
-    fn absent_and_stored_params_are_read() {
-        let mut vera = VeraModule::new();
-        assert_eq!(vera.get_params().unwrap(), VeraParams::default());
-        let params = VeraParams {};
-        vera.store
-            .put(keys::PARAMS_KEY, borsh::to_vec(&params).unwrap());
-        assert_eq!(vera.get_params().unwrap(), params);
-    }
-
-    #[test]
     fn store_token_and_retrieve() {
-        let _hub = VeraModule::new();
-        let mut hub2 = VeraModule::new();
-        hub2.set_chain_config(ChainConfig {
-            allow_zero_fee_txs: false,
-            ignore_bearer_auth: true,
-        })
-        .unwrap();
+        let mut vera = VeraModule::new();
         let ctx = block_ctx(100);
         let did = make_did("did:key:z6MkAlice");
-        hub2.store_or_update_jws_token(
+        vera.store_or_update_jws_token(
             &ctx,
             "my-bearer",
             &did,
-            "",
+            ACCOUNT,
             Timestamp {
                 seconds: 50,
                 block_height: 5,
             },
-            Timestamp::default(),
+            NEVER_DUE,
         )
         .unwrap();
         let hash = keys::hash_jws_token("my-bearer");
-        let record = hub2.get_jws_token(&hash).unwrap().unwrap();
+        let record = vera.get_jws_token(&hash).unwrap().unwrap();
         assert_eq!(record.bearer_token, "my-bearer");
         assert_eq!(record.issuer_did, did.to_string());
+        assert_eq!(record.authorized_account, ACCOUNT);
         assert_eq!(record.status, JWSTokenStatus::Valid);
         assert_eq!(record.first_used_at, Some(ctx.timestamp.clone()));
         assert_eq!(record.last_used_at, Some(ctx.timestamp));
-        drop(_hub);
     }
 
     #[test]
-    fn store_token_requires_account_when_bearer_auth_enforced() {
+    fn store_token_requires_account() {
         let mut vera = VeraModule::new();
         let ctx = block_ctx(100);
         let did = make_did("did:key:z6MkBob");
+        let before = vera.store.serialize();
+        let err = vera
+            .store_or_update_jws_token(&ctx, "bearer", &did, "", Timestamp::default(), NEVER_DUE)
+            .unwrap_err();
+        assert!(matches!(err, VeraError::InvalidJws { .. }));
+        assert_eq!(vera.store.serialize(), before);
+    }
+
+    #[test]
+    fn store_token_rejects_zero_expiry_as_expired() {
+        let mut vera = VeraModule::new();
+        let did = make_did("did:key:z6MkBob");
         let err = vera
             .store_or_update_jws_token(
-                &ctx,
+                &block_ctx(100),
                 "bearer",
                 &did,
-                "",
+                ACCOUNT,
                 Timestamp::default(),
                 Timestamp::default(),
             )
@@ -492,11 +396,6 @@ mod tests {
     #[test]
     fn store_token_rejects_pre_expired() {
         let mut vera = VeraModule::new();
-        vera.set_chain_config(ChainConfig {
-            allow_zero_fee_txs: false,
-            ignore_bearer_auth: true,
-        })
-        .unwrap();
         let ctx = block_ctx(200);
         let did = make_did("did:key:z6MkCarol");
         let err = vera
@@ -504,7 +403,7 @@ mod tests {
                 &ctx,
                 "expired-bearer",
                 &did,
-                "",
+                ACCOUNT,
                 Timestamp {
                     seconds: 100,
                     block_height: 10,
@@ -521,20 +420,15 @@ mod tests {
     #[test]
     fn record_usage_updates_timestamps() {
         let mut vera = VeraModule::new();
-        vera.set_chain_config(ChainConfig {
-            allow_zero_fee_txs: false,
-            ignore_bearer_auth: true,
-        })
-        .unwrap();
         let ctx1 = block_ctx(100);
         let did = make_did("did:key:z6MkDave");
         vera.store_or_update_jws_token(
             &ctx1,
             "token-dave",
             &did,
-            "",
+            ACCOUNT,
             Timestamp::default(),
-            Timestamp::default(),
+            NEVER_DUE,
         )
         .unwrap();
         let hash = keys::hash_jws_token("token-dave");
@@ -548,20 +442,15 @@ mod tests {
     #[test]
     fn idempotent_store_updates_usage() {
         let mut vera = VeraModule::new();
-        vera.set_chain_config(ChainConfig {
-            allow_zero_fee_txs: false,
-            ignore_bearer_auth: true,
-        })
-        .unwrap();
         let ctx1 = block_ctx(100);
         let did = make_did("did:key:z6MkEve");
         vera.store_or_update_jws_token(
             &ctx1,
             "token-eve",
             &did,
-            "",
+            ACCOUNT,
             Timestamp::default(),
-            Timestamp::default(),
+            NEVER_DUE,
         )
         .unwrap();
         let ctx2 = block_ctx(200);
@@ -569,9 +458,9 @@ mod tests {
             &ctx2,
             "token-eve",
             &did,
-            "",
+            ACCOUNT,
             Timestamp::default(),
-            Timestamp::default(),
+            NEVER_DUE,
         )
         .unwrap();
         let hash = keys::hash_jws_token("token-eve");
@@ -582,13 +471,8 @@ mod tests {
     #[test]
     fn update_status_to_invalid() {
         let mut vera = VeraModule::new();
-        vera.set_chain_config(ChainConfig {
-            allow_zero_fee_txs: false,
-            ignore_bearer_auth: true,
-        })
-        .unwrap();
         let ctx = block_ctx(100);
-        let hash = sample_record_ignore_bearer(&mut vera, &ctx);
+        let hash = sample_record(&mut vera, &ctx);
         let ctx2 = block_ctx(200);
         vera.update_jws_token_status(&ctx2, &hash, JWSTokenStatus::Invalid, "0xAdmin")
             .unwrap();
@@ -596,20 +480,6 @@ mod tests {
         assert_eq!(record.status, JWSTokenStatus::Invalid);
         assert_eq!(record.invalidated_at, Some(ctx2.timestamp));
         assert_eq!(record.invalidated_by, "0xAdmin");
-    }
-
-    fn sample_record_ignore_bearer(vera: &mut VeraModule, ctx: &BlockExecCtx) -> String {
-        let did = make_did("did:key:z6MkTest2");
-        vera.store_or_update_jws_token(
-            ctx,
-            "bearer-ignore",
-            &did,
-            "",
-            Timestamp::default(),
-            Timestamp::default(),
-        )
-        .unwrap();
-        keys::hash_jws_token("bearer-ignore")
     }
 
     #[test]
@@ -668,11 +538,6 @@ mod tests {
 
     fn vera_with_token() -> (VeraModule, String) {
         let mut vera = VeraModule::new();
-        vera.set_chain_config(ChainConfig {
-            allow_zero_fee_txs: false,
-            ignore_bearer_auth: true,
-        })
-        .unwrap();
         let ctx = block_ctx(100);
         let did = make_did("did:key:z6MkTest");
         vera.store_or_update_jws_token(
@@ -684,7 +549,7 @@ mod tests {
                 seconds: 1,
                 block_height: 1,
             },
-            Timestamp::default(),
+            NEVER_DUE,
         )
         .unwrap();
         let hash = keys::hash_jws_token("bearer-token-abc");
@@ -752,28 +617,15 @@ mod tests {
     }
 
     #[test]
-    fn unauthenticated_parameter_update_is_rejected() {
-        let mut vera = VeraModule::new();
-        let authority = make_did("did:key:z6MkGov");
-        assert!(vera.update_params(&authority, VeraParams {}).is_err());
-        assert_eq!(vera.get_params().unwrap(), VeraParams {});
-    }
-
-    #[test]
     fn check_and_update_expired_tokens_sweeps() {
         let mut vera = VeraModule::new();
-        vera.set_chain_config(ChainConfig {
-            allow_zero_fee_txs: false,
-            ignore_bearer_auth: true,
-        })
-        .unwrap();
         let ctx = block_ctx(100);
         let did = make_did("did:key:z6MkExpiry");
         vera.store_or_update_jws_token(
             &ctx,
             "expiring-token",
             &did,
-            "",
+            ACCOUNT,
             Timestamp::default(),
             Timestamp {
                 seconds: 150,
@@ -793,29 +645,14 @@ mod tests {
     }
 
     #[test]
-    fn check_and_update_skips_zero_expiry() {
+    fn check_and_update_keeps_tokens_until_their_deadline_passes() {
         let mut vera = VeraModule::new();
-        vera.set_chain_config(ChainConfig {
-            allow_zero_fee_txs: false,
-            ignore_bearer_auth: true,
-        })
-        .unwrap();
-        let ctx = block_ctx(100);
-        let did = make_did("did:key:z6MkNoExpiry");
-        vera.store_or_update_jws_token(
-            &ctx,
-            "no-expiry-token",
-            &did,
-            "",
-            Timestamp::default(),
-            Timestamp::default(),
-        )
-        .unwrap();
-        let hash = keys::hash_jws_token("no-expiry-token");
-
-        let sweep_ctx = block_ctx(999_999);
-        vera.check_and_update_expired_tokens(&sweep_ctx).unwrap();
-        let record = vera.get_jws_token(&hash).unwrap().unwrap();
-        assert_eq!(record.status, JWSTokenStatus::Valid);
+        let hash = sample_record(&mut vera, &block_ctx(100));
+        for seconds in [999_999, NEVER_DUE.seconds] {
+            vera.check_and_update_expired_tokens(&block_ctx(seconds))
+                .unwrap();
+            let record = vera.get_jws_token(&hash).unwrap().unwrap();
+            assert_eq!(record.status, JWSTokenStatus::Valid);
+        }
     }
 }

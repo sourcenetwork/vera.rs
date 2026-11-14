@@ -162,24 +162,6 @@ pub(super) fn dispatch(
             ))
         }
 
-        IBulletin::updateParamsCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Ok(oog_dispatch());
-            }
-            let call = IBulletin::updateParamsCall::abi_decode(input).map_err(decode_error)?;
-            let authority = did_from_signer(&tx_ctx.signer)?;
-            let params: vera_modules::bulletin::types::BulletinParams =
-                serde_json::from_slice(&call.params)
-                    .map_err(|e| PrecompileError::Fatal(format!("params JSON decode: {e}")))?;
-
-            match module.update_params(&authority, params) {
-                Ok(()) => {}
-                Err(e) => return Ok(err_dispatch(e)),
-            }
-
-            Ok(ok_dispatch(WRITE_GAS, Vec::new(), vec![]))
-        }
-
         // ── Read methods ─────────────────────────────────────────────
         IBulletin::getPostCall::SELECTOR => {
             if gas_limit < READ_GAS {
@@ -284,20 +266,6 @@ pub(super) fn dispatch(
             };
 
             let ret = IBulletin::iterateGlobCall::abi_encode_returns(&json_bytes(&posts));
-            Ok(ok_dispatch(READ_GAS, ret, vec![]))
-        }
-
-        IBulletin::getParamsCall::SELECTOR => {
-            if gas_limit < READ_GAS {
-                return Ok(oog_dispatch());
-            }
-
-            let params = match module.query_params() {
-                Ok(p) => p,
-                Err(e) => return Ok(err_dispatch(e)),
-            };
-
-            let ret = IBulletin::getParamsCall::abi_encode_returns(&json_bytes(&params));
             Ok(ok_dispatch(READ_GAS, ret, vec![]))
         }
 

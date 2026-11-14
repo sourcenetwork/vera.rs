@@ -54,7 +54,6 @@ impl BulletinModule {
             }
         }
         self.get_policy_id()?;
-        self.get_params()?;
         Ok(())
     }
 }
@@ -62,8 +61,6 @@ impl BulletinModule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bulletin::types::BulletinParams;
-    use crate::kv_store::ModuleKvStore;
     use crate::{kv_store::InMemoryKvStore, types::Timestamp};
 
     #[test]
@@ -213,10 +210,6 @@ mod tests {
                 keys::collaborator_key(&collaborator.namespace, &collaborator.did),
                 borsh::to_vec(&collaborator).unwrap(),
             ),
-            (
-                keys::PARAMS_KEY.to_vec(),
-                borsh::to_vec(&BulletinParams::default()).unwrap(),
-            ),
         ] {
             let restored = |bytes| {
                 BulletinModule::from_store(InMemoryKvStore::from_pairs(vec![(key.clone(), bytes)]))
@@ -256,10 +249,5 @@ mod tests {
             assert_eq!(module.store.serialize(), before);
             assert_eq!(acp.store().serialize(), acp_before);
         }
-        let mut module = BulletinModule::default();
-        assert!(module.query_params().is_ok());
-        module.store.put(keys::PARAMS_KEY, vec![0]);
-        assert!(module.query_params().is_err());
-        assert!(module.validate_storage_keys().is_err());
     }
 }

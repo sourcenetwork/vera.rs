@@ -15,8 +15,6 @@ sol! {
 
         function revokeDelegation(string token) external;
 
-        function updateParams(bytes params) external;
-
         function applyAdministration(bytes request) external;
 
         function applyNodeRequest(bytes request) external returns (bytes);
@@ -50,9 +48,5 @@ sol! {
         function getDelegationsBySubmitter(
             string submitter
         ) external view returns (bytes);
-
-        function getChainConfig() external view returns (bytes);
-
-        function getParams() external view returns (bytes);
     }
 }

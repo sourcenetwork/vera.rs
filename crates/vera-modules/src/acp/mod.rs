@@ -361,13 +361,6 @@ impl AcpModule {
         }
     }
 
-    /// Reject legacy parameter writes without operator approvals.
-    pub fn update_params(&mut self, _authority: &Did, _params: AcpParams) -> Result<()> {
-        Err(AcpError::Unauthorized {
-            reason: "operator approvals are required".into(),
-        })
-    }
-
     // ── Query handlers ──────────────────────────────────────────────────
 
     /// Fetch a policy by ID.
@@ -1879,21 +1872,6 @@ resources:
             )
             .unwrap_err();
         assert!(matches!(err, AcpError::Unauthorized { .. }));
-    }
-
-    #[test]
-    fn unauthenticated_parameter_update_is_rejected() {
-        let mut module = AcpModule::new();
-        let authority = alice();
-
-        let params = AcpParams {
-            registrations_commitment_validity: crate::types::Duration::Seconds(1200),
-        };
-
-        assert!(module.update_params(&authority, params).is_err());
-
-        let fetched = module.query_params().unwrap();
-        assert_eq!(fetched, AcpParams::default());
     }
 
     #[test]

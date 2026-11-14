@@ -19,8 +19,6 @@ pub const POST_PREFIX: &[u8] = b"post/";
 pub const NAMESPACE_PREFIX: &[u8] = b"namespace/";
 /// Collaborator storage prefix.
 pub const COLLABORATOR_PREFIX: &[u8] = b"collaborator/";
-/// Module parameters key.
-pub const PARAMS_KEY: &[u8] = b"p_bulletin";
 
 const NAMESPACE_ID_PREFIX: &str = "bulletin/";
 

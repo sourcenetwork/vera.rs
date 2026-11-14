@@ -33,8 +33,6 @@ sol! {
             string collaboratorDid
         ) external returns (string storedDid);
 
-        function updateParams(bytes params) external;
-
         // ── Read methods ────────────────────────────────────────────────
 
         function getPost(
@@ -62,7 +60,5 @@ sol! {
             string namespace,
             string glob
         ) external view returns (bytes);
-
-        function getParams() external view returns (bytes);
     }
 }

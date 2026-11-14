@@ -38,8 +38,7 @@ use revm::precompile::{PrecompileError, PrecompileOutput};
 use vera_identity::Did;
 use vera_modules::acp::abi::IAcp;
 use vera_modules::acp::types::{
-    AccessRequest, AcpParams, Actor, Object, Operation, PolicyCmd, PolicyMarshalingType,
-    RelationshipSelector,
+    AccessRequest, Actor, Object, Operation, PolicyCmd, PolicyMarshalingType, RelationshipSelector,
 };
 use vera_modules::acp::{AcpModule, PolicyEditBudget, QueryBudget};
 use vera_modules::types::{BlockExecCtx, TxExecCtx};
@@ -440,23 +439,6 @@ fn dispatch_validated(
         | IAcp::checkAccessCall::SELECTOR
         | IAcp::verifyAccessRequestCall::SELECTOR => {
             permissions::dispatch(module, vera, block_ctx, tx_ctx, input, gas_limit)
-        }
-
-        IAcp::updateParamsCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Ok(oog_dispatch());
-            }
-            let call = IAcp::updateParamsCall::abi_decode(input).map_err(decode_error)?;
-            let authority = did_from_signer(&tx_ctx.signer)?;
-            let params: AcpParams = serde_json::from_slice(&call.params)
-                .map_err(|e| PrecompileError::Fatal(format!("params JSON decode: {e}")))?;
-
-            match module.update_params(&authority, params) {
-                Ok(()) => {}
-                Err(e) => return Ok(err_dispatch(e)),
-            }
-
-            Ok(ok_dispatch(WRITE_GAS, Vec::new(), vec![]))
         }
 
         // ── Read methods ─────────────────────────────────────────────

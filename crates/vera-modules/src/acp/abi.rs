@@ -130,7 +130,6 @@ sol! {
         ) external view returns (bool);
 
         function bearerPolicyCmd(string bearerToken, bytes32 policyId, bytes cmd) external returns (bytes);
-        function updateParams(bytes params) external;
 
         // ── Read methods (map to Cosmos Queries) ────────────────────────
 

@@ -244,24 +244,6 @@ pub(super) fn dispatch(
             ))
         }
 
-        IVera::updateParamsCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Ok(oog_dispatch());
-            }
-            let call = IVera::updateParamsCall::abi_decode(input).map_err(decode_error)?;
-            let authority = did_from_signer(&tx_ctx.signer)?;
-            let params: vera_modules::vera::types::VeraParams =
-                serde_json::from_slice(&call.params)
-                    .map_err(|e| PrecompileError::Fatal(format!("params JSON decode: {e}")))?;
-
-            match module.update_params(&authority, params) {
-                Ok(()) => {}
-                Err(e) => return Ok(err_dispatch(e)),
-            }
-
-            Ok(ok_dispatch(WRITE_GAS, Vec::new(), vec![]))
-        }
-
         // ── Read methods ─────────────────────────────────────────────
         IVera::getJWSTokenCall::SELECTOR => {
             if gas_limit < READ_GAS {
@@ -330,34 +312,6 @@ pub(super) fn dispatch(
             };
             let ret =
                 IVera::getDelegationsBySubmitterCall::abi_encode_returns(&json_bytes(&tokens));
-            Ok(ok_dispatch(READ_GAS, ret, vec![]))
-        }
-
-        IVera::getChainConfigCall::SELECTOR => {
-            if gas_limit < READ_GAS {
-                return Ok(oog_dispatch());
-            }
-            // Zero-parameter function — no ABI decoding needed.
-            let config = match module.get_chain_config() {
-                Ok(c) => c,
-                Err(e) => return Ok(err_dispatch(e)),
-            };
-
-            let ret = IVera::getChainConfigCall::abi_encode_returns(&json_bytes(&config));
-            Ok(ok_dispatch(READ_GAS, ret, vec![]))
-        }
-
-        IVera::getParamsCall::SELECTOR => {
-            if gas_limit < READ_GAS {
-                return Ok(oog_dispatch());
-            }
-            // Zero-parameter function — no ABI decoding needed.
-            let params = match module.query_params() {
-                Ok(p) => p,
-                Err(e) => return Ok(err_dispatch(e)),
-            };
-
-            let ret = IVera::getParamsCall::abi_encode_returns(&json_bytes(&params));
             Ok(ok_dispatch(READ_GAS, ret, vec![]))
         }
 

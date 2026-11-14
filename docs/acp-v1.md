@@ -29,7 +29,7 @@ The reference is Go `acp_core` v0.8.2, used by Go Vera at
 | GetPolicyCatalogue | `query_policy_catalogue`; declared names, known live objects and actors |
 | EvaluateTheorem | `evaluate_theorem`; authorization and delegation assertions |
 | AmendRegistration / RevealRegistration | authenticated commitment/reveal workflow; callers cannot choose a privileged principal or arbitrary earlier timestamp |
-| SetParams / GetParams | Go core parameters are empty. Vera's operational parameters use the existing operator-authorized configuration |
+| SetParams / GetParams | `getParams` reads the ACP parameters. There is no parameter-write call; operators set them through administration |
 | GetRuntimeManager | host plumbing, replaced by execution context and the module store |
 
 Native calls are declared in `acp/abi.rs`. `VeraClient` exposes typed methods in

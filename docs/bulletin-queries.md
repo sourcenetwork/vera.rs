@@ -29,9 +29,8 @@ inspection limits.
 
 Native startup and snapshot recovery validate complete bulletin records before
 publishing query state. Truncated or trailing record bytes, namespace/post/
-collaborator key mismatches, invalid policy-ID encoding and malformed parameters
-stop restoration with a storage error. Absent settings remain valid for an
-uninitialized module. Recovery does not repair or discard corrupt records.
+collaborator key mismatches and invalid policy-ID encoding stop restoration with
+a storage error. An absent policy ID remains valid for an uninitialized module. Recovery does not repair or discard corrupt records.
 
 `VeraClient::read_bulletin_policy_id` authenticates the bulletin's ACP policy ID
 against caller-provided consensus trust. Before the first namespace initializes
@@ -45,9 +44,9 @@ collaborators.
 Bulletin policy initialization distinguishes absence from invalid stored IDs.
 Empty or non-UTF-8 values return errors before creating an ACP policy or changing
 bulletin state. Posting and collaborator management use the same fallible reader.
-Bulletin and core parameter reads also return decoding errors for corrupt stored
-bytes; defaults apply only to missing keys. Native recovery checks these values
-before publishing query state.
+ACP parameter reads also return decoding errors for corrupt stored bytes; defaults
+apply only to a missing key. Native recovery checks the value before publishing
+query state. The bulletin and Vera modules have no parameters.
 
 Namespace registration, posting, and collaborator changes reject empty namespace names before reading or mutating policy state. Failed empty-name registration does not initialize the bulletin policy.
 
