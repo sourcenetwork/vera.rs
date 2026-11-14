@@ -12,6 +12,10 @@ pub fn decode_pubkey(public_key: &[u8]) -> Result<VerifyingKey, Secp256k1Error> 
     if public_key.len() != 33 {
         return Err(Secp256k1Error::InvalidPubkeyLength(public_key.len()));
     }
+    // The SEC1 compact form is also 33 bytes and would be a second spelling of one key.
+    if !matches!(public_key[0], 0x02 | 0x03) {
+        return Err(Secp256k1Error::Recovery("not a compressed point".into()));
+    }
     VerifyingKey::from_sec1_bytes(public_key)
         .map_err(|error| Secp256k1Error::Recovery(error.to_string()))
 }
@@ -107,12 +111,7 @@ pub fn evm_address_from_did(did: &str) -> Result<alloy_primitives::Address, Secp
         return Err(Secp256k1Error::Recovery("not a secp256k1 did:key".into()));
     }
     let compressed = &decoded[prefix.len()..];
-    if compressed.len() != 33 {
-        return Err(Secp256k1Error::InvalidPubkeyLength(compressed.len()));
-    }
-
-    let vk = VerifyingKey::from_sec1_bytes(compressed)
-        .map_err(|e| Secp256k1Error::Recovery(format!("invalid pubkey: {e}")))?;
+    let vk = decode_pubkey(compressed)?;
     let uncompressed = vk.to_encoded_point(false);
     let raw = &uncompressed.as_bytes()[1..]; // strip 0x04 prefix
 

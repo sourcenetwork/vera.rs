@@ -190,6 +190,18 @@ fn a_key_has_exactly_one_entry_form() {
 }
 
 #[test]
+fn a_secp256k1_key_cannot_be_listed_again_in_compact_form() {
+    let compressed = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+    // SEC1 compact form of the same even-y point; one holder would otherwise give both approvals.
+    let compact = format!("05{}", &compressed[2..]);
+    let policy = OperatorPolicy {
+        threshold: 2,
+        keys: vec![compressed.to_owned(), compact],
+    };
+    assert!(policy.validate().is_err());
+}
+
+#[test]
 fn rotation_installs_and_then_requires_the_new_key_types() {
     let secp256k1: Vec<_> = (1..=2u8)
         .map(|byte| Operator::Secp256k1(k256::ecdsa::SigningKey::from_slice(&[byte; 32]).unwrap()))
