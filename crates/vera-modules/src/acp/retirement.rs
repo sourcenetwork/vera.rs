@@ -12,6 +12,7 @@ pub(super) enum Phase {
     Relationships,
     RelationshipsMetadata,
     ObjectState,
+    Relinquishments,
     Commitments,
     Amendments,
 }
@@ -57,6 +58,7 @@ impl Phase {
             Self::Relationships => keys::relationship_policy_prefix(policy),
             Self::RelationshipsMetadata => relationship_index::policy_prefix(policy),
             Self::ObjectState => object_state::policy_prefix(policy),
+            Self::Relinquishments => relinquishment::policy_prefix(policy),
             Self::Commitments => keys::commitment_policy_index_prefix(policy),
             Self::Amendments => keys::amendment_event_policy_index_prefix(policy),
         }
@@ -66,7 +68,8 @@ impl Phase {
         match self {
             Self::Relationships => Some(Self::RelationshipsMetadata),
             Self::RelationshipsMetadata => Some(Self::ObjectState),
-            Self::ObjectState => Some(Self::Commitments),
+            Self::ObjectState => Some(Self::Relinquishments),
+            Self::Relinquishments => Some(Self::Commitments),
             Self::Commitments => Some(Self::Amendments),
             Self::Amendments => None,
         }
@@ -210,6 +213,7 @@ impl AcpModule {
                 Phase::Relationships,
                 Phase::RelationshipsMetadata,
                 Phase::ObjectState,
+                Phase::Relinquishments,
                 Phase::Commitments,
             ] {
                 if phase < retired.phase

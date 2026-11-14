@@ -1,7 +1,7 @@
 use super::registration_tests::{execute, setup};
 use super::*;
 
-fn commit(
+pub(super) fn commit(
     module: &mut AcpModule,
     actor: &Did,
     policy: &str,
@@ -32,7 +32,7 @@ fn commit(
     (registrations_commitment.id, generated.proofs[0].clone())
 }
 
-fn reveal(
+pub(super) fn reveal(
     module: &mut AcpModule,
     actor: &Did,
     policy: &str,
@@ -51,7 +51,7 @@ fn reveal(
     )
 }
 
-fn owner(module: &AcpModule, policy: &str, object: &Object) -> RelationshipRecord {
+pub(super) fn owner(module: &AcpModule, policy: &str, object: &Object) -> RelationshipRecord {
     module
         .registration_owner_record(policy, object)
         .unwrap()
@@ -75,10 +75,11 @@ fn rejected(
 }
 
 #[test]
-fn a_transferor_cannot_reveal_the_same_commitment_again_after_a_transfer() {
+fn a_transferor_cannot_claim_the_object_by_commitment_after_a_transfer() {
     let (mut module, first, second, policy, object) = setup();
-    let commitment = commit(&mut module, &first, &policy, &object, 5);
-    reveal(&mut module, &first, &policy, &commitment, 6).unwrap();
+    let older = commit(&mut module, &first, &policy, &object, 5);
+    let newer = commit(&mut module, &first, &policy, &object, 6);
+    reveal(&mut module, &first, &policy, &newer, 7).unwrap();
     execute(
         &mut module,
         &first,
@@ -87,16 +88,21 @@ fn a_transferor_cannot_reveal_the_same_commitment_again_after_a_transfer() {
             object: object.clone(),
             new_owner: Actor(second.clone()),
         },
-        7,
+        8,
     )
     .unwrap();
     rejected(&mut module, |module| {
-        reveal(module, &first, &policy, &commitment, 8)
+        reveal(module, &first, &policy, &newer, 9)
     });
-    assert_eq!(
-        owner(&module, &policy, &object).metadata.owner_did,
-        second.to_string()
-    );
+    let before = module.store.serialize();
+    assert!(matches!(
+        reveal(&mut module, &first, &policy, &older, 9),
+        Err(AcpError::Unauthorized { .. })
+    ));
+    assert_eq!(module.store.serialize(), before);
+    let stored = owner(&module, &policy, &object);
+    assert_eq!(stored.metadata.owner_did, second.to_string());
+    assert_eq!(stored.metadata.creation_ts.block_height, 6);
 }
 
 #[test]

@@ -45,6 +45,7 @@ mod relation_restoration;
 pub mod relationship_index;
 mod relationship_mutations;
 mod relationship_queries;
+mod relinquishment;
 mod restoration;
 mod retirement;
 mod retirement_cleanup;
@@ -114,6 +115,7 @@ pub const MAX_POLICY_DEFINITION_BYTES: usize = 64 << 10;
 /// "relationship/v5/" + policy_id + "/" + pair + storage_key → RelationshipRecord (serde_json)
 /// "relation_state/" + policy_id + "/" + index_key       → pair counts, current directories, retired names
 /// "relation_cleanup/queue/" + BE(sequence)             → RelationJob (serde_json)
+/// "relinquished/" + policy_id + "/" + hex(resource) + "/" + hex(object_id) + "/" + hex(actor digest) → empty
 /// "access_decision/" + decision_id                     → AccessDecision (Borsh)
 /// "decision_cleanup/cursor"                           → last inspected decision key
 /// "commitment/objs/" + BE(id)                          → RegistrationsCommitment (Borsh)
@@ -1153,6 +1155,13 @@ impl AcpModule {
                 return Err(AcpError::InvalidProof {
                     reason: "commitment is not older than the existing registration; cannot amend"
                         .into(),
+                });
+            }
+            if self.relinquished_with_budget(policy_id, &proof.object, creator.as_str(), budget)? {
+                return Err(AcpError::Unauthorized {
+                    reason:
+                        "an owner the object was transferred from cannot claim it by commitment"
+                            .into(),
                 });
             }
         }

@@ -11,15 +11,34 @@ override an earlier claim after an amendment. Its submission ID and signer
 identify the reveal; the amendment event records the reveal's own execution
 timestamp.
 
-A transfer is not final while an older commitment is still valid. A transferred
-record keeps its creation timestamp, and commitments are neither consumed by a
-transfer nor tied to the record, so any still-valid commitment older than the
-record can amend the transferee's ownership, whoever holds it. That includes
-the transferor: an actor who committed to the object twice, or committed and
-then registered it directly, can transfer the object and afterwards reveal the
-commitment it held in reserve to own it again. Only the commitment that created
-the record is refused. The window closes when those commitments expire, ten
-minutes after they were made by default.
+A transfer is final for the owner the object left. The transfer records that
+owner as having relinquished the object, and a reveal that would amend the
+object's registration is refused with an authorization error for a relinquished
+actor, whichever of its commitments it reveals and however old that commitment
+is. An actor who committed to the object twice, or committed and then
+registered it directly, therefore cannot transfer the object and afterwards
+take it back with the commitment it held in reserve. The owner is recorded
+whoever submitted the transfer, including a manager of the owner relation.
+
+A transfer gives the transferee no priority over anyone else. The transferred
+record keeps its creation timestamp, so a still-valid commitment that another
+actor made strictly earlier amends the transferee's ownership as it would have
+amended the transferor's. A registration followed by a transfer to an
+accomplice does not defeat an earlier commitment.
+
+The relinquishment marker is the empty value at
+`relinquished/{policy_id}/{resource_hex}/{object_hex}/{actor_digest}`, where
+the digest is the hexadecimal SHA-256 of `vera/acp-relinquished/v1`, a zero
+byte and the actor's canonical DID. It is part of ACP state and of the native
+state commitment. It survives archive, unarchive, later transfers and
+amendments by other actors, and it stays in force if the actor later owns the
+object again and loses it to an amendment. A transfer to the current owner
+writes no marker. An object holds at most one marker per actor that has
+transferred it away, each written by a paid transfer; markers are not expired
+by time, because a transfer carries no clock and commitment lifetimes are an
+operator parameter that can change, and they are removed when the policy is
+deleted. Native recovery rejects a marker that is malformed, has a value, or
+names an unregistered object or an absent policy.
 
 Native and optional EVM execution supply this metadata through the same module
 command path. Delegated commands preserve the actor as owner and the worker as

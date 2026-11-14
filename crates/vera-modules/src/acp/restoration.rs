@@ -37,6 +37,7 @@ impl AcpModule {
             }
         }
         self.validate_relation_state()?;
+        self.validate_relinquishments()?;
         for (key, _) in self.store.prefix_iter(keys::ACCESS_DECISION_PREFIX) {
             let id = std::str::from_utf8(&key[keys::ACCESS_DECISION_PREFIX.len()..])
                 .map_err(|_| AcpError::State("invalid access decision key".into()))?;

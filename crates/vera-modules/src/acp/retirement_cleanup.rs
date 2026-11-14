@@ -217,6 +217,15 @@ impl AcpModule {
                 }
                 vec![key.to_vec()]
             }
+            Phase::Relinquishments => {
+                let (owner, object) = relinquishment::parse(key, value)?;
+                if owner != policy || !retired.relations.active.contains_key(&object.resource) {
+                    return Err(AcpError::State(
+                        "cleanup relinquishment identity mismatch".into(),
+                    ));
+                }
+                vec![key.to_vec()]
+            }
             Phase::Commitments => {
                 let id = indexed_id(prefix, key, value)?;
                 let record_key = keys::commitment_key(id);

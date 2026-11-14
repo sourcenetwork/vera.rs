@@ -57,7 +57,8 @@ Creating a policy does not grant management rights over objects registered by
 other actors. Managers can be recursive usersets, so revoking their group membership
 revokes management authority. Ownership cannot be added or deleted with ordinary
 relationship commands. Transfer changes the owner while preserving registration
-priority and other grants. Archive invalidates outgoing grants by advancing the
+priority and other grants, and bars the previous owner from claiming the object
+back with a [registration commitment](registration-commitments.md). Archive invalidates outgoing grants by advancing the
 target object incarnation and retains the archived owner at incarnation zero. Unarchive restores ownership
 without reviving those grants; physical removal runs under the cleanup budget.
 
@@ -162,7 +163,8 @@ native record can make progress with a fresh budget. Cleanup follows the policy'
 relationship, commitment and amendment indexes; it does not scan unrelated
 policies. Object cleanup selects an obsolete target incarnation and cannot remove
 newly regranted relationships. Policy deletion retains object-state points until
-its physical relationships and related cleanup metadata are gone.
+its physical relationships and related cleanup metadata are gone, and then
+removes the policy's relinquishment markers before its commitments.
 
 Commitments are removed with their policy, root and expiry indexes. Expiry of a
 retired commitment cannot recreate those indexes. The retirement marker and queue
@@ -355,8 +357,12 @@ a complete prepared plan does not charge those writes again. Idempotent grants
 still pay for their reads and return the original record; unarchive rewrites
 validate counters without charging nonexistent counter writes.
 
-Reveal also charges its commitment and policy-liveness reads, amendment counter
-and collision reads, and the amendment record/index writes. Exhaustion during a
+Transfer also pays one write for the previous owner's relinquishment marker,
+unless the object is transferred to its current owner. Reveal also charges its
+commitment and policy-liveness reads, amendment counter
+and collision reads, and the amendment record/index writes. A reveal that would
+amend an existing registration pays one point read for the claimant's
+relinquishment marker; a reveal of an unregistered object does not. Exhaustion during a
 late amendment write restores every earlier command change and
 preserves the spent allowance. The public `RecordStore` preparation hooks retain
 unmetered defaults for generic stores and maintenance; the command-only adapter
