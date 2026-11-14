@@ -20,6 +20,21 @@ pub struct UnsignedToken {
     input: String,
 }
 
+/// Delegation claims in the order their bytes are signed.
+///
+/// A JSON map would order them by a `serde_json` feature that any crate in
+/// the build can switch, and token records are keyed by the hash of these bytes.
+#[derive(serde::Serialize)]
+struct DelegationClaims<'a> {
+    aud: String,
+    exp: u64,
+    iat: u64,
+    iss: &'a str,
+    nbf: u64,
+    scope: DelegationScope,
+    sub: &'a str,
+}
+
 impl UnsignedToken {
     /// A delegation limited to one scope, worker, deployment and lifetime.
     pub fn delegation(
@@ -33,12 +48,15 @@ impl UnsignedToken {
         if issued_at >= expires_at {
             return Err(ClientError::Signing("invalid delegation lifetime".into()));
         }
-        let payload = serde_json::json!({
-            "iss": issuer, "sub": subject, "aud": format!("vera:{deployment_id}"),
-            "scope": scope, "iat": issued_at,
-            "nbf": issued_at.saturating_sub(30), "exp": expires_at,
-        })
-        .to_string();
+        let payload = serde_json::to_string(&DelegationClaims {
+            aud: format!("vera:{deployment_id}"),
+            exp: expires_at,
+            iat: issued_at,
+            iss: issuer,
+            nbf: issued_at.saturating_sub(30),
+            scope,
+            sub: subject,
+        })?;
         Self::new(issuer, "vera-delegation-v1+jwt", &payload)
     }
 

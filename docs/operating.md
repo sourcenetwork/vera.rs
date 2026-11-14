@@ -213,8 +213,10 @@ rejected. Restore a complete compatible backup or use authenticated recovery.
   a stalled initialization from the newest stored gossiped finalization.
 - **Finality watchdog** (`watchdog_stall_seconds`, default 600, `0` disables):
   remains unarmed while authenticated connectivity is unavailable. The current
-  Commonware integration does not expose that telemetry, so this setting does
-  not currently trigger supervised recovery. A watchdog that accounts for the
+  Commonware integration does not expose that telemetry, so with more than one
+  validator this setting does not currently trigger supervised recovery. A
+  deployment whose only validator is this node needs no peer to finalize, so
+  there the watchdog trips on the stall alone. A watchdog that accounts for the
   active voting quorum still requires implementation and qualification. Snapshot
   initialization has its separate deadline; supervised restart does not guarantee recovery.
 - **History backend**: Regolith with synchronous writes in every build. There

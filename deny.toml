@@ -11,4 +11,8 @@ exceptions = [
 [advisories]
 ignore = [
     { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5 has no patched release; Alloy and REVM depend on the affected elliptic-curve 0.13 family" },
+    { id = "RUSTSEC-2024-0388", reason = "derivative is unmaintained with no successor release; arkworks 0.4 (ark-ec, ark-ff) depends on it at build time" },
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained with no successor release; alloy-primitives and other macro crates depend on it at build time" },
+    { id = "RUSTSEC-2026-0441", reason = "pin-utils is unmaintained with no successor release; hyper 1 depends on it" },
+    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml is unmaintained; serde_yaml 0.9, which parses ACP policies, depends on it and has no maintained release" },
 ]

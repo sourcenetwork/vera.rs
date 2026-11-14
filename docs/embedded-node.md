@@ -17,7 +17,13 @@ node.stop().await?;
 ```
 
 `start` returns after startup recovery has completed and the node serves
-requests. It can be awaited from any async runtime.
+requests. It can be awaited from any async runtime. A host crate needs no
+`recursion_limit` attribute: the node's actor graph is built inside `vera-node`
+and the host holds it behind a pointer.
+
+A directory that another node holds, in this process or another, fails with
+`EmbedError::DirectoryInUse`. The check runs just before the node's runtime
+takes the directory, so a holder that arrives in between is waited for instead.
 
 ## Deployment identity
 
@@ -147,8 +153,16 @@ without a separate shutdown protocol, so durability relies on the same recovery
 path as an interrupted daemon. Dropping an `EmbeddedNode` requests the same stop
 without waiting.
 
+Once the node has stopped, by `stop` or by itself, its directory is free and
+another node can start on it. That holds while clones of its `LocalRpc` are
+still alive: the node releases the method table they share, and their calls
+return `LocalRpcError::Stopped`.
+
 `failed` resolves if the node stops by itself. An embedded node never exits the
-host process: the finality watchdog stops the node with an error instead.
+host process: the finality watchdog stops the node with an error instead. It
+trips when the node has finalized before and then finalizes nothing for ten
+minutes, checked every 30 seconds. An idle node keeps finalizing heartbeat
+blocks, so idleness is not a stall.
 
 ## Files and ports
 
@@ -173,6 +187,40 @@ validators must reach the node.
 
 ## Memory
 
+`EmbeddedConfig::sizing` sets the two allocations a node makes when it starts,
+before any request. The embedded defaults are `NodeSizing::EMBEDDED`; the
+daemon uses `NodeSizing::DAEMON`.
+
+| Size | Embedded default | Daemon |
+| --- | --- | --- |
+| `channel_burst`: burst of each peer channel's rate limit | 1 | 64 |
+| `page_cache_pages`: 4 KiB pages shared by the state and consensus journals | 256 | 4,096 |
+
+Commonware allocates each of the 16 peer channels an inbound queue of tracked
+peers times the burst, and the router the sum of those, whether or not a peer
+connects. A solo deployment tracks 100 peers, so a burst of 64 reserves about
+56 MiB for a validator that has none. The embedded sizes assume no peers; a
+deployment that gains validators needs the daemon's.
+
+Measured with
+`PROFILE_WRITES=1000 cargo test --release -p vera-node --test embedded_solo_profile -- --ignored --nocapture`
+on an Apple M5 Max (18 cores, 64 GiB, macOS 27.0.1), one run per row, selected
+with `PROFILE_CHANNEL_BURST` and `PROFILE_PAGE_CACHE_PAGES`. Memory is the peak
+resident size of the test process, which measured 8.0 MiB before the node
+started. The restart is a stop followed by a start on the same directory.
+
+| Burst | Cache pages | After start | After 1,000 policy writes | Receipt p50 | Restart |
+| --- | --- | --- | --- | --- | --- |
+| 64 | 4,096 (daemon) | 105.7 MiB | 132.8 MiB | 193 ms | 436 ms |
+| 1 | 4,096 | 50.2 MiB | 75.0 MiB | 191 ms | 424 ms |
+| 1 | 1,024 | 38.8 MiB | 62.8 MiB | 195 ms | 441 ms |
+| 1 | 256 (default) | 35.3 MiB | 59.7 MiB | 195 ms | 453 ms |
+| 1 | 64 | 34.8 MiB | 59.3 MiB | 194 ms | 483 ms |
+
+Below 256 pages the saving is under 1 MiB. The state these runs build is small
+(1,000 policies), so they do not show what a small cache costs once the state
+no longer fits in it.
+
 `EmbeddedConfig::history_memory` bounds what the finalized-history store keeps
 in memory. The embedded defaults are `HistoryMemory::EMBEDDED`; the daemon
 keeps Regolith's own sizes.
@@ -195,7 +243,8 @@ buffer is accepted and stays in memory until it is flushed. A block cache of
 zero disables the cache. `start` rejects a write buffer of zero, the one size
 Regolith refuses.
 
-Measured with
+The table below predates `NodeSizing` and was taken with the daemon's start-up
+sizes. Measured with
 `cargo test --release -p vera-node --test embedded_solo_profile -- --ignored --nocapture`
 on an Apple M5 Max (18 cores, 64 GiB, macOS 27.0.1), two runs of the first row
 and three of the second. The first row sets `PROFILE_HISTORY_CACHE_MIB=512 PROFILE_HISTORY_BUFFER_MIB=64`.
@@ -211,7 +260,7 @@ before the node started.
 This workload leaves about 0.3 MiB of history on disk and reads little of it
 back, so neither pair of budgets is reached and the rows do not differ beyond
 run-to-run variation. The budgets limit growth over a longer life; they do not
-lower the starting footprint, which the node's other allocations set. The
+lower the starting footprint, which the start-up sizes above set. The
 machine was running other builds (load average 9 to 30), which does not change
 what the node allocates but did make the system reclaim idle memory: the
 current resident size fell as low as 36 MiB during the idle period in some
@@ -258,9 +307,10 @@ are not a capacity or multi-validator measurement.
 
 - One validator. A stopped or lost device stops the deployment.
 - An idle deployment still produces a heartbeat block about every 1.5 s.
-- Memory was measured for one short workload on one machine; see
+- Memory was measured for short workloads on one machine; see
   [Memory](#memory). Growth over hours, larger states and Linux are not
-  measured.
+  measured, and the embedded page cache has not been measured against a state
+  larger than it.
 - The smallest workable `max_blocking_threads` has not been established.
   Blocking tasks that wait on storage hold threads that storage needs, so a
   bound that is too small can stall the node. On one Apple-silicon laptop a

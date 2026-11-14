@@ -1,5 +1,7 @@
 //! In-process access to the node's JSON-RPC method table.
 
+use std::sync::{Arc, PoisonError, RwLock};
+
 use jsonrpsee::core::params::ArrayParams;
 use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
@@ -44,23 +46,45 @@ impl LocalRpcError {
 ///
 /// Method-level limits and errors match the network server. Transport limits
 /// (request size, batching, per-connection subscriptions) do not apply.
+///
+/// Clones share one method table. [`Self::close`] drops it for all of them, so
+/// a clone that outlives its node retains none of the node's state.
 #[derive(Clone, Debug)]
 pub struct LocalRpc {
-    methods: jsonrpsee::Methods,
+    methods: Arc<RwLock<Option<jsonrpsee::Methods>>>,
     runtime: Option<tokio::runtime::Handle>,
 }
 
 impl LocalRpc {
     pub(crate) fn new(module: jsonrpsee::RpcModule<()>) -> Self {
         Self {
-            methods: module.into(),
+            methods: Arc::new(RwLock::new(Some(module.into()))),
             runtime: tokio::runtime::Handle::try_current().ok(),
         }
     }
 
-    /// Names of the registered methods.
-    pub fn method_names(&self) -> impl Iterator<Item = &'static str> + '_ {
-        self.methods.method_names()
+    /// Names of the registered methods; none once closed.
+    #[must_use]
+    pub fn method_names(&self) -> Vec<&'static str> {
+        self.methods()
+            .map(|methods| methods.method_names().collect())
+            .unwrap_or_default()
+    }
+
+    /// Release the method table for every clone. Later calls fail with [`LocalRpcError::Stopped`].
+    pub fn close(&self) {
+        self.methods
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+    }
+
+    fn methods(&self) -> Result<jsonrpsee::Methods, LocalRpcError> {
+        self.methods
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .ok_or(LocalRpcError::Stopped)
     }
 
     /// Call `method` with positional JSON parameters and return its result as JSON text.
@@ -73,7 +97,7 @@ impl LocalRpc {
         params: Vec<serde_json::Value>,
     ) -> Result<String, LocalRpcError> {
         let params = positional(params)?;
-        let (methods, method) = (self.methods.clone(), method.to_owned());
+        let (methods, method) = (self.methods()?, method.to_owned());
         let result: Box<RawValue> = self
             .on_runtime(async move { methods.call(&method, params).await })
             .await??;
@@ -109,7 +133,7 @@ impl LocalRpc {
         capacity: usize,
     ) -> Result<LocalSubscription, LocalRpcError> {
         let params = positional(params)?;
-        let (methods, method) = (self.methods.clone(), method.to_owned());
+        let (methods, method) = (self.methods()?, method.to_owned());
         self.on_runtime(async move { methods.subscribe(&method, params, capacity).await })
             .await?
             .map(LocalSubscription)

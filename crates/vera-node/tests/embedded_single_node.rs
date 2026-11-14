@@ -1,7 +1,5 @@
 //! A single-validator node hosted in the test process, with no RPC socket.
 
-#![recursion_limit = "256"]
-
 use std::{net::SocketAddr, path::Path, time::Duration};
 
 use alloy_primitives::B256;
@@ -110,11 +108,7 @@ async fn solo_node_finalizes_native_writes_and_recovers_them_after_restart() {
     let node = EmbeddedNode::start(config(directory.path(), chain_id, ACCOUNT_KEY))
         .await
         .unwrap();
-    assert!(
-        node.rpc()
-            .method_names()
-            .any(|name| name == "vera_getReceiptProof")
-    );
+    assert!(node.rpc().method_names().contains(&"vera_getReceiptProof"));
     let trusted = *node.consensus_key();
     let first = create_policy(&node, &signer, "first").await;
     let proof = verified_receipt(&node, first).await;

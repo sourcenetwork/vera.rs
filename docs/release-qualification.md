@@ -21,8 +21,10 @@ packaging them must not require merging the entire Orbis service stack. Consumer
 qualification records must identify actual source revisions rather than assume
 that a passing branch has reached a repository's default branch.
 
-No crate or tagged release has been published from this repository yet. The
-remaining first-release work is:
+Versions 0.1.0 to 0.1.2 are tagged, and the nine packaged crates are published
+on crates.io at 0.1.2, with prerelease daemon assets for v0.1.1 and v0.1.2. The
+gates below were the first-release requirements, and every later release
+repeats them for its own candidate:
 
 | Gate | Required result |
 | --- | --- |
@@ -38,10 +40,10 @@ daemon must be qualified at the selected candidate revision. The upload gates
 below remain requirements for the maintainer's later crates.io publication.
 See [Git SDK access](manual-release.md#current-git-sdk-access).
 
-The existing `0.1.0` workspace version is the initial package-version candidate.
+The workspace version names the release candidate; `0.1.0` was the first.
 The approved packaging scope is `vera-client`, `vera-verifier` and their seven
 required Vera libraries, plus daemon binaries. An installable `verad` crate, test
-harnesses and development tools are outside this first publication.
+harnesses and development tools are outside the published set.
 Crates.io cannot reproduce Git-only or path-only dependencies from this checkout;
 adding version strings alone does not establish that the registry packages have
 the APIs or behavior qualified here. See Cargo's

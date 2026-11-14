@@ -1,7 +1,5 @@
 //! Memory budgets and the consensus listener of an embedded single-validator node.
 
-#![recursion_limit = "256"]
-
 mod support;
 
 use support::{await_certified_receipt, block_on, config, finalize_a_write};
