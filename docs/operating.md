@@ -26,9 +26,12 @@ dialable address. Two paths produce that material:
 `testnet` and `devnet` write one chain ID into the genesis and every node
 configuration. A built-in genesis takes `--chain-id`; a genesis read from
 `--genesis`, or the one a devnet stored on its first run, keeps its own, and a
-different `--chain-id` is rejected before anything is written. Explicit
-`--base-p2p-port` and `--base-rpc-port` ranges must fit below port 65536 and
-must not overlap.
+different `--chain-id` is rejected before anything is written. `devnet` treats
+a `chain_id` written in its `--config` file the same way when the flag is
+absent; `testnet` writes its own node configurations and does not read one.
+Explicit `--base-p2p-port` and `--base-rpc-port` ranges must fit below port
+65536 and must not overlap each other; system-chosen ports avoid an explicit
+range.
 
 `verad client` signs for the top-level `--chain-id`, which `--client-chain-id`
 may repeat but not contradict. Without either flag it uses `VERA_CHAIN_ID`,

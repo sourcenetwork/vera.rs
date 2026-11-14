@@ -76,8 +76,8 @@ fetch. The caller's timeout covers the asynchronous transfer; synchronous decode
 and storage work can outlast it.
 
 The client issues one chunk request at a time and holds at most one assembled
-record and one bounded finality response. The producer shares one cached proof
-across resolver requests to avoid rebuilding it per chunk. The 17-byte request
+record and one bounded finality response. The producer slices chunks from its
+four cached proofs instead of rebuilding a proof per chunk. The 17-byte request
 key contains a resource kind (0 for execution record, 1 for finality proof),
 height and offset; the latter two are big-endian u64 values. This replaces the
 previous 16-byte record-only protocol. Individual chunks receive no positive

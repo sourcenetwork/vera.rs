@@ -59,6 +59,9 @@ pub fn encode_node_request(
 
 impl VeraClient {
     /// Submit an authorized node command. Retain the returned ID for certified receipt recovery.
+    ///
+    /// [`ClientError::SubmissionUnknown`] carries the same ID when the reply is lost;
+    /// see [`Self::confirm_submission`].
     pub async fn submit_node_request(
         &self,
         submitter: &BlsSigner,

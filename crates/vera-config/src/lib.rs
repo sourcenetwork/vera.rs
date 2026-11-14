@@ -6,6 +6,8 @@
 mod error;
 pub use error::ConfigError;
 
+mod explicit;
+
 mod execution;
 pub use execution::{DEFAULT_GAS_LIMIT, ExecutionConfig};
 

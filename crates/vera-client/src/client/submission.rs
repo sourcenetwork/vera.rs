@@ -18,9 +18,13 @@ impl VeraClient {
     /// Sign at the signer's current sequence and submit.
     ///
     /// The sequence advances only once the node returns the request's own
-    /// identifier, so a rejected or unsent request leaves it reusable. After a
-    /// transport failure admission is unknown and the sequence is also left
-    /// unchanged; see [`BlsSigner::set_next_sequence`].
+    /// identifier, so a rejected or unsent request leaves it reusable.
+    ///
+    /// A reply lost after the request was sent returns
+    /// [`ClientError::SubmissionUnknown`] with the request's identifier and
+    /// sequence, and also leaves the sequence unchanged. Settle it with
+    /// [`Self::confirm_submission`]. Dropping this future while the request is
+    /// in flight leaves the same state without the error.
     pub(crate) async fn submit_native(
         &self,
         signer: &BlsSigner,
@@ -34,13 +38,50 @@ impl VeraClient {
             .map_err(|e| ClientError::Signing(e.to_string()))?
             .tx_id()
             .0;
-        if self.send_native_tx(&wire).await? != expected {
-            return Err(ClientError::InvalidResponse(
-                "native submission identifier mismatch",
-            ));
+        match self.send_native_tx(&wire).await {
+            Ok(returned) if returned == expected => {}
+            Ok(_) => {
+                return Err(ClientError::InvalidResponse(
+                    "native submission identifier mismatch",
+                ));
+            }
+            Err(error) if reply_lost(&error) => {
+                return Err(ClientError::SubmissionUnknown {
+                    tx_hash: expected,
+                    sequence,
+                    source: Box::new(error),
+                });
+            }
+            Err(error) => return Err(error),
         }
         signer.admitted(sequence);
         Ok(expected)
+    }
+
+    /// Settle a submission that failed with [`ClientError::SubmissionUnknown`].
+    ///
+    /// Polls for the receipt of `tx_hash` as [`Self::wait_for_receipt`] does. A
+    /// receipt, successful or not, shows the node consumed `sequence`, so the
+    /// signer moves past it and never back. Without a receipt the sequence
+    /// stays where it was: the request is either still pending or was never
+    /// admitted. Repeating the original call then signs the same bytes under
+    /// the same identifier, so it cannot take effect twice: a node that
+    /// already admitted the request rejects the repeat. Signing different
+    /// content at this sequence is likewise rejected once the first request
+    /// was admitted, and supersedes it only if it never was.
+    pub async fn confirm_submission(
+        &self,
+        signer: &BlsSigner,
+        tx_hash: B256,
+        sequence: u64,
+        interval: Duration,
+        max_attempts: u32,
+    ) -> Result<TransactionReceipt, ClientError> {
+        let receipt = self
+            .wait_for_receipt(tx_hash, interval, max_attempts)
+            .await?;
+        signer.admitted(sequence);
+        Ok(receipt)
     }
 
     /// Sign and submit a native BLS transaction, then poll for the receipt.
@@ -113,6 +154,14 @@ impl VeraClient {
             attempts: max_attempts,
         })
     }
+}
+
+/// Whether a failed send may have reached the node: the connection was made
+/// and no reply came back from it.
+fn reply_lost(error: &ClientError) -> bool {
+    matches!(error, ClientError::Transport(error)
+        if !error.is_connect() && !error.is_builder()
+            && error.status().is_none_or(|status| status.is_server_error()))
 }
 
 fn is_outage(error: &ClientError) -> bool {

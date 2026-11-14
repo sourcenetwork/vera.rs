@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use alloy_primitives::{Address, B256, Bytes};
 use serde_json::json;
+use vera_domain::NativeTx;
 
 use super::stub::{Reply, Stub, submitted};
 use super::*;
@@ -48,7 +49,7 @@ async fn sequence_advances_only_when_the_node_admits_the_request() {
     ));
     assert!(matches!(
         submit(b"first").await,
-        Err(ClientError::Transport(_))
+        Err(ClientError::SubmissionUnknown { sequence: 0, .. })
     ));
     assert!(matches!(
         submit(b"first").await,
@@ -81,6 +82,110 @@ async fn unsent_request_leaves_the_sequence_reusable() {
         Err(ClientError::ClientCapacityExhausted)
     ));
     assert_eq!(signer.nonce(), 0);
+}
+
+#[tokio::test]
+async fn refused_connection_is_not_an_unknown_admission() {
+    let signer = BlsSigner::random(7).unwrap();
+    let client = VeraClient::new("http://127.0.0.1:1");
+    assert!(matches!(
+        client
+            .submit_native(&signer, target(), Bytes::from_static(b"call"))
+            .await,
+        Err(ClientError::Transport(_))
+    ));
+    assert_eq!(signer.nonce(), 0);
+}
+
+#[tokio::test]
+async fn lost_reply_names_the_submission_and_its_receipt_settles_the_sequence() {
+    let signer = BlsSigner::random(7).unwrap();
+    signer.set_next_sequence(4);
+    let lost = signer
+        .sign_native_tx_with_sequence(target(), Bytes::from_static(b"lost"), 4)
+        .unwrap();
+    let lost = NativeTx::decode_wire(&lost).unwrap().tx_id().0;
+    let stub = Stub::serve(vec![
+        Reply::Disconnect,
+        Reply::Result(serde_json::Value::Null),
+        Reply::Result(receipt(lost)),
+        Reply::Admit,
+    ]);
+    let client = VeraClient::new(stub.url.clone());
+
+    let outcome = client
+        .submit_native(&signer, target(), Bytes::from_static(b"lost"))
+        .await;
+    let Err(ClientError::SubmissionUnknown {
+        tx_hash,
+        sequence,
+        source,
+    }) = outcome
+    else {
+        panic!("unexpected outcome: {outcome:?}");
+    };
+    assert_eq!((tx_hash, sequence), (lost, 4));
+    assert!(matches!(*source, ClientError::Transport(_)));
+    assert_eq!(signer.nonce(), 4);
+
+    let settled = client
+        .confirm_submission(&signer, tx_hash, sequence, POLL, 1_000)
+        .await
+        .unwrap();
+    assert_eq!(settled.transaction_hash, lost);
+    assert_eq!(signer.nonce(), 5);
+
+    client
+        .submit_native(&signer, target(), Bytes::from_static(b"next"))
+        .await
+        .unwrap();
+    let requests = stub.requests();
+    assert_eq!(submitted(&requests[0]).tx_id().0, lost);
+    assert_eq!(submitted(&requests[3]).nonce, 5);
+    assert_eq!(signer.nonce(), 6);
+}
+
+#[tokio::test]
+async fn unsettled_submission_keeps_its_sequence_and_a_late_receipt_cannot_rewind() {
+    let signer = BlsSigner::random(7).unwrap();
+    let stub = Stub::serve(vec![
+        Reply::Disconnect,
+        Reply::Result(serde_json::Value::Null),
+        Reply::Admit,
+        Reply::Admit,
+        Reply::Admit,
+        Reply::Result(receipt(B256::repeat_byte(9))),
+    ]);
+    let client = VeraClient::new(stub.url.clone());
+    let submit = |calldata: &'static [u8]| {
+        client.submit_native(&signer, target(), Bytes::from_static(calldata))
+    };
+
+    let Err(ClientError::SubmissionUnknown {
+        tx_hash, sequence, ..
+    }) = submit(b"lost").await
+    else {
+        panic!("a lost reply must leave admission unknown");
+    };
+    assert!(matches!(
+        client
+            .confirm_submission(&signer, tx_hash, sequence, POLL, 1)
+            .await,
+        Err(ClientError::ReceiptTimeout { tx_hash: named, .. }) if named == tx_hash
+    ));
+    assert_eq!(signer.nonce(), 0);
+
+    assert_eq!(submit(b"lost").await.unwrap(), tx_hash);
+    submit(b"second").await.unwrap();
+    submit(b"third").await.unwrap();
+    assert_eq!(signer.nonce(), 3);
+
+    client
+        .confirm_submission(&signer, tx_hash, sequence, POLL, 1)
+        .await
+        .unwrap();
+    assert_eq!(signer.nonce(), 3);
+    stub.requests();
 }
 
 #[tokio::test]

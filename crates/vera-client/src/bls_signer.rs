@@ -121,11 +121,14 @@ impl BlsSigner {
         *self.nonce.lock().expect("native sequence lock poisoned")
     }
 
-    /// Replace the local sequence after a submission whose admission is unknown.
+    /// Replace the local sequence with one the caller tracks itself.
     ///
-    /// `vera_getNativeNonce` reports committed module state: it does not count
-    /// this signer's requests that a node has admitted but not yet executed,
-    /// so a value read while one is pending reuses that request's sequence.
+    /// After [`ClientError::SubmissionUnknown`] prefer
+    /// [`VeraClient::confirm_submission`](crate::VeraClient::confirm_submission),
+    /// which only moves forward. `vera_getNativeNonce` reports committed module
+    /// state: it does not count this signer's requests that a node has admitted
+    /// but not yet executed, so a value read while one is pending reuses that
+    /// request's sequence.
     pub fn set_next_sequence(&self, next: u64) {
         *self.nonce.lock().expect("native sequence lock poisoned") = next;
     }

@@ -180,7 +180,9 @@ impl GlobalArgs {
             None => VeraGenesis::load(&stored_genesis)?,
         };
         genesis.validate_timestamp()?;
-        config.chain_id = crate::chain_id::reconcile(&mut genesis, !persist, self.chain_id)?;
+        let requested =
+            crate::chain_id::Requested::from_inputs(self.chain_id, self.config.as_deref())?;
+        config.chain_id = crate::chain_id::reconcile(&mut genesis, !persist, requested)?;
         std::fs::create_dir_all(&config.data_dir)?;
         let key = config.validator_key()?;
         let local = key.public_key();

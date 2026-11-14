@@ -56,6 +56,21 @@ pub enum ClientError {
         source: Box<Self>,
     },
 
+    /// A native request was sent but its reply was lost, so admission is unknown.
+    ///
+    /// The signer's sequence is unchanged and the request may still execute.
+    /// Settle it with [`VeraClient::confirm_submission`](crate::VeraClient::confirm_submission)
+    /// before signing different content.
+    #[error("admission of {tx_hash} at sequence {sequence} is unknown: {source}")]
+    SubmissionUnknown {
+        /// Identifier of the signed request, whose receipt can be polled.
+        tx_hash: B256,
+        /// Sequence the request was signed with.
+        sequence: u64,
+        /// Transport failure that lost the reply.
+        source: Box<Self>,
+    },
+
     /// Transaction signing failed.
     #[error("signing error: {0}")]
     Signing(String),
@@ -194,6 +209,23 @@ mod tests {
                 "ab".repeat(32)
             )
         );
+    }
+
+    #[test]
+    fn unknown_admission_names_the_submission_and_its_sequence() {
+        let err = ClientError::SubmissionUnknown {
+            tx_hash: B256::repeat_byte(0xcd),
+            sequence: 7,
+            source: Box::new(ClientError::MissingResult),
+        };
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "admission of 0x{} at sequence 7 is unknown: missing result in RPC response",
+                "cd".repeat(32)
+            )
+        );
+        assert!(!err.is_throttled());
     }
 
     #[test]

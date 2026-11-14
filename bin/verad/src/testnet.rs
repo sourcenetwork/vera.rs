@@ -70,7 +70,11 @@ pub(crate) fn run(
         genesis
     };
     genesis.validate_timestamp()?;
-    let chain_id = crate::chain_id::reconcile(&mut genesis, args.genesis.is_some(), chain_id)?;
+    let chain_id = crate::chain_id::reconcile(
+        &mut genesis,
+        args.genesis.is_some(),
+        chain_id.map(crate::chain_id::Requested::Flag),
+    )?;
     let ports::Ports {
         p2p: p2p_ports,
         rpc: rpc_ports,
