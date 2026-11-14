@@ -347,6 +347,12 @@ fn policy_retirement_drains_old_jobs_before_incarnation_state() {
 #[test]
 fn transfers_and_commitment_amendments_preserve_current_grants_and_incarnation() {
     let (mut module, owner, policy, object, rows) = fixture(1);
+    let mut registration = module
+        .registration_owner_record(&policy, &object)
+        .unwrap()
+        .unwrap();
+    registration.metadata.creation_ts.block_height = 5;
+    module.set_relationship(&registration).unwrap();
     archive(
         &mut module,
         &owner,
@@ -405,7 +411,7 @@ fn transfers_and_commitment_amendments_preserve_current_grants_and_incarnation()
         .unwrap();
     assert!(
         registrations_commitment.metadata.creation_ts.block_height
-            <= registration.metadata.creation_ts.block_height
+            < registration.metadata.creation_ts.block_height
     );
     assert!(matches!(
         module

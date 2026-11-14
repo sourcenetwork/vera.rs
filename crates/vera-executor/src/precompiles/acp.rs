@@ -26,6 +26,8 @@ mod queries;
 mod query_budget_tests;
 #[cfg(test)]
 mod spelling_tests;
+#[cfg(test)]
+mod theorem_budget_tests;
 mod validation;
 #[cfg(test)]
 mod validation_tests;

@@ -4,7 +4,6 @@ use super::*;
 
 impl AcpModule {
     /// Fetch a registration commitment by its autoincrement ID.
-    #[allow(unused_variables)]
     pub fn query_registrations_commitment(&self, id: u64) -> Result<RegistrationsCommitment> {
         self.query_registrations_commitment_with_budget(id, &CommandBudget::new(u64::MAX))
     }

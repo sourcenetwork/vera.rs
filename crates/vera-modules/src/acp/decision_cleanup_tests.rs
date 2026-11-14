@@ -185,27 +185,16 @@ fn corruption_rejects_the_whole_lifecycle_batch() {
 }
 
 #[test]
-fn zero_height_legacy_records_are_retained_and_do_not_block_progress() {
+fn zero_height_records_fail_cleanup_without_changing_state() {
     let mut module = AcpModule::new();
-    let mut legacy = insert(&mut module, 1, 1, 1);
-    module.store.delete(&keys::access_decision_key(&legacy.id));
-    legacy.id = "legacy-id".into();
-    legacy.issued_height = 0;
-    legacy.creation_time.block_height = 0;
+    let mut record = insert(&mut module, 1, 1, 1);
+    record.issued_height = 0;
+    record.creation_time.block_height = 0;
     module.store.put(
-        &keys::access_decision_key(&legacy.id),
-        borsh::to_vec(&legacy).unwrap(),
+        &keys::access_decision_key(&record.id),
+        borsh::to_vec(&record).unwrap(),
     );
-    for sequence in 2..MAX_ITEMS as u64 + 2 {
-        insert(&mut module, sequence, 1, 1);
-    }
-    for _ in 0..3 {
-        module.end_blocker(&block(101)).unwrap();
-        module = restore(&module);
-    }
-    assert_eq!(count(&module), 1);
-    assert_eq!(
-        module.query_access_decision(&legacy.id).unwrap(),
-        Some(legacy)
-    );
+    let before = module.store.serialize();
+    assert!(module.end_blocker(&block(101)).is_err());
+    assert_eq!(module.store.serialize(), before);
 }

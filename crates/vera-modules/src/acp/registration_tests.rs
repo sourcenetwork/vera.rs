@@ -1,6 +1,6 @@
 use super::*;
 
-fn setup() -> (AcpModule, Did, Did, String, Object) {
+pub(super) fn setup() -> (AcpModule, Did, Did, String, Object) {
     let first = Did::new("did:key:first").unwrap();
     let second = Did::new("did:key:second").unwrap();
     let mut module = AcpModule::new();
@@ -120,21 +120,27 @@ fn amendment_moves_the_owner_key_and_revokes_the_previous_owner() {
         .unwrap();
     let PolicyCmdResult::CommitRegistrations {
         registrations_commitment,
-    } = module
-        .direct_policy_cmd(
-            &second,
-            &policy,
-            PolicyCmd::CommitRegistrations {
-                commitment: generated.commitment,
-            },
-        )
-        .unwrap()
+    } = execute(
+        &mut module,
+        &second,
+        &policy,
+        PolicyCmd::CommitRegistrations {
+            commitment: generated.commitment,
+        },
+        5,
+    )
+    .unwrap()
     else {
         panic!("expected commitment")
     };
-    module
-        .direct_policy_cmd(&first, &policy, PolicyCmd::RegisterObject(object.clone()))
-        .unwrap();
+    execute(
+        &mut module,
+        &first,
+        &policy,
+        PolicyCmd::RegisterObject(object.clone()),
+        6,
+    )
+    .unwrap();
     assert!(
         module
             .permission_engine(&module.zanzibar_policies[&policy])
@@ -144,16 +150,17 @@ fn amendment_moves_the_owner_key_and_revokes_the_previous_owner() {
     let PolicyCmdResult::RevealRegistration {
         record,
         event: Some(event),
-    } = module
-        .direct_policy_cmd(
-            &second,
-            &policy,
-            PolicyCmd::RevealRegistration {
-                registrations_commitment_id: registrations_commitment.id,
-                proof: generated.proofs[0].clone(),
-            },
-        )
-        .unwrap()
+    } = execute(
+        &mut module,
+        &second,
+        &policy,
+        PolicyCmd::RevealRegistration {
+            registrations_commitment_id: registrations_commitment.id,
+            proof: generated.proofs[0].clone(),
+        },
+        7,
+    )
+    .unwrap()
     else {
         panic!("expected amendment")
     };
@@ -249,7 +256,7 @@ fn reveal_cannot_reassign_a_commitment_to_another_policy() {
     assert_eq!(module.store.serialize(), before);
 }
 
-fn execute(
+pub(super) fn execute(
     module: &mut AcpModule,
     actor: &Did,
     policy: &str,

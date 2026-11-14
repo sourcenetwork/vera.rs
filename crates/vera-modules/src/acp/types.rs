@@ -288,30 +288,11 @@ pub struct GenerateCommitmentResult {
     pub proofs_json: Vec<String>,
 }
 
-/// Native BLS transaction operations for the ACP module.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum AcpOp {
-    CreatePolicy {
-        policy: String,
-    },
-    EditPolicy {
-        policy_id: String,
-        policy: String,
-    },
-    CheckAccess {
-        policy_id: String,
-        access_request: AccessRequest,
-    },
-    DirectCmd {
-        policy_id: String,
-        cmd: PolicyCmd,
-    },
-}
-
 /// Module-level parameters.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AcpParams {
+    /// Retained for the operator parameter encoding; commands carry no expiry to enforce.
     pub policy_command_max_expiration_delta: u64,
     pub registrations_commitment_validity: Duration,
 }

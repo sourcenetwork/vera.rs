@@ -321,3 +321,38 @@ fn theorem_results_cover_denial_management_ranges_and_invalid_inputs() {
     );
     assert!(module.evaluate_theorem(&policy, &oversized).is_err());
 }
+
+#[test]
+fn theorem_allowance_spans_all_assertions_and_exhaustion_is_not_a_report() {
+    use vera_modules::acp::{CommandBudget, error::AcpError};
+    let (module, policy) = setup();
+    let source = "Authorizations { file:report#read@did:key:owner !file:report#read@did:key:stranger }\nDelegations { did:key:owner > file:report#reader }";
+    let single = CommandBudget::new(u64::MAX);
+    module
+        .evaluate_theorem_with_budget(
+            &policy,
+            "Authorizations { file:report#read@did:key:owner } Delegations {}",
+            &single,
+        )
+        .unwrap();
+    let budget = CommandBudget::new(u64::MAX);
+    let report = module
+        .evaluate_theorem_with_budget(&policy, source, &budget)
+        .unwrap();
+    assert!(report.ok);
+    assert!(budget.consumed() > single.consumed());
+    assert!(
+        module
+            .evaluate_theorem_with_budget(&policy, source, &CommandBudget::new(budget.consumed()))
+            .unwrap()
+            .ok
+    );
+    for limit in [budget.consumed() - 1, single.consumed(), 0] {
+        let short = CommandBudget::new(limit);
+        assert!(matches!(
+            module.evaluate_theorem_with_budget(&policy, source, &short),
+            Err(AcpError::CommandBudgetExceeded)
+        ));
+        assert!(short.is_exhausted());
+    }
+}

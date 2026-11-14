@@ -70,24 +70,6 @@ impl AcpModule {
         submission: &TxExecCtx,
         budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
-        let mut candidate = self.clone();
-        let result = budget.finish(candidate.apply_policy_cmd_with_metadata(
-            actor, policy_id, request, block, submission, budget,
-        ))?;
-        *self = candidate;
-        Ok(result)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn apply_policy_cmd_with_metadata(
-        &mut self,
-        actor: &Did,
-        policy_id: &str,
-        request: types::PolicyCommandRequest,
-        block: &BlockExecCtx,
-        submission: &TxExecCtx,
-        budget: &CommandBudget,
-    ) -> Result<PolicyCmdResult> {
         budget.metadata(&request.metadata)?;
         if !request.metadata.is_empty()
             && !matches!(
@@ -101,26 +83,14 @@ impl AcpModule {
                 reason: "this command does not accept supplied metadata".into(),
             });
         }
-        let mut result = self.execute_policy_cmd_with_budget(
+        self.execute_stamped_policy_cmd(
             actor,
             policy_id,
             request.command,
+            request.metadata,
             block,
             submission,
             budget,
-        )?;
-        match &mut result {
-            PolicyCmdResult::SetRelationship {
-                record_existed: false,
-                record,
-            }
-            | PolicyCmdResult::RegisterObject { record }
-            | PolicyCmdResult::RevealRegistration { record, .. } => {
-                record.supplied_metadata = request.metadata;
-                self.set_relationship_with_budget(record, budget)?;
-            }
-            _ => {}
-        }
-        Ok(result)
+        )
     }
 }

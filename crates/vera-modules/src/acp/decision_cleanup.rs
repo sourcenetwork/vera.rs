@@ -45,13 +45,8 @@ impl AcpModule {
             if decision.id != id {
                 return Err(AcpError::State("access decision identity mismatch".into()));
             }
-            // Legacy zero-height placeholders have no usable expiry; retain them for migration.
-            let expiry = if decision.issued_height == 0 {
-                None
-            } else {
-                Some(decision.verify_issuance(block.deployment_id, id, &block.timestamp)?)
-            };
-            if expiry.is_some_and(|expiry| block.timestamp.block_height >= expiry) {
+            let expiry = decision.verify_issuance(block.deployment_id, id, &block.timestamp)?;
+            if block.timestamp.block_height >= expiry {
                 removed.push(key.to_vec());
             }
             last = Some(key.to_vec());

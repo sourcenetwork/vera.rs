@@ -27,11 +27,6 @@ sequence, issuance metadata and expiry. Record presence alone is insufficient. A
 decision proves successful evaluation at issuance; it does not prove that permission
 remains granted after subsequent policy changes or authorize an unrelated payload.
 
-The stored Borsh field layout is unchanged. Historical records remain readable, but
-legacy identifiers and zero issuance placeholders do not pass the new verification
-rules. Operators must coordinate the execution update and consumer dependency pins;
-new and old decision producers derive different identifiers.
-
 `VeraClient::read_access_decision` combines the certified native record read with
 `DecisionRequest::verify_record`. Supply the exact expected deployment, policy,
 creator, submission sequence, actor and ordered operations, plus independent
@@ -52,9 +47,8 @@ End-block maintenance inspects at most 64 access-decision records and 1 MiB of
 encoded keys and values per block. A persisted ordered cursor resumes the sweep
 across restarts and wraps at the end of the prefix. Decisions are removed at or
 after their exclusive expiry; live decisions are retained and revisited on later
-sweeps. Existing records require no new expiry index or bulk migration. Legacy
-zero-height placeholders have no trustworthy lifetime and remain for explicit
-migration rather than being silently deleted.
+sweeps. A record whose identifier or issuance revision does not verify, including
+a zero issuance height, fails maintenance instead of being skipped or deleted.
 
 Deletion can lag expiry by multiple blocks. The limits bound cleanup work, not
 retained state or RSS; sustained arrivals above reclamation capacity can still

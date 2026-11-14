@@ -304,6 +304,17 @@ their existing read limits; required incarnation points share those limits. Proo
 reads do not consume native execution gas.
 This is deterministic work accounting, not an instruction count or latency bound.
 
+`evaluateTheorem` charges its 1,000-unit dispatch base plus one allowance shared by
+the whole call: the policy identifier and source bytes before parsing, the policy
+read, and every assertion's reads and evaluator steps at the prices above.
+Authorization assertions use the permission accounting and delegation assertions
+the management accounting described below. An exhausted allowance returns
+out-of-gas for the call; it is never recorded as an assertion error. Rejected
+sources retain the work spent on them. The module exposes
+`evaluate_theorem_with_budget`; `evaluate_theorem` retains an unlimited allowance.
+A read-only call made through the client is limited by its call's gas, so a
+report over many assertions or wide relations can run out of gas there.
+
 ## Management authorization work
 
 Policy commands and `checkManagementAuthority` use a caller-owned `CommandBudget`.
@@ -333,27 +344,27 @@ units, including in nested batches. Failed native transactions continue to charg
 the full native transaction allowance, as before.
 
 Relationship point storage for set/delete, register, transfer, unarchive and reveal
-uses the same allowance, including contextual and supplied-metadata rewrites.
+uses the same allowance. A command writes each record once, already carrying its
+submission and supplied metadata.
 Policy, existing relationship, object-incarnation, physical/logical pair-count,
 subject-directory and object-pair-count reads reserve work before copying or decoding. Prepared replacements
 and deletions cost 200 units plus two per 16 encoded key/value bytes; JSON encoding
 reserves bytes before extending its buffer. Primary records, both count mirrors,
 changed directories, logical counts and object counters each pay once per prepared write. Applying
 a complete prepared plan does not charge those writes again. Idempotent grants
-still pay for their reads and return the original record; metadata-only rewrites
+still pay for their reads and return the original record; unarchive rewrites
 validate counters without charging nonexistent counter writes.
 
 Reveal also charges its commitment and policy-liveness reads, amendment counter
 and collision reads, and the amendment record/index writes. Exhaustion during a
-late metadata or amendment rewrite restores every earlier command change and
+late amendment write restores every earlier command change and
 preserves the spent allowance. The public `RecordStore` preparation hooks retain
 unmetered defaults for generic stores and maintenance; the command-only adapter
 uses them explicitly and rejects direct unprepared writes.
 
 Commitment creation also reserves parameter, allocation-counter and identifier
 collision reads, then the counter, Borsh record and expiry/root/policy index writes
-before publication. Contextual restamping charges the previous-record read and
-all index removals/replacements before applying any of them. Each prepared index
+before publication. Each prepared index
 operation pays once; the prepaid record encoding is not charged again when the
 plan is applied. End-block expiry uses the same persistence logic with its own
 existing bounded maintenance schedule, outside transaction command allowances.
