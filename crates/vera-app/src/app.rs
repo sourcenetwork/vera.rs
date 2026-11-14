@@ -25,7 +25,8 @@ use vera_executor::{BlockContext, ExecutionReceipt, VeraExecutor, receipt_commit
 use crate::{AppError, ConsensusScheme, FinalizedSink, ReshareInput};
 
 const MAX_CLOCK_DRIFT_SECS: u64 = 15;
-const MAX_TIMESTAMP_STEP_SECS: u64 = 5;
+/// Default limit on how far a block's timestamp may advance past its parent's.
+pub const MAX_TIMESTAMP_STEP_SECS: u64 = 5;
 const MAX_PENDING_ANCESTORS: usize = 64;
 
 /// Vera block production and verification on top of glue-managed state.
@@ -44,6 +45,8 @@ pub struct StatefulVeraApp<S: FinalizedSink, D: ApplicationState = OrderedState>
     native_pipeline: bool,
     proposal_batch_wait: std::time::Duration,
     proposal_idle_wait: std::time::Duration,
+    started_at: Arc<std::sync::OnceLock<u64>>,
+    timestamp_step: u64,
 }
 
 impl<S: FinalizedSink, D: ApplicationState> std::fmt::Debug for StatefulVeraApp<S, D> {
@@ -83,6 +86,8 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
             native_pipeline: false,
             proposal_batch_wait: std::time::Duration::ZERO,
             proposal_idle_wait: std::time::Duration::ZERO,
+            started_at: Arc::default(),
+            timestamp_step: MAX_TIMESTAMP_STEP_SECS,
         }
     }
 
@@ -107,10 +112,25 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
 
     /// Let an idle proposer wait this long for a first request before proposing an empty block.
     ///
+    /// Proposals do not wait until one block has been finalized since the
+    /// start: a client that verifies state against finalized headers needs a
+    /// current one before it can read.
+    ///
     /// The wait must stay below the consensus leader and stall timeouts.
     #[must_use]
     pub const fn with_idle_wait(mut self, idle_wait: std::time::Duration) -> Self {
         self.proposal_idle_wait = idle_wait;
+        self
+    }
+
+    /// Limit how far a block's timestamp may advance past its parent's, in seconds.
+    ///
+    /// Every validator must use the same limit. A chain that finalizes less
+    /// often than this, or resumes after a pause, falls behind the clock by
+    /// the difference at every block.
+    #[must_use]
+    pub const fn with_timestamp_step(mut self, seconds: u64) -> Self {
+        self.timestamp_step = seconds;
         self
     }
 
@@ -278,7 +298,11 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         // This wait runs on the application actor, which also processes finalization.
         // Idling while an ancestor with requests is unfinalized would delay its receipts.
         let settled = pending.iter().all(|block| block.txs.is_empty());
-        let mut txs = if self.native_pipeline && settled && !self.proposal_idle_wait.is_zero() {
+        // Finalization is processed on this actor between proposals, so the
+        // height moves only once a proposal made since the start has returned.
+        let fresh = finalized_height > *self.started_at.get_or_init(|| finalized_height);
+        let idle = fresh && settled && !self.proposal_idle_wait.is_zero();
+        let mut txs = if self.native_pipeline && idle {
             input
                 .provider
                 .build_block_idle_wait(
@@ -307,7 +331,7 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         let height = parent.height + 1;
         let timestamp = now_secs()
             .max(parent.timestamp)
-            .min(parent.timestamp.saturating_add(MAX_TIMESTAMP_STEP_SECS));
+            .min(parent.timestamp.saturating_add(self.timestamp_step));
         let randomness = if self.native_pipeline || consensus_context.round.view().get() <= 1 {
             None
         } else {
@@ -457,7 +481,7 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             );
             return None;
         }
-        if block.timestamp > parent.timestamp.saturating_add(MAX_TIMESTAMP_STEP_SECS) {
+        if block.timestamp > parent.timestamp.saturating_add(self.timestamp_step) {
             warn!(
                 ?digest,
                 block_ts = block.timestamp,

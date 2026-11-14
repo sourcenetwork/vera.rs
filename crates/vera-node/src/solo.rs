@@ -147,6 +147,9 @@ pub fn prepare_solo(
                 stall_timeout_ms: SOLO_STALL_TIMEOUT_MS,
                 ..Default::default()
             }),
+            // A lone validator proposes every block from its own clock, and
+            // an idle or paused device must not fall behind it.
+            timestamp_step_secs: Some(u64::MAX),
         };
         // The share is stored first: a genesis record without its share cannot be recovered.
         store

@@ -218,6 +218,63 @@ async fn idle_node_keeps_a_slow_heartbeat_and_wakes_for_a_write() {
     node.stop().await.unwrap();
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn an_idle_node_finalizes_a_block_right_after_each_start() {
+    let directory = tempfile::tempdir().unwrap();
+    let settings = config(directory.path(), 9406, ACCOUNT_KEY);
+    let heartbeat = EmbeddedConfig::HEARTBEAT;
+    let mut height = 0;
+    for _ in 0..2 {
+        let node = EmbeddedNode::start(settings.clone()).await.unwrap();
+        let started = std::time::Instant::now();
+        height = finalized_beyond(&node, height).await;
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < heartbeat / 2,
+            "the first block after a start waited {elapsed:?}"
+        );
+        node.stop().await.unwrap();
+    }
+}
+
+/// Seconds between a header's block timestamp and now.
+fn age(header: &vera_domain::GossipHeader) -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        .saturating_sub(header.timestamp)
+}
+
+#[test]
+fn an_idle_or_paused_node_keeps_its_block_timestamps_on_the_clock() {
+    let directory = tempfile::tempdir().unwrap();
+    let settings = config(directory.path(), 9407, ACCOUNT_KEY);
+    // A header reaches subscribers one heartbeat after its block was proposed.
+    let limit = EmbeddedConfig::HEARTBEAT.as_secs() + 4;
+
+    let node = block_on(EmbeddedNode::start(settings.clone())).unwrap();
+    let mut headers =
+        block_on(node.rpc().subscribe("vera_subscribeHeaders", Vec::new(), 8)).unwrap();
+    for _ in 0..4 {
+        let header: vera_domain::GossipHeader = block_on(headers.next()).unwrap().unwrap();
+        let age = age(&header);
+        assert!(age < limit, "header {} is {age} s old", header.height);
+    }
+    drop(headers);
+    block_on(node.stop()).unwrap();
+
+    std::thread::sleep(Duration::from_secs(8));
+    let node = block_on(EmbeddedNode::start(settings)).unwrap();
+    let mut headers =
+        block_on(node.rpc().subscribe("vera_subscribeHeaders", Vec::new(), 8)).unwrap();
+    let header: vera_domain::GossipHeader = block_on(headers.next()).unwrap().unwrap();
+    let age = age(&header);
+    assert!(age < 4, "the first header after a pause is {age} s old");
+    drop(headers);
+    block_on(node.stop()).unwrap();
+}
+
 /// Waits for the finalized height to pass `height` and returns it.
 async fn finalized_beyond(node: &EmbeddedNode, height: u64) -> u64 {
     tokio::time::timeout(Duration::from_secs(60), async {
