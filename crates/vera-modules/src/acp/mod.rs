@@ -25,7 +25,7 @@ mod object_pairs;
 pub mod object_state;
 pub mod pages;
 mod policy_create;
-pub use policy_create::PolicySeed;
+pub use policy_create::{PlacedPolicy, PolicySeed};
 mod policy_create_budget;
 pub use policy_create_budget::PolicyCreateBudget;
 mod policy_edit;

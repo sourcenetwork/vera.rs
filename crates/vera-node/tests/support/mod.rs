@@ -49,6 +49,7 @@ pub(crate) fn block_on<F: Future>(future: F) -> F::Output {
 /// A deployment in `directory` with explicit thread counts.
 pub(crate) fn config(directory: &Path, chain_id: u64) -> EmbeddedConfig {
     let genesis = SoloGenesis {
+        policies: Vec::new(),
         chain_id,
         operators: OperatorPolicy {
             threshold: 1,

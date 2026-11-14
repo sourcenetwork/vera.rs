@@ -375,7 +375,9 @@ does not wait out a view. A lone validator waits for a first
 request before proposing, with a ten-second heartbeat, unless a block carrying
 requests is still unfinalized. `EmbeddedConfig::thread_setup` runs on the node
 thread before its runtime is built, so every node thread is created afterwards
-and, on Linux, inherits the CPU affinity it sets. `thread_budget()` reports the
+and, on Linux, inherits the CPU affinity it sets. `SoloGenesis::policies` seeds ACP policies at
+genesis under counters and owners the host chooses, so a host keeps the policy
+identifiers it already uses. `thread_budget()` reports the
 node, worker, blocking, verification and history-store thread counts.
 `EmbeddedConfig::history_memory` sets the history store's block-cache and
 write-buffer budgets, 8 MiB and 4 MiB by default; the daemon keeps Regolith's
