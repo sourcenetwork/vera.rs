@@ -575,8 +575,16 @@ async fn run_node_with_elector<
         let stall = Duration::from_secs(config.watchdog_stall_seconds);
         let watchdog_state = node_state.clone();
         let has_durable_history = history.head_height() > 0;
+        let lone_validator = peers.participants.len() == 1;
         state_resolver_handles.push(context.child("watchdog").spawn(move |_| async move {
-            crate::run_watchdog(watchdog_state, stall, has_durable_history, watchdog).await;
+            crate::run_watchdog(
+                watchdog_state,
+                stall,
+                has_durable_history,
+                lone_validator,
+                watchdog,
+            )
+            .await;
         }));
     }
     if let Some(height) = completed_sync_height {

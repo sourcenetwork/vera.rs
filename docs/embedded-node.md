@@ -145,7 +145,10 @@ path as an interrupted daemon. Dropping an `EmbeddedNode` requests the same stop
 without waiting.
 
 `failed` resolves if the node stops by itself. An embedded node never exits the
-host process: the finality watchdog stops the node with an error instead.
+host process: the finality watchdog stops the node with an error instead. It
+trips when the node has finalized before and then finalizes nothing for ten
+minutes, checked every 30 seconds. An idle node keeps finalizing heartbeat
+blocks, so idleness is not a stall.
 
 ## Files and ports
 
