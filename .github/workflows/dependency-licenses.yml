@@ -1,4 +1,4 @@
-name: Dependency licenses
+name: Dependency checks
 
 on:
   pull_request:
@@ -9,6 +9,9 @@ on:
       - .github/workflows/dependency-licenses.yml
   push:
     branches: [main]
+  schedule:
+    # New advisories appear without a change here.
+    - cron: '17 5 * * 1'
   workflow_dispatch:
 
 permissions:
@@ -27,3 +30,16 @@ jobs:
           rust-version: '1.99.1'
           arguments: ''
           command: check licenses
+
+  advisories:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+        with:
+          manifest-path: bin/verad/Cargo.toml
+          rust-version: '1.99.1'
+          arguments: ''
+          command: check advisories
