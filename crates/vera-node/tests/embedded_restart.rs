@@ -1,7 +1,5 @@
 //! How soon a restarted embedded node serves its first write.
 
-#![recursion_limit = "256"]
-
 mod support;
 
 use std::time::{Duration, Instant};

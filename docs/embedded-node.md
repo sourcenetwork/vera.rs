@@ -182,6 +182,30 @@ connection from the same machine is accepted only from a peer the node tracks,
 after the authenticated handshake. Use another address only when other
 validators must reach the node.
 
+## Disk
+
+`EmbeddedConfig::pruning` sets how much consensus archive and state journal the
+node keeps. The default, `EmbeddedConfig::RETENTION`, keeps 512 revisions of
+consensus archives (two epochs) and 256 of state journals, pruned every 64
+revisions. `None` keeps everything, as the daemon does without a `[pruning]`
+section. A lone validator has no peer that needs older consensus data from it.
+
+Finalized history, which serves receipts and historical lookups, is not
+pruned by this setting or any other. It is what still grows.
+
+Measured on an Apple M5 Max with a release build: an idle node at the daemon
+cadence (`pacing: None`, about 6.6 revisions a second) for five minutes, about
+1,970 empty revisions, one run each.
+
+| Retention | Directory after 5 min | Growth per revision | Of which finalized history |
+| --- | --- | --- | --- |
+| none | 10.6 MB | about 5.1 kB | about 1.05 kB |
+| 512 consensus, 256 state | 5.3 MB and levelling off | about 1.05 kB once the window is full | about 1.05 kB |
+
+At the default heartbeat of one revision every 1.5 s that is about 12 MB an
+hour without retention and about 2.5 MB an hour with it, all of it finalized
+history. Revisions that carry requests are larger.
+
 ## Memory
 
 `EmbeddedConfig::sizing` sets the two allocations a node makes when it starts,
@@ -303,7 +327,9 @@ are not a capacity or multi-validator measurement.
 ## Limits
 
 - One validator. A stopped or lost device stops the deployment.
-- An idle deployment still produces a heartbeat block about every 1.5 s.
+- An idle deployment still produces a heartbeat block about every 1.5 s, and
+  finalized history has no retention, so the directory grows without bound;
+  see [Disk](#disk).
 - Memory was measured for short workloads on one machine; see
   [Memory](#memory). Growth over hours, larger states and Linux are not
   measured, and the embedded page cache has not been measured against a state
