@@ -138,7 +138,10 @@ What a thread passes on to the threads it creates depends on the platform:
   hold.
 - **Windows.** A thread affinity mask applies to the thread it is set on; new
   threads start from the process affinity mask. `thread_setup` therefore places
-  only the node thread. Vera's CI does not build or test on Windows.
+  only the node thread.
+
+CI runs the embedded test targets on Linux and on macOS arm64. Windows is not a
+supported host: nothing builds or tests the node there.
 
 The inventory covers the default build. The optional `nuclei-rpc` transport
 uses a process-global proactor and is not covered.
