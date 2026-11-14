@@ -638,8 +638,14 @@ fn registry_status_checks_the_full_member_index(#[case] index: U256, #[case] suc
     assert_eq!(outcome.receipts[0].success(), success);
     let changes = outcome.changes.accounts.get(&VALIDATOR_REGISTRY_ADDRESS);
     if success {
-        let packed = changes.unwrap().storage[&member_slot(member)].to_be_bytes::<32>();
-        assert_eq!(packed[20], 1);
+        // Re-activating an active member leaves its slot as stored, so no write is reported.
+        let slot = member_slot(member);
+        let stored = registered.changes.accounts[&VALIDATOR_REGISTRY_ADDRESS].storage[&slot];
+        let current = changes
+            .and_then(|account| account.storage.get(&slot))
+            .copied()
+            .unwrap_or(stored);
+        assert_eq!(current.to_be_bytes::<32>()[20], 1);
     } else {
         assert!(changes.is_none_or(|account| account.storage.is_empty()));
     }
@@ -716,7 +722,7 @@ fn epoch_rosters_capture_the_boundary_branch_and_survive_later_changes() {
         .execute_with_modules(&state, &verification, &[registration], parent)
         .unwrap();
     assert!(selected.changes_from(&verified).iter().all(Vec::is_empty));
-    futures::executor::block_on(state.commit(outcome.changes)).unwrap();
+    state.commit(outcome.changes);
     context.header.number = 19;
     let (_, later) = executor
         .execute_with_modules(&state, &context, &[backup_member_call(1)], selected.clone())

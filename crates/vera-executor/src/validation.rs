@@ -3,7 +3,7 @@
 use alloy_consensus::TxEnvelope;
 use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Bytes, TxKind, U256};
-use vera_traits::StateDb;
+use vera_traits::StateDbRead;
 
 use crate::{ExecutionConfig, ExecutionError};
 
@@ -63,7 +63,7 @@ impl<'a> TxValidator<'a> {
     }
 
     /// Validate a transaction against the sender's account in `state`.
-    pub async fn validate<S: StateDb>(
+    pub async fn validate<S: StateDbRead>(
         &self,
         tx_bytes: &[u8],
         state: &S,

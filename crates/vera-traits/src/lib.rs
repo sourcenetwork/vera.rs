@@ -1,4 +1,4 @@
-//! Core trait abstractions for vera storage and consensus.
+//! Read access to EVM state for vera execution and queries.
 
 #![doc(issue_tracker_base_url = "https://github.com/sourcenetwork/vera.rs/issues/")]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
@@ -8,4 +8,4 @@ mod error;
 pub use error::StateDbError;
 
 mod state;
-pub use state::{StateDb, StateDbRead, StateDbWrite};
+pub use state::StateDbRead;

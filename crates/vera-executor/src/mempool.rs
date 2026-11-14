@@ -10,7 +10,7 @@ use alloy_primitives::{Address, U256};
 use vera_crypto::bls;
 use vera_domain::NativeTx;
 use vera_modules::native_account::NativeNonceStore;
-use vera_traits::StateDb;
+use vera_traits::StateDbRead;
 
 use crate::executor::native_authentication::{authenticate_native_tx, decode_native_tx};
 use crate::{ExecutionConfig, ExecutionError, TxValidator};
@@ -62,7 +62,7 @@ pub struct MempoolValidator<S> {
     native_only: bool,
 }
 
-impl<S: StateDb> MempoolValidator<S> {
+impl<S: StateDbRead> MempoolValidator<S> {
     /// Create a new mempool validator against the given base state.
     pub fn new(base: S, config: ExecutionConfig, base_fee: u64) -> Self {
         Self {
@@ -244,8 +244,7 @@ mod tests {
     use alloy_primitives::{Address, B256, Bytes, FixedBytes, KECCAK256_EMPTY, TxKind, U256};
     use alloy_signer::SignerSync;
     use alloy_signer_local::PrivateKeySigner;
-    use vera_qmdb::ChangeSet;
-    use vera_traits::{StateDb, StateDbError, StateDbRead, StateDbWrite};
+    use vera_traits::{StateDbError, StateDbRead};
 
     use super::*;
     use crate::precompiles::VALIDATOR_REGISTRY_ADDRESS;
@@ -287,24 +286,6 @@ mod tests {
         }
         async fn storage(&self, _address: &Address, _slot: &U256) -> Result<U256, StateDbError> {
             Ok(U256::ZERO)
-        }
-    }
-
-    impl StateDbWrite for MockStateDb {
-        async fn commit(&self, _changes: ChangeSet) -> Result<B256, StateDbError> {
-            Ok(B256::ZERO)
-        }
-        async fn compute_root(&self, _changes: &ChangeSet) -> Result<B256, StateDbError> {
-            Ok(B256::ZERO)
-        }
-        fn merge_changes(&self, _older: ChangeSet, newer: ChangeSet) -> ChangeSet {
-            newer
-        }
-    }
-
-    impl StateDb for MockStateDb {
-        async fn state_root(&self) -> Result<B256, StateDbError> {
-            Ok(B256::ZERO)
         }
     }
 

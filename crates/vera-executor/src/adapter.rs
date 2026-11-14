@@ -1,7 +1,7 @@
 //! State database adapter for REVM.
 //!
 //! Note: REVM's `DatabaseRef` trait is synchronous, so we use `futures::executor::block_on`
-//! to bridge the async StateDb traits into the sync REVM interface.
+//! to bridge the async [`StateDbRead`] trait into the sync REVM interface.
 
 use std::sync::{Arc, Mutex};
 
@@ -72,21 +72,14 @@ impl<S: StateDbRead> DatabaseRef for StateDbAdapter<S> {
     type Error = ExecutionError;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        match self.record(block_on(self.state.nonce(&address))) {
-            Ok(nonce) => {
-                let balance = self.record(block_on(self.state.balance(&address)))?;
-                let code_hash = self.record(block_on(self.state.code_hash(&address)))?;
-                Ok(Some(AccountInfo {
-                    nonce,
-                    balance,
-                    code_hash,
-                    code: None,
-                    account_id: None,
-                }))
-            }
-            Err(StateDbError::AccountNotFound(_)) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+        let account = self.record(block_on(self.state.account(&address)))?;
+        Ok(account.map(|(nonce, balance, code_hash)| AccountInfo {
+            nonce,
+            balance,
+            code_hash,
+            code: None,
+            account_id: None,
+        }))
     }
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {

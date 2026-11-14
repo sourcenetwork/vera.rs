@@ -6,11 +6,11 @@
 
 use std::sync::Arc;
 
-use alloy_primitives::{Address, B256, Bytes, U256};
+use alloy_primitives::{Address, B256, Bytes, KECCAK256_EMPTY, U256};
 use commonware_glue::stateful::db::Unmerkleized as _;
 use tokio::sync::Mutex;
 use vera_qmdb::{AccountEncoding, ChangeSet, StorageKey as StorageSlotKey};
-use vera_traits::{StateDb, StateDbError, StateDbRead, StateDbWrite};
+use vera_traits::{StateDbError, StateDbRead};
 
 use crate::{
     BackendError,
@@ -48,6 +48,15 @@ fn storage_err(e: impl std::fmt::Display) -> StateDbError {
     StateDbError::Storage(e.to_string())
 }
 
+fn batches_taken() -> StateDbError {
+    StateDbError::Storage("batches already taken".into())
+}
+
+fn decode_account(value: &AccountValue) -> Result<AccountRecord, StateDbError> {
+    AccountEncoding::decode(&value.0)
+        .ok_or_else(|| StateDbError::Storage("undecodable account record".into()))
+}
+
 impl BatchState {
     /// Wrap batches forked for one block.
     pub fn new(batches: VeraUnmerkleized) -> Self {
@@ -65,23 +74,19 @@ impl BatchState {
             .ok_or(BackendError::NotInitialized)
     }
 
-    async fn account(&self, address: &Address) -> Result<Option<AccountRecord>, StateDbError> {
+    async fn record(&self, address: &Address) -> Result<Option<AccountRecord>, StateDbError> {
         let guard = self.batches.lock().await;
-        let batches = guard.as_ref().ok_or(StateDbError::LockPoisoned)?;
+        let batches = guard.as_ref().ok_or_else(batches_taken)?;
         let record = batches
             .0
             .get(&account_key(*address))
             .await
             .map_err(storage_err)?;
-        record.map_or(Ok(None), |value| {
-            AccountEncoding::decode(&value.0)
-                .map(Some)
-                .ok_or_else(|| StateDbError::Storage("undecodable account record".into()))
-        })
+        record.as_ref().map(decode_account).transpose()
     }
 
     async fn require_account(&self, address: &Address) -> Result<AccountRecord, StateDbError> {
-        self.account(address)
+        self.record(address)
             .await?
             .ok_or(StateDbError::AccountNotFound(*address))
     }
@@ -93,13 +98,12 @@ impl BatchState {
     ) -> Result<VeraUnmerkleized, BackendError> {
         for (address, update) in &changes.accounts {
             let key = account_key(*address);
-            let current_generation = match batches.0.get(&key).await {
-                Ok(Some(value)) => AccountEncoding::decode(&value.0)
-                    .map(|(_, _, _, generation)| generation)
-                    .unwrap_or(0),
-                Ok(None) => 0,
+            let stored = match batches.0.get(&key).await {
+                Ok(Some(value)) => AccountEncoding::decode(&value.0),
+                Ok(None) => None,
                 Err(e) => return Err(BackendError::Storage(e.to_string())),
             };
+            let current_generation = stored.map_or(0, |(_, _, _, generation)| generation);
             let generation = if update.created || update.selfdestructed {
                 current_generation.saturating_add(1)
             } else {
@@ -116,17 +120,21 @@ impl BatchState {
                     generation,
                 );
                 batches.0 = batches.0.write(key, Some(AccountValue(encoded)));
-                if let Some(code) = &update.code {
+                let stored_code_hash = stored.map(|(_, _, code_hash, _)| code_hash);
+                if let Some(code) = &update.code
+                    && update.code_hash != KECCAK256_EMPTY
+                    && stored_code_hash != Some(update.code_hash)
+                {
                     batches.2 = batches
                         .2
                         .write(code_key(update.code_hash), Some(code.clone()));
                 }
-            }
 
-            for (slot, value) in &update.storage {
-                let key = storage_key(*address, generation, *slot);
-                let value = (!value.is_zero()).then_some(StorageValue(*value));
-                batches.1 = batches.1.write(key, value);
+                for (slot, value) in &update.storage {
+                    let key = storage_key(*address, generation, *slot);
+                    let value = (!value.is_zero()).then_some(StorageValue(*value));
+                    batches.1 = batches.1.write(key, value);
+                }
             }
         }
         Ok(batches)
@@ -164,9 +172,16 @@ impl StateDbRead for BatchState {
         Ok(self.require_account(address).await?.2)
     }
 
+    async fn account(&self, address: &Address) -> Result<Option<(u64, U256, B256)>, StateDbError> {
+        Ok(self
+            .record(address)
+            .await?
+            .map(|(nonce, balance, code_hash, _)| (nonce, balance, code_hash)))
+    }
+
     async fn code(&self, code_hash: &B256) -> Result<Bytes, StateDbError> {
         let guard = self.batches.lock().await;
-        let batches = guard.as_ref().ok_or(StateDbError::LockPoisoned)?;
+        let batches = guard.as_ref().ok_or_else(batches_taken)?;
         batches
             .2
             .get(&code_key(*code_hash))
@@ -177,43 +192,21 @@ impl StateDbRead for BatchState {
     }
 
     async fn storage(&self, address: &Address, slot: &U256) -> Result<U256, StateDbError> {
-        let Some((_, _, _, generation)) = self.account(address).await? else {
+        let guard = self.batches.lock().await;
+        let batches = guard.as_ref().ok_or_else(batches_taken)?;
+        let record = batches
+            .0
+            .get(&account_key(*address))
+            .await
+            .map_err(storage_err)?;
+        let Some((_, _, _, generation)) = record.as_ref().map(decode_account).transpose()? else {
             return Ok(U256::ZERO);
         };
-        let guard = self.batches.lock().await;
-        let batches = guard.as_ref().ok_or(StateDbError::LockPoisoned)?;
         let value = batches
             .1
             .get(&storage_key(*address, generation, *slot))
             .await
             .map_err(storage_err)?;
         Ok(value.map_or(U256::ZERO, |v| v.0))
-    }
-}
-
-impl StateDbWrite for BatchState {
-    async fn commit(&self, _changes: ChangeSet) -> Result<B256, StateDbError> {
-        Err(StateDbError::RootComputation(
-            "batch state is committed by the stateful actor".into(),
-        ))
-    }
-
-    async fn compute_root(&self, _changes: &ChangeSet) -> Result<B256, StateDbError> {
-        Err(StateDbError::RootComputation(
-            "batch state roots come from merkleized batches".into(),
-        ))
-    }
-
-    fn merge_changes(&self, mut older: ChangeSet, newer: ChangeSet) -> ChangeSet {
-        older.merge(newer);
-        older
-    }
-}
-
-impl StateDb for BatchState {
-    async fn state_root(&self) -> Result<B256, StateDbError> {
-        Err(StateDbError::RootComputation(
-            "batch state roots come from merkleized batches".into(),
-        ))
     }
 }

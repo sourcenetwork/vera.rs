@@ -10,7 +10,7 @@ use vera_permission::{
     relationship_object_key, validate_policy_prefix,
 };
 
-use super::{BackendError, NativeDb, record_proof_at};
+use super::{BackendError, NativeDb, evidence::charge, record_proof_at};
 
 /// Capture policy liveness and a relationship prefix under the same partition guards.
 pub async fn policy_prefix_proof_at(
@@ -174,11 +174,4 @@ async fn capture_objects(
         objects.push(proof);
     }
     Ok(objects)
-}
-
-fn charge(remaining: &mut usize, amount: usize) -> Result<(), PermissionError> {
-    *remaining = remaining
-        .checked_sub(amount)
-        .ok_or(PermissionError::Limit)?;
-    Ok(())
 }

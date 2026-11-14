@@ -7,7 +7,10 @@ use vera_permission::{
     encoded_size, verify_permission_proof,
 };
 
-use super::{BackendError, InMemoryKvStore, NativeDb, NativeStateSet, combine_module_roots};
+use super::{
+    BackendError, InMemoryKvStore, NativeDb, NativeStateSet, combine_module_roots,
+    evidence::{charge, point_evidence, storage},
+};
 
 /// Capture permission evidence at the selected current-state root.
 ///
@@ -65,19 +68,7 @@ pub async fn permission_proof_at(
                     charge(&mut records.records, 1)?;
                     charge(&mut records.bytes, value.len())?;
                 }
-                let evidence = if value.is_some() {
-                    let evidence = a.key_value_proof(key.clone()).await.map_err(storage)?;
-                    if evidence.encode_size() > bytes / 2 {
-                        return Err(PermissionError::Limit.into());
-                    }
-                    evidence.encode()
-                } else {
-                    let evidence = a.exclusion_proof(&key).await.map_err(storage)?;
-                    if evidence.encode_size() > bytes / 2 {
-                        return Err(PermissionError::Limit.into());
-                    }
-                    evidence.encode()
-                };
+                let evidence = point_evidence(a, &key, value.is_some(), bytes / 2).await?;
                 PermissionRead::CurrentPoint {
                     key: key.into(),
                     value: value.map(Into::into),
@@ -99,17 +90,6 @@ pub async fn permission_proof_at(
     // Current-state evidence is bound to the supplied root; it has no separate height field.
     verify_permission_proof(expected, 0, policy, request, &proof, limits)?;
     Ok(proof)
-}
-
-fn charge(remaining: &mut usize, amount: usize) -> Result<(), PermissionError> {
-    *remaining = remaining
-        .checked_sub(amount)
-        .ok_or(PermissionError::Limit)?;
-    Ok(())
-}
-
-fn storage(error: impl std::fmt::Display) -> BackendError {
-    BackendError::Storage(error.to_string())
 }
 
 pub(super) async fn prefix_proof(

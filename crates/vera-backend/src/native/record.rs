@@ -1,8 +1,10 @@
 use alloy_primitives::B256;
-use commonware_codec::{Encode as _, EncodeSize as _};
 use vera_permission::{ModuleId, PermissionError, RECORD_PROOF_BYTES, RecordProof};
 
-use super::{BackendError, MAX_KEY_BYTES, NativeDb, combine_module_roots};
+use super::{
+    BackendError, MAX_KEY_BYTES, NativeDb, combine_module_roots,
+    evidence::{point_evidence, storage},
+};
 
 /// Prove a current record while the caller retains all four partition read guards.
 pub async fn record_proof_at(
@@ -21,19 +23,7 @@ pub async fn record_proof_at(
     let db = databases[module.index()];
     let key = key.to_vec();
     let value = db.get(&key).await.map_err(storage)?;
-    let proof = if value.is_some() {
-        let proof = db.key_value_proof(key.clone()).await.map_err(storage)?;
-        if proof.encode_size() > RECORD_PROOF_BYTES / 2 {
-            return Err(PermissionError::Limit.into());
-        }
-        proof.encode()
-    } else {
-        let proof = db.exclusion_proof(&key).await.map_err(storage)?;
-        if proof.encode_size() > RECORD_PROOF_BYTES / 2 {
-            return Err(PermissionError::Limit.into());
-        }
-        proof.encode()
-    };
+    let proof = point_evidence(db, &key, value.is_some(), RECORD_PROOF_BYTES / 2).await?;
     let record = RecordProof {
         module,
         key: key.into(),
@@ -43,8 +33,4 @@ pub async fn record_proof_at(
     };
     record.verify(expected, module, &record.key, RECORD_PROOF_BYTES)?;
     Ok(record)
-}
-
-fn storage(error: impl std::fmt::Display) -> BackendError {
-    BackendError::Storage(error.to_string())
 }

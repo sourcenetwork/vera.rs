@@ -30,7 +30,7 @@ use vera_modules::module_state::{ModuleState, SharedModuleState};
 use vera_modules::native_account::NativeNonceStore;
 use vera_modules::types::{BlockExecCtx, Timestamp, TxExecCtx};
 use vera_modules::vera::VeraModule;
-use vera_traits::StateDb;
+use vera_traits::StateDbRead;
 
 use crate::precompiles::{
     DispatchReturn, VALIDATOR_REGISTRY_ADDRESS, VeraPrecompiles, dispatch_to_module,
@@ -328,7 +328,7 @@ impl VeraExecutor {
 
 impl VeraExecutor {
     /// Execute against an owned parent snapshot without replacing query state.
-    pub fn execute_with_modules<S: StateDb>(
+    pub fn execute_with_modules<S: StateDbRead>(
         &self,
         state: &S,
         context: &BlockContext,
@@ -599,8 +599,7 @@ impl VeraExecutor {
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{Address, B256, Bytes, FixedBytes, KECCAK256_EMPTY};
-    use vera_qmdb::ChangeSet;
-    use vera_traits::{StateDb, StateDbError, StateDbRead, StateDbWrite};
+    use vera_traits::{StateDbError, StateDbRead};
 
     use super::*;
     use crate::precompiles::{ACP_ADDRESS, BULLETIN_ADDRESS, VERA_ADDRESS};
@@ -623,24 +622,6 @@ mod tests {
         }
         async fn storage(&self, _address: &Address, _slot: &U256) -> Result<U256, StateDbError> {
             Ok(U256::ZERO)
-        }
-    }
-
-    impl StateDbWrite for MockStateDb {
-        async fn commit(&self, _changes: ChangeSet) -> Result<B256, StateDbError> {
-            Ok(B256::ZERO)
-        }
-        async fn compute_root(&self, _changes: &ChangeSet) -> Result<B256, StateDbError> {
-            Ok(B256::ZERO)
-        }
-        fn merge_changes(&self, _older: ChangeSet, newer: ChangeSet) -> ChangeSet {
-            newer
-        }
-    }
-
-    impl StateDb for MockStateDb {
-        async fn state_root(&self) -> Result<B256, StateDbError> {
-            Ok(B256::ZERO)
         }
     }
 

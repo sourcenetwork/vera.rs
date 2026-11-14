@@ -32,6 +32,7 @@ pub use sync_proof::SyncProof;
 
 pub use vera_permission::current::{MAX_KEY_BYTES, MAX_VALUE_BYTES};
 
+mod evidence;
 mod record;
 pub use record::record_proof_at;
 mod prefix;

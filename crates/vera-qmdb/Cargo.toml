@@ -6,17 +6,13 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Pure QMDB store logic for vera"
+description = "EVM change sets, record encodings and the combined state root for vera"
 
 [dependencies]
 alloy-primitives.workspace = true
 
-# Error handling
-thiserror.workspace = true
-
 [dev-dependencies]
 rstest.workspace = true
-tokio = { workspace = true, features = ["rt", "macros"] }
 
 [lints]
 workspace = true

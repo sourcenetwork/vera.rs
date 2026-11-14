@@ -10,7 +10,7 @@ use alloy_primitives::{Address, B256, Bytes, U256};
 use rstest::rstest;
 use vera_executor::{BlockContext, VeraExecutor};
 use vera_qmdb::{AccountUpdate, ChangeSet};
-use vera_traits::{StateDb, StateDbError, StateDbRead, StateDbWrite};
+use vera_traits::{StateDbError, StateDbRead};
 
 /// Account data stored in the mock state database.
 #[derive(Clone, Debug, Default)]
@@ -32,8 +32,6 @@ struct MockStateDb {
     accounts: Arc<RwLock<HashMap<Address, MockAccount>>>,
     /// Contract code indexed by code hash.
     code: Arc<RwLock<HashMap<B256, Bytes>>>,
-    /// Current state root.
-    state_root: Arc<RwLock<B256>>,
 }
 
 impl MockStateDb {
@@ -109,8 +107,9 @@ impl StateDbRead for MockStateDb {
     }
 }
 
-impl StateDbWrite for MockStateDb {
-    async fn commit(&self, changes: ChangeSet) -> Result<B256, StateDbError> {
+impl MockStateDb {
+    /// Apply an executed change set the way the backend does.
+    fn commit(&self, changes: ChangeSet) {
         let mut accounts = self.accounts.write().unwrap();
         let mut code_store = self.code.write().unwrap();
 
@@ -137,27 +136,6 @@ impl StateDbWrite for MockStateDb {
                 }
             }
         }
-
-        // Generate a simple state root from account count.
-        let root = B256::from_slice(&[accounts.len() as u8; 32]);
-        *self.state_root.write().unwrap() = root;
-        Ok(root)
-    }
-
-    async fn compute_root(&self, _changes: &ChangeSet) -> Result<B256, StateDbError> {
-        // Simplified: just return current state root.
-        Ok(*self.state_root.read().unwrap())
-    }
-
-    fn merge_changes(&self, mut older: ChangeSet, newer: ChangeSet) -> ChangeSet {
-        older.merge(newer);
-        older
-    }
-}
-
-impl StateDb for MockStateDb {
-    async fn state_root(&self) -> Result<B256, StateDbError> {
-        Ok(*self.state_root.read().unwrap())
     }
 }
 
@@ -321,9 +299,8 @@ async fn test_mock_state_db_commit_stores_changes() {
         },
     );
 
-    let root = state.commit(changes).await.unwrap();
+    state.commit(changes);
 
-    assert_ne!(root, B256::ZERO);
     assert_eq!(state.nonce(&address).await.unwrap(), 10);
     assert_eq!(state.balance(&address).await.unwrap(), U256::from(5000));
 }
@@ -358,7 +335,7 @@ async fn test_mock_state_db_commit_handles_selfdestruct() {
         },
     );
 
-    state.commit(changes).await.unwrap();
+    state.commit(changes);
 
     assert!(matches!(
         state.nonce(&address).await,
@@ -387,7 +364,7 @@ async fn test_mock_state_db_commit_stores_code() {
         },
     );
 
-    state.commit(changes).await.unwrap();
+    state.commit(changes);
 
     assert_eq!(state.code(&code_hash).await.unwrap(), Bytes::from(code));
 }
@@ -411,107 +388,6 @@ async fn test_mock_state_db_insert_code() {
     state.insert_code(code_hash, code.clone());
 
     assert_eq!(state.code(&code_hash).await.unwrap(), code);
-}
-
-#[tokio::test]
-async fn test_mock_state_db_state_root() {
-    let state = MockStateDb::new();
-
-    let root = state.state_root().await.unwrap();
-
-    assert_eq!(root, B256::ZERO);
-}
-
-#[test]
-fn test_mock_state_db_merge_changes() {
-    let state = MockStateDb::new();
-    let address = Address::from([0x01; 20]);
-
-    let mut older = ChangeSet::new();
-    older.insert(
-        address,
-        AccountUpdate {
-            created: true,
-            selfdestructed: false,
-            nonce: 1,
-            balance: U256::from(100),
-            code_hash: B256::ZERO,
-            code: None,
-            storage: std::collections::BTreeMap::new(),
-        },
-    );
-
-    let mut newer = ChangeSet::new();
-    newer.insert(
-        address,
-        AccountUpdate {
-            created: false,
-            selfdestructed: false,
-            nonce: 5,
-            balance: U256::from(500),
-            code_hash: B256::ZERO,
-            code: None,
-            storage: std::collections::BTreeMap::new(),
-        },
-    );
-
-    let merged = state.merge_changes(older, newer);
-
-    let update = merged.accounts.get(&address).unwrap();
-    assert_eq!(update.nonce, 5);
-    assert_eq!(update.balance, U256::from(500));
-}
-
-// ----------------------------------------------------------------------------
-// Tests for exists() default implementation
-// ----------------------------------------------------------------------------
-
-#[tokio::test]
-async fn test_mock_state_db_exists_returns_false_for_missing_account() {
-    let state = MockStateDb::new();
-    let address = Address::from([0x01; 20]);
-
-    assert!(!state.exists(&address).await.unwrap());
-}
-
-#[tokio::test]
-async fn test_mock_state_db_exists_returns_true_for_account_with_nonce() {
-    let state = MockStateDb::new();
-    let address = Address::from([0x01; 20]);
-    state.insert_account(
-        address,
-        MockAccount {
-            nonce: 1,
-            ..Default::default()
-        },
-    );
-
-    assert!(state.exists(&address).await.unwrap());
-}
-
-#[tokio::test]
-async fn test_mock_state_db_exists_returns_true_for_account_with_balance() {
-    let state = MockStateDb::new();
-    let address = Address::from([0x01; 20]);
-    state.insert_account(
-        address,
-        MockAccount {
-            nonce: 0,
-            balance: U256::from(1),
-            ..Default::default()
-        },
-    );
-
-    assert!(state.exists(&address).await.unwrap());
-}
-
-#[tokio::test]
-async fn test_mock_state_db_exists_returns_false_for_empty_account() {
-    let state = MockStateDb::new();
-    let address = Address::from([0x01; 20]);
-    state.insert_account(address, MockAccount::default());
-
-    assert!(!state.exists(&address).await.unwrap());
 }
 
 // ----------------------------------------------------------------------------
@@ -562,6 +438,9 @@ mod encoding;
 
 #[path = "executor/rollback.rs"]
 mod rollback;
+
+#[path = "executor/evm_state.rs"]
+mod evm_state;
 
 #[path = "executor/sequence.rs"]
 mod sequence;

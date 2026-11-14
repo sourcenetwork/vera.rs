@@ -7409,16 +7409,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vera-overlay"
-version = "0.1.2"
-dependencies = [
- "alloy-primitives",
- "tokio",
- "vera-qmdb",
- "vera-traits",
-]
-
-[[package]]
 name = "vera-permission"
 version = "0.1.2"
 dependencies = [
@@ -7442,8 +7432,6 @@ version = "0.1.2"
 dependencies = [
  "alloy-primitives",
  "rstest",
- "thiserror 2.0.18",
- "tokio",
 ]
 
 [[package]]
@@ -7467,7 +7455,6 @@ version = "0.1.2"
 dependencies = [
  "alloy-primitives",
  "thiserror 2.0.18",
- "vera-qmdb",
 ]
 
 [[package]]

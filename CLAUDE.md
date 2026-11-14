@@ -423,10 +423,9 @@ vera.rs/
         vera-jsonrpc/           # Native vera_* RPC, subscriptions and compatibility methods
         vera-modules/           # ACP, Bulletin, Vera, ValidatorRegistry module logic
         vera-node/              # Validator assembly: p2p, marshal, DKG, stateful glue, RPC
-        vera-overlay/           # Overlay state for unpersisted QMDB changes
         vera-permission/        # Permission/record/prefix evidence types and verification
-        vera-qmdb/              # Core QMDB abstractions and traits
-        vera-traits/            # StateDb trait abstractions for storage/consensus
+        vera-qmdb/              # EVM change sets, record encodings, combined state root
+        vera-traits/            # StateDbRead trait for EVM state reads
         vera-test-infra/            # Shared test primitives: process, ports, logs, binary resolver
         vera-verifier/          # C shared-library verifier for receipts, records, prefixes and policies
 ```
