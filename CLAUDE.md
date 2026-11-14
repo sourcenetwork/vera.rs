@@ -195,7 +195,14 @@ A module call that fails on what its caller sent (an unknown selector, calldata
 that does not decode, an argument out of bounds) rejects that request with a
 failed receipt, and the block goes on. Only an error marked as the node's own
 (`precompiles::internal_fault`: stored membership or policy state that does not
-read back) fails the block. ACP and token lifecycle errors reject proposal execution and re-verification.
+read back) fails the block, including inside an ACP batch. A call that exhausts
+its gas allowance is a failure too: nothing it wrote is kept, a native request
+is charged its full limit, and a contract's call returns no gas.
+Only a transaction's own call to a module carries its signer's authority. A call
+made by contract code, DELEGATECALL and CALLCODE included, has no signer, and a
+method that needs one refuses it.
+EVM transactions execute only in their canonical EIP-2718 encoding, and a legacy
+transaction must carry a chain ID. ACP and token lifecycle errors reject proposal execution and re-verification.
 Malformed token records encountered during reads or expiry are errors, including a mismatch between the storage key
 and the record's token hash. Failed lifecycle work cannot publish its module view. Token expiry uses an ordered
 deadline index, leaving invalidated and non-expiring tokens out of each revision's

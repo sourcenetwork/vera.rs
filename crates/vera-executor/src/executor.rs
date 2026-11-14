@@ -5,9 +5,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::{
-    BlockContext, BlockExecutor, ExecutionConfig, ExecutionError, ExecutionOutcome,
-    ExecutionReceipt, ModuleSnapshot, StateDbAdapter, build_receipt, decode_evm_tx,
-    extract_changes,
+    BlockContext, ExecutionConfig, ExecutionError, ExecutionOutcome, ExecutionReceipt,
+    ModuleSnapshot, StateDbAdapter, build_receipt, decode_evm_tx, extract_changes,
 };
 use alloy_primitives::{B256, Bytes, U256, keccak256};
 use commonware_parallel::{Rayon, Sequential, Strategy};
@@ -34,9 +33,14 @@ use vera_modules::vera::VeraModule;
 use vera_traits::StateDb;
 
 use crate::precompiles::{
-    ACP_ADDRESS, BULLETIN_ADDRESS, VALIDATOR_REGISTRY_ADDRESS, VERA_ADDRESS, VeraPrecompiles,
-    dispatch_to_module,
+    ACP_ADDRESS, BULLETIN_ADDRESS, DispatchReturn, VALIDATOR_REGISTRY_ADDRESS, VERA_ADDRESS,
+    VeraPrecompiles, dispatch_to_module,
 };
+
+/// Whether a module call ran to completion: not a revert, a halt, an error or a panic.
+fn succeeded(dispatch: &std::thread::Result<DispatchReturn>) -> bool {
+    matches!(dispatch, Ok(Ok(result)) if result.precompile.status.is_success())
+}
 
 /// Gas budget for native BLS transactions dispatched to modules.
 const NATIVE_TX_GAS_LIMIT: u64 = 1_000_000;
@@ -264,7 +268,7 @@ impl VeraExecutor {
             .expect("target validated above")
         }));
 
-        if matches!(&dispatch_result, Ok(Ok(result)) if !result.precompile.status.is_revert())
+        if succeeded(&dispatch_result)
             && !(acp.store().changes_fit_native_bounds(before.0.store())
                 && bulletin.store().changes_fit_native_bounds(before.1.store())
                 && vera.store().changes_fit_native_bounds(before.2.store()))
@@ -275,11 +279,12 @@ impl VeraExecutor {
             dispatch_result = Ok(Ok(rejected));
         }
 
-        if !matches!(&dispatch_result, Ok(Ok(result)) if !result.precompile.status.is_revert()) {
+        // A halt is a failure like a revert: an exhausted allowance commits nothing.
+        if succeeded(&dispatch_result) {
+            journal.journal_mut().checkpoint_commit();
+        } else {
             (*acp, *bulletin, *vera) = before;
             journal.journal_mut().checkpoint_revert(checkpoint);
-        } else {
-            journal.journal_mut().checkpoint_commit();
         }
 
         let failed_receipt = || {
@@ -294,7 +299,7 @@ impl VeraExecutor {
         };
 
         match dispatch_result {
-            Ok(Ok(result)) if !result.precompile.status.is_revert() => Ok(ExecutionReceipt::new(
+            Ok(Ok(result)) if result.precompile.status.is_success() => Ok(ExecutionReceipt::new(
                 tx_hash,
                 true,
                 result.precompile.gas_used,
@@ -476,7 +481,7 @@ impl VeraExecutor {
 
             let tx_hash = keccak256(tx_bytes);
 
-            let (tx_env, signer_did) = match decode_evm_tx(tx_bytes, self.config.chain_id) {
+            let (tx_env, signer_did) = match decode_evm_tx(tx_bytes) {
                 Ok(r) => r,
                 Err(ExecutionError::TxDecode(msg)) if building => {
                     warn!(%tx_hash, msg, "skipping tx: decode error");
@@ -593,37 +598,6 @@ impl VeraExecutor {
     }
 }
 
-impl<S: StateDb> BlockExecutor<S> for VeraExecutor {
-    type Tx = Bytes;
-
-    fn execute(
-        &self,
-        state: &S,
-        context: &BlockContext,
-        txs: &[Self::Tx],
-    ) -> Result<ExecutionOutcome, ExecutionError> {
-        let modules = self.snapshot();
-        self.execute_with_modules(state, context, txs, modules)
-            .map(|(outcome, _)| outcome)
-    }
-
-    fn validate_header(&self, header: &alloy_consensus::Header) -> Result<(), ExecutionError> {
-        if header.gas_limit < self.config.gas_limit_bounds.min {
-            return Err(ExecutionError::BlockValidation(format!(
-                "gas limit {} below minimum {}",
-                header.gas_limit, self.config.gas_limit_bounds.min
-            )));
-        }
-        if header.gas_limit > self.config.gas_limit_bounds.max {
-            return Err(ExecutionError::BlockValidation(format!(
-                "gas limit {} above maximum {}",
-                header.gas_limit, self.config.gas_limit_bounds.max
-            )));
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{Address, B256, Bytes, FixedBytes, KECCAK256_EMPTY};
@@ -671,6 +645,16 @@ mod tests {
         }
     }
 
+    fn execute(
+        executor: &VeraExecutor,
+        context: &BlockContext,
+        txs: &[Bytes],
+    ) -> Result<ExecutionOutcome, ExecutionError> {
+        executor
+            .execute_with_modules(&MockStateDb, context, txs, executor.snapshot())
+            .map(|(outcome, _)| outcome)
+    }
+
     fn test_executor() -> VeraExecutor {
         VeraExecutor::new(9001)
     }
@@ -705,7 +689,6 @@ mod tests {
         use alloy_consensus::Header;
 
         let executor = test_executor();
-        let state = MockStateDb;
         let header = Header {
             number: 1,
             timestamp: 1_700_000_000,
@@ -715,7 +698,7 @@ mod tests {
         };
         let context = BlockContext::new(header, B256::ZERO, B256::ZERO);
         let txs: Vec<Bytes> = vec![];
-        let outcome = executor.execute(&state, &context, &txs).unwrap();
+        let outcome = execute(&executor, &context, &txs).unwrap();
         assert_eq!(outcome.gas_used, 0);
         assert!(outcome.receipts.is_empty());
         assert_ne!(outcome.module_state_root, B256::ZERO);
@@ -905,19 +888,6 @@ mod tests {
     }
 
     #[test]
-    fn vera_executor_validate_header() {
-        let executor = test_executor();
-        let header = alloy_consensus::Header {
-            gas_limit: 30_000_000,
-            ..Default::default()
-        };
-        assert!(
-            <VeraExecutor as BlockExecutor<MockStateDb>>::validate_header(&executor, &header)
-                .is_ok()
-        );
-    }
-
-    #[test]
     fn parallel_native_authentication_preserves_execution_and_error_order() {
         let sequential = test_executor();
         let parallel = test_executor().with_native_verification_strategy(
@@ -942,8 +912,8 @@ mod tests {
             B256::ZERO,
         );
         let before = parallel.snapshot().modules.state_root();
-        let expected = sequential.execute(&MockStateDb, &context, &txs).unwrap();
-        let actual = parallel.execute(&MockStateDb, &context, &txs).unwrap();
+        let expected = execute(&sequential, &context, &txs).unwrap();
+        let actual = execute(&parallel, &context, &txs).unwrap();
         assert_eq!(actual.receipts.len(), 64);
         assert_eq!(actual.executed_tx_indices, expected.executed_tx_indices);
         assert_eq!(actual.module_state_root, expected.module_state_root);
@@ -958,25 +928,19 @@ mod tests {
             .into_iter()
             .map(|i| txs[i].clone())
             .collect();
-        let verified = parallel
-            .execute(
-                &MockStateDb,
-                &context.clone().with_verification(),
-                &included,
-            )
-            .unwrap();
+        let verified = execute(&parallel, &context.clone().with_verification(), &included).unwrap();
         assert_eq!(verified.module_state_root, actual.module_state_root);
         assert_eq!(
             serde_json::to_value(verified.receipts).unwrap(),
             serde_json::to_value(actual.receipts).unwrap()
         );
         assert!(matches!(
-            parallel.execute(&MockStateDb, &context.clone().with_verification(), &txs),
+            execute(&parallel, &context.clone().with_verification(), &txs),
             Err(ExecutionError::BlsVerification(_))
         ));
         txs.swap(3, 5);
         assert!(matches!(
-            parallel.execute(&MockStateDb, &context.with_verification(), &txs),
+            execute(&parallel, &context.with_verification(), &txs),
             Err(ExecutionError::NonceMismatch { .. })
         ));
         assert_eq!(parallel.snapshot().modules.state_root(), before);
@@ -1138,7 +1102,6 @@ mod tests {
         use alloy_consensus::Header;
 
         let executor = test_executor();
-        let state = MockStateDb;
         let header = Header {
             number: 1,
             timestamp: 1_700_000_000,
@@ -1153,7 +1116,7 @@ mod tests {
         let bad_native = Bytes::from(vec![0x45, 0xFF, 0xFF]);
         let txs = vec![bad_native];
 
-        let outcome = executor.execute(&state, &context, &txs).unwrap();
+        let outcome = execute(&executor, &context, &txs).unwrap();
         // Invalid tx should be skipped
         assert!(outcome.receipts.is_empty());
         assert_eq!(outcome.gas_used, 0);
@@ -1165,7 +1128,6 @@ mod tests {
         use alloy_consensus::Header;
 
         let executor = test_executor();
-        let state = MockStateDb;
         let header = Header {
             number: 1,
             timestamp: 1_700_000_000,
@@ -1177,7 +1139,7 @@ mod tests {
         let txs: Vec<Bytes> = vec![];
 
         // Should not panic — end-block hooks are no-ops
-        let outcome = executor.execute(&state, &context, &txs).unwrap();
+        let outcome = execute(&executor, &context, &txs).unwrap();
         assert_eq!(outcome.gas_used, 0);
     }
 

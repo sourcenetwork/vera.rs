@@ -60,7 +60,6 @@ fn signed(state: &MockStateDb, key: u8, nonce: u64, revert: bool) -> (Address, B
 fn execute(
     state: &MockStateDb,
     txs: &[Bytes],
-    vera: bool,
     verify: bool,
 ) -> Result<ExecutionOutcome, ExecutionError> {
     let mut context = BlockContext::new(
@@ -73,24 +72,18 @@ fn execute(
         B256::ZERO,
     );
     context.is_verification = verify;
-    if vera {
-        let executor = VeraExecutor::new(9001);
-        executor
-            .execute_with_modules(state, &context, txs, executor.snapshot())
-            .map(|(outcome, _)| outcome)
-    } else {
-        RevmExecutor::new(9001).execute(state, &context, txs)
-    }
+    let executor = VeraExecutor::new(9001);
+    executor
+        .execute_with_modules(state, &context, txs, executor.snapshot())
+        .map(|(outcome, _)| outcome)
 }
 
-#[rstest]
-#[case(false)]
-#[case(true)]
-fn consecutive_operations_advance_account_and_storage(#[case] vera: bool) {
+#[test]
+fn consecutive_operations_advance_account_and_storage() {
     let state = fixture();
     let (actor, first) = signed(&state, 0x42, 0, false);
     let (_, second) = signed(&state, 0x42, 1, false);
-    let outcome = execute(&state, &[first, second], vera, true).unwrap();
+    let outcome = execute(&state, &[first, second], true).unwrap();
     assert_eq!(outcome.receipts.len(), 2);
     assert!(outcome.receipts.iter().all(|receipt| receipt.success()));
     assert_eq!(outcome.changes.accounts[&actor].nonce, 2);
@@ -103,23 +96,19 @@ fn consecutive_operations_advance_account_and_storage(#[case] vera: bool) {
     assert!(original[&CONTRACT].storage.is_empty());
 }
 
-#[rstest]
-#[case(false)]
-#[case(true)]
-fn verification_rejects_repeated_operation(#[case] vera: bool) {
+#[test]
+fn verification_rejects_repeated_operation() {
     let state = fixture();
     let (_, tx) = signed(&state, 0x42, 0, false);
-    assert!(execute(&state, &[tx.clone(), tx], vera, true).is_err());
+    assert!(execute(&state, &[tx.clone(), tx], true).is_err());
 }
 
-#[rstest]
-#[case(false)]
-#[case(true)]
-fn different_actors_observe_prior_storage_writes(#[case] vera: bool) {
+#[test]
+fn different_actors_observe_prior_storage_writes() {
     let state = fixture();
     let (_, first) = signed(&state, 0x42, 0, false);
     let (_, second) = signed(&state, 0x43, 0, false);
-    let outcome = execute(&state, &[first, second], vera, true).unwrap();
+    let outcome = execute(&state, &[first, second], true).unwrap();
     assert!(outcome.receipts.iter().all(|receipt| receipt.success()));
     assert_eq!(
         outcome.changes.accounts[&CONTRACT].storage[&U256::ZERO],
@@ -133,7 +122,7 @@ fn skipped_operation_preserves_prior_changes() {
     let (actor, first) = signed(&state, 0x42, 0, false);
     let (_, invalid) = signed(&state, 0x42, 7, false);
     let (_, second) = signed(&state, 0x42, 1, false);
-    let outcome = execute(&state, &[first, invalid, second], true, false).unwrap();
+    let outcome = execute(&state, &[first, invalid, second], false).unwrap();
     assert_eq!(outcome.executed_tx_indices, Some(vec![0, 2]));
     assert_eq!(outcome.changes.accounts[&actor].nonce, 2);
     assert_eq!(
@@ -142,14 +131,12 @@ fn skipped_operation_preserves_prior_changes() {
     );
 }
 
-#[rstest]
-#[case(false)]
-#[case(true)]
-fn reverted_operation_consumes_sequence_without_storage_write(#[case] vera: bool) {
+#[test]
+fn reverted_operation_consumes_sequence_without_storage_write() {
     let state = fixture();
     let (actor, first) = signed(&state, 0x42, 0, true);
     let (_, second) = signed(&state, 0x42, 1, false);
-    let outcome = execute(&state, &[first, second], vera, true).unwrap();
+    let outcome = execute(&state, &[first, second], true).unwrap();
     assert!(!outcome.receipts[0].success());
     assert!(outcome.receipts[1].success());
     assert_eq!(outcome.changes.accounts[&actor].nonce, 2);

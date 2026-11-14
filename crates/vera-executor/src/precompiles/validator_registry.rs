@@ -747,60 +747,7 @@ pub(crate) fn dispatch_with_journal<CTX: ContextTr>(
 }
 
 fn evm_address_from_signer(signer: &str) -> Address {
-    if signer.starts_with("0x") || signer.starts_with("0X") {
-        signer.parse().unwrap_or(Address::ZERO)
-    } else if signer.starts_with("did:key:") {
-        vera_crypto::secp256k1::evm_address_from_did(signer).unwrap_or(Address::ZERO)
-    } else {
-        Address::ZERO
-    }
-}
-
-/// Compute the storage entries needed to bootstrap validators at genesis.
-#[allow(dead_code)]
-pub(crate) fn genesis_storage_entries(
-    validators: &[GenesiValidator],
-    policy_id_hash: B256,
-) -> Vec<(U256, U256)> {
-    let mut entries = Vec::new();
-
-    entries.push((SLOT_POLICY_ID, U256::from_be_bytes(policy_id_hash.0)));
-    entries.push((SLOT_VALIDATOR_COUNT, U256::from(validators.len())));
-
-    for (i, v) in validators.iter().enumerate() {
-        let addr_slot = array_element_slot(SLOT_VALIDATORS_ARRAY_BASE, i as u64);
-        entries.push((addr_slot, address_to_padded_u256(v.evm_address)));
-
-        let entry_base = mapping_slot(v.evm_address, SLOT_VALIDATORS_MAPPING_BASE);
-        entries.push((entry_base, pack_address_active(v.evm_address, true)));
-        entries.push((
-            entry_base.wrapping_add(U256::from(1)),
-            U256::from_be_bytes(v.consensus_pubkey),
-        ));
-        entries.push((entry_base.wrapping_add(U256::from(2)), U256::from(i)));
-        let p2p_bytes = v.p2p_address.as_bytes();
-        entries.push((
-            entry_base.wrapping_add(U256::from(3)),
-            U256::from(p2p_bytes.len()),
-        ));
-        let mut padded = [0u8; 32];
-        let copy_len = p2p_bytes.len().min(32);
-        padded[..copy_len].copy_from_slice(&p2p_bytes[..copy_len]);
-        entries.push((
-            entry_base.wrapping_add(U256::from(4)),
-            U256::from_be_bytes(padded),
-        ));
-    }
-
-    entries
-}
-
-/// Genesis-time validator descriptor (uses native types, not serializable strings).
-#[allow(dead_code)]
-pub(crate) struct GenesiValidator {
-    pub evm_address: Address,
-    pub consensus_pubkey: [u8; 32],
-    pub p2p_address: String,
+    vera_crypto::secp256k1::evm_address_from_did(signer).unwrap_or(Address::ZERO)
 }
 
 #[cfg(test)]
@@ -843,31 +790,14 @@ mod tests {
     }
 
     #[test]
-    fn genesis_storage_entries_roundtrip() {
-        let validators = vec![GenesiValidator {
-            evm_address: Address::repeat_byte(0x01),
-            consensus_pubkey: [0xAA; 32],
-            p2p_address: "127.0.0.1:30300".to_string(),
-        }];
-        let policy_id = B256::repeat_byte(0xFF);
-        let entries = genesis_storage_entries(&validators, policy_id);
-
-        assert!(entries.len() > 2);
-        assert_eq!(entries[0].0, SLOT_POLICY_ID);
-        assert_eq!(entries[1].0, SLOT_VALIDATOR_COUNT);
-        assert_eq!(entries[1].1, U256::from(1));
-    }
-
-    #[test]
-    fn evm_address_from_signer_hex() {
-        let addr = evm_address_from_signer("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
-        assert_ne!(addr, Address::ZERO);
-    }
-
-    #[test]
-    fn evm_address_from_signer_did() {
-        let addr = evm_address_from_signer("did:key:z6MkTest");
-        assert_eq!(addr, Address::ZERO);
+    fn a_signer_without_a_secp256k1_key_has_no_address() {
+        for signer in [
+            "",
+            "did:key:z6MkTest",
+            "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        ] {
+            assert_eq!(evm_address_from_signer(signer), Address::ZERO);
+        }
     }
 
     #[test]

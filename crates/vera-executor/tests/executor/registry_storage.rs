@@ -447,6 +447,38 @@ fn native_membership_rejects_truncated_record_fields(#[case] offset: u64, #[case
 }
 
 #[rstest]
+#[case(0xf1)]
+#[case(0xf2)]
+#[case(0xf4)]
+fn a_called_contract_cannot_change_membership_as_the_signer(#[case] opcode: u8) {
+    let (state, executor) = authorized_state();
+    let contract = Address::repeat_byte(0x22);
+    super::rollback::install(
+        &state,
+        contract,
+        super::rollback::requiring_code(VALIDATOR_REGISTRY_ADDRESS, opcode, None),
+    );
+    let calldata = IValidatorRegistry::addValidatorCall {
+        evmAddr: Address::repeat_byte(0x11),
+        consensusPubkey: "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+            .parse()
+            .unwrap(),
+        p2pAddr: "127.0.0.1:3000".into(),
+    }
+    .abi_encode();
+    let (outcome, _) =
+        execute_with_executor(&state, TxKind::Call(contract), calldata.into(), executor);
+    assert_eq!(outcome.receipts.len(), 1);
+    assert!(!outcome.receipts[0].success());
+    assert!(
+        !outcome
+            .changes
+            .accounts
+            .contains_key(&VALIDATOR_REGISTRY_ADDRESS)
+    );
+}
+
+#[rstest]
 #[case(None)]
 #[case(Some(false))]
 #[case(Some(true))]

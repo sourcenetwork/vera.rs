@@ -3,7 +3,6 @@
 use alloy_consensus::TxEnvelope;
 use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Bytes, TxKind, U256};
-use alloy_rlp::Decodable;
 use vera_traits::StateDb;
 
 use crate::{ExecutionConfig, ExecutionError};
@@ -60,8 +59,7 @@ impl<'a> TxValidator<'a> {
         tx_bytes: &Bytes,
         state: &S,
     ) -> Result<ValidatedTx, ExecutionError> {
-        let envelope = TxEnvelope::decode(&mut tx_bytes.as_ref())
-            .map_err(|e| ExecutionError::TxDecode(format!("{}", e)))?;
+        let envelope = crate::envelope::decode_envelope(tx_bytes)?;
 
         self.validate_envelope(&envelope, state).await
     }

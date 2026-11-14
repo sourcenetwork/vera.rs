@@ -561,3 +561,22 @@ fn oversized_policy_id_listing_keeps_read_charges_and_rolls_back_earlier_batch_w
     assert!(result.logs.is_empty());
     assert_eq!(fixture.state(), before);
 }
+
+#[test]
+fn a_batch_keeps_node_faults_and_exhaustion_distinct_from_refusals() {
+    use crate::precompiles::internal_fault;
+
+    let fault = batch_error(2, internal_fault("stored policy does not read back"));
+    assert_eq!(
+        internal_fault_reason(&fault).as_deref(),
+        Some("stored policy does not read back")
+    );
+    assert!(is_out_of_gas(&batch_error(2, out_of_gas_error())));
+
+    let refusal = batch_error(2, PrecompileError::Fatal("policy not found".to_string()));
+    assert_eq!(internal_fault_reason(&refusal), None);
+    assert_eq!(
+        recoverable_message(&refusal),
+        "batch call 3: policy not found"
+    );
+}

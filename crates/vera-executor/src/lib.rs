@@ -1,4 +1,4 @@
-//! Block execution abstractions, REVM implementation, and vera precompiles.
+//! Block execution over REVM with the vera module precompiles.
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
@@ -6,10 +6,12 @@ mod adapter;
 pub use adapter::StateDbAdapter;
 
 mod config;
-pub use config::{BaseFeeParams, ExecutionConfig, GasLimitBounds};
+pub use config::ExecutionConfig;
 
 mod context;
-pub use context::{BlockContext, ParentBlock};
+pub use context::BlockContext;
+
+mod envelope;
 
 mod error;
 pub use error::ExecutionError;
@@ -23,12 +25,9 @@ pub use vera_domain::receipt_commitment;
 
 mod revm;
 pub use revm::{
-    RevmExecutor, SpecId, build_receipt, calculate_base_fee, convert_access_list,
-    convert_authorization_list, convert_tx_kind, decode_evm_tx, decode_tx_env, extract_changes,
+    SpecId, build_receipt, convert_access_list, convert_authorization_list, convert_tx_kind,
+    decode_evm_tx, extract_changes,
 };
-
-mod traits;
-pub use traits::BlockExecutor;
 
 mod validation;
 pub use validation::{

@@ -47,8 +47,8 @@ use vera_modules::vera::VeraModule;
 
 use super::{
     ACP_ADDRESS, DispatchResult, DispatchReturn, decode_error, did_from_signer, err_dispatch,
-    event_log, is_out_of_gas, json_bytes, ok_dispatch, oog_dispatch, out_of_gas_error,
-    recoverable_message,
+    event_log, internal_fault_reason, is_out_of_gas, json_bytes, ok_dispatch, oog_dispatch,
+    out_of_gas_error, recoverable_message,
 };
 
 /// Base gas cost for reads and each batch wrapper.
@@ -210,7 +210,8 @@ fn batch_revert(
 }
 
 fn batch_error(index: usize, err: PrecompileError) -> PrecompileError {
-    if is_out_of_gas(&err) {
+    // Both are recognised by their leading sentinel, which a prefix would hide.
+    if is_out_of_gas(&err) || internal_fault_reason(&err).is_some() {
         return err;
     }
     match err {

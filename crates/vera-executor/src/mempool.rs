@@ -341,8 +341,8 @@ impl<S: StateDb> MempoolValidator<S> {
 #[cfg(test)]
 mod tests {
     use alloy_consensus::{SignableTransaction, TxEip1559, TxEnvelope};
+    use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{Address, B256, FixedBytes, KECCAK256_EMPTY, TxKind, U256};
-    use alloy_rlp::Encodable;
     use alloy_signer::SignerSync;
     use alloy_signer_local::PrivateKeySigner;
     use vera_qmdb::ChangeSet;
@@ -430,9 +430,7 @@ mod tests {
         let signature = signer.sign_hash_sync(&sig_hash).expect("sign");
         let signed = tx.into_signed(signature);
         let envelope = TxEnvelope::Eip1559(signed);
-        let mut buf = Vec::new();
-        envelope.encode(&mut buf);
-        buf
+        envelope.encoded_2718()
     }
 
     fn test_bls_keypair() -> (ark_bls12_381::Fr, Vec<u8>) {

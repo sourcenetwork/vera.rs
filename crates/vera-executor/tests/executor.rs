@@ -8,7 +8,7 @@ use std::{
 use alloy_consensus::Header;
 use alloy_primitives::{Address, B256, Bytes, U256};
 use rstest::rstest;
-use vera_executor::{BlockContext, BlockExecutor, RevmExecutor};
+use vera_executor::{BlockContext, VeraExecutor};
 use vera_qmdb::{AccountUpdate, ChangeSet};
 use vera_traits::{StateDb, StateDbError, StateDbRead, StateDbWrite};
 
@@ -162,115 +162,25 @@ impl StateDb for MockStateDb {
 }
 
 // ----------------------------------------------------------------------------
-// Tests for RevmExecutor creation with different chain IDs
-// ----------------------------------------------------------------------------
-
-#[rstest]
-#[case(1, "Ethereum Mainnet")]
-#[case(11155111, "Sepolia")]
-#[case(42161, "Arbitrum One")]
-#[case(10, "Optimism")]
-#[case(137, "Polygon")]
-#[case(u64::MAX, "Max chain ID")]
-fn test_revm_executor_chain_ids(#[case] chain_id: u64, #[case] _name: &str) {
-    let executor = RevmExecutor::new(chain_id);
-    assert_eq!(executor.chain_id(), chain_id);
-}
-
-#[test]
-fn test_revm_executor_default_chain_id() {
-    let executor = RevmExecutor::default();
-    assert_eq!(executor.chain_id(), 1);
-}
-
-// ----------------------------------------------------------------------------
 // Tests for execute with empty transaction list
 // ----------------------------------------------------------------------------
-
-#[test]
-fn test_execute_empty_transactions_returns_empty_outcome() {
-    let executor = RevmExecutor::new(1);
-    let state = MockStateDb::new();
-    let context = BlockContext::new(Header::default(), B256::ZERO, B256::ZERO);
-    let txs: Vec<Bytes> = vec![];
-
-    let outcome = executor
-        .execute(&state, &context, &txs)
-        .expect("execution should succeed");
-
-    assert!(outcome.changes.is_empty());
-    assert!(outcome.receipts.is_empty());
-    assert_eq!(outcome.gas_used, 0);
-}
 
 #[rstest]
 #[case(1)]
 #[case(137)]
 #[case(42161)]
-fn test_execute_empty_transactions_different_chains(#[case] chain_id: u64) {
-    let executor = RevmExecutor::new(chain_id);
+fn test_execute_empty_transactions_returns_empty_outcome(#[case] chain_id: u64) {
+    let executor = VeraExecutor::new(chain_id);
     let state = MockStateDb::new();
     let context = BlockContext::new(Header::default(), B256::ZERO, B256::ZERO);
-    let txs: Vec<Bytes> = vec![];
 
-    let outcome = executor
-        .execute(&state, &context, &txs)
+    let (outcome, _) = executor
+        .execute_with_modules(&state, &context, &[], executor.snapshot())
         .expect("execution should succeed");
 
     assert!(outcome.changes.is_empty());
     assert!(outcome.receipts.is_empty());
     assert_eq!(outcome.gas_used, 0);
-}
-
-// ----------------------------------------------------------------------------
-// Tests for validate_header
-// ----------------------------------------------------------------------------
-
-#[test]
-fn test_validate_header_succeeds_with_valid_gas_limit() {
-    let executor = RevmExecutor::new(1);
-    let header = Header {
-        gas_limit: 30_000_000,
-        ..Default::default()
-    };
-
-    let result = <RevmExecutor as BlockExecutor<MockStateDb>>::validate_header(&executor, &header);
-
-    assert!(result.is_ok());
-}
-
-#[test]
-fn test_validate_header_fails_with_gas_limit_below_minimum() {
-    let executor = RevmExecutor::new(1);
-    let header = Header {
-        gas_limit: 1000,
-        ..Default::default()
-    };
-
-    let result = <RevmExecutor as BlockExecutor<MockStateDb>>::validate_header(&executor, &header);
-
-    assert!(result.is_err());
-}
-
-#[rstest]
-#[case(0, 30_000_000)]
-#[case(1, 30_000_000)]
-#[case(1_000_000, 30_000_000)]
-#[case(u64::MAX, 30_000_000)]
-fn test_validate_header_succeeds_with_various_block_numbers(
-    #[case] number: u64,
-    #[case] gas_limit: u64,
-) {
-    let executor = RevmExecutor::new(1);
-    let header = Header {
-        number,
-        gas_limit,
-        ..Default::default()
-    };
-
-    let result = <RevmExecutor as BlockExecutor<MockStateDb>>::validate_header(&executor, &header);
-
-    assert!(result.is_ok());
 }
 
 // ----------------------------------------------------------------------------
@@ -610,7 +520,7 @@ async fn test_mock_state_db_exists_returns_false_for_empty_account() {
 
 #[test]
 fn test_execute_with_populated_state() {
-    let executor = RevmExecutor::new(1);
+    let executor = VeraExecutor::new(1);
     let state = MockStateDb::new();
 
     // Populate some accounts.
@@ -634,10 +544,8 @@ fn test_execute_with_populated_state() {
     );
 
     let context = BlockContext::new(Header::default(), B256::ZERO, B256::ZERO);
-    let txs: Vec<Bytes> = vec![];
-
-    let outcome = executor
-        .execute(&state, &context, &txs)
+    let (outcome, _) = executor
+        .execute_with_modules(&state, &context, &[], executor.snapshot())
         .expect("execution should succeed");
 
     // Empty transactions still produce empty outcome.
@@ -645,6 +553,12 @@ fn test_execute_with_populated_state() {
     assert!(outcome.receipts.is_empty());
     assert_eq!(outcome.gas_used, 0);
 }
+
+#[path = "executor/call_authority.rs"]
+mod call_authority;
+
+#[path = "executor/encoding.rs"]
+mod encoding;
 
 #[path = "executor/rollback.rs"]
 mod rollback;

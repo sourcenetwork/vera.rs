@@ -27,8 +27,8 @@ use revm::{
         Precompile, PrecompileError, PrecompileHalt, PrecompileId, PrecompileOutput,
         PrecompileResult, Precompiles,
     },
-    primitives::AddressSet,
     primitives::hardfork::SpecId,
+    primitives::{AddressSet, TxKind},
 };
 use vera_identity::Did;
 use vera_modules::acp::AcpModule;
@@ -56,9 +56,15 @@ const fn address_from_last_two_bytes(hi: u8, lo: u8) -> Address {
 }
 
 pub(super) fn did_from_signer(signer: &str) -> Result<Did, PrecompileError> {
-    // The executor derives the signer; a caller cannot make it malformed.
+    // A call that is not the transaction's own has no signer, which is the
+    // caller's doing. A signer the executor derived cannot be malformed.
+    if signer.is_empty() {
+        return Err(PrecompileError::Fatal(UNAUTHENTICATED_CALLER.to_string()));
+    }
     Did::new(signer).map_err(|e| internal_fault(format!("DID: {e}")))
 }
+
+const UNAUTHENTICATED_CALLER: &str = "module call requires an authenticated caller";
 
 /// Sentinel prefix of an error that is the node's own: stored state that does
 /// not read back as what was written, or a value the executor derived that is
@@ -353,11 +359,16 @@ impl<CTX: ContextTr> PrecompileProvider<CTX> for VeraPrecompiles {
                     block_height: block.number().as_limbs()[0],
                 },
             };
-            let direct_caller = inputs.caller == context.tx().caller();
+            // Only the transaction's own call carries the submitting key's
+            // module authority. DELEGATECALL keeps the caller of the frame
+            // that made it, so the caller address alone does not tell a
+            // contract's call from the signer's.
+            let direct_caller = context.tx().kind() == TxKind::Call(inputs.bytecode_address)
+                && inputs.target_address == inputs.bytecode_address
+                && inputs.caller == context.tx().caller();
             let tx_ctx = TxExecCtx {
                 sequence: context.tx().nonce(),
                 tx_hash: self.current_tx_hash.to_vec(),
-                // A contract cannot inherit the submitting key's module authority.
                 signer: if direct_caller {
                     self.current_signer_did.clone()
                 } else {
@@ -426,23 +437,30 @@ impl VeraPrecompiles {
         };
         match dispatch_result {
             Ok(dr) => {
+                use revm::precompile::PrecompileStatus;
+
                 result.gas.record_refund(dr.precompile.gas_refunded);
                 if !result.gas.record_regular_cost(dr.precompile.gas_used) {
                     result.result = InstructionResult::PrecompileOOG;
                     return Ok((Some(result), vec![]));
                 }
-                result.result = if dr.precompile.status.is_revert() {
-                    InstructionResult::Revert
-                } else {
-                    InstructionResult::Return
-                };
-                result.output = dr.precompile.bytes;
-                let logs = if dr.precompile.status.is_revert() {
-                    vec![]
-                } else {
-                    dr.logs
-                };
-                Ok((Some(result), logs))
+                match dr.precompile.status {
+                    PrecompileStatus::Success => {
+                        result.output = dr.precompile.bytes;
+                        Ok((Some(result), dr.logs))
+                    }
+                    PrecompileStatus::Revert => {
+                        result.result = InstructionResult::Revert;
+                        result.output = dr.precompile.bytes;
+                        Ok((Some(result), vec![]))
+                    }
+                    // The frame returns no gas for a halt, so the whole
+                    // allowance is spent.
+                    PrecompileStatus::Halt(_) => {
+                        result.result = InstructionResult::PrecompileOOG;
+                        Ok((Some(result), vec![]))
+                    }
+                }
             }
             Err(error) if is_out_of_gas(&error) => {
                 result.result = InstructionResult::PrecompileOOG;
@@ -501,7 +519,7 @@ impl VeraPrecompiles {
         if inputs.is_static && journal.changed() {
             return Ok((Some(Self::static_write_error(inputs)), vec![]));
         }
-        if matches!(&dispatch_result, Ok(result) if !result.precompile.status.is_revert())
+        if matches!(&dispatch_result, Ok(result) if result.precompile.status.is_success())
             && !journal.writes_fit_native_bounds()
         {
             // Charge the full allowance: the record cannot be published, so the
@@ -523,6 +541,16 @@ mod tests {
 
     fn test_precompiles() -> VeraPrecompiles {
         VeraPrecompiles::new(SpecId::CANCUN)
+    }
+
+    #[test]
+    fn a_missing_signer_is_a_refusal_and_a_malformed_one_a_fault() {
+        let missing = did_from_signer("").unwrap_err();
+        assert_eq!(internal_fault_reason(&missing), None);
+        assert_eq!(recoverable_message(&missing), UNAUTHENTICATED_CALLER);
+
+        let malformed = did_from_signer("not-a-did").unwrap_err();
+        assert!(internal_fault_reason(&malformed).is_some());
     }
 
     #[test]
