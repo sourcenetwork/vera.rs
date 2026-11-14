@@ -4,10 +4,7 @@ use crate::{ClientError, VeraClient};
 use alloy_primitives::{B256, Bytes};
 use vera_domain::ConsensusPublicKey;
 use vera_modules::acp::{keys, types::RelationshipRecord};
-use vera_permission::{
-    ModuleId, PAGE_PROOF_BYTES, PAGE_RESPONSE_BYTES, PolicyPrefixPageResponse, PrefixPageRequest,
-    VerifiedPrefixPage,
-};
+use vera_permission::{ModuleId, PAGE_PROOF_BYTES, PrefixPageRequest, VerifiedPrefixPage};
 
 /// Current generation relationships from a physical page at one finalized revision.
 #[derive(Clone, Debug)]
@@ -43,15 +40,9 @@ impl VeraClient {
             prefix,
             limit,
         };
-        request.validate()?;
-        let response: PolicyPrefixPageResponse = self
-            .rpc_call_bounded(
-                "vera_getCurrentPolicyPrefixPageProof",
-                serde_json::json!([policy, request, minimum]),
-                PAGE_RESPONSE_BYTES,
-            )
+        let (response, page) = self
+            .verified_policy_prefix_page(&policy, &request, minimum, trusted, PAGE_PROOF_BYTES)
             .await?;
-        let page = response.verify(&policy, &request, minimum, trusted, PAGE_PROOF_BYTES)?;
         let (records, continuation) = current_relationships(&policy, page)?;
         Ok(RelationshipPage {
             revision: response.revision.height,

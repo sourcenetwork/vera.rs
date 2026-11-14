@@ -286,6 +286,9 @@ with `retryable: true` before starting, and so does exceeding the two-second
 current-evidence deadline: the certificate is delayed, not absent. The Rust client exposes these responses
 as `ResourceBusy`; `is_throttled()` also recognizes HTTP 429. Other -32002
 errors remain ordinary RPC errors, and submissions are not automatically retried.
+The client's sign-and-submit helpers advance a signer's sequence only after the
+node admits the request; receipt polling rides out connection failures within
+its time budget, and its errors name the accepted submission.
 Receipt polls return no evidence yet when the finalization certificate is absent,
 without holding a proof slot while waiting or assembling receipt payloads.
 All Rust client RPC calls share bounded response decoding, request-ID/protocol

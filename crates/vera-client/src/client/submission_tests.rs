@@ -1,0 +1,154 @@
+use std::time::Duration;
+
+use alloy_primitives::{Address, B256, Bytes};
+use serde_json::json;
+
+use super::stub::{Reply, Stub, submitted};
+use super::*;
+use crate::{BlsSigner, TransactionReceipt};
+
+const POLL: Duration = Duration::from_millis(5);
+
+fn target() -> Address {
+    Address::repeat_byte(0x08)
+}
+
+fn receipt(tx_hash: B256) -> serde_json::Value {
+    serde_json::to_value(TransactionReceipt {
+        transaction_hash: tx_hash,
+        status: 1,
+        ..TransactionReceipt::default()
+    })
+    .unwrap()
+}
+
+#[tokio::test]
+async fn sequence_advances_only_when_the_node_admits_the_request() {
+    let signer = BlsSigner::random(7).unwrap();
+    let stub = Stub::serve(vec![
+        Reply::Error(json!({"code": -32000, "message": "rejected"})),
+        Reply::Error(json!({"code": -32002, "message": "busy", "data": {"retryable": true}})),
+        Reply::Disconnect,
+        Reply::Result(json!(format!("{:?}", B256::repeat_byte(1)))),
+        Reply::Admit,
+        Reply::Admit,
+    ]);
+    let client = VeraClient::new(stub.url.clone());
+    let submit = |calldata: &'static [u8]| {
+        client.submit_native(&signer, target(), Bytes::from_static(calldata))
+    };
+
+    assert!(matches!(
+        submit(b"first").await,
+        Err(ClientError::Rpc { code: -32000, .. })
+    ));
+    assert!(matches!(
+        submit(b"first").await,
+        Err(ClientError::ResourceBusy(_))
+    ));
+    assert!(matches!(
+        submit(b"first").await,
+        Err(ClientError::Transport(_))
+    ));
+    assert!(matches!(
+        submit(b"first").await,
+        Err(ClientError::InvalidResponse(_))
+    ));
+    assert_eq!(signer.nonce(), 0);
+
+    let first = submit(b"first").await.unwrap();
+    assert_eq!(signer.nonce(), 1);
+    let second = submit(b"second").await.unwrap();
+    assert_eq!(signer.nonce(), 2);
+
+    let requests = stub.requests();
+    let sequences: Vec<u64> = requests.iter().map(|r| submitted(r).nonce).collect();
+    assert_eq!(sequences, [0, 0, 0, 0, 0, 1]);
+    assert_eq!(first, submitted(&requests[4]).tx_id().0);
+    assert_eq!(second, submitted(&requests[5]).tx_id().0);
+}
+
+#[tokio::test]
+async fn unsent_request_leaves_the_sequence_reusable() {
+    let signer = BlsSigner::random(7).unwrap();
+    let client = VeraClient::new("http://127.0.0.1:1")
+        .with_max_concurrent_requests(std::num::NonZeroU32::new(1).unwrap());
+    let _occupied = client.request_permit().await.unwrap();
+    assert!(matches!(
+        client
+            .submit_native(&signer, target(), Bytes::from_static(b"call"))
+            .await,
+        Err(ClientError::ClientCapacityExhausted)
+    ));
+    assert_eq!(signer.nonce(), 0);
+}
+
+#[tokio::test]
+async fn resynchronized_sequence_is_used_for_the_next_submission() {
+    let signer = BlsSigner::random(7).unwrap();
+    let stub = Stub::serve(vec![Reply::Admit]);
+    let client = VeraClient::new(stub.url.clone());
+    signer.set_next_sequence(9);
+    client
+        .submit_native(&signer, target(), Bytes::from_static(b"call"))
+        .await
+        .unwrap();
+    assert_eq!(signer.nonce(), 10);
+    assert_eq!(submitted(&stub.requests()[0]).nonce, 9);
+}
+
+#[tokio::test]
+async fn receipt_polling_survives_a_dropped_connection() {
+    let tx_hash = B256::repeat_byte(3);
+    let stub = Stub::serve(vec![
+        Reply::Result(serde_json::Value::Null),
+        Reply::Disconnect,
+        Reply::Result(receipt(tx_hash)),
+    ]);
+    let client = VeraClient::new(stub.url.clone());
+    let found = client.wait_for_receipt(tx_hash, POLL, 1_000).await.unwrap();
+    assert_eq!(found.transaction_hash, tx_hash);
+    assert_eq!(stub.requests().len(), 3);
+}
+
+#[tokio::test]
+async fn receipt_failures_name_the_submission() {
+    let tx_hash = B256::repeat_byte(4);
+    let stub = Stub::serve(vec![
+        Reply::Result(serde_json::Value::Null),
+        Reply::Error(json!({"code": -32603, "message": "internal"})),
+    ]);
+    let client = VeraClient::new(stub.url.clone());
+    match client.wait_for_receipt(tx_hash, POLL, 1).await {
+        Err(ClientError::ReceiptTimeout {
+            tx_hash: named,
+            attempts: 1,
+        }) => assert_eq!(named, tx_hash),
+        other => panic!("unexpected outcome: {other:?}"),
+    }
+    match client.wait_for_receipt(tx_hash, POLL, 1_000).await {
+        Err(ClientError::ReceiptUnavailable {
+            tx_hash: named,
+            source,
+        }) => {
+            assert_eq!(named, tx_hash);
+            assert!(matches!(*source, ClientError::Rpc { code: -32603, .. }));
+        }
+        other => panic!("unexpected outcome: {other:?}"),
+    }
+    stub.requests();
+}
+
+#[tokio::test]
+async fn receipt_polling_stops_once_an_outage_outlasts_its_budget() {
+    let tx_hash = B256::repeat_byte(5);
+    let client = VeraClient::new("http://127.0.0.1:1");
+    let outcome = client
+        .wait_for_receipt(tx_hash, Duration::ZERO, 1_000)
+        .await;
+    assert!(matches!(
+        outcome,
+        Err(ClientError::ReceiptUnavailable { source, .. })
+            if matches!(*source, ClientError::Transport(_))
+    ));
+}

@@ -100,12 +100,7 @@ impl VeraClient {
             )
             .await?;
         Ok(verify_permission_proof(
-            root,
-            revision.height,
-            policy,
-            request,
-            &proof,
-            limits,
+            root, policy, request, &proof, limits,
         )?)
     }
 }

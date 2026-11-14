@@ -3,7 +3,7 @@ use vera_domain::{ConsensusPublicKey, LIGHT_BLOCK_RESPONSE_BYTES, LightBlock, ve
 
 use crate::{
     AccessRequest, PERMISSION_LIMITS, PermissionError, PermissionLimits, PermissionProof,
-    encoded_size, validate_request, verify_permission_proof,
+    encoded_size, verify_permission_proof,
 };
 
 /// Transport budget for revision artifacts, permission evidence and the RPC envelope.
@@ -30,22 +30,13 @@ impl PermissionResponse {
         trusted: &ConsensusPublicKey,
         limits: PermissionLimits,
     ) -> Result<bool, PermissionError> {
-        validate_request(policy, request, limits)?;
         encoded_size(&self.revision, LIGHT_BLOCK_RESPONSE_BYTES)?;
-        encoded_size(&self.proof, limits.proof_bytes)?;
         let (_, root) = verify_light_block(&self.revision, trusted)?;
         if self.revision.height < minimum_height {
             return Err(PermissionError::Invalid(
                 "revision precedes required minimum",
             ));
         }
-        verify_permission_proof(
-            root,
-            self.revision.height,
-            policy,
-            request,
-            &self.proof,
-            limits,
-        )
+        verify_permission_proof(root, policy, request, &self.proof, limits)
     }
 }

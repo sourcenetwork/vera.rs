@@ -97,7 +97,7 @@ pub async fn permission_proof_at(
         proof.reads.push(read);
     }
     // Current-state evidence is bound to the supplied root; it has no separate height field.
-    verify_permission_proof(expected, 0, policy, request, &proof, limits)?;
+    verify_permission_proof(expected, policy, request, &proof, limits)?;
     Ok(proof)
 }
 

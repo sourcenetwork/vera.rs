@@ -26,6 +26,7 @@ pub struct BlsSigner {
     did: String,
     chain_id: u64,
     nonce: Mutex<u64>,
+    submission: tokio::sync::Mutex<()>,
 }
 
 impl std::fmt::Debug for BlsSigner {
@@ -63,6 +64,7 @@ impl BlsSigner {
             did,
             chain_id,
             nonce: Mutex::new(0),
+            submission: tokio::sync::Mutex::new(()),
         })
     }
 
@@ -117,6 +119,26 @@ impl BlsSigner {
     /// Return the current local nonce counter.
     pub fn nonce(&self) -> u64 {
         *self.nonce.lock().expect("native sequence lock poisoned")
+    }
+
+    /// Replace the local sequence after a submission whose admission is unknown.
+    ///
+    /// `vera_getNativeNonce` reports committed module state: it does not count
+    /// this signer's requests that a node has admitted but not yet executed,
+    /// so a value read while one is pending reuses that request's sequence.
+    pub fn set_next_sequence(&self, next: u64) {
+        *self.nonce.lock().expect("native sequence lock poisoned") = next;
+    }
+
+    /// Serialize sign-and-submit so requests reach the node in sequence order.
+    pub(crate) async fn submission(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.submission.lock().await
+    }
+
+    /// Record that a node admitted the request signed with `sequence`.
+    pub(crate) fn admitted(&self, sequence: u64) {
+        let mut nonce = self.nonce.lock().expect("native sequence lock poisoned");
+        *nonce = (*nonce).max(sequence.saturating_add(1));
     }
 
     /// Build, sign, and encode a native transaction in wire format.
