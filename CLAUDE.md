@@ -43,6 +43,7 @@ Related repositories are independent checkouts; discover their paths rather than
 The development toolchain is pinned to Rust 1.99.1 in `rust-toolchain.toml`.
 Linux native-service CI covers module/storage checks, native lifecycle and
 recovery, crash injection, and a normal release build.
+A hosted macOS arm64 job runs the embedded node's test targets.
 
 ## Architecture
 
