@@ -16,10 +16,10 @@ use vera_executor::MempoolValidator;
 use vera_jsonrpc::TxSubmitError;
 use vera_modules::native_account::NativeNonceStore;
 
-use crate::CommittedState;
+use crate::{CommittedState, tx_admission::Admission};
 
-/// Mempool validator over committed state, bound once the databases are open.
-pub type SharedValidator = Arc<OnceLock<Mutex<MempoolValidator<CommittedState>>>>;
+/// Admission state over committed state, bound once the databases are open.
+pub type SharedValidator = Arc<OnceLock<Mutex<Admission>>>;
 
 /// Admits transactions locally and forwards them to peers.
 pub struct TxGossip<S: Sender, E: Clock> {
@@ -82,17 +82,15 @@ pub(crate) async fn admit(
     if !mempool.can_insert(&tx) {
         return Err(TxSubmitError::AtCapacity);
     }
-    if let Some(pre) = pre {
-        guard
-            .admit_native(&pre)
-            .map_err(|error| TxSubmitError::Rejected(error.to_string()))?;
-    } else {
-        guard
-            .validate_tx(&bytes)
-            .await
-            .map_err(|error| TxSubmitError::Rejected(error.to_string()))?;
+    guard
+        .reserve(pre.as_ref(), &bytes)
+        .await
+        .map_err(|error| TxSubmitError::Rejected(error.to_string()))?;
+    let inserted = mempool.insert(tx);
+    if inserted && let Some(pre) = pre {
+        guard.remember(id, pre);
     }
-    Ok(mempool.insert(tx))
+    Ok(inserted)
 }
 
 impl<S: Sender, E: Clock> TxGossip<S, E> {
@@ -169,15 +167,7 @@ pub(crate) async fn recheck(
         return;
     };
     let mut guard = validator.lock().await;
-    guard.reset(state, nonces);
-    let pending = mempool.build(usize::MAX, &std::collections::BTreeSet::new());
-    let mut evict = Vec::new();
-    for tx in &pending {
-        if let Err(e) = guard.recheck_pending_tx(&tx.bytes).await {
-            trace!(tx_id = ?tx.id(), error = %e, "evicting stale tx");
-            evict.push(tx.id());
-        }
-    }
+    let evict = guard.recheck(state, nonces, &mempool.pending()).await;
     if !evict.is_empty() {
         debug!(count = evict.len(), "evicted stale transactions");
         mempool.prune(&evict);

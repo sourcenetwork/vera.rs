@@ -72,6 +72,7 @@ use crate::{
     rejoin,
     sink::{FinalizationArtifacts, FinalizationLookup, NodeSink, SinkParts},
     spawn_tx_receiver,
+    tx_admission::Admission,
     tx_gossip::SharedValidator,
 };
 
@@ -915,9 +916,10 @@ async fn run_node_with_elector<
         let recovered_modules = modules.read().expect("module state lock poisoned");
         let mut admission =
             MempoolValidator::new(committed_state.clone(), ExecutionConfig::new(chain_id), 0)
-                .with_native_only(genesis.simplex.is_some());
+                .with_native_only(genesis.simplex.is_some())
+                .with_block_gas_limit(gas_limit);
         admission.reset(committed_state.clone(), recovered_modules.nonces.clone());
-        let _ = validator.set(::tokio::sync::Mutex::new(admission));
+        let _ = validator.set(::tokio::sync::Mutex::new(Admission::new(admission)));
     }
     application_ready.send_replace(true);
     let gossip = TxGossip::new(

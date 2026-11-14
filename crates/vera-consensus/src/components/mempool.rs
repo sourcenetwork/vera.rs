@@ -105,6 +105,15 @@ impl InMemoryMempool {
         selected
     }
 
+    /// Every pending transaction with its identifier, in admission order.
+    pub fn pending(&self) -> Vec<(TxId, Tx)> {
+        self.inner
+            .read()
+            .ordered()
+            .map(|(id, tx)| (*id, tx.clone()))
+            .collect()
+    }
+
     /// Check capacity while the caller holds the admission validator lock.
     pub fn can_insert(&self, tx: &Tx) -> bool {
         self.inner.read().accepts(&tx.id(), tx)
@@ -334,6 +343,8 @@ mod tests {
             .cloned()
             .collect();
         assert_eq!(pool.build(10, &Default::default()), expected);
+        let identified: Vec<_> = expected.iter().map(|tx| (tx.id(), tx.clone())).collect();
+        assert_eq!(pool.pending(), identified);
         let ids: Vec<_> = txs.iter().map(Tx::id).collect();
         pool.prune(&ids);
         assert!(pool.inner.read().order.is_empty());

@@ -358,6 +358,13 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
                 }
             };
         let exec_ms = exec_start.elapsed().as_millis();
+        let rejected: Vec<TxId> = executed
+            .outcome
+            .rejected_tx_indices
+            .iter()
+            .map(|&index| txs[index].id())
+            .collect();
+        self.mempool.prune(&rejected);
         let txs = match &executed.outcome.executed_tx_indices {
             Some(indices) => indices.iter().map(|&i| txs[i].clone()).collect(),
             None => txs,

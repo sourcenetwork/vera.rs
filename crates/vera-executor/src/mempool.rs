@@ -6,15 +6,13 @@
 
 use std::collections::BTreeMap;
 
-use alloy_primitives::{Bytes, U256};
+use alloy_primitives::{Address, U256};
 use vera_crypto::bls;
 use vera_domain::NativeTx;
 use vera_modules::native_account::NativeNonceStore;
-use vera_overlay::OverlayState;
-use vera_qmdb::{AccountUpdate, ChangeSet};
 use vera_traits::StateDb;
 
-use crate::precompiles::{ACP_ADDRESS, BULLETIN_ADDRESS, VALIDATOR_REGISTRY_ADDRESS, VERA_ADDRESS};
+use crate::executor::native_authentication::{authenticate_native_tx, decode_native_tx};
 use crate::{ExecutionConfig, ExecutionError, TxValidator};
 
 /// Result of validating a transaction for mempool admission.
@@ -41,6 +39,13 @@ pub struct PreValidatedNativeTx {
     pub nonce: u64,
 }
 
+/// Next nonce and unreserved balance of an EVM sender with pending transactions.
+#[derive(Clone, Copy, Debug)]
+struct EvmReservation {
+    nonce: u64,
+    balance: U256,
+}
+
 /// Stateful transaction validator — mempool admission gate.
 ///
 /// Maintains branched state across calls so sequential validations
@@ -50,9 +55,10 @@ pub struct PreValidatedNativeTx {
 pub struct MempoolValidator<S> {
     config: ExecutionConfig,
     base: S,
-    evm_changes: ChangeSet,
+    evm_reserved: BTreeMap<Address, EvmReservation>,
     native_nonces: NativeNonceStore,
     base_fee: u64,
+    block_gas_limit: u64,
     native_only: bool,
 }
 
@@ -62,9 +68,10 @@ impl<S: StateDb> MempoolValidator<S> {
         Self {
             config,
             base,
-            evm_changes: ChangeSet::new(),
+            evm_reserved: BTreeMap::new(),
             native_nonces: NativeNonceStore::default(),
             base_fee,
+            block_gas_limit: u64::MAX,
             native_only: false,
         }
     }
@@ -76,6 +83,13 @@ impl<S: StateDb> MempoolValidator<S> {
         self
     }
 
+    /// Reject EVM transactions whose gas limit no block can hold.
+    #[must_use]
+    pub const fn with_block_gas_limit(mut self, block_gas_limit: u64) -> Self {
+        self.block_gas_limit = block_gas_limit;
+        self
+    }
+
     /// Reset branched state after block finalization.
     ///
     /// Native nonces are loaded from the finalized module state so the
@@ -84,15 +98,18 @@ impl<S: StateDb> MempoolValidator<S> {
     /// admission order before accepting new requests.
     pub fn reset(&mut self, base: S, native_nonces: NativeNonceStore) {
         self.base = base;
-        self.evm_changes = ChangeSet::new();
+        self.evm_reserved.clear();
         self.native_nonces = native_nonces;
     }
 
     /// Recheck immutable transactions already authenticated at admission.
     ///
     /// Call once per retained transaction, in admission order, after [`Self::reset`].
-    /// Native requests rebuild nonce reservations without repeating signature
-    /// verification. EVM requests check nonce/balance against committed base state.
+    /// Both kinds rebuild their sender's reservations, so a retained
+    /// transaction keeps its place behind the sender's earlier ones. Native
+    /// requests skip signature verification; a caller that kept the
+    /// [`PreValidatedNativeTx`] from admission can call [`Self::admit_native`]
+    /// instead and skip decoding too.
     pub async fn recheck_pending_tx(&mut self, tx_bytes: &[u8]) -> Result<(), ExecutionError> {
         if tx_bytes.is_empty() {
             return Err(ExecutionError::TxDecode("empty transaction".to_string()));
@@ -100,36 +117,12 @@ impl<S: StateDb> MempoolValidator<S> {
         if NativeTx::is_native_tx(tx_bytes[0]) {
             self.recheck_native_tx(tx_bytes)
         } else {
-            self.recheck_evm_tx(tx_bytes).await
+            self.reserve_evm_tx(tx_bytes).await.map(drop)
         }
-    }
-
-    async fn recheck_evm_tx(&self, tx_bytes: &[u8]) -> Result<(), ExecutionError> {
-        let validator = TxValidator::new(&self.config, self.base_fee);
-        let bytes = Bytes::from(tx_bytes.to_vec());
-        validator.validate(&bytes, &self.base).await?;
-        Ok(())
     }
 
     fn recheck_native_tx(&mut self, tx_bytes: &[u8]) -> Result<(), ExecutionError> {
-        let native_tx = NativeTx::decode_wire(tx_bytes)
-            .map_err(|e| ExecutionError::TxDecode(format!("native tx: {e}")))?;
-
-        if native_tx.chain_id != self.config.chain_id {
-            return Err(ExecutionError::ChainIdMismatch {
-                expected: self.config.chain_id,
-                got: native_tx.chain_id,
-            });
-        }
-
-        if native_tx.target != ACP_ADDRESS
-            && native_tx.target != BULLETIN_ADDRESS
-            && native_tx.target != VERA_ADDRESS
-            && native_tx.target != VALIDATOR_REGISTRY_ADDRESS
-        {
-            return Err(ExecutionError::UnknownNativeTarget(native_tx.target));
-        }
-
+        let native_tx = decode_native_tx(self.config.chain_id, tx_bytes)?;
         let signer_did = bls::did_from_compressed_pubkey(native_tx.bls_pubkey.as_slice())
             .map_err(|e| ExecutionError::BlsVerification(format!("pubkey: {e}")))?;
         self.admit_native(&PreValidatedNativeTx {
@@ -149,34 +142,10 @@ impl<S: StateDb> MempoolValidator<S> {
         chain_id: u64,
         tx_bytes: &[u8],
     ) -> Result<PreValidatedNativeTx, ExecutionError> {
-        let native_tx = NativeTx::decode_wire(tx_bytes)
-            .map_err(|e| ExecutionError::TxDecode(format!("native tx: {e}")))?;
-
-        if native_tx.chain_id != chain_id {
-            return Err(ExecutionError::ChainIdMismatch {
-                expected: chain_id,
-                got: native_tx.chain_id,
-            });
-        }
-
-        if native_tx.target != ACP_ADDRESS
-            && native_tx.target != BULLETIN_ADDRESS
-            && native_tx.target != VERA_ADDRESS
-            && native_tx.target != VALIDATOR_REGISTRY_ADDRESS
-        {
-            return Err(ExecutionError::UnknownNativeTarget(native_tx.target));
-        }
-
-        let signer_did = bls::verify_and_identify(
-            native_tx.bls_pubkey.as_slice(),
-            &native_tx.signing_data(),
-            native_tx.signature.as_slice(),
-        )
-        .map_err(|e| ExecutionError::BlsVerification(format!("signature: {e}")))?;
-
+        let authenticated = authenticate_native_tx(chain_id, tx_bytes)?;
         Ok(PreValidatedNativeTx {
-            signer_did,
-            nonce: native_tx.nonce,
+            signer_did: authenticated.signer_did,
+            nonce: authenticated.native_tx.nonce,
         })
     }
 
@@ -189,18 +158,7 @@ impl<S: StateDb> MempoolValidator<S> {
         pre: &PreValidatedNativeTx,
     ) -> Result<TxValidationResult, ExecutionError> {
         self.native_nonces
-            .check_and_increment(&pre.signer_did, pre.nonce)
-            .map_err(|e| match e {
-                vera_modules::native_account::NonceError::Mismatch { did, expected, got } => {
-                    ExecutionError::NonceMismatch { did, expected, got }
-                }
-                vera_modules::native_account::NonceError::Overflow(did) => {
-                    ExecutionError::InvalidTx(format!("nonce overflow for {did}"))
-                }
-                vera_modules::native_account::NonceError::Malformed(did) => {
-                    ExecutionError::InvalidTx(format!("stored nonce for {did} is malformed"))
-                }
-            })?;
+            .check_and_increment(&pre.signer_did, pre.nonce)?;
 
         Ok(TxValidationResult {
             sender: pre.signer_did.clone(),
@@ -233,49 +191,40 @@ impl<S: StateDb> MempoolValidator<S> {
             return Err(ExecutionError::TxDecode("empty transaction".to_string()));
         }
         if NativeTx::is_native_tx(tx_bytes[0]) {
-            self.validate_native_tx(tx_bytes)
+            let pre = Self::pre_validate_native(self.config.chain_id, tx_bytes)?;
+            self.admit_native(&pre)
         } else {
-            self.validate_evm_tx(tx_bytes).await
+            self.reserve_evm_tx(tx_bytes).await
         }
     }
 
-    async fn validate_evm_tx(
+    /// Validate an EVM transaction against its sender's reservations, then
+    /// reserve its nonce and its maximum cost.
+    async fn reserve_evm_tx(
         &mut self,
         tx_bytes: &[u8],
     ) -> Result<TxValidationResult, ExecutionError> {
-        let overlay = OverlayState::new(self.base.clone(), self.evm_changes.clone());
-        let validator = TxValidator::new(&self.config, self.base_fee);
-        let bytes = Bytes::from(tx_bytes.to_vec());
-        let validated = validator.validate(&bytes, &overlay).await?;
-
-        let new_nonce = validated.nonce.checked_add(1).ok_or_else(|| {
+        let validated = TxValidator::new(&self.config, self.base_fee)
+            .with_block_gas_limit(self.block_gas_limit)
+            .check(tx_bytes)?;
+        let account = match self.evm_reserved.get(&validated.sender) {
+            Some(account) => *account,
+            None => EvmReservation {
+                nonce: self.base.nonce(&validated.sender).await?,
+                balance: self.base.balance(&validated.sender).await?,
+            },
+        };
+        validated.check_account(account.nonce, account.balance)?;
+        let nonce = validated.nonce.checked_add(1).ok_or_else(|| {
             ExecutionError::InvalidTx(format!("nonce overflow for {:?}", validated.sender))
         })?;
-
-        // Reserve balance for gas + value (matches Cosmos SDK AnteHandler behavior:
-        // fees are deducted from branched checkState during CheckTx).
-        let reserved =
-            U256::from(validated.gas_limit) * U256::from(validated.max_fee) + validated.value;
-
-        if let Some(account) = self.evm_changes.accounts.get_mut(&validated.sender) {
-            account.nonce = new_nonce;
-            account.balance = account.balance.saturating_sub(reserved);
-        } else {
-            let balance = self.base.balance(&validated.sender).await?;
-            let code_hash = self.base.code_hash(&validated.sender).await?;
-            self.evm_changes.accounts.insert(
-                validated.sender,
-                AccountUpdate {
-                    created: false,
-                    selfdestructed: false,
-                    nonce: new_nonce,
-                    balance: balance.saturating_sub(reserved),
-                    code_hash,
-                    code: None,
-                    storage: BTreeMap::new(),
-                },
-            );
-        }
+        self.evm_reserved.insert(
+            validated.sender,
+            EvmReservation {
+                nonce,
+                balance: account.balance - validated.max_cost,
+            },
+        );
 
         Ok(TxValidationResult {
             sender: format!("{:?}", validated.sender),
@@ -283,86 +232,37 @@ impl<S: StateDb> MempoolValidator<S> {
             is_native: false,
         })
     }
-
-    fn validate_native_tx(
-        &mut self,
-        tx_bytes: &[u8],
-    ) -> Result<TxValidationResult, ExecutionError> {
-        let native_tx = NativeTx::decode_wire(tx_bytes)
-            .map_err(|e| ExecutionError::TxDecode(format!("native tx: {e}")))?;
-
-        if native_tx.chain_id != self.config.chain_id {
-            return Err(ExecutionError::ChainIdMismatch {
-                expected: self.config.chain_id,
-                got: native_tx.chain_id,
-            });
-        }
-
-        if native_tx.target != ACP_ADDRESS
-            && native_tx.target != BULLETIN_ADDRESS
-            && native_tx.target != VERA_ADDRESS
-            && native_tx.target != VALIDATOR_REGISTRY_ADDRESS
-        {
-            return Err(ExecutionError::UnknownNativeTarget(native_tx.target));
-        }
-
-        let pubkey = bls::deserialize_pubkey(native_tx.bls_pubkey.as_slice())
-            .map_err(|e| ExecutionError::BlsVerification(format!("pubkey: {e}")))?;
-
-        let signing_data = native_tx.signing_data();
-        bls::verify(&pubkey, &signing_data, native_tx.signature.as_slice())
-            .map_err(|e| ExecutionError::BlsVerification(format!("signature: {e}")))?;
-
-        let signer_did = bls::did_from_bls_pubkey(&pubkey)
-            .map_err(|e| ExecutionError::BlsVerification(format!("DID: {e}")))?;
-
-        self.native_nonces
-            .check_and_increment(&signer_did, native_tx.nonce)
-            .map_err(|e| match e {
-                vera_modules::native_account::NonceError::Mismatch { did, expected, got } => {
-                    ExecutionError::NonceMismatch { did, expected, got }
-                }
-                vera_modules::native_account::NonceError::Overflow(did) => {
-                    ExecutionError::InvalidTx(format!("nonce overflow for {did}"))
-                }
-                vera_modules::native_account::NonceError::Malformed(did) => {
-                    ExecutionError::InvalidTx(format!("stored nonce for {did} is malformed"))
-                }
-            })?;
-
-        Ok(TxValidationResult {
-            sender: signer_did,
-            nonce: native_tx.nonce,
-            is_native: true,
-        })
-    }
 }
+
+#[cfg(test)]
+mod evm_tests;
 
 #[cfg(test)]
 mod tests {
     use alloy_consensus::{SignableTransaction, TxEip1559, TxEnvelope};
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{Address, B256, FixedBytes, KECCAK256_EMPTY, TxKind, U256};
+    use alloy_primitives::{Address, B256, Bytes, FixedBytes, KECCAK256_EMPTY, TxKind, U256};
     use alloy_signer::SignerSync;
     use alloy_signer_local::PrivateKeySigner;
     use vera_qmdb::ChangeSet;
     use vera_traits::{StateDb, StateDbError, StateDbRead, StateDbWrite};
 
     use super::*;
+    use crate::precompiles::VALIDATOR_REGISTRY_ADDRESS;
 
     #[derive(Clone, Debug)]
-    struct MockStateDb {
+    pub(super) struct MockStateDb {
         accounts: BTreeMap<Address, (u64, U256)>,
     }
 
     impl MockStateDb {
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             Self {
                 accounts: BTreeMap::new(),
             }
         }
 
-        fn with_account(mut self, address: Address, nonce: u64, balance: U256) -> Self {
+        pub(super) fn with_account(mut self, address: Address, nonce: u64, balance: U256) -> Self {
             self.accounts.insert(address, (nonce, balance));
             self
         }
@@ -408,9 +308,9 @@ mod tests {
         }
     }
 
-    const CHAIN_ID: u64 = 9001;
+    pub(super) const CHAIN_ID: u64 = 9001;
 
-    fn test_config() -> ExecutionConfig {
+    pub(super) fn test_config() -> ExecutionConfig {
         ExecutionConfig::new(CHAIN_ID)
     }
 

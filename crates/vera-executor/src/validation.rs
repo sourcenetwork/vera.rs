@@ -34,6 +34,7 @@ pub struct TxValidator<'a> {
     config: &'a ExecutionConfig,
     base_fee: u64,
     blob_base_fee: Option<u128>,
+    block_gas_limit: u64,
 }
 
 impl<'a> TxValidator<'a> {
@@ -43,7 +44,15 @@ impl<'a> TxValidator<'a> {
             config,
             base_fee,
             blob_base_fee: None,
+            block_gas_limit: u64::MAX,
         }
+    }
+
+    /// Reject transactions whose gas limit no block can hold.
+    #[must_use]
+    pub const fn with_block_gas_limit(mut self, block_gas_limit: u64) -> Self {
+        self.block_gas_limit = block_gas_limit;
+        self
     }
 
     /// Set the blob base fee for Cancun+ validation.
@@ -53,23 +62,25 @@ impl<'a> TxValidator<'a> {
         self
     }
 
-    /// Validate a transaction before execution.
+    /// Validate a transaction against the sender's account in `state`.
     pub async fn validate<S: StateDb>(
         &self,
-        tx_bytes: &Bytes,
+        tx_bytes: &[u8],
         state: &S,
     ) -> Result<ValidatedTx, ExecutionError> {
-        let envelope = crate::envelope::decode_envelope(tx_bytes)?;
-
-        self.validate_envelope(&envelope, state).await
+        let validated = self.check(tx_bytes)?;
+        let nonce = state.nonce(&validated.sender).await?;
+        let balance = state.balance(&validated.sender).await?;
+        validated.check_account(nonce, balance)?;
+        Ok(validated)
     }
 
-    /// Validate a decoded transaction envelope.
-    async fn validate_envelope<S: StateDb>(
-        &self,
-        envelope: &TxEnvelope,
-        state: &S,
-    ) -> Result<ValidatedTx, ExecutionError> {
+    /// Decode a transaction and run every check that needs no account state.
+    pub fn check(&self, tx_bytes: &[u8]) -> Result<ValidatedTx, ExecutionError> {
+        self.check_envelope(&crate::envelope::decode_envelope(tx_bytes)?)
+    }
+
+    fn check_envelope(&self, envelope: &TxEnvelope) -> Result<ValidatedTx, ExecutionError> {
         let (
             sender,
             chain_id,
@@ -194,23 +205,19 @@ impl<'a> TxValidator<'a> {
             )));
         }
 
-        let account_nonce = state.nonce(&sender).await?;
-        if account_nonce != nonce {
+        if gas_limit > self.block_gas_limit {
             return Err(ExecutionError::InvalidTx(format!(
-                "nonce mismatch: expected {}, got {}",
-                account_nonce, nonce
+                "gas limit {} exceeds block gas limit {}",
+                gas_limit, self.block_gas_limit
             )));
         }
 
-        let account_balance = state.balance(&sender).await?;
-        let max_gas_cost = U256::from(gas_limit) * U256::from(max_fee);
-        let required_balance = max_gas_cost + value;
-        if account_balance < required_balance {
-            return Err(ExecutionError::InvalidTx(format!(
-                "insufficient balance: has {}, needs {}",
-                account_balance, required_balance
-            )));
-        }
+        // A u64 times a u128 fits in 256 bits; only adding the value can overflow.
+        let max_cost = (U256::from(gas_limit) * U256::from(max_fee))
+            .checked_add(value)
+            .ok_or_else(|| {
+                ExecutionError::InvalidTx("gas cost plus value overflows".to_string())
+            })?;
 
         if max_fee < u128::from(self.base_fee) {
             return Err(ExecutionError::InvalidTx(format!(
@@ -236,6 +243,7 @@ impl<'a> TxValidator<'a> {
             intrinsic_gas,
             max_fee,
             value,
+            max_cost,
         })
     }
 
@@ -341,6 +349,27 @@ pub struct ValidatedTx {
     pub max_fee: u128,
     /// ETH value transferred.
     pub value: U256,
+    /// Balance the sender needs: the gas limit at the maximum fee, plus the value.
+    pub max_cost: U256,
+}
+
+impl ValidatedTx {
+    /// Check the transaction against its sender's nonce and balance.
+    pub fn check_account(&self, nonce: u64, balance: U256) -> Result<(), ExecutionError> {
+        if nonce != self.nonce {
+            return Err(ExecutionError::InvalidTx(format!(
+                "nonce mismatch: expected {}, got {}",
+                nonce, self.nonce
+            )));
+        }
+        if balance < self.max_cost {
+            return Err(ExecutionError::InvalidTx(format!(
+                "insufficient balance: has {}, needs {}",
+                balance, self.max_cost
+            )));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

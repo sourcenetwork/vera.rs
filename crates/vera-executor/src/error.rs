@@ -3,6 +3,7 @@
 use alloy_primitives::{Address, B256};
 use revm::database_interface::DBErrorMarker;
 use thiserror::Error;
+use vera_modules::native_account::NonceError;
 
 /// Errors that can occur during block execution.
 #[derive(Debug, Error)]
@@ -65,6 +66,20 @@ pub enum ExecutionError {
 }
 
 impl DBErrorMarker for ExecutionError {}
+
+impl From<NonceError> for ExecutionError {
+    fn from(error: NonceError) -> Self {
+        match error {
+            NonceError::Mismatch { did, expected, got } => {
+                Self::NonceMismatch { did, expected, got }
+            }
+            NonceError::Overflow(did) => Self::InvalidTx(format!("nonce overflow for {did}")),
+            NonceError::Malformed(did) => {
+                Self::InvalidTx(format!("stored nonce for {did} is malformed"))
+            }
+        }
+    }
+}
 
 impl ExecutionError {
     /// Whether execution failed because local state could not be read reliably.

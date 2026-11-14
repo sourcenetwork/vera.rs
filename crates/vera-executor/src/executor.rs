@@ -14,7 +14,7 @@ use revm::{
     Context, ExecuteCommitEvm, InspectEvm, Journal, MainBuilder,
     context::{
         block::BlockEnv,
-        result::{EVMError, ExecutionResult},
+        result::{EVMError, ExecutionResult, InvalidTransaction},
     },
     context_interface::{ContextTr, JournalTr},
     database::State,
@@ -33,8 +33,7 @@ use vera_modules::vera::VeraModule;
 use vera_traits::StateDb;
 
 use crate::precompiles::{
-    ACP_ADDRESS, BULLETIN_ADDRESS, DispatchReturn, VALIDATOR_REGISTRY_ADDRESS, VERA_ADDRESS,
-    VeraPrecompiles, dispatch_to_module,
+    DispatchReturn, VALIDATOR_REGISTRY_ADDRESS, VeraPrecompiles, dispatch_to_module,
 };
 
 /// Whether a module call ran to completion: not a revert, a halt, an error or a panic.
@@ -46,10 +45,10 @@ fn succeeded(dispatch: &std::thread::Result<DispatchReturn>) -> bool {
 const NATIVE_TX_GAS_LIMIT: u64 = 1_000_000;
 
 mod gas_budget;
-mod native_authentication;
+pub(crate) mod native_authentication;
 
 use gas_budget::BlockGasBudget;
-use native_authentication::AuthenticatedNativeTx;
+use native_authentication::{AuthenticatedNativeTx, authenticate_native_tx};
 
 /// Block executor with vera precompiles (ACP, Bulletin, Vera).
 ///
@@ -184,7 +183,7 @@ impl VeraExecutor {
         journal: &mut CTX,
     ) -> Result<ExecutionReceipt, ExecutionError> {
         self.execute_authenticated_native_tx(
-            self.authenticate_native_tx(tx_bytes)?,
+            authenticate_native_tx(self.config.chain_id, tx_bytes)?,
             block_ctx,
             acp,
             bulletin,
@@ -209,19 +208,7 @@ impl VeraExecutor {
             native_tx,
             signer_did,
         } = authenticated;
-        nonce_store
-            .check_and_increment(&signer_did, native_tx.nonce)
-            .map_err(|e| match e {
-                vera_modules::native_account::NonceError::Mismatch { did, expected, got } => {
-                    ExecutionError::NonceMismatch { did, expected, got }
-                }
-                vera_modules::native_account::NonceError::Overflow(did) => {
-                    ExecutionError::InvalidTx(format!("nonce overflow for {did}"))
-                }
-                vera_modules::native_account::NonceError::Malformed(did) => {
-                    ExecutionError::InvalidTx(format!("stored nonce for {did} is malformed"))
-                }
-            })?;
+        nonce_store.check_and_increment(&signer_did, native_tx.nonce)?;
 
         let tx_hash = native_tx.tx_id().0;
         let tx_ctx = TxExecCtx {
@@ -363,6 +350,7 @@ impl VeraExecutor {
         let mut gas_budget = BlockGasBudget::new(context.header.gas_limit);
         let building = !context.is_verification;
         let mut executed_indices: Vec<usize> = Vec::new();
+        let mut rejected_indices: Vec<usize> = Vec::new();
 
         let state_failure = Arc::new(Mutex::new(None));
         let adapter = StateDbAdapter::new(state.clone()).track_failures(state_failure.clone());
@@ -391,7 +379,8 @@ impl VeraExecutor {
                 .first()
                 .is_some_and(|byte| NativeTx::is_native_tx(*byte))
         });
-        let authenticate = |(i, bytes): (usize, &Bytes)| (i, self.authenticate_native_tx(bytes));
+        let authenticate =
+            |(i, bytes): (usize, &Bytes)| (i, authenticate_native_tx(self.config.chain_id, bytes));
         // Retain errors in order: an earlier nonce or dispatch failure must win
         // over a later authentication failure during proposal verification.
         let authenticated = match &self.native_verification {
@@ -485,6 +474,7 @@ impl VeraExecutor {
                 Ok(r) => r,
                 Err(ExecutionError::TxDecode(msg)) if building => {
                     warn!(%tx_hash, msg, "skipping tx: decode error");
+                    rejected_indices.push(i);
                     continue;
                 }
                 Err(e) => return Err(e),
@@ -516,6 +506,13 @@ impl VeraExecutor {
                 )) => return Err(error),
                 Err(e) if building => {
                     warn!(%tx_hash, ?e, "skipping tx: execution error");
+                    // A nonce ahead of the account can become valid once the
+                    // predecessor this block deferred is included.
+                    if matches!(&e, EVMError::Transaction(invalid)
+                        if !matches!(invalid, InvalidTransaction::NonceTooHigh { .. }))
+                    {
+                        rejected_indices.push(i);
+                    }
                     continue;
                 }
                 Err(e) => {
@@ -585,6 +582,7 @@ impl VeraExecutor {
 
         if building {
             outcome.executed_tx_indices = Some(executed_indices);
+            outcome.rejected_tx_indices = rejected_indices;
         }
 
         outcome.gas_used = gas_budget.used();
@@ -605,6 +603,7 @@ mod tests {
     use vera_traits::{StateDb, StateDbError, StateDbRead, StateDbWrite};
 
     use super::*;
+    use crate::precompiles::{ACP_ADDRESS, BULLETIN_ADDRESS, VERA_ADDRESS};
 
     #[derive(Clone, Debug, Default)]
     struct MockStateDb;

@@ -7215,7 +7215,6 @@ dependencies = [
  "vera-domain",
  "vera-identity",
  "vera-modules",
- "vera-overlay",
  "vera-qmdb",
  "vera-traits",
 ]

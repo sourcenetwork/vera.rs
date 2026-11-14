@@ -74,8 +74,10 @@ pub use solo::{
 mod sink;
 pub use sink::{FinalizationArtifacts, FinalizationLookup, NodeSink, SinkParts};
 
+mod tx_admission;
 mod tx_gossip;
 mod tx_reannouncement;
+pub use tx_admission::Admission;
 pub use tx_gossip::{SharedValidator, TxGossip, spawn_tx_receiver};
 
 mod vrf_elector;

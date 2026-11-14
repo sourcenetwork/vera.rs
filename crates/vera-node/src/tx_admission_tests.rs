@@ -79,10 +79,10 @@ fn concurrent_duplicate_submissions_preserve_nonces_and_local_retry_tracking() {
                 let state = CommittedState::new(databases);
                 let validator: SharedValidator = Arc::new(OnceLock::new());
                 validator
-                    .set(Mutex::new(
+                    .set(Mutex::new(Admission::new(
                         MempoolValidator::new(state.clone(), ExecutionConfig::new(CHAIN_ID), 0)
                             .with_native_only(true),
-                    ))
+                    )))
                     .unwrap();
                 let pool = InMemoryMempool::new();
                 let sender = RecordingSender::default();
@@ -124,10 +124,14 @@ fn concurrent_duplicate_submissions_preserve_nonces_and_local_retry_tracking() {
 
                 let pending = signed_request(1);
                 assert!(gossip.submit(pending.clone()).await.unwrap());
+                assert_eq!(validator.get().unwrap().lock().await.remembered(), 2);
                 pool.prune(&[first_tx.id()]);
                 let mut finalized_nonces = NativeNonceStore::default();
                 finalized_nonces.check_and_increment(&signer, 0).unwrap();
                 recheck(&pool, &validator, state, finalized_nonces).await;
+                // The finalized request's admission result is released; the
+                // pending one is replayed from it without being decoded again.
+                assert_eq!(validator.get().unwrap().lock().await.remembered(), 1);
                 let stale = gossip.submit(first).await.unwrap_err();
                 assert!(
                     matches!(&stale, vera_jsonrpc::TxSubmitError::Rejected(message)
