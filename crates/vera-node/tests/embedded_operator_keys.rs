@@ -80,6 +80,7 @@ async fn an_account_key_and_a_device_key_together_administer_a_solo_node() {
         .local_addr()
         .unwrap();
     let genesis = SoloGenesis {
+        policies: Vec::new(),
         chain_id,
         operators: policy.clone(),
         timestamp: std::time::SystemTime::now()

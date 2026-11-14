@@ -34,6 +34,7 @@ fn free_address() -> SocketAddr {
 
 fn config(directory: &Path, chain_id: u64, account: &str) -> EmbeddedConfig {
     let genesis = SoloGenesis {
+        policies: Vec::new(),
         chain_id,
         operators: OperatorPolicy {
             threshold: 1,

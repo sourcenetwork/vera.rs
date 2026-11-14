@@ -25,6 +25,11 @@ pub struct VeraGenesis {
     /// `operators` is seeded directly rather than through a live tx.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub policies: Vec<vera_modules::acp::PolicySeed>,
+    /// ACP policies seeded under counters and owners the deployment chooses,
+    /// so a host that already names a policy by its identifier finds it there.
+    /// Not combined with `policies`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub placed_policies: Vec<vera_modules::acp::PlacedPolicy>,
     /// Orbis node-demerit scores seeded directly, bypassing the normal
     /// report-submission path entirely. Each entry's `ring_id` is the
     /// caller's own responsibility to predict (`RingConfig::id()` composed
@@ -296,6 +301,7 @@ impl VeraGenesis {
         Self {
             operators: None,
             policies: Vec::new(),
+            placed_policies: Vec::new(),
             node_demerits: Vec::new(),
             chain_id: 9001,
             chain_name: "vera-devnet".to_string(),
@@ -516,6 +522,7 @@ mod tests {
         let genesis = VeraGenesis {
             operators: None,
             policies: Vec::new(),
+            placed_policies: Vec::new(),
             node_demerits: Vec::new(),
             chain_id: 1,
             chain_name: "test".to_string(),
@@ -540,6 +547,7 @@ mod tests {
         VeraGenesis {
             operators: None,
             policies: Vec::new(),
+            placed_policies: Vec::new(),
             node_demerits: Vec::new(),
             chain_id: 1,
             chain_name: "test".to_string(),

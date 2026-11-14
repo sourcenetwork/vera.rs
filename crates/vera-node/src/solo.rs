@@ -34,6 +34,8 @@ pub struct SoloGenesis {
     pub operators: OperatorPolicy,
     /// Genesis timestamp in Unix seconds, used only when the deployment is first created.
     pub timestamp: u64,
+    /// ACP policies the deployment starts with, under the counters and owners given.
+    pub policies: Vec<vera_modules::acp::PlacedPolicy>,
 }
 
 /// Failure to create or reopen a single-validator deployment.
@@ -96,6 +98,9 @@ pub fn prepare_solo(
         if genesis.operators.as_ref() != Some(&identity.operators) {
             return Err(SoloError::Mismatch("operator policy"));
         }
+        if genesis.placed_policies != identity.policies {
+            return Err(SoloError::Mismatch("seeded policies"));
+        }
         let expected = validator(&local, &config.network.listen_addr);
         let same_validator = matches!(genesis.validators.as_slice(), [only]
             if only.consensus_pubkey == expected.consensus_pubkey
@@ -134,6 +139,7 @@ pub fn prepare_solo(
             contracts: Vec::new(),
             extra_storage: Vec::new(),
             policies: Vec::new(),
+            placed_policies: identity.policies.clone(),
             node_demerits: Vec::new(),
             epoch_info: Some(crate::epoch_info_hex(&epoch_info)),
             blocks_per_epoch: SOLO_BLOCKS_PER_EPOCH,

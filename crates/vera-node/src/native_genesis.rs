@@ -108,6 +108,15 @@ pub(super) async fn load_or_create(
             .acp
             .initialize_policies(&creator, &genesis.policies)?;
     }
+    if !genesis.placed_policies.is_empty() {
+        ensure!(
+            genesis.policies.is_empty(),
+            "genesis seeds policies by position or under chosen counters, not both"
+        );
+        modules
+            .acp
+            .initialize_placed_policies(&genesis.placed_policies)?;
+    }
     if !genesis.node_demerits.is_empty() {
         modules
             .vera

@@ -10,6 +10,7 @@ const ACCOUNT_KEY: &str = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f
 
 fn config(directory: &Path) -> EmbeddedConfig {
     let genesis = SoloGenesis {
+        policies: Vec::new(),
         chain_id: 9_271,
         operators: OperatorPolicy {
             threshold: 1,

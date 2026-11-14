@@ -12,6 +12,22 @@ pub struct PolicySeed {
     pub marshal_type: PolicyMarshalingType,
 }
 
+/// One genesis-seeded policy whose counter and owner the deployment chooses.
+///
+/// The counter is part of the policy's identifier, so a deployment that
+/// already names a policy by an identifier can seed it under that one.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlacedPolicy {
+    /// The policy's source text, in `marshal_type`'s format.
+    pub definition: String,
+    /// Which format `definition` is written in.
+    pub marshal_type: PolicyMarshalingType,
+    /// Counter the identifier is derived from.
+    pub counter: u64,
+    /// DID recorded as the policy's owner.
+    pub owner: String,
+}
+
 impl AcpModule {
     /// Parse, validate, and store a new access control policy.
     pub fn create_policy(
@@ -147,6 +163,48 @@ impl AcpModule {
             )?;
             records.push(record);
         }
+        self.store
+            .put(keys::POLICY_COUNTER_KEY, counter.to_be_bytes().to_vec());
+        Ok(records)
+    }
+
+    /// Seed policies under the counters and owners the caller chose.
+    ///
+    /// Only safe at genesis, like [`Self::initialize_policies`], and not
+    /// combined with it. Two policies may share a counter when their
+    /// definitions differ; an identifier that already exists is rejected.
+    /// Live creation continues after the highest counter seeded here, and
+    /// after the number of policies seeded, which the counter never trails.
+    pub fn initialize_placed_policies(
+        &mut self,
+        policies: &[PlacedPolicy],
+    ) -> Result<Vec<PolicyRecord>> {
+        if self.store.has(keys::POLICY_COUNTER_KEY) {
+            return Err(AcpError::State(
+                "policy counter is already initialized".into(),
+            ));
+        }
+        let mut records = Vec::with_capacity(policies.len());
+        let mut highest = 0u64;
+        for placed in policies {
+            let owner = Did::new(placed.owner.as_str())
+                .map(|owner| crate::actor::canonical(&owner))
+                .map_err(|error| AcpError::State(format!("seeded policy owner: {error}")))?;
+            let metadata = RecordMetadata {
+                creation_ts: Timestamp::default(),
+                tx_hash: Vec::new(),
+                tx_signer: String::new(),
+                owner_did: owner.to_string(),
+            };
+            records.push(self.initialize_one_policy(
+                &placed.definition,
+                &placed.marshal_type,
+                placed.counter,
+                &metadata,
+            )?);
+            highest = highest.max(placed.counter);
+        }
+        let counter = highest.max(records.len() as u64);
         self.store
             .put(keys::POLICY_COUNTER_KEY, counter.to_be_bytes().to_vec());
         Ok(records)

@@ -146,6 +146,20 @@ supported host: nothing builds or tests the node there.
 The inventory covers the default build. The optional `nuclei-rpc` transport
 uses a process-global proactor and is not covered.
 
+## Seeded policies
+
+`SoloGenesis::policies` lists ACP policies the deployment starts with. Each
+entry names its definition, the counter its identifier is derived from and the
+DID recorded as its owner, so a host that already names a policy by an
+identifier, as a content-derived one with a fixed counter, finds it under that
+identifier on a new deployment. Two entries may share a counter when their
+definitions differ. Policies created later take counters above the highest one
+seeded and above the number of policies seeded.
+
+The list is part of the deployment's identity: reopening a directory with a
+different list is refused. A seeded policy records no creating transaction,
+worker or creation revision.
+
 ## Shutdown
 
 `stop` ends the node between views and waits for its thread. It first holds

@@ -206,3 +206,57 @@ fn genesis_seeded_policies_match_predicted_ids_and_leave_room_for_live_creation(
     assert_ne!(live.policy.id, predicted_first);
     assert_ne!(live.policy.id, predicted_second);
 }
+
+#[test]
+fn placed_policies_take_the_chosen_counters_and_owners() {
+    let other = "name: second\nresources:\n  - name: widget\n";
+    let yaml = PolicyMarshalingType::ShortYaml;
+    let placed = |definition: &str, counter, owner: &str| PlacedPolicy {
+        definition: definition.to_string(),
+        marshal_type: yaml.clone(),
+        counter,
+        owner: owner.to_string(),
+    };
+
+    let mut module = AcpModule::new();
+    let records = module
+        .initialize_placed_policies(&[
+            placed(POLICY, 0, "did:key:first"),
+            placed(other, 0, "did:key:second"),
+        ])
+        .unwrap();
+    for (record, (definition, owner)) in records
+        .iter()
+        .zip([(POLICY, "did:key:first"), (other, "did:key:second")])
+    {
+        assert_eq!(
+            record.policy.id,
+            AcpModule::predict_policy_id(definition, &yaml, 0).unwrap()
+        );
+        assert_eq!(record.metadata.owner_did, owner);
+    }
+
+    let owner = Did::new("did:key:owner").unwrap();
+    let live = module.create_policy(&owner, POLICY, yaml.clone()).unwrap();
+    assert_eq!(
+        live.policy.id,
+        AcpModule::predict_policy_id(POLICY, &yaml, 3).unwrap()
+    );
+    module.validate_restored_state().unwrap();
+
+    assert!(matches!(
+        AcpModule::new().initialize_placed_policies(&[
+            placed(POLICY, 3, "did:key:first"),
+            placed(POLICY, 3, "did:key:second"),
+        ]),
+        Err(AcpError::State(_))
+    ));
+    assert!(matches!(
+        module.initialize_placed_policies(&[placed(other, 7, "did:key:first")]),
+        Err(AcpError::State(_))
+    ));
+    assert!(matches!(
+        AcpModule::new().initialize_placed_policies(&[placed(POLICY, 0, "not a did")]),
+        Err(AcpError::State(_))
+    ));
+}

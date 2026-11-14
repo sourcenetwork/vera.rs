@@ -151,6 +151,7 @@ async fn profile_solo_writes_and_idle_cost() {
     let directory = tempfile::tempdir().unwrap();
     let chain_id = 9411;
     let genesis = SoloGenesis {
+        policies: Vec::new(),
         chain_id,
         operators: OperatorPolicy {
             threshold: 1,
