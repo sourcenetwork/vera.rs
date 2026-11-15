@@ -101,3 +101,24 @@ fn a_deployment_starts_with_its_policies_under_the_chosen_identifiers() {
         )))
     ));
 }
+
+#[test]
+fn a_refused_seed_stores_nothing_so_a_corrected_one_starts_in_the_same_directory() {
+    let directory = tempfile::tempdir().unwrap();
+    assert!(matches!(
+        block_on(EmbeddedNode::start(seeded(directory.path(), &["["]))),
+        Err(EmbedError::Deployment(SoloError::Policies(_)))
+    ));
+    assert!(matches!(
+        block_on(EmbeddedNode::start(seeded(
+            directory.path(),
+            &[NOTES, NOTES]
+        ))),
+        Err(EmbedError::Deployment(SoloError::Policies(_)))
+    ));
+
+    let node = block_on(EmbeddedNode::start(seeded(directory.path(), &[NOTES]))).unwrap();
+    let id = AcpModule::predict_policy_id(NOTES, &PolicyMarshalingType::ShortYaml, 0).unwrap();
+    assert!(stored_policy(&node, &id).is_some());
+    block_on(node.stop()).unwrap();
+}
