@@ -6,7 +6,14 @@ use super::{cluster_state::ClusterState, events::LogEvent};
 ///
 /// vera binds both jsonrpsee and a status HTTP server to the same port —
 /// the second binding always fails with "Address already in use".
-const KNOWN_ERRORS: &[&str] = &["HTTP status server not started"];
+///
+/// A replaced epoch's Simplex resolver can see its mailbox close before its
+/// own abort and log that as an error. The other resolver engines are owned
+/// by actors whose exit stops the node, which the health checks report.
+const KNOWN_ERRORS: &[&str] = &[
+    "HTTP status server not started",
+    "commonware_resolver::p2p::engine: mailbox closed",
+];
 
 /// Extension trait for cluster-level assertions.
 pub trait ClusterAssertions {
