@@ -174,8 +174,35 @@ impl LightBlock {
     /// Construct the JSON-facing light block from canonical node artifacts.
     #[must_use]
     pub fn from_parts(block: &Block, finalization: &[u8], epoch_material: &[u8]) -> Self {
+        Self::from_canonical(block, &block.encode(), finalization, epoch_material)
+    }
+
+    /// Construct from canonical block bytes retained alongside the finalization.
+    ///
+    /// The block hash is the digest of `block` as given, and the same bytes are
+    /// published, so the two agree by construction.
+    pub fn from_encoded_block(
+        block: &[u8],
+        finalization: &[u8],
+        epoch_material: &[u8],
+    ) -> Result<Self, LightBlockError> {
+        let decoded = decode_block(block)?;
+        Ok(Self::from_canonical(
+            &decoded,
+            block,
+            finalization,
+            epoch_material,
+        ))
+    }
+
+    fn from_canonical(
+        block: &Block,
+        encoded: &[u8],
+        finalization: &[u8],
+        epoch_material: &[u8],
+    ) -> Self {
         Self {
-            block_hash: encode_hex(block.id().0.as_slice()),
+            block_hash: encode_hex(keccak256(encoded).as_slice()),
             parent_hash: encode_hex(block.parent.0.as_slice()),
             height: block.height,
             timestamp: block.timestamp,
@@ -184,21 +211,11 @@ impl LightBlock {
             epoch: block.context.round.epoch().get(),
             view: block.context.round.view().get(),
             parent_view: block.context.parent.0.get(),
-            block: encode_hex(&block.encode()),
+            block: encode_hex(encoded),
             descendants: Vec::new(),
             finalization: encode_hex(finalization),
             epoch_material: encode_hex(epoch_material),
         }
-    }
-
-    /// Construct from canonical block bytes retained alongside the finalization.
-    pub fn from_encoded_block(
-        block: &[u8],
-        finalization: &[u8],
-        epoch_material: &[u8],
-    ) -> Result<Self, LightBlockError> {
-        let decoded = decode_block(block)?;
-        Ok(Self::from_parts(&decoded, finalization, epoch_material))
     }
 
     /// Reject excessive artifact count or size before decoding untrusted hex.

@@ -23,7 +23,7 @@ impl VeraApiImpl {
         }
     }
 
-    /// Decode and re-encode the cached block: synchronous work proportional to its size.
+    /// Decode, hash and hex-encode the cached block: synchronous work proportional to its size.
     pub(super) fn cached_light_block(&self, height: u64) -> RpcResult<Option<LightBlock>> {
         let Some(light_index) = &self.light_block_index else {
             return Ok(None);

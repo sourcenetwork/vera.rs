@@ -54,6 +54,11 @@ fn light_fixture(seed: u64) -> LightBlock {
 }
 
 fn light_fixture_with(seed: u64, configure: impl FnOnce(&mut Block)) -> LightBlock {
+    let (block, finalization, material) = artifacts(seed, configure);
+    LightBlock::from_parts(&block, &finalization, &material)
+}
+
+fn artifacts(seed: u64, configure: impl FnOnce(&mut Block)) -> (Block, Vec<u8>, Vec<u8>) {
     let (signers, verifier, material) = fixture(seed);
     let leader = material
         .participants
@@ -91,8 +96,14 @@ fn light_fixture_with(seed: u64, configure: impl FnOnce(&mut Block)) -> LightBlo
     let finalization =
         Finalization::from_finalizes(&verifier, non_empty![@votes.iter()], &Sequential)
             .expect("assemble quorum");
-    LightBlock::from_parts(&block, &finalization.encode(), &material.encode())
+    (
+        block,
+        finalization.encode().to_vec(),
+        material.encode().to_vec(),
+    )
 }
+
+mod encoded;
 
 fn trusted_key() -> ConsensusPublicKey {
     *fixture(42).2.sharing.public()
