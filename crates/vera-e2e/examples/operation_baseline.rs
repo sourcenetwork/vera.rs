@@ -34,8 +34,8 @@ const CHAIN_ID: u64 = 9001;
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     assert!(
-        args.len() <= 12,
-        "usage: operation_baseline [count] [arrivals/sec] [max outstanding] [permission reads 0/1] [fast|normal|stress] [RPC connections] [epoch revisions] [retention minimum revision] [fixed update objects, 0 for registrations] [retained consensus revisions, 0 disables pruning] [pipelined consensus 0/1] [inherit RPC listener 0/1, Unix default 1]"
+        args.len() <= 13,
+        "usage: operation_baseline [count] [arrivals/sec] [max outstanding] [permission reads 0/1] [fast|normal|stress] [RPC connections] [epoch revisions] [retention minimum revision] [fixed update objects, 0 for registrations] [retained consensus revisions, 0 disables pruning] [pipelined consensus 0/1] [inherit RPC listener 0/1, Unix default 1] [discovery section in node configuration 0/1, default 1]"
     );
     let parse = |index: usize, default: usize| {
         args.get(index).map_or(default, |value| {
@@ -80,6 +80,8 @@ async fn main() {
         cfg!(unix) || inherit_rpc_listener == 0,
         "listener inheritance requires Unix"
     );
+    let discovery_section = parse(12, 1);
+    assert!(discovery_section <= 1, "discovery section must be 0 or 1");
     let simplex = (pipelined == 1).then(vera_domain::SimplexParameters::default);
     let term_length =
         std::num::NonZeroU64::new(simplex.map_or(1, |parameters| parameters.term_length)).unwrap();
@@ -125,6 +127,7 @@ async fn main() {
         .chain_id(CHAIN_ID)
         .preset(preset)
         .rpc_max_connections(rpc_connections)
+        .discovery_section(discovery_section == 1)
         .node_initializer(move |dir, _| {
             if retained_consensus > 0 {
                 use std::io::Write as _;
@@ -259,6 +262,7 @@ async fn main() {
             "format_version": 2, "permission_reads_per_write": permission_reads,
             "runner_debug_assertions": cfg!(debug_assertions),
             "inherit_rpc_listener": inherit_rpc_listener == 1,
+            "discovery_section": discovery_section == 1,
             "revisions_per_epoch": epoch_length.get(),
             "simplex": simplex,
             "proposal_batch_wait_ms": simplex.map(|_| (timing.leader_timeout / 4).min(Duration::from_millis(100)).as_millis()),

@@ -277,3 +277,46 @@ fn an_unusable_setting_builds_no_listener() {
         assert!(stated(&setting).is_err(), "{setting:?}");
     }
 }
+
+#[test]
+fn the_longest_durations_a_node_may_state_run_the_listeners_rate_limiters() {
+    use commonware_runtime::{
+        KeyedRateLimiter, RateLimiter, Runner as _, Supervisor as _, deterministic,
+    };
+
+    let window_ms = u64::try_from(vera_config::MAX_DURATION.as_millis()).unwrap();
+    let longest = |count| DiscoveryConfig {
+        handshakes_per_ip: Some(HandshakeRate { count, window_ms }),
+        peer_gossip_interval_ms: Some(window_ms),
+        ..Default::default()
+    };
+    let beyond = DiscoveryConfig {
+        peer_gossip_interval_ms: Some(window_ms + 1),
+        ..Default::default()
+    };
+    assert_eq!(
+        stated(&beyond).unwrap_err(),
+        DiscoveryConfigError::TooLong("peer_gossip_interval_ms")
+    );
+    deterministic::Runner::default().start(|context| async move {
+        for count in [1, 2, u32::MAX] {
+            let profile = stated(&longest(count)).unwrap();
+            let handshakes = KeyedRateLimiter::hashmap_with_clock(
+                profile.allowed_handshake_rate_per_ip,
+                context.child("handshakes"),
+            );
+            for _ in 0..count.min(2) {
+                handshakes.check_key(&0u8).unwrap();
+            }
+            if count <= 2 {
+                handshakes.check_key(&0u8).unwrap_err();
+            }
+            let gossip = RateLimiter::direct_with_clock(
+                Quota::with_period(profile.gossip_bit_vec_frequency / 2).unwrap(),
+                context.child("gossip"),
+            );
+            gossip.check().unwrap();
+            gossip.check().unwrap_err();
+        }
+    });
+}

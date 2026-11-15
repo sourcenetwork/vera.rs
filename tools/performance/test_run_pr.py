@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import run_pr
 from record import digest
-from protocol import KEYS, TYPES, source_schema, unavailable
+from protocol import DISCOVERY, KEYS, TYPES, source_schema, unavailable
 
 
 class RunPrTests(unittest.TestCase):
@@ -29,6 +29,8 @@ class RunPrTests(unittest.TestCase):
             (source / 'Cargo.lock').write_text('[[package]]\nname = \"commonware-storage\"\nversion = \"2026.10.0\"\n')
             subprocess.run(['git', 'init', '-q', str(source)], check=True)
             self.write_schema(side, 'relationship/v5/')
+            (source / DISCOVERY).parent.mkdir(parents=True)
+            (source / DISCOVERY).write_text('pub struct DiscoveryConfig;\n')
             subprocess.run(['git', 'add', '.'], cwd=source, check=True)
             subprocess.run(['git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
                             '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null',
@@ -67,14 +69,24 @@ print({help_text!r} if sys.argv[1:] == ['validator', '--help'] else {side!r})
             record += 'pub struct RelationshipRecord {\n    pub incarnation: u64,\n}\n'
         (source / TYPES).write_text(record)
 
-    def commit_schema(self, side, namespace):
-        self.write_schema(side, namespace)
+    def commit(self, side, message):
         source = self.root / side
-        subprocess.run(['git', 'add', '.'], cwd=source, check=True)
+        subprocess.run(['git', 'add', '-A', '.'], cwd=source, check=True)
         subprocess.run(['git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
                         '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null',
-                        'commit', '-qm', 'schema'], cwd=source, check=True)
+                        'commit', '-qm', message], cwd=source, check=True)
         self.revisions[side] = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip()
+
+    def commit_schema(self, side, namespace):
+        self.write_schema(side, namespace)
+        self.commit(side, 'schema')
+
+    def workload_arguments(self, tag, objects):
+        destination = self.output / tag / f'objects-{objects}'
+        row = json.loads((destination / 'workload.jsonl').read_text())
+        manifest = json.loads((destination / 'manifest.json').read_text())
+        self.assertEqual(manifest['arguments'], row['arguments'])
+        return row['arguments']
 
     def executable(self, side, name, content):
         path = self.binaries / side / name
@@ -114,6 +126,7 @@ print({help_text!r} if sys.argv[1:] == ['validator', '--help'] else {side!r})
         for tag in ('head1', 'base1', 'base2', 'head2'):
             side = tag.rstrip('12')
             self.assertTrue(identity[side]['supports_rpc_listener_fd'])
+            self.assertIs(identity[side]['discovery_setting'], True)
             self.assertEqual(identity[side]['source'], self.revisions[side])
             self.assertEqual(identity[side]['runner_source'], self.revisions['head'])
             self.assertEqual(identity[side]['runner_sha256'], runner_hash)
@@ -127,7 +140,7 @@ print({help_text!r} if sys.argv[1:] == ['validator', '--help'] else {side!r})
                 row = json.loads((destination / 'workload.jsonl').read_text())
                 self.assertEqual(row, dict(driver='head', node=side, checkout=side,
                                            arguments=['3', '7', '128', '1', 'normal', '100',
-                                                      '192', '0', str(objects), '256', '1', '1']))
+                                                      '192', '0', str(objects), '256', '1', '1', '1']))
                 self.assertEqual(manifest['format_version'], 2)
                 for field in ('source', 'runner_source', 'node_sha256', 'runner_sha256'):
                     self.assertEqual(manifest[field], identity[side][field])
@@ -148,8 +161,37 @@ print({help_text!r} if sys.argv[1:] == ['validator', '--help'] else {side!r})
                 destination = self.output / tag / f'objects-{objects}'
                 row = json.loads((destination / 'workload.jsonl').read_text())
                 manifest = json.loads((destination / 'manifest.json').read_text())
-                self.assertEqual(row['arguments'][-1], '0')
+                self.assertEqual(row['arguments'][-2:], ['0', '1'])
                 self.assertEqual(manifest['arguments'], row['arguments'])
+
+    def test_base_that_predates_the_discovery_setting_alone_omits_the_section(self):
+        (self.root / 'base' / DISCOVERY).unlink()
+        self.commit('base', 'before discovery settings')
+        self.measure()
+        identity = json.loads((self.output / 'comparison.json').read_text())
+        self.assertIs(identity['head']['discovery_setting'], True)
+        self.assertIs(identity['base']['discovery_setting'], False)
+        self.assertTrue(identity['inherit_rpc_listener'])
+        for tag, section in (('head1', '1'), ('base1', '0'), ('base2', '0'), ('head2', '1')):
+            for objects in (0, 32):
+                self.assertEqual(self.workload_arguments(tag, objects)[-2:], ['1', section])
+
+    def test_uncommitted_discovery_source_does_not_change_the_recorded_node(self):
+        (self.root / 'base' / DISCOVERY).unlink()
+        self.measure()
+        identity = json.loads((self.output / 'comparison.json').read_text())
+        self.assertIs(identity['base']['discovery_setting'], True)
+        self.assertEqual(self.workload_arguments('base1', 0)[-1], '1')
+
+    def test_both_sides_before_the_discovery_setting_omit_the_section(self):
+        for side in ('head', 'base'):
+            (self.root / side / DISCOVERY).unlink()
+            self.commit(side, 'before discovery settings')
+        self.measure()
+        identity = json.loads((self.output / 'comparison.json').read_text())
+        for tag in ('head1', 'base1', 'base2', 'head2'):
+            self.assertIs(identity[tag.rstrip('12')]['discovery_setting'], False)
+            self.assertEqual(self.workload_arguments(tag, 32)[-1], '0')
 
     def test_failed_help_probe_does_not_silently_downgrade(self):
         self.executable('base', 'verad', '#!/bin/sh\nexit 7\n')

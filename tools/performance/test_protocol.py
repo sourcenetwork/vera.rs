@@ -2,7 +2,8 @@
 import unittest
 from unittest.mock import patch
 
-from protocol import SCHEMAS, baseline_incompatible, source_schema, source_storage_version
+from protocol import (DISCOVERY, SCHEMAS, baseline_incompatible, discovery_section, source_discovery_setting,
+                      source_schema, source_storage_version)
 
 
 class ProtocolTests(unittest.TestCase):
@@ -58,6 +59,25 @@ pub struct RelationshipRecord {
         identity['head']['proof_schema'].pop('object_incarnation')
         with self.assertRaisesRegex(ValueError, 'unrecognized proof schema'):
             baseline_incompatible(identity)
+
+    def test_discovery_setting_is_read_from_the_recorded_revision(self):
+        for listing, expected in ((DISCOVERY + '\n', True), ('', False)):
+            with patch('protocol.subprocess.check_output', return_value=listing) as git:
+                self.assertIs(source_discovery_setting('.', 'revision'), expected)
+            self.assertEqual(git.call_args.args[0], ['git', 'ls-tree', '--name-only', 'revision', '--', DISCOVERY])
+
+    def test_discovery_provenance_is_per_side_and_absent_from_older_comparisons(self):
+        identity = dict(head={}, base={})
+        self.assertIsNone(discovery_section(identity, 'base'))
+        identity['head']['discovery_setting'] = True
+        with self.assertRaisesRegex(ValueError, 'incomplete discovery setting'):
+            discovery_section(identity, 'base')
+        identity['base']['discovery_setting'] = False
+        self.assertIs(discovery_section(identity, 'head'), True)
+        self.assertIs(discovery_section(identity, 'base'), False)
+        identity['base']['discovery_setting'] = 0
+        with self.assertRaisesRegex(ValueError, 'incomplete discovery setting'):
+            discovery_section(identity, 'head')
 
     def test_storage_version_provenance_is_required_and_unique(self):
         record = '[[package]]\nname = "commonware-storage"\nversion = "2026.10.0"\n'

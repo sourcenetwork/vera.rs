@@ -262,7 +262,10 @@ rejected. Restore a complete compatible backup or use authenticated recovery.
   genesis DKG run Commonware's recommended discovery profile, with Commonware's
   values. Each setting below can be stated on its own; one left out keeps the
   recommended value. Unknown keys, zero durations or counts, and a handshake
-  rate finer than one nanosecond per attempt fail startup.
+  rate finer than one nanosecond per attempt fail startup. So does a duration
+  longer than 365 days (31536000 seconds, 31536000000 ms), which for a
+  handshake rate bounds `window_ms`: the listener's rate limiters cannot count
+  past 584 years and would stop the node after startup.
 
   | Setting | Recommended | Meaning |
   | --- | --- | --- |

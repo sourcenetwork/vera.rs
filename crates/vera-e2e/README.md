@@ -42,6 +42,11 @@ when deliberately exercising an older external binary. There is no automatic
 fallback based on binary selection. P2P ports still use address-based binding and
 are not covered by this reservation.
 
+Each generated node configuration states the local discovery settings under
+`[network.discovery]`. Use `.discovery_section(false)` only when deliberately
+exercising an older external binary that predates the setting; it rejects the
+section and always runs those values.
+
 ## Serial / global-lock expectation
 
 Each target starts a real multi-process cluster, and the Fast timing preset is

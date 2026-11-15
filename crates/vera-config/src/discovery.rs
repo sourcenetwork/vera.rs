@@ -78,7 +78,18 @@ pub enum DiscoveryConfigError {
         "network.discovery.{0} needs a non-zero count and a window of at least one nanosecond per attempt"
     )]
     Rate(&'static str),
+
+    /// A duration, or the window of a rate, beyond [`MAX_DURATION`].
+    #[error("network.discovery.{0} states a duration longer than 365 days")]
+    TooLong(&'static str),
 }
+
+/// Longest duration a setting may state, for a rate the length of its window.
+///
+/// The listener's rate limiters count nanoseconds in a `u64` and panic past
+/// 584 years, on a replenish period, on a whole window, and on either added
+/// to the time the node has been running.
+pub const MAX_DURATION: Duration = Duration::from_secs(365 * 24 * 60 * 60);
 
 impl DiscoveryConfig {
     /// The values of Commonware's local profile, for several nodes on one host:
@@ -141,30 +152,51 @@ impl DiscoveryConfig {
 
     /// Reject a stated value the listener cannot run with.
     pub fn validate(&self) -> Result<(), DiscoveryConfigError> {
-        for (name, value) in [
-            ("reconnect_cooldown_ms", self.reconnect_cooldown_ms),
-            (
-                "max_concurrent_handshakes",
-                self.max_concurrent_handshakes.map(u64::from),
-            ),
-            ("dial_interval_ms", self.dial_interval_ms),
+        for (name, count) in [
+            ("max_concurrent_handshakes", self.max_concurrent_handshakes),
             (
                 "dial_failures_before_refresh",
-                self.dial_failures_before_refresh.map(u64::from),
+                self.dial_failures_before_refresh,
             ),
-            ("peer_gossip_interval_ms", self.peer_gossip_interval_ms),
-            ("block_duration_seconds", self.block_duration_seconds),
         ] {
-            if value == Some(0) {
+            if count == Some(0) {
                 return Err(DiscoveryConfigError::Zero(name));
+            }
+        }
+        let milliseconds = Duration::from_millis;
+        for (name, duration) in [
+            (
+                "reconnect_cooldown_ms",
+                self.reconnect_cooldown_ms.map(milliseconds),
+            ),
+            ("dial_interval_ms", self.dial_interval_ms.map(milliseconds)),
+            (
+                "peer_gossip_interval_ms",
+                self.peer_gossip_interval_ms.map(milliseconds),
+            ),
+            (
+                "block_duration_seconds",
+                self.block_duration_seconds.map(Duration::from_secs),
+            ),
+        ] {
+            match duration {
+                Some(Duration::ZERO) => return Err(DiscoveryConfigError::Zero(name)),
+                Some(duration) if duration > MAX_DURATION => {
+                    return Err(DiscoveryConfigError::TooLong(name));
+                }
+                _ => {}
             }
         }
         for (name, rate) in [
             ("handshakes_per_ip", self.handshakes_per_ip),
             ("handshakes_per_subnet", self.handshakes_per_subnet),
         ] {
-            if rate.is_some_and(|rate| rate.count == 0 || rate.replenish_interval().is_none()) {
+            let Some(rate) = rate else { continue };
+            if rate.count == 0 || rate.replenish_interval().is_none() {
                 return Err(DiscoveryConfigError::Rate(name));
+            }
+            if milliseconds(rate.window_ms) > MAX_DURATION {
+                return Err(DiscoveryConfigError::TooLong(name));
             }
         }
         Ok(())

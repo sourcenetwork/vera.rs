@@ -124,6 +124,51 @@ fn values_no_listener_can_run_with_are_rejected() {
 }
 
 #[test]
+fn a_duration_is_accepted_up_to_the_cap_and_rejected_past_it() {
+    let cap_ms = u64::try_from(MAX_DURATION.as_millis()).unwrap();
+    let cap_seconds = MAX_DURATION.as_secs();
+    let cases = [
+        ("reconnect_cooldown_ms", cap_ms, String::new()),
+        ("dial_interval_ms", cap_ms, String::new()),
+        ("peer_gossip_interval_ms", cap_ms, String::new()),
+        ("block_duration_seconds", cap_seconds, String::new()),
+        (
+            "handshakes_per_ip",
+            cap_ms,
+            "{ count = 1, window_ms = ".into(),
+        ),
+        (
+            "handshakes_per_ip",
+            cap_ms,
+            "{ count = 4000000000, window_ms = ".into(),
+        ),
+        (
+            "handshakes_per_subnet",
+            cap_ms,
+            "{ count = 1, window_ms = ".into(),
+        ),
+        (
+            "handshakes_per_subnet",
+            cap_ms,
+            "{ count = 4000000000, window_ms = ".into(),
+        ),
+    ];
+    for (name, cap, rate) in cases {
+        let close = if rate.is_empty() { "" } else { " }" };
+        let field = |value: u64| format!("{name} = {rate}{value}{close}");
+        stated(&field(cap)).unwrap_or_else(|error| panic!("{}: {error}", field(cap)));
+        for value in [cap + 1, u64::MAX / 2] {
+            match stated(&field(value)) {
+                Err(ConfigError::Discovery(DiscoveryConfigError::TooLong(rejected))) => {
+                    assert_eq!(rejected, name);
+                }
+                other => panic!("{}: {other:?}", field(value)),
+            }
+        }
+    }
+}
+
+#[test]
 fn unknown_and_mistyped_settings_are_rejected() {
     for field in [
         "profile = \"local\"",

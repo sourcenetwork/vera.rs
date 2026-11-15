@@ -57,6 +57,7 @@ pub struct NodeConfigBuilder {
     rpc_max_connections: std::num::NonZeroU32,
     preset: ConsensusPreset,
     consensus_override: Option<ConsensusParams>,
+    discovery_section: bool,
 }
 
 impl Default for NodeConfigBuilder {
@@ -66,6 +67,7 @@ impl Default for NodeConfigBuilder {
             rpc_max_connections: std::num::NonZeroU32::new(100).unwrap(),
             preset: ConsensusPreset::Fast,
             consensus_override: None,
+            discovery_section: true,
         }
     }
 }
@@ -104,6 +106,16 @@ impl NodeConfigBuilder {
         self
     }
 
+    /// Write the `[network.discovery]` section into generated configs (default).
+    ///
+    /// Disable only to drive a node build that predates the setting: it rejects
+    /// the section as an unknown key and always runs the local discovery values.
+    #[must_use]
+    pub const fn discovery_section(mut self, enabled: bool) -> Self {
+        self.discovery_section = enabled;
+        self
+    }
+
     /// Resolve the effective consensus parameters (override or preset).
     pub fn consensus(&self) -> ConsensusParams {
         self.consensus_override
@@ -114,13 +126,20 @@ impl NodeConfigBuilder {
     /// Build a TOML config string for a specific node directory and ports.
     ///
     /// The nodes of a cluster share one host, so the config states the local
-    /// discovery settings.
+    /// discovery settings unless [`Self::discovery_section`] leaves them out.
     pub fn build_config_toml(
         &self,
         data_dir: &std::path::Path,
         p2p_port: u16,
         rpc_port: u16,
     ) -> String {
+        let discovery = if self.discovery_section {
+            vera_config::DiscoveryConfig::local()
+                .toml_section()
+                .expect("local discovery settings serialize")
+        } else {
+            String::new()
+        };
         format!(
             r#"chain_id = {chain_id}
 data_dir = "{data_dir}"
@@ -139,9 +158,6 @@ max_connections = {rpc_max_connections}
             p2p_port = p2p_port,
             rpc_port = rpc_port,
             rpc_max_connections = self.rpc_max_connections,
-            discovery = vera_config::DiscoveryConfig::local()
-                .toml_section()
-                .expect("local discovery settings serialize"),
         )
     }
 
@@ -207,6 +223,17 @@ mod tests {
             config.network.discovery,
             vera_config::DiscoveryConfig::local()
         );
+    }
+
+    #[test]
+    fn a_config_for_an_older_node_leaves_the_discovery_section_out() {
+        let toml = NodeConfigBuilder::new()
+            .discovery_section(false)
+            .build_config_toml(std::path::Path::new("/tmp/node0"), 30_303, 8_545);
+        assert!(!toml.contains("discovery"), "{toml}");
+        let config = vera_config::NodeConfig::from_toml(&toml).unwrap();
+        assert_eq!(config.network.listen_addr, "0.0.0.0:30303");
+        assert_eq!(config.rpc.http_addr, "0.0.0.0:8545");
     }
 
     #[test]
