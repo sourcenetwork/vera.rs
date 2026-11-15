@@ -6,6 +6,7 @@
 #![recursion_limit = "256"]
 
 mod allocator_memory;
+mod beneficiaries;
 mod bootstrap;
 pub use bootstrap::{
     BootstrapSettings, GenesisEpochInfo, epoch_info_hex, run_bootstrap, trusted_setup,
@@ -16,6 +17,7 @@ pub use committed_state::CommittedState;
 
 mod config;
 mod connectivity;
+mod consensus_timeouts;
 pub use config::{NodeSettings, PeerSet, PeerSetError, load_peers};
 
 mod consts;
@@ -37,7 +39,7 @@ pub use history::{
     HistoryMemory, HistoryPeer, start_history_peer,
 };
 
-mod marshal_floor;
+mod marshal;
 mod native_genesis;
 mod node;
 
@@ -52,6 +54,7 @@ mod participants;
 pub use participants::{RegistryParticipants, validator_address};
 
 mod peer_capacity;
+mod peer_discovery;
 
 mod proposal_hold;
 pub use proposal_hold::ProposalHold;
@@ -74,8 +77,10 @@ pub use solo::{
 mod sink;
 pub use sink::{FinalizationArtifacts, FinalizationLookup, NodeSink, SinkParts};
 
+mod tx_admission;
 mod tx_gossip;
 mod tx_reannouncement;
+pub use tx_admission::Admission;
 pub use tx_gossip::{SharedValidator, TxGossip, spawn_tx_receiver};
 
 mod vrf_elector;

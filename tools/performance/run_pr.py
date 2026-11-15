@@ -9,7 +9,8 @@ import sys
 
 from compare_pr import TAGS, compare
 from record import digest
-from protocol import baseline_incompatible, incompatibility_reason, source_schema, source_storage_version, unavailable
+from protocol import (baseline_incompatible, incompatibility_reason, source_discovery_setting, source_schema,
+                      source_storage_version, unavailable)
 
 
 def supports_rpc_listener(node):
@@ -43,6 +44,7 @@ def main():
             'source': revisions[side],
             'proof_schema': source_schema(sources[side], revisions[side]),
             'storage_version': source_storage_version(sources[side], revisions[side]),
+            'discovery_setting': source_discovery_setting(sources[side], revisions[side]),
             'runner_source': revisions['head'],
             'node_sha256': digest(binaries / side / 'verad'),
             'runner_sha256': runner_sha256,
@@ -80,7 +82,8 @@ def main():
                        '--runner', str(runner), '--runner-source', str(sources['head']), '--history', 'regolith',
                        '--output', str(destination / f'objects-{objects}'), str(args.count), str(args.rate),
                        '128', '1', 'normal', '100', epoch, '0', str(objects), retained,
-                       '1' if pipelined else '0', '1' if inherit_rpc_listener else '0']
+                       '1' if pipelined else '0', '1' if inherit_rpc_listener else '0',
+                       '1' if identity[side]['discovery_setting'] else '0']
             environment = dict(os.environ, VERA_E2E_KEEP='0')
             failed |= subprocess.run(command, cwd=sources[side], env=environment, check=False).returncode != 0
     # Render only after every timed pass has finished.

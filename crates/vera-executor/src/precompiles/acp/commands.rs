@@ -59,7 +59,7 @@ pub(super) fn dispatch(
     };
     match result {
         Ok(mut result) => {
-            if result.precompile.status.is_revert() {
+            if !result.precompile.status.is_success() {
                 (*module, *vera) = snapshot;
             }
             result.precompile.gas_used = gas;
@@ -68,6 +68,10 @@ pub(super) fn dispatch(
         Err(error) if is_out_of_gas(&error) => {
             (*module, *vera) = snapshot;
             Ok(oog_dispatch())
+        }
+        Err(error) if internal_fault_reason(&error).is_some() => {
+            (*module, *vera) = snapshot;
+            Err(error)
         }
         Err(error) => {
             (*module, *vera) = snapshot;

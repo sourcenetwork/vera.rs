@@ -3,20 +3,17 @@ use super::*;
 impl VeraModule {
     /// Validate token records and both directions of their indexes before recovery publication.
     pub fn validate_restored_tokens(&self) -> Result<()> {
-        self.get_params()?;
-        let config = self.get_chain_config()?;
         for (key, bytes) in self.store.prefix_iter(keys::JWS_TOKEN_PREFIX) {
             let record: JWSTokenRecord = borsh::from_slice(bytes)
                 .map_err(|e| VeraError::State(format!("invalid restored token: {e}")))?;
             Self::validate_token_selector(&record.token_hash)?;
             Self::validate_token_selector(&record.issuer_did)?;
-            if !record.authorized_account.is_empty() {
-                Self::validate_token_selector(&record.authorized_account)?;
-            } else if !config.ignore_bearer_auth {
+            if record.authorized_account.is_empty() {
                 return Err(VeraError::State(
                     "restored token has no authorized account".into(),
                 ));
             }
+            Self::validate_token_selector(&record.authorized_account)?;
             if keys::jws_token_key(&record.token_hash) != key {
                 return Err(VeraError::State("restored token key mismatch".into()));
             }
@@ -24,12 +21,10 @@ impl VeraModule {
                 &keys::jws_token_by_did_key(&record.issuer_did, &record.token_hash),
                 &[1],
             )?;
-            if !record.authorized_account.is_empty() {
-                self.require_token_index(
-                    &keys::jws_token_by_account_key(&record.authorized_account, &record.token_hash),
-                    &[1],
-                )?;
-            }
+            self.require_token_index(
+                &keys::jws_token_by_account_key(&record.authorized_account, &record.token_hash),
+                &[1],
+            )?;
             if let Some(key) = Self::token_expiry_key(&record) {
                 self.require_token_index(&key, &[])?;
             }
@@ -67,8 +62,10 @@ impl VeraModule {
                 let expected = if prefix == keys::JWS_TOKEN_BY_DID_PREFIX {
                     Some(keys::jws_token_by_did_key(&record.issuer_did, &hash))
                 } else if prefix == keys::JWS_TOKEN_BY_ACCOUNT_PREFIX {
-                    (!record.authorized_account.is_empty())
-                        .then(|| keys::jws_token_by_account_key(&record.authorized_account, &hash))
+                    Some(keys::jws_token_by_account_key(
+                        &record.authorized_account,
+                        &hash,
+                    ))
                 } else {
                     Self::token_expiry_key(&record)
                 };
@@ -155,7 +152,6 @@ mod tests {
             (keys::jws_token_by_did_key("did:key:other", &hash), vec![1]),
             (keys::jws_token_by_account_key("other", &hash), vec![1]),
             (keys::JWS_TOKEN_EXPIRY_PREFIX.to_vec(), vec![]),
-            (keys::CHAIN_CONFIG_KEY.to_vec(), vec![255]),
             (keys::jws_token_key(&hash), vec![255]),
         ] {
             let mut broken = original.clone();
@@ -165,8 +161,6 @@ mod tests {
             assert!(module.validate_restored_tokens().is_err());
             assert_eq!(module.store.serialize(), before);
         }
-        vera.delete_jws_token(&hash).unwrap();
-        vera.validate_restored_tokens().unwrap();
         VeraModule::new().validate_restored_tokens().unwrap();
     }
 }

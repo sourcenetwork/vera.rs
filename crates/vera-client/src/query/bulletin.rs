@@ -87,15 +87,6 @@ impl VeraClient {
             .map_err(|e| ClientError::AbiDecode(e.to_string()))?;
         Ok(decoded)
     }
-
-    /// Fetch current Bulletin module parameters.
-    pub async fn get_bulletin_params(&self) -> Result<Bytes, ClientError> {
-        let calldata = IBulletin::getParamsCall {}.abi_encode();
-        let result = self.eth_call(BULLETIN_ADDRESS, calldata.into()).await?;
-        let decoded = IBulletin::getParamsCall::abi_decode_returns(&result)
-            .map_err(|e| ClientError::AbiDecode(e.to_string()))?;
-        Ok(decoded)
-    }
 }
 
 #[cfg(test)]
@@ -149,15 +140,5 @@ mod tests {
         let decoded = IBulletin::iterateGlobCall::abi_decode(&encoded).unwrap();
         assert_eq!(decoded.namespace, "ns");
         assert_eq!(decoded.glob, "dkg/*");
-    }
-
-    #[test]
-    fn get_params_calldata_selector() {
-        let calldata = IBulletin::getParamsCall {}.abi_encode();
-        assert_eq!(calldata.len(), 4);
-        assert_eq!(
-            &calldata[..4],
-            <IBulletin::getParamsCall as SolCall>::SELECTOR
-        );
     }
 }

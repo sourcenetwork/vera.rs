@@ -1,4 +1,4 @@
-//! Block execution abstractions, REVM implementation, and vera precompiles.
+//! Block execution over REVM with the vera module precompiles.
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
@@ -6,10 +6,12 @@ mod adapter;
 pub use adapter::StateDbAdapter;
 
 mod config;
-pub use config::{BaseFeeParams, ExecutionConfig, GasLimitBounds};
+pub use config::ExecutionConfig;
 
 mod context;
-pub use context::{BlockContext, ParentBlock};
+pub use context::BlockContext;
+
+mod envelope;
 
 mod error;
 pub use error::ExecutionError;
@@ -23,17 +25,14 @@ pub use vera_domain::receipt_commitment;
 
 mod revm;
 pub use revm::{
-    RevmExecutor, SpecId, build_receipt, calculate_base_fee, convert_access_list,
-    convert_authorization_list, convert_tx_kind, decode_evm_tx, decode_tx_env, extract_changes,
+    SpecId, build_receipt, convert_access_list, convert_authorization_list, convert_tx_kind,
+    decode_evm_tx, extract_changes,
 };
-
-mod traits;
-pub use traits::BlockExecutor;
 
 mod validation;
 pub use validation::{
-    ACCESS_LIST_ADDRESS_GAS, ACCESS_LIST_STORAGE_KEY_GAS, MAX_BLOBS_PER_TX, TX_BASE_GAS,
-    TX_CREATE_GAS, TX_DATA_NON_ZERO_GAS, TX_DATA_ZERO_GAS, TxValidator, ValidatedTx,
+    ACCESS_LIST_ADDRESS_GAS, ACCESS_LIST_STORAGE_KEY_GAS, TX_BASE_GAS, TX_CREATE_GAS,
+    TX_DATA_NON_ZERO_GAS, TX_DATA_ZERO_GAS, TxValidator, ValidatedTx,
 };
 
 mod executor;
@@ -46,7 +45,11 @@ mod mempool;
 pub use mempool::{MempoolValidator, PreValidatedNativeTx, TxValidationResult};
 
 mod simulate;
-pub use simulate::{SimulateRequest, SimulateResult, estimate_gas, simulate_call};
+pub use simulate::{
+    MAX_SIMULATED_SIGNER_BYTES, NativeSimulateError, NativeSimulateRequest, NativeSimulateResult,
+    SimulateRequest, SimulateResult, SimulationContext, estimate_gas, simulate_call,
+    simulate_native_call,
+};
 
 pub mod precompiles;
 pub use precompiles::VALIDATOR_REGISTRY_ADDRESS;

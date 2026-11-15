@@ -22,6 +22,13 @@ pub struct ExecutionOutcome {
     /// verifiers see a consistent set.  Empty means "all txs were executed"
     /// (backwards-compatible default for verification mode).
     pub executed_tx_indices: Option<Vec<usize>>,
+    /// Indices of input EVM txs that block building found invalid on their own.
+    ///
+    /// These do not decode or fail a check that waiting cannot cure, unlike a
+    /// tx deferred by the block gas budget or one whose nonce is still ahead
+    /// of its account. The proposer drops them from its pending pool so they
+    /// cannot occupy every later proposal.
+    pub rejected_tx_indices: Vec<usize>,
 }
 
 impl ExecutionOutcome {
@@ -34,6 +41,7 @@ impl ExecutionOutcome {
             gas_used: 0,
             module_state_root: B256::ZERO,
             executed_tx_indices: None,
+            rejected_tx_indices: Vec::new(),
         }
     }
 }

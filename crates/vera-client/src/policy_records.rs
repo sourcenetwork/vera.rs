@@ -2,7 +2,7 @@ use alloy_primitives::Bytes;
 use vera_domain::{ConsensusPublicKey, LIGHT_BLOCK_RESPONSE_BYTES};
 use vera_permission::{
     ModuleId, PAGE_PROOF_BYTES, PermissionError, PolicyPrefixPageResponse, PolicyPrefixResponse,
-    PrefixPageRequest, RECORD_PROOF_BYTES, validate_policy_prefix,
+    PrefixPageRequest, RECORD_PROOF_BYTES, VerifiedPrefixPage, validate_policy_prefix,
 };
 
 use crate::{ClientError, VeraClient};
@@ -42,6 +42,21 @@ impl VeraClient {
         trusted: &ConsensusPublicKey,
         maximum_bytes: usize,
     ) -> Result<PolicyPrefixPageResponse, ClientError> {
+        let (response, _) = self
+            .verified_policy_prefix_page(policy, request, minimum_height, trusted, maximum_bytes)
+            .await?;
+        Ok(response)
+    }
+
+    /// Fetch one relationship page and keep the entries its single verification produced.
+    pub(crate) async fn verified_policy_prefix_page(
+        &self,
+        policy: &str,
+        request: &PrefixPageRequest,
+        minimum_height: u64,
+        trusted: &ConsensusPublicKey,
+        maximum_bytes: usize,
+    ) -> Result<(PolicyPrefixPageResponse, Option<VerifiedPrefixPage>), ClientError> {
         validate_policy_prefix(policy, &request.prefix)?;
         request.validate()?;
         if request.module != ModuleId::Acp {
@@ -55,7 +70,7 @@ impl VeraClient {
                 LIGHT_BLOCK_RESPONSE_BYTES + maximum_bytes + 1024,
             )
             .await?;
-        response.verify(policy, request, minimum_height, trusted, maximum_bytes)?;
-        Ok(response)
+        let page = response.verify(policy, request, minimum_height, trusted, maximum_bytes)?;
+        Ok((response, page))
     }
 }

@@ -4,7 +4,7 @@
 //! state directly in EVM storage slots (Solidity-compatible layout). This means
 //! the EVM state root already covers validator state — no separate module tree.
 
-use alloy_primitives::{Address, B256, U256, keccak256};
+use alloy_primitives::{Address, B256, U256};
 use alloy_sol_types::SolCall;
 use commonware_codec::ReadExt as _;
 use revm::context_interface::{ContextTr, JournalTr};
@@ -15,6 +15,11 @@ use vera_modules::acp::types::{AccessRequest, Actor, Object, Operation};
 use vera_modules::types::TxExecCtx;
 use vera_modules::validator_registry::abi::IValidatorRegistry;
 use vera_modules::validator_registry::error::ValidatorRegistryError;
+use vera_modules::validator_registry::layout::{
+    MAX_P2P_ADDRESS_LEN, SLOT_POLICY_ID, SLOT_VALIDATOR_COUNT, SLOT_VALIDATORS_ARRAY_BASE,
+    SLOT_VALIDATORS_MAPPING_BASE, address_to_padded_u256, array_element_slot, mapping_slot,
+    pack_address_active, u256_to_address, unpack_address_active,
+};
 use vera_modules::validator_registry::types::ValidatorInfo;
 use vera_modules::vera::VeraModule;
 
@@ -41,52 +46,6 @@ const INPUT_COST_PER_WORD: u64 = 6;
 
 const fn input_cost(calldata_len: usize) -> u64 {
     calldata_len.div_ceil(32) as u64 * INPUT_COST_PER_WORD
-}
-
-const MAX_P2P_ADDRESS_LEN: usize = 32;
-
-// ── Storage layout constants ───────────────────────────────────────────
-
-const SLOT_POLICY_ID: U256 = U256::ZERO;
-const SLOT_VALIDATOR_COUNT: U256 = U256::from_limbs([1, 0, 0, 0]);
-const SLOT_VALIDATORS_ARRAY_BASE: U256 = U256::from_limbs([2, 0, 0, 0]);
-const SLOT_VALIDATORS_MAPPING_BASE: U256 = U256::from_limbs([3, 0, 0, 0]);
-
-fn mapping_slot(key: Address, base: U256) -> U256 {
-    let mut buf = [0u8; 64];
-    buf[12..32].copy_from_slice(key.as_slice());
-    buf[32..64].copy_from_slice(&base.to_be_bytes::<32>());
-    U256::from_be_bytes(keccak256(buf).0)
-}
-
-fn array_element_slot(base: U256, index: u64) -> U256 {
-    let hash = keccak256(base.to_be_bytes::<32>());
-    U256::from_be_bytes(hash.0).wrapping_add(U256::from(index))
-}
-
-fn pack_address_active(addr: Address, active: bool) -> U256 {
-    let mut bytes = [0u8; 32];
-    bytes[..20].copy_from_slice(addr.as_slice());
-    bytes[20] = u8::from(active);
-    U256::from_be_bytes(bytes)
-}
-
-fn unpack_address_active(val: U256) -> (Address, bool) {
-    let bytes = val.to_be_bytes::<32>();
-    let addr = Address::from_slice(&bytes[..20]);
-    let active = bytes[20] != 0;
-    (addr, active)
-}
-
-fn address_to_padded_u256(addr: Address) -> U256 {
-    let mut buf = [0u8; 32];
-    buf[12..32].copy_from_slice(addr.as_slice());
-    U256::from_be_bytes(buf)
-}
-
-fn u256_to_address(val: U256) -> Address {
-    let bytes = val.to_be_bytes::<32>();
-    Address::from_slice(&bytes[12..32])
 }
 
 // ── Journal helpers ────────────────────────────────────────────────────
@@ -747,60 +706,7 @@ pub(crate) fn dispatch_with_journal<CTX: ContextTr>(
 }
 
 fn evm_address_from_signer(signer: &str) -> Address {
-    if signer.starts_with("0x") || signer.starts_with("0X") {
-        signer.parse().unwrap_or(Address::ZERO)
-    } else if signer.starts_with("did:key:") {
-        vera_crypto::secp256k1::evm_address_from_did(signer).unwrap_or(Address::ZERO)
-    } else {
-        Address::ZERO
-    }
-}
-
-/// Compute the storage entries needed to bootstrap validators at genesis.
-#[allow(dead_code)]
-pub(crate) fn genesis_storage_entries(
-    validators: &[GenesiValidator],
-    policy_id_hash: B256,
-) -> Vec<(U256, U256)> {
-    let mut entries = Vec::new();
-
-    entries.push((SLOT_POLICY_ID, U256::from_be_bytes(policy_id_hash.0)));
-    entries.push((SLOT_VALIDATOR_COUNT, U256::from(validators.len())));
-
-    for (i, v) in validators.iter().enumerate() {
-        let addr_slot = array_element_slot(SLOT_VALIDATORS_ARRAY_BASE, i as u64);
-        entries.push((addr_slot, address_to_padded_u256(v.evm_address)));
-
-        let entry_base = mapping_slot(v.evm_address, SLOT_VALIDATORS_MAPPING_BASE);
-        entries.push((entry_base, pack_address_active(v.evm_address, true)));
-        entries.push((
-            entry_base.wrapping_add(U256::from(1)),
-            U256::from_be_bytes(v.consensus_pubkey),
-        ));
-        entries.push((entry_base.wrapping_add(U256::from(2)), U256::from(i)));
-        let p2p_bytes = v.p2p_address.as_bytes();
-        entries.push((
-            entry_base.wrapping_add(U256::from(3)),
-            U256::from(p2p_bytes.len()),
-        ));
-        let mut padded = [0u8; 32];
-        let copy_len = p2p_bytes.len().min(32);
-        padded[..copy_len].copy_from_slice(&p2p_bytes[..copy_len]);
-        entries.push((
-            entry_base.wrapping_add(U256::from(4)),
-            U256::from_be_bytes(padded),
-        ));
-    }
-
-    entries
-}
-
-/// Genesis-time validator descriptor (uses native types, not serializable strings).
-#[allow(dead_code)]
-pub(crate) struct GenesiValidator {
-    pub evm_address: Address,
-    pub consensus_pubkey: [u8; 32],
-    pub p2p_address: String,
+    vera_crypto::secp256k1::evm_address_from_did(signer).unwrap_or(Address::ZERO)
 }
 
 #[cfg(test)]
@@ -808,66 +714,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mapping_slot_is_deterministic() {
-        let addr = Address::repeat_byte(0x01);
-        let s1 = mapping_slot(addr, SLOT_VALIDATORS_MAPPING_BASE);
-        let s2 = mapping_slot(addr, SLOT_VALIDATORS_MAPPING_BASE);
-        assert_eq!(s1, s2);
-    }
-
-    #[test]
-    fn different_addresses_different_slots() {
-        let a = mapping_slot(Address::repeat_byte(0x01), SLOT_VALIDATORS_MAPPING_BASE);
-        let b = mapping_slot(Address::repeat_byte(0x02), SLOT_VALIDATORS_MAPPING_BASE);
-        assert_ne!(a, b);
-    }
-
-    #[test]
-    fn array_element_slot_increments() {
-        let s0 = array_element_slot(SLOT_VALIDATORS_ARRAY_BASE, 0);
-        let s1 = array_element_slot(SLOT_VALIDATORS_ARRAY_BASE, 1);
-        assert_eq!(s1, s0.wrapping_add(U256::from(1)));
-    }
-
-    #[test]
-    fn pack_unpack_address_active() {
-        let addr = Address::repeat_byte(0xAB);
-        let packed = pack_address_active(addr, true);
-        let (unpacked_addr, unpacked_active) = unpack_address_active(packed);
-        assert_eq!(unpacked_addr, addr);
-        assert!(unpacked_active);
-
-        let packed_inactive = pack_address_active(addr, false);
-        let (_, active) = unpack_address_active(packed_inactive);
-        assert!(!active);
-    }
-
-    #[test]
-    fn genesis_storage_entries_roundtrip() {
-        let validators = vec![GenesiValidator {
-            evm_address: Address::repeat_byte(0x01),
-            consensus_pubkey: [0xAA; 32],
-            p2p_address: "127.0.0.1:30300".to_string(),
-        }];
-        let policy_id = B256::repeat_byte(0xFF);
-        let entries = genesis_storage_entries(&validators, policy_id);
-
-        assert!(entries.len() > 2);
-        assert_eq!(entries[0].0, SLOT_POLICY_ID);
-        assert_eq!(entries[1].0, SLOT_VALIDATOR_COUNT);
-        assert_eq!(entries[1].1, U256::from(1));
-    }
-
-    #[test]
-    fn evm_address_from_signer_hex() {
-        let addr = evm_address_from_signer("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
-        assert_ne!(addr, Address::ZERO);
-    }
-
-    #[test]
-    fn evm_address_from_signer_did() {
-        let addr = evm_address_from_signer("did:key:z6MkTest");
-        assert_eq!(addr, Address::ZERO);
+    fn a_signer_without_a_secp256k1_key_has_no_address() {
+        for signer in [
+            "",
+            "did:key:z6MkTest",
+            "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        ] {
+            assert_eq!(evm_address_from_signer(signer), Address::ZERO);
+        }
     }
 
     #[test]

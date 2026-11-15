@@ -2,8 +2,10 @@
 
 mod acp;
 mod bulletin;
+mod chain_id;
 mod context;
 mod keys;
+mod parse;
 mod read_check;
 mod status;
 mod tx;
@@ -32,9 +34,10 @@ pub(crate) struct ClientArgs {
     #[arg(long, env = "VERA_BLS_KEY", global = true)]
     bls_key: Option<String>,
 
-    /// Target chain ID.
-    #[arg(long, env = "VERA_CHAIN_ID", default_value = "9001", global = true)]
-    client_chain_id: u64,
+    /// Target chain ID; the same as the top-level --chain-id. Without either
+    /// flag the client uses VERA_CHAIN_ID, then 9001.
+    #[arg(long, global = true)]
+    client_chain_id: Option<u64>,
 
     /// Output compact single-line JSON instead of pretty-printed.
     #[arg(long, global = true)]
@@ -48,17 +51,8 @@ pub(crate) struct ClientArgs {
 enum ClientCommand {
     /// Verify a native policy read against independently selected trust, checkpoint and age.
     CheckRead(read_check::ReadCheckArgs),
-    /// Query node status (vera_nodeStatus).
-    Status,
-    /// Query chain ID (eth_chainId).
-    ChainId,
-    /// Query latest block number (eth_blockNumber).
-    BlockNumber,
-    /// Query balance of an address (eth_getBalance).
-    Balance {
-        /// Ethereum address (hex, 0x-prefixed).
-        address: String,
-    },
+    #[command(flatten)]
+    Status(status::StatusCommand),
 
     /// Transaction operations (receipt, send).
     #[command(subcommand)]
@@ -72,7 +66,7 @@ enum ClientCommand {
     #[command(subcommand)]
     Bulletin(bulletin::BulletinCommand),
 
-    /// Vera module operations (chain config, JWS tokens).
+    /// Vera module operations (relay grants, JWS tokens).
     #[command(subcommand)]
     Vera(vera_mod::VeraCommand),
 
@@ -82,17 +76,20 @@ enum ClientCommand {
 }
 
 impl ClientArgs {
-    pub(crate) fn run(self) -> eyre::Result<()> {
+    /// Run the command; `chain_id` is the top-level `--chain-id`.
+    pub(crate) fn run(self, chain_id: Option<u64>) -> eyre::Result<()> {
+        let environment = std::env::var(chain_id::ENVIRONMENT).ok();
+        let chain_id = chain_id::resolve(self.client_chain_id, chain_id, environment.as_deref())?;
         let rt = tokio::runtime::Runtime::new()?;
-        rt.block_on(self.run_async())
+        rt.block_on(self.run_async(chain_id))
     }
 
-    async fn run_async(self) -> eyre::Result<()> {
+    async fn run_async(self, chain_id: u64) -> eyre::Result<()> {
         let ctx = ClientContext::new(
             &self.url,
             self.key.as_deref(),
             self.bls_key.as_deref(),
-            self.client_chain_id,
+            chain_id,
             self.compact,
         )?;
 
@@ -101,17 +98,55 @@ impl ClientArgs {
                 let report = args.run(&ctx.client).await?;
                 ctx.print_json(&report)
             }
-            ClientCommand::Status => status::StatusCommand::Status.run(&ctx).await,
-            ClientCommand::ChainId => status::StatusCommand::ChainId.run(&ctx).await,
-            ClientCommand::BlockNumber => status::StatusCommand::BlockNumber.run(&ctx).await,
-            ClientCommand::Balance { address } => {
-                status::StatusCommand::Balance { address }.run(&ctx).await
-            }
+            ClientCommand::Status(cmd) => cmd.run(&ctx).await,
             ClientCommand::Tx(cmd) => cmd.run(&ctx).await,
             ClientCommand::Acp(cmd) => cmd.run(&ctx).await,
             ClientCommand::Bulletin(cmd) => cmd.run(&ctx).await,
             ClientCommand::Vera(cmd) => cmd.run(&ctx).await,
             ClientCommand::Keys(cmd) => cmd.run(&ctx).await,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser as _;
+
+    use super::*;
+    use crate::cli::{Cli, Commands};
+
+    fn client(arguments: &[&str]) -> ClientArgs {
+        match Cli::try_parse_from(arguments).unwrap().command.unwrap() {
+            Commands::Client(args) => args,
+            other => panic!("expected a client command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn status_commands_keep_their_top_level_names() {
+        for arguments in [
+            vec!["verad", "client", "status"],
+            vec!["verad", "client", "chain-id"],
+            vec!["verad", "client", "block-number"],
+            vec!["verad", "client", "balance", "0x00"],
+        ] {
+            assert!(matches!(
+                client(&arguments).command,
+                ClientCommand::Status(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn client_chain_id_is_unset_unless_its_flag_is_given() {
+        assert_eq!(client(&["verad", "client", "status"]).client_chain_id, None);
+        assert_eq!(
+            client(&["verad", "client", "--chain-id", "1234", "status"]).client_chain_id,
+            None
+        );
+        assert_eq!(
+            client(&["verad", "client", "status", "--client-chain-id", "42"]).client_chain_id,
+            Some(42)
+        );
     }
 }

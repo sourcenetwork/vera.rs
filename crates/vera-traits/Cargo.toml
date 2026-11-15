@@ -6,11 +6,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Core trait abstractions for vera storage and consensus"
+description = "Read access to EVM state for vera execution and queries"
 
 [dependencies]
 alloy-primitives.workspace = true
-vera-qmdb.workspace = true
 
 # Error handling
 thiserror.workspace = true

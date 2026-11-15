@@ -1,5 +1,7 @@
 //! Client error types.
 
+use alloy_primitives::B256;
+
 use crate::types::TransactionReceipt;
 
 /// Errors returned by [`VeraClient`](crate::VeraClient) methods.
@@ -36,10 +38,37 @@ pub enum ClientError {
     },
 
     /// Receipt polling exhausted without finding the receipt.
-    #[error("receipt not available after {attempts} attempts")]
+    /// The submission was accepted and may still execute.
+    #[error("receipt for {tx_hash} not available after {attempts} attempts")]
     ReceiptTimeout {
+        /// Accepted submission whose receipt can still be read later.
+        tx_hash: B256,
         /// Number of poll attempts made.
         attempts: u32,
+    },
+
+    /// Receipt polling failed after the submission was accepted, which may still execute.
+    #[error("receipt for {tx_hash} could not be read: {source}")]
+    ReceiptUnavailable {
+        /// Accepted submission whose receipt can still be read later.
+        tx_hash: B256,
+        /// Failure of the last poll.
+        source: Box<Self>,
+    },
+
+    /// A native request was sent but its reply was lost, so admission is unknown.
+    ///
+    /// The signer's sequence is unchanged and the request may still execute.
+    /// Settle it with [`VeraClient::confirm_submission`](crate::VeraClient::confirm_submission)
+    /// before signing different content.
+    #[error("admission of {tx_hash} at sequence {sequence} is unknown: {source}")]
+    SubmissionUnknown {
+        /// Identifier of the signed request, whose receipt can be polled.
+        tx_hash: B256,
+        /// Sequence the request was signed with.
+        sequence: u64,
+        /// Transport failure that lost the reply.
+        source: Box<Self>,
     },
 
     /// Transaction signing failed.
@@ -169,8 +198,34 @@ mod tests {
 
     #[test]
     fn receipt_timeout_display() {
-        let err = ClientError::ReceiptTimeout { attempts: 10 };
-        assert_eq!(err.to_string(), "receipt not available after 10 attempts");
+        let err = ClientError::ReceiptTimeout {
+            tx_hash: B256::repeat_byte(0xab),
+            attempts: 10,
+        };
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "receipt for 0x{} not available after 10 attempts",
+                "ab".repeat(32)
+            )
+        );
+    }
+
+    #[test]
+    fn unknown_admission_names_the_submission_and_its_sequence() {
+        let err = ClientError::SubmissionUnknown {
+            tx_hash: B256::repeat_byte(0xcd),
+            sequence: 7,
+            source: Box::new(ClientError::MissingResult),
+        };
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "admission of 0x{} at sequence 7 is unknown: missing result in RPC response",
+                "cd".repeat(32)
+            )
+        );
+        assert!(!err.is_throttled());
     }
 
     #[test]

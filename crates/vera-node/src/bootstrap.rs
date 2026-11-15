@@ -4,7 +4,6 @@ use std::{num::NonZeroU64, path::PathBuf};
 
 use commonware_codec::Encode as _;
 use commonware_consensus::types::Epoch;
-use commonware_cryptography::ChaCha20Poly1305;
 use commonware_cryptography::{
     Signer as _,
     bls12381::{
@@ -19,10 +18,6 @@ use commonware_glue::dkg::{
 use commonware_p2p::{Ingress, authenticated::discovery};
 use commonware_parallel::Sequential;
 use commonware_runtime::{Supervisor as _, tokio};
-use commonware_stream::{
-    cups::{self, Cups},
-    sake::{self, Sake},
-};
 use commonware_utils::{
     N3f1, NZU64, TestRng,
     ordered::{Map, Set},
@@ -34,9 +29,9 @@ use vera_genesis::VeraGenesis;
 
 use crate::{
     BACKFILL_CHANNEL, BROADCAST_CHANNEL, CERTIFICATE_CHANNEL, DKG_CHANNEL, FileSecretStore,
-    IO_BUFFER_SIZE, MAILBOX_SIZE, MAX_MESSAGE_SIZE, MAX_SUPPORTED_MODE, MESSAGE_RATE, NAMESPACE,
-    P2P_SUFFIX, PAGE_CACHE_SIZE, PAGE_SIZE, PeerSet, RESOLVER_CHANNEL, REVEAL, SHARING_MODE,
-    VOTE_CHANNEL, peer_capacity::PeerCapacity,
+    IO_BUFFER_SIZE, MAILBOX_SIZE, MAX_SUPPORTED_MODE, MESSAGE_RATE, NAMESPACE, PAGE_CACHE_SIZE,
+    PAGE_SIZE, PeerSet, RESOLVER_CHANNEL, REVEAL, SHARING_MODE, VOTE_CHANNEL,
+    peer_capacity::PeerCapacity,
 };
 
 /// Epoch-0 artifact carried by the genesis block.
@@ -104,25 +99,14 @@ pub async fn run_bootstrap(
         .filter(|(key, _)| *key != local)
         .map(|(key, address)| (key.clone(), Ingress::Socket(*address)))
         .collect();
-    let mut p2p_config = discovery::Config::local(
-        Cups::<_, ChaCha20Poly1305>::new(
-            Sake {
-                signer: signing_key.clone(),
-                synchrony_bound: std::time::Duration::from_secs(5),
-                max_handshake_age: std::time::Duration::from_secs(10),
-                version: sake::Version::V1,
-            },
-            cups::Version::V1,
-        ),
-        &[NAMESPACE, P2P_SUFFIX].concat(),
+    let p2p_config = crate::peer_discovery::config(
+        signing_key.clone(),
         listen,
         dial,
         bootstrappers,
         peer_capacity.tracked(),
-        MAX_MESSAGE_SIZE,
-        MAILBOX_SIZE,
-    );
-    p2p_config.mailbox_size = MAILBOX_SIZE;
+        &settings.config.network.discovery,
+    )?;
     let (mut p2p, oracle) = discovery::Network::new(context.child("network"), p2p_config);
     let votes = p2p.register(VOTE_CHANNEL, MESSAGE_RATE);
     let certificates = p2p.register(CERTIFICATE_CHANNEL, MESSAGE_RATE);
@@ -177,9 +161,9 @@ pub async fn run_bootstrap(
     info.next_players = participants;
     settings.genesis.epoch_info = Some(epoch_info_hex(&info));
     let genesis_path = settings.config.data_dir.join("genesis.json");
-    std::fs::write(
+    vera_cli::write_durable(
         genesis_path,
-        serde_json::to_string_pretty(&settings.genesis)?,
+        serde_json::to_string_pretty(&settings.genesis)?.as_bytes(),
     )?;
     Ok(info)
 }

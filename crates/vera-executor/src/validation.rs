@@ -3,13 +3,9 @@
 use alloy_consensus::TxEnvelope;
 use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Bytes, TxKind, U256};
-use alloy_rlp::Decodable;
-use vera_traits::StateDb;
+use vera_traits::StateDbRead;
 
 use crate::{ExecutionConfig, ExecutionError};
-
-/// Maximum number of blobs per transaction (EIP-4844).
-pub const MAX_BLOBS_PER_TX: usize = 6;
 
 /// Gas cost per byte of calldata (zero byte).
 pub const TX_DATA_ZERO_GAS: u64 = 4;
@@ -34,7 +30,7 @@ pub const ACCESS_LIST_STORAGE_KEY_GAS: u64 = 1900;
 pub struct TxValidator<'a> {
     config: &'a ExecutionConfig,
     base_fee: u64,
-    blob_base_fee: Option<u128>,
+    block_gas_limit: u64,
 }
 
 impl<'a> TxValidator<'a> {
@@ -43,35 +39,36 @@ impl<'a> TxValidator<'a> {
         Self {
             config,
             base_fee,
-            blob_base_fee: None,
+            block_gas_limit: u64::MAX,
         }
     }
 
-    /// Set the blob base fee for Cancun+ validation.
+    /// Reject transactions whose gas limit no block can hold.
     #[must_use]
-    pub const fn with_blob_base_fee(mut self, blob_base_fee: u128) -> Self {
-        self.blob_base_fee = Some(blob_base_fee);
+    pub const fn with_block_gas_limit(mut self, block_gas_limit: u64) -> Self {
+        self.block_gas_limit = block_gas_limit;
         self
     }
 
-    /// Validate a transaction before execution.
-    pub async fn validate<S: StateDb>(
+    /// Validate a transaction against the sender's account in `state`.
+    pub async fn validate<S: StateDbRead>(
         &self,
-        tx_bytes: &Bytes,
+        tx_bytes: &[u8],
         state: &S,
     ) -> Result<ValidatedTx, ExecutionError> {
-        let envelope = TxEnvelope::decode(&mut tx_bytes.as_ref())
-            .map_err(|e| ExecutionError::TxDecode(format!("{}", e)))?;
-
-        self.validate_envelope(&envelope, state).await
+        let validated = self.check(tx_bytes)?;
+        let nonce = state.nonce(&validated.sender).await?;
+        let balance = state.balance(&validated.sender).await?;
+        validated.check_account(nonce, balance)?;
+        Ok(validated)
     }
 
-    /// Validate a decoded transaction envelope.
-    async fn validate_envelope<S: StateDb>(
-        &self,
-        envelope: &TxEnvelope,
-        state: &S,
-    ) -> Result<ValidatedTx, ExecutionError> {
+    /// Decode a transaction and run every check that needs no account state.
+    pub fn check(&self, tx_bytes: &[u8]) -> Result<ValidatedTx, ExecutionError> {
+        self.check_envelope(&crate::envelope::decode_envelope(tx_bytes)?)
+    }
+
+    fn check_envelope(&self, envelope: &TxEnvelope) -> Result<ValidatedTx, ExecutionError> {
         let (
             sender,
             chain_id,
@@ -138,27 +135,7 @@ impl<'a> TxValidator<'a> {
                     Some(&tx.access_list),
                 )
             }
-            TxEnvelope::Eip4844(signed) => {
-                let tx = signed.tx().tx();
-                let sender = signed.recover_signer().map_err(|e| {
-                    ExecutionError::InvalidTx(format!("failed to recover signer: {}", e))
-                })?;
-
-                self.validate_blob_tx_fields(&tx.blob_versioned_hashes, tx.max_fee_per_blob_gas)?;
-
-                (
-                    sender,
-                    Some(tx.chain_id),
-                    tx.nonce,
-                    tx.gas_limit,
-                    tx.max_fee_per_gas,
-                    tx.max_priority_fee_per_gas,
-                    tx.value,
-                    &tx.input,
-                    false,
-                    Some(&tx.access_list),
-                )
-            }
+            TxEnvelope::Eip4844(_) => return Err(crate::envelope::blob_transaction()),
             TxEnvelope::Eip7702(signed) => {
                 let tx = signed.tx();
                 let sender = signed.recover_signer().map_err(|e| {
@@ -196,23 +173,19 @@ impl<'a> TxValidator<'a> {
             )));
         }
 
-        let account_nonce = state.nonce(&sender).await?;
-        if account_nonce != nonce {
+        if gas_limit > self.block_gas_limit {
             return Err(ExecutionError::InvalidTx(format!(
-                "nonce mismatch: expected {}, got {}",
-                account_nonce, nonce
+                "gas limit {} exceeds block gas limit {}",
+                gas_limit, self.block_gas_limit
             )));
         }
 
-        let account_balance = state.balance(&sender).await?;
-        let max_gas_cost = U256::from(gas_limit) * U256::from(max_fee);
-        let required_balance = max_gas_cost + value;
-        if account_balance < required_balance {
-            return Err(ExecutionError::InvalidTx(format!(
-                "insufficient balance: has {}, needs {}",
-                account_balance, required_balance
-            )));
-        }
+        // A u64 times a u128 fits in 256 bits; only adding the value can overflow.
+        let max_cost = (U256::from(gas_limit) * U256::from(max_fee))
+            .checked_add(value)
+            .ok_or_else(|| {
+                ExecutionError::InvalidTx("gas cost plus value overflows".to_string())
+            })?;
 
         if max_fee < u128::from(self.base_fee) {
             return Err(ExecutionError::InvalidTx(format!(
@@ -238,6 +211,7 @@ impl<'a> TxValidator<'a> {
             intrinsic_gas,
             max_fee,
             value,
+            max_cost,
         })
     }
 
@@ -274,47 +248,6 @@ impl<'a> TxValidator<'a> {
         Ok(gas)
     }
 
-    /// Validate blob transaction specific fields.
-    fn validate_blob_tx_fields(
-        &self,
-        blob_versioned_hashes: &[alloy_primitives::B256],
-        max_fee_per_blob_gas: u128,
-    ) -> Result<(), ExecutionError> {
-        if blob_versioned_hashes.is_empty() {
-            return Err(ExecutionError::InvalidTx(
-                "blob transaction must have at least one blob".to_string(),
-            ));
-        }
-
-        if blob_versioned_hashes.len() > MAX_BLOBS_PER_TX {
-            return Err(ExecutionError::InvalidTx(format!(
-                "blob transaction exceeds max blobs: {} > {}",
-                blob_versioned_hashes.len(),
-                MAX_BLOBS_PER_TX
-            )));
-        }
-
-        for hash in blob_versioned_hashes {
-            if hash[0] != 0x01 {
-                return Err(ExecutionError::InvalidTx(format!(
-                    "invalid blob version: expected 0x01, got 0x{:02x}",
-                    hash[0]
-                )));
-            }
-        }
-
-        if let Some(blob_base_fee) = self.blob_base_fee
-            && max_fee_per_blob_gas < blob_base_fee
-        {
-            return Err(ExecutionError::InvalidTx(format!(
-                "max fee per blob gas {} below blob base fee {}",
-                max_fee_per_blob_gas, blob_base_fee
-            )));
-        }
-
-        Ok(())
-    }
-
     /// Validate access list entries.
     fn validate_access_list(&self, access_list: &AccessList) -> Result<(), ExecutionError> {
         for item in access_list.iter() {
@@ -343,6 +276,27 @@ pub struct ValidatedTx {
     pub max_fee: u128,
     /// ETH value transferred.
     pub value: U256,
+    /// Balance the sender needs: the gas limit at the maximum fee, plus the value.
+    pub max_cost: U256,
+}
+
+impl ValidatedTx {
+    /// Check the transaction against its sender's nonce and balance.
+    pub fn check_account(&self, nonce: u64, balance: U256) -> Result<(), ExecutionError> {
+        if nonce != self.nonce {
+            return Err(ExecutionError::InvalidTx(format!(
+                "nonce mismatch: expected {}, got {}",
+                nonce, self.nonce
+            )));
+        }
+        if balance < self.max_cost {
+            return Err(ExecutionError::InvalidTx(format!(
+                "insufficient balance: has {}, needs {}",
+                balance, self.max_cost
+            )));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

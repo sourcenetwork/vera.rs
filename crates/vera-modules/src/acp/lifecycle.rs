@@ -60,6 +60,8 @@ impl AcpModule {
     }
 
     /// Transfer a live registration without changing its priority or other grants.
+    /// The previous owner can no longer claim the object by commitment, whoever
+    /// submitted the transfer; the new owner is cleared of an earlier transfer away.
     pub fn transfer_object(
         &mut self,
         actor: &Did,
@@ -132,10 +134,15 @@ impl AcpModule {
             record.generations,
             &keys::relationship_storage_key(&record.relationship, record.incarnation),
         );
+        let previous_owner =
+            std::mem::replace(&mut record.metadata.owner_did, new_owner.to_string());
         record.relationship.subject = vera_acp::Subject::Entity(new_owner.clone());
-        record.metadata.owner_did = new_owner.to_string();
         self.remove_relationship_key_with_budget(&old_key, budget)?;
         self.set_relationship_with_budget(&record, budget)?;
+        if previous_owner != new_owner.as_str() {
+            self.relinquish_with_budget(policy_id, object, &previous_owner, budget)?;
+            self.reclaim_with_budget(policy_id, object, new_owner.as_str(), budget)?;
+        }
         Ok(record)
     }
 

@@ -21,13 +21,11 @@ vera-modules.workspace = true
 
 vera-acp.workspace = true
 vera-identity.workspace = true
-async-trait.workspace = true
 
 alloy-consensus = { workspace = true, features = ["k256"] }
 alloy-eips.workspace = true
 alloy-primitives = { workspace = true, features = ["serde"] }
 alloy-sol-types.workspace = true
-k256.workspace = true
 k256-native = { package = "k256", version = "0.14", features = ["ecdsa"] }
 
 ark-bls12-381.workspace = true
@@ -41,7 +39,7 @@ tempfile.workspace = true
 base64.workspace = true
 reqwest.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
 tokio = { workspace = true, features = ["net"] }
 hex.workspace = true
 sha2.workspace = true
@@ -49,6 +47,7 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+k256.workspace = true
 ed25519-dalek.workspace = true
 p256.workspace = true
 alloy-signer.workspace = true

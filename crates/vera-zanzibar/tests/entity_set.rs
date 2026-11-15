@@ -58,11 +58,6 @@ async fn nested_entity_sets_follow_the_named_relation_and_revocation() {
                 .unwrap(),
             expected
         );
-        let explanation = engine
-            .explain("policy", "document", "report", "reader", &actor)
-            .await
-            .unwrap();
-        assert_eq!(explanation.granted, expected);
     };
     check(true).await;
     store.store_relationship("policy", &blocked).await.unwrap();
@@ -106,23 +101,9 @@ async fn entity_set_cycles_do_not_hide_a_reachable_grant() {
         .check("policy", "group", "a", "member", &actor)
         .await
         .unwrap());
-    assert!(
-        engine
-            .explain("policy", "group", "a", "member", &actor)
-            .await
-            .unwrap()
-            .granted
-    );
     store.delete_relationship("policy", &grant).await.unwrap();
     assert!(!engine
         .check("policy", "group", "a", "member", &actor)
         .await
         .unwrap());
-    assert!(
-        !engine
-            .explain("policy", "group", "a", "member", &actor)
-            .await
-            .unwrap()
-            .granted
-    );
 }

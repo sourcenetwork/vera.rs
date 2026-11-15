@@ -1,6 +1,6 @@
 use super::oog_dispatch;
 use super::*;
-use vera_modules::acp::types::SuppliedMetadata;
+use vera_modules::acp::{CommandBudget, types::SuppliedMetadata};
 
 pub(super) const fn handles(selector: [u8; 4]) -> bool {
     matches!(
@@ -78,13 +78,29 @@ pub(super) fn dispatch(
         }
         IAcp::evaluateTheoremCall::SELECTOR => {
             let call = IAcp::evaluateTheoremCall::abi_decode(input).map_err(decode_error)?;
-            match module.evaluate_theorem(&policy_id_to_string(&call.policyId), &call.source) {
+            let budget = CommandBudget::new(gas_limit - gas);
+            let result = module.evaluate_theorem_with_budget(
+                &policy_id_to_string(&call.policyId),
+                &call.source,
+                &budget,
+            );
+            let Some(gas) = gas
+                .checked_add(budget.consumed())
+                .filter(|_| !budget.is_exhausted())
+            else {
+                return Ok(oog_dispatch());
+            };
+            match result {
                 Ok(value) => Ok(ok_dispatch(
                     gas,
                     IAcp::evaluateTheoremCall::abi_encode_returns(&json_bytes(&value)),
                     vec![],
                 )),
-                Err(error) => Ok(err_dispatch(error)),
+                Err(error) => {
+                    let mut result = err_dispatch(error);
+                    result.precompile.gas_used = gas;
+                    Ok(result)
+                }
             }
         }
         IAcp::getObjectRegistrationCall::SELECTOR => {

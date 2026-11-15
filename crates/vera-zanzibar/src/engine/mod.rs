@@ -1,8 +1,8 @@
 mod cache;
 mod evaluate;
 mod limits;
+mod outcome;
 pub use limits::{EvaluationMeter, MAX_EVALUATION_DEPTH, MAX_EVALUATION_STEPS};
-mod trace;
 
 use std::sync::Arc;
 
@@ -13,89 +13,9 @@ use crate::lookup::PolicyLookupTable;
 use crate::store::ZanzibarStore;
 use crate::types::Policy;
 
-use cache::{CheckCache, NodeId, NodeTrail};
-
-#[derive(Debug, Clone)]
-pub struct PermissionCheckRequest<'a> {
-    pub policy_id: &'a str,
-    pub resource: &'a str,
-    pub object_id: &'a str,
-    pub relation: &'a str,
-    pub subject: &'a Did,
-}
-
-impl<'a> PermissionCheckRequest<'a> {
-    pub fn new(
-        policy_id: &'a str,
-        resource: &'a str,
-        object_id: &'a str,
-        relation: &'a str,
-        subject: &'a Did,
-    ) -> Self {
-        Self {
-            policy_id,
-            resource,
-            object_id,
-            relation,
-            subject,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct PermissionExplanation {
-    pub granted: bool,
-    pub resource: String,
-    pub object_id: String,
-    pub relation: String,
-    pub subject: String,
-    pub trace: EvaluationTrace,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct EvaluationTrace {
-    pub steps: Vec<EvaluationStep>,
-}
-
-impl EvaluationTrace {
-    pub(crate) fn new() -> Self {
-        Self { steps: Vec::new() }
-    }
-
-    pub(crate) fn add_step(&mut self, step: EvaluationStep) {
-        self.steps.push(step);
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct EvaluationStep {
-    pub expression_type: String,
-    pub resource: String,
-    pub object_id: String,
-    pub relation: String,
-    pub result: StepResult,
-    pub details: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub enum StepResult {
-    Granted,
-    Denied,
-    Skipped,
-    Continuing,
-}
-
-impl std::fmt::Display for StepResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StepResult::Granted => write!(f, "GRANTED"),
-            StepResult::Denied => write!(f, "DENIED"),
-            StepResult::Skipped => write!(f, "SKIPPED"),
-            StepResult::Continuing => write!(f, "..."),
-        }
-    }
-}
+use cache::{CheckCache, NodeTrail};
+use evaluate::Goal;
+use outcome::Outcome;
 
 pub struct PermissionEngine<S: ZanzibarStore + ?Sized> {
     store: Arc<S>,
@@ -155,19 +75,17 @@ impl<S: ZanzibarStore + ?Sized> PermissionEngine<S> {
         relation: &str,
         subject: &Did,
     ) -> Result<bool> {
-        let expression = self.lookup.get_expression(policy_id, resource, relation)?;
-
-        let node_id = NodeId::new(resource, object_id, relation);
-        let trail = NodeTrail::new().with_node(node_id);
-
-        let cache = Arc::new(CheckCache::new(self.meter.clone()));
-
-        let (granted, _tainted) = self
-            .evaluate_expr_cached(
-                policy_id, resource, object_id, relation, subject, expression, trail, cache,
-            )
+        let goal = Goal {
+            policy_id,
+            resource,
+            object_id,
+            subject,
+        };
+        let cache = CheckCache::new(self.meter.clone());
+        let outcome = self
+            .evaluate_node(goal, relation, &NodeTrail::default(), &cache)
             .await?;
-        Ok(granted)
+        Ok(matches!(outcome, Outcome::Granted))
     }
 
     /// Synchronous, runtime-free wrapper over [`check`](Self::check) for
@@ -189,8 +107,10 @@ impl<S: ZanzibarStore + ?Sized> PermissionEngine<S> {
     /// - **order-stable**: policy and relationship traversal is deterministically
     ///   ordered, so identical inputs yield the identical decision on every node.
     ///
-    /// `MemoryZanzibarStore` satisfies all three. A network- or disk-backed
-    /// store generally does not and must not be used through this entry point.
+    /// An adapter over an immutable in-memory snapshot with ordered keys
+    /// satisfies all three, and so does `MemoryZanzibarStore`. A network- or
+    /// disk-backed store generally does not and must not be used through this
+    /// entry point.
     pub fn check_blocking(
         &self,
         policy_id: &str,
@@ -200,84 +120,6 @@ impl<S: ZanzibarStore + ?Sized> PermissionEngine<S> {
         subject: &Did,
     ) -> Result<bool> {
         futures::executor::block_on(self.check(policy_id, resource, object_id, relation, subject))
-    }
-
-    /// Evaluate a batch with one shared cache and work budget.
-    pub async fn check_many(&self, requests: &[PermissionCheckRequest<'_>]) -> Vec<Result<bool>> {
-        let cache = Arc::new(CheckCache::new(self.meter.clone()));
-
-        let mut results = Vec::with_capacity(requests.len());
-
-        for req in requests {
-            let result = self
-                .check_with_cache(
-                    req.policy_id,
-                    req.resource,
-                    req.object_id,
-                    req.relation,
-                    req.subject,
-                    cache.clone(),
-                )
-                .await;
-            results.push(result);
-        }
-
-        results
-    }
-
-    async fn check_with_cache(
-        &self,
-        policy_id: &str,
-        resource: &str,
-        object_id: &str,
-        relation: &str,
-        subject: &Did,
-        cache: Arc<CheckCache>,
-    ) -> Result<bool> {
-        let expression = self.lookup.get_expression(policy_id, resource, relation)?;
-
-        let node_id = NodeId::new(resource, object_id, relation);
-        let trail = NodeTrail::new().with_node(node_id);
-
-        let (granted, _tainted) = self
-            .evaluate_expr_cached(
-                policy_id, resource, object_id, relation, subject, expression, trail, cache,
-            )
-            .await?;
-        Ok(granted)
-    }
-
-    pub async fn explain(
-        &self,
-        policy_id: &str,
-        resource: &str,
-        object_id: &str,
-        relation: &str,
-        subject: &Did,
-    ) -> Result<PermissionExplanation> {
-        let expression = self.lookup.get_expression(policy_id, resource, relation)?;
-
-        let node_id = NodeId::new(resource, object_id, relation);
-        let trail = NodeTrail::new().with_node(node_id);
-
-        let cache = Arc::new(CheckCache::new(self.meter.clone()));
-        let mut trace = EvaluationTrace::new();
-
-        let granted = self
-            .evaluate_expr_with_trace(
-                policy_id, resource, object_id, relation, subject, expression, trail, cache,
-                &mut trace,
-            )
-            .await?;
-
-        Ok(PermissionExplanation {
-            granted,
-            resource: resource.to_string(),
-            object_id: object_id.to_string(),
-            relation: relation.to_string(),
-            subject: subject.to_string(),
-            trace,
-        })
     }
 }
 

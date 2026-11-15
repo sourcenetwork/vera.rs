@@ -71,6 +71,28 @@ pub struct TheoremReport {
 impl AcpModule {
     /// Evaluate the ACP v1 `Authorizations` and `Delegations` theorem language.
     pub fn evaluate_theorem(&self, policy_id: &str, source: &str) -> Result<TheoremReport> {
+        self.evaluate_theorem_with_budget(policy_id, source, &CommandBudget::new(u64::MAX))
+    }
+
+    /// Share one allowance across the source, the policy read and every assertion.
+    /// Exhaustion fails the evaluation; it is never reported as an assertion error.
+    pub fn evaluate_theorem_with_budget(
+        &self,
+        policy_id: &str,
+        source: &str,
+        budget: &CommandBudget,
+    ) -> Result<TheoremReport> {
+        budget.finish(self.theorem_report(policy_id, source, budget))
+    }
+
+    fn theorem_report(
+        &self,
+        policy_id: &str,
+        source: &str,
+        budget: &CommandBudget,
+    ) -> Result<TheoremReport> {
+        budget.input(policy_id.len().saturating_add(source.len()))?;
+        self.charge_policy_read(policy_id, budget)?;
         let policy = self.query_policy(policy_id)?.policy;
         let theorems = parser::parse(source)?;
         let mut results = Vec::with_capacity(theorems.len());
@@ -83,21 +105,26 @@ impl AcpModule {
                 })
             } else {
                 match theorem.kind {
-                    TheoremKind::Authorization => self.query_verify_access_request(
+                    TheoremKind::Authorization => self.query_verify_access_request_with_budget(
                         policy_id,
                         &AccessRequest {
                             actor: theorem.actor.clone(),
                             operations: vec![theorem.operation.clone()],
                         },
+                        &budget.permissions,
                     ),
-                    TheoremKind::Delegation => self.check_management_authority(
+                    TheoremKind::Delegation => self.check_management_authority_with_budget(
                         &theorem.actor.0,
                         policy_id,
                         object,
                         relation,
+                        budget,
                     ),
                 }
             };
+            if budget.is_exhausted() {
+                return Err(AcpError::CommandBudgetExceeded);
+            }
             let (status, message) = match outcome {
                 Ok(actual) => (
                     if actual == theorem.assert_true {

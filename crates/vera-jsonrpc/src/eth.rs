@@ -4,7 +4,6 @@ use std::{future::Future, pin::Pin, sync::Arc};
 
 use alloy_primitives::{Address, B256, Bytes, U64, U256};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use tokio::sync::RwLock;
 
 use crate::{
     error::RpcError,
@@ -216,9 +215,8 @@ pub type TxSubmitCallback = Arc<
 /// Ethereum API implementation with state provider.
 pub struct EthApiImpl<S: StateProvider> {
     chain_id: u64,
-    block_height: Arc<std::sync::atomic::AtomicU64>,
     tx_submit: Option<TxSubmitCallback>,
-    state_provider: Arc<RwLock<S>>,
+    state_provider: S,
     node_state: Option<NodeState>,
 }
 
@@ -226,7 +224,6 @@ impl<S: StateProvider> std::fmt::Debug for EthApiImpl<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthApiImpl")
             .field("chain_id", &self.chain_id)
-            .field("block_height", &self.block_height)
             .field("tx_submit", &self.tx_submit.is_some())
             .finish()
     }
@@ -237,9 +234,8 @@ impl<S: StateProvider + 'static> EthApiImpl<S> {
     pub fn new(chain_id: u64, state_provider: S) -> Self {
         Self {
             chain_id,
-            block_height: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             tx_submit: None,
-            state_provider: Arc::new(RwLock::new(state_provider)),
+            state_provider,
             node_state: None,
         }
     }
@@ -248,9 +244,8 @@ impl<S: StateProvider + 'static> EthApiImpl<S> {
     pub fn with_tx_submit(chain_id: u64, state_provider: S, tx_submit: TxSubmitCallback) -> Self {
         Self {
             chain_id,
-            block_height: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             tx_submit: Some(tx_submit),
-            state_provider: Arc::new(RwLock::new(state_provider)),
+            state_provider,
             node_state: None,
         }
     }
@@ -261,17 +256,6 @@ impl<S: StateProvider + 'static> EthApiImpl<S> {
         self.node_state = Some(state);
         self
     }
-
-    /// Get a handle to update the block height.
-    pub fn block_height_handle(&self) -> Arc<std::sync::atomic::AtomicU64> {
-        self.block_height.clone()
-    }
-
-    /// Update the current block height.
-    pub fn set_block_height(&self, height: u64) {
-        self.block_height
-            .store(height, std::sync::atomic::Ordering::Relaxed);
-    }
 }
 
 #[jsonrpsee::core::async_trait]
@@ -281,14 +265,7 @@ impl<S: StateProvider + 'static> EthApiServer for EthApiImpl<S> {
     }
 
     async fn block_number(&self) -> RpcResult<U64> {
-        let provider = self.state_provider.read().await;
-        provider.block_number().await.map_or_else(
-            |_| {
-                let height = self.block_height.load(std::sync::atomic::Ordering::Relaxed);
-                Ok(U64::from(height))
-            },
-            |height| Ok(U64::from(height)),
-        )
+        Ok(U64::from(self.state_provider.block_number().await?))
     }
 
     async fn get_balance(
@@ -296,7 +273,7 @@ impl<S: StateProvider + 'static> EthApiServer for EthApiImpl<S> {
         address: Address,
         block: Option<BlockNumberOrTag>,
     ) -> RpcResult<U256> {
-        let provider = self.state_provider.read().await;
+        let provider = &self.state_provider;
         provider.balance(address, block).await.map_err(Into::into)
     }
 
@@ -305,7 +282,7 @@ impl<S: StateProvider + 'static> EthApiServer for EthApiImpl<S> {
         address: Address,
         block: Option<BlockNumberOrTag>,
     ) -> RpcResult<U64> {
-        let provider = self.state_provider.read().await;
+        let provider = &self.state_provider;
         let nonce = provider.nonce(address, block).await?;
         Ok(U64::from(nonce))
     }
@@ -315,7 +292,7 @@ impl<S: StateProvider + 'static> EthApiServer for EthApiImpl<S> {
         address: Address,
         block: Option<BlockNumberOrTag>,
     ) -> RpcResult<Bytes> {
-        let provider = self.state_provider.read().await;
+        let provider = &self.state_provider;
         provider.code(address, block).await.map_err(Into::into)
     }
 
@@ -325,7 +302,7 @@ impl<S: StateProvider + 'static> EthApiServer for EthApiImpl<S> {
         slot: U256,
         block: Option<BlockNumberOrTag>,
     ) -> RpcResult<U256> {
-        let provider = self.state_provider.read().await;
+        let provider = &self.state_provider;
         provider
             .storage(address, slot, block)
             .await
@@ -360,7 +337,7 @@ impl<S: StateProvider + 'static> EthApiServer for EthApiImpl<S> {
         request: CallRequest,
         block: Option<BlockNumberOrTag>,
     ) -> RpcResult<Bytes> {
-        let provider = self.state_provider.read().await;
+        let provider = &self.state_provider;
         provider.call(request, block).await.map_err(Into::into)
     }
 
@@ -369,7 +346,7 @@ impl<S: StateProvider + 'static> EthApiServer for EthApiImpl<S> {
         request: CallRequest,
         block: Option<BlockNumberOrTag>,
     ) -> RpcResult<U64> {
-        let provider = self.state_provider.read().await;
+        let provider = &self.state_provider;
         let gas = provider.estimate_gas(request, block).await?;
         Ok(U64::from(gas))
     }
@@ -379,7 +356,7 @@ impl<S: StateProvider + 'static> EthApiServer for EthApiImpl<S> {
         block: BlockNumberOrTag,
         _full_transactions: bool,
     ) -> RpcResult<Option<RpcBlock>> {
-        let provider = self.state_provider.read().await;
+        let provider = &self.state_provider;
         provider.block_by_number(block).await.map_err(Into::into)
     }
 
@@ -388,12 +365,12 @@ impl<S: StateProvider + 'static> EthApiServer for EthApiImpl<S> {
         hash: B256,
         _full_transactions: bool,
     ) -> RpcResult<Option<RpcBlock>> {
-        let provider = self.state_provider.read().await;
+        let provider = &self.state_provider;
         provider.block_by_hash(hash).await.map_err(Into::into)
     }
 
     async fn get_transaction_by_hash(&self, hash: B256) -> RpcResult<Option<RpcTransaction>> {
-        let provider = self.state_provider.read().await;
+        let provider = &self.state_provider;
         provider.transaction_by_hash(hash).await.map_err(Into::into)
     }
 
@@ -401,7 +378,7 @@ impl<S: StateProvider + 'static> EthApiServer for EthApiImpl<S> {
         &self,
         hash: B256,
     ) -> RpcResult<Option<RpcTransactionReceipt>> {
-        let provider = self.state_provider.read().await;
+        let provider = &self.state_provider;
         provider.receipt_by_hash(hash).await.map_err(Into::into)
     }
 
@@ -461,7 +438,7 @@ impl<S: StateProvider + 'static> EthApiServer for EthApiImpl<S> {
     }
 
     async fn get_logs(&self, filter: RpcLogFilter) -> RpcResult<Vec<RpcLog>> {
-        let provider = self.state_provider.read().await;
+        let provider = &self.state_provider;
         provider.get_logs(filter).await.map_err(Into::into)
     }
 }
@@ -469,7 +446,6 @@ impl<S: StateProvider + 'static> EthApiServer for EthApiImpl<S> {
 /// Net API implementation.
 pub struct NetApiImpl {
     chain_id: u64,
-    peer_count: parking_lot::RwLock<Option<u64>>,
     node_state: Option<NodeState>,
 }
 
@@ -477,7 +453,6 @@ impl std::fmt::Debug for NetApiImpl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NetApiImpl")
             .field("chain_id", &self.chain_id)
-            .field("peer_count", &*self.peer_count.read())
             .finish()
     }
 }
@@ -487,7 +462,6 @@ impl NetApiImpl {
     pub const fn new(chain_id: u64) -> Self {
         Self {
             chain_id,
-            peer_count: parking_lot::RwLock::new(None),
             node_state: None,
         }
     }
@@ -497,11 +471,6 @@ impl NetApiImpl {
     pub fn with_node_state(mut self, node_state: NodeState) -> Self {
         self.node_state = Some(node_state);
         self
-    }
-
-    /// Publish an observed authenticated peer count, including an observed zero.
-    pub fn set_peer_count(&self, count: u64) {
-        *self.peer_count.write() = Some(count);
     }
 }
 
@@ -515,11 +484,7 @@ impl NetApiServer for NetApiImpl {
     }
 
     fn peer_count(&self) -> RpcResult<U64> {
-        let observed = self
-            .node_state
-            .as_ref()
-            .and_then(NodeState::peer_count)
-            .or(*self.peer_count.read());
+        let observed = self.node_state.as_ref().and_then(NodeState::peer_count);
         let count = observed.ok_or_else(|| {
             jsonrpsee::types::ErrorObjectOwned::owned(
                 crate::error::codes::RESOURCE_UNAVAILABLE,
@@ -580,13 +545,19 @@ mod tests {
 
     #[test]
     fn net_peer_count_distinguishes_unavailable_from_observed_zero() {
-        let api = NetApiImpl::new(1337);
-        let error = NetApiServer::peer_count(&api).unwrap_err();
-        assert_eq!(error.code(), crate::error::codes::RESOURCE_UNAVAILABLE);
-        assert_eq!(error.message(), "authenticated peer count is unavailable");
-        assert!(error.data().is_none());
+        let state = NodeState::new(1337, 0, 4);
+        for api in [
+            NetApiImpl::new(1337),
+            NetApiImpl::new(1337).with_node_state(state.clone()),
+        ] {
+            let error = NetApiServer::peer_count(&api).unwrap_err();
+            assert_eq!(error.code(), crate::error::codes::RESOURCE_UNAVAILABLE);
+            assert_eq!(error.message(), "authenticated peer count is unavailable");
+            assert!(error.data().is_none());
+        }
+        let api = NetApiImpl::new(1337).with_node_state(state.clone());
         for observed in [0, 3, 0] {
-            api.set_peer_count(observed);
+            state.set_peer_count(observed);
             assert_eq!(NetApiServer::peer_count(&api).unwrap(), U64::from(observed));
         }
     }
@@ -603,9 +574,8 @@ mod tests {
     #[tokio::test]
     async fn eth_block_number() {
         let api = EthApiImpl::new(1, NoopStateProvider);
-        api.set_block_height(42);
         let block_number = EthApiServer::block_number(&api).await.unwrap();
-        assert_eq!(block_number, U64::from(42));
+        assert_eq!(block_number, U64::ZERO);
     }
 
     #[tokio::test]

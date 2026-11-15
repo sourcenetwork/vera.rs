@@ -134,11 +134,10 @@ pub fn validate_request(
 
 /// Verify all evidence at a trusted revision and evaluate the caller's request.
 ///
-/// The root and height must come from an independently verified finalized
-/// revision. Transport must bound the response before deserializing this type.
+/// The root must come from an independently verified finalized revision; it
+/// alone binds the evidence. Transport must bound the response before deserializing this type.
 pub fn verify_permission_proof(
     root: B256,
-    _height: u64,
     policy: &str,
     request: &AccessRequest,
     proof: &PermissionProof,
@@ -256,7 +255,6 @@ mod tests {
         assert!(matches!(
             verify_permission_proof(
                 B256::ZERO,
-                1,
                 "policy",
                 &request(),
                 &PermissionProof::default(),
@@ -310,7 +308,7 @@ mod tests {
             reads: Vec::new(),
         };
         assert!(matches!(
-            verify_permission_proof(root, 1, "policy", &request(), &proof, PERMISSION_LIMITS),
+            verify_permission_proof(root, "policy", &request(), &proof, PERMISSION_LIMITS),
             Err(PermissionError::Evaluation(_))
         ));
     }

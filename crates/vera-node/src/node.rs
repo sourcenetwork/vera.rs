@@ -20,7 +20,6 @@ use commonware_consensus::{
     },
     types::{Epoch, FixedEpocher, Height, ViewDelta},
 };
-use commonware_cryptography::ChaCha20Poly1305;
 use commonware_cryptography::{Digested, Digestible as _, Signer as _};
 use commonware_glue::{
     dkg::{
@@ -39,10 +38,6 @@ use commonware_p2p::{Ingress, Provider as _, authenticated::discovery};
 use commonware_parallel::{Rayon, Sequential};
 use commonware_runtime::{Handle, Spawner as _, Supervisor as _, buffer::paged::CacheRef, tokio};
 use commonware_storage::{archive::prunable, translator::TwoCap};
-use commonware_stream::{
-    cups::{self, Cups},
-    sake::{self, Sake},
-};
 use commonware_utils::{NZDuration, NZU64, NZUsize, sequence::Unit};
 use tracing::{error, info};
 use vera_app::{
@@ -64,14 +59,14 @@ use vera_jsonrpc::{IndexedStateProvider, NodeState, RpcServer, TxSubmitCallback}
 use crate::{
     BACKFILL_CHANNEL, BROADCAST_CHANNEL, CERTIFICATE_CHANNEL, CommittedState, DKG_CHANNEL,
     DKG_PROBE_CHANNEL, DynamicProvider, FileSecretStore, IO_BUFFER_SIZE, MAILBOX_SIZE,
-    MAX_BLOCK_TXS, MAX_MESSAGE_SIZE, MAX_PARTICIPANTS, MAX_SUPPORTED_MODE, MAX_TX_BYTES,
-    MEMPOOL_CHANNEL, NAMESPACE, NodeOptions, NodeSettings, P2P_SUFFIX, PAGE_SIZE, RESOLVER_CHANNEL,
-    REVEAL, Registrar, RegistryParticipants, RpcMode, SHARING_MODE, TxGossip, VOTE_CHANNEL,
-    VrfElectorConfig,
+    MAX_BLOCK_TXS, MAX_PARTICIPANTS, MAX_SUPPORTED_MODE, MAX_TX_BYTES, MEMPOOL_CHANNEL, NAMESPACE,
+    NodeOptions, NodeSettings, PAGE_SIZE, RESOLVER_CHANNEL, REVEAL, Registrar,
+    RegistryParticipants, RpcMode, SHARING_MODE, TxGossip, VOTE_CHANNEL, VrfElectorConfig,
     peer_capacity::PeerCapacity,
     rejoin,
     sink::{FinalizationArtifacts, FinalizationLookup, NodeSink, SinkParts},
     spawn_tx_receiver,
+    tx_admission::Admission,
     tx_gossip::SharedValidator,
 };
 
@@ -144,6 +139,19 @@ async fn run_node_with_elector<
         certification_timeout,
         timeout_retry,
     } = settings;
+    crate::consensus_timeouts::validate(
+        leader_timeout,
+        certification_timeout,
+        timeout_retry,
+        genesis
+            .simplex
+            .map(|parameters| Duration::from_millis(parameters.stall_timeout_ms)),
+    )
+    .map_err(|error| {
+        anyhow::anyhow!(
+            "{error}; check --leader-timeout-ms, --notarization-timeout-ms and --nullify-retry-ms"
+        )
+    })?;
     let chain_id = config.chain_id;
     anyhow::ensure!(
         chain_id == genesis.chain_id,
@@ -205,6 +213,11 @@ async fn run_node_with_elector<
             "genesis has {count} {set}, but epoch length {blocks_per_epoch} and leader term {term_length} support at most {capacity}",
         );
     }
+    // The last block of every epoch reads the next participants from the registry.
+    anyhow::ensure!(
+        !genesis.validators.is_empty(),
+        "genesis.json lists no registry validators"
+    );
     let listen: std::net::SocketAddr = config.network.listen_addr.parse()?;
     let dial: std::net::SocketAddr = config
         .network
@@ -221,25 +234,14 @@ async fn run_node_with_elector<
         .map(|(pk, addr)| (pk.clone(), Ingress::Socket(*addr)))
         .collect();
     let max_peers_per_set = peer_capacity.tracked();
-    let mut p2p_config = discovery::Config::local(
-        Cups::<_, ChaCha20Poly1305>::new(
-            Sake {
-                signer: signing_key.clone(),
-                synchrony_bound: std::time::Duration::from_secs(5),
-                max_handshake_age: std::time::Duration::from_secs(10),
-                version: sake::Version::V1,
-            },
-            cups::Version::V1,
-        ),
-        &[NAMESPACE, P2P_SUFFIX].concat(),
+    let p2p_config = crate::peer_discovery::config(
+        signing_key.clone(),
         listen,
         dial,
         bootstrappers,
         max_peers_per_set,
-        MAX_MESSAGE_SIZE,
-        MAILBOX_SIZE,
-    );
-    p2p_config.mailbox_size = MAILBOX_SIZE;
+        &config.network.discovery,
+    )?;
     let channel_rate = sizing.channel_rate();
     let (mut p2p, oracle) = discovery::Network::new(context.child("network"), p2p_config);
     let vote_network = p2p.register(VOTE_CHANNEL, channel_rate);
@@ -316,6 +318,7 @@ async fn run_node_with_elector<
             .await?
             .with_payload(Payload::EpochInfo(epoch_info.clone()));
     let executor = executor.with_genesis_id(genesis_block.id().0.0);
+    let execution_config = executor.config().clone();
 
     // Marshal, broadcast, archives.
     let resolver = marshal_resolver::init(
@@ -436,7 +439,7 @@ async fn run_node_with_elector<
                 }
                 Err(_) => {
                     return Err(anyhow::anyhow!(
-                        "no peers answered the epoch probe within {}s; check peers.json                          bootstrappers and network reachability",
+                        "no peers answered the epoch probe within {}s; check peers.json bootstrappers and network reachability",
                         wait.as_secs()
                     ));
                 }
@@ -573,24 +576,6 @@ async fn run_node_with_elector<
         validator_index as u32,
         peers.participants.len() as u32,
     );
-    // The watchdog runs before any blocking startup await: the state-sync
-    // handoff below can itself stall, and that stall must be recoverable.
-    if config.watchdog_stall_seconds > 0 {
-        let stall = Duration::from_secs(config.watchdog_stall_seconds);
-        let watchdog_state = node_state.clone();
-        let has_durable_history = history.head_height() > 0;
-        let needed_peers = crate::watchdog::peers_for_quorum(peers.participants.len());
-        state_resolver_handles.push(context.child("watchdog").spawn(move |_| async move {
-            crate::run_watchdog(
-                watchdog_state,
-                stall,
-                has_durable_history,
-                needed_peers,
-                watchdog,
-            )
-            .await;
-        }));
-    }
     // A lone validator never has a peer to count, so it skips the sampling work.
     if peers.participants.len() > 1 {
         let state = node_state.clone();
@@ -645,12 +630,7 @@ async fn run_node_with_elector<
         let index = block_index.clone();
         move || index.head_block_number()
     });
-    let participant_addresses = peers
-        .participants
-        .iter()
-        .cloned()
-        .zip(genesis.to_genesis_state()?.participant_addresses)
-        .collect();
+    let participant_addresses = crate::beneficiaries::from_genesis(&genesis)?;
     let application = StatefulVeraApp::<_, OrderedState>::new(
         executor.clone(),
         genesis_block.clone(),
@@ -849,6 +829,25 @@ async fn run_node_with_elector<
             recovered.inner().context.round.view().get(),
         );
     }
+    // The stall clock starts after the history scan, which finalizes nothing
+    // however long it runs, and before the stateful actor, whose state-sync
+    // handoff can itself stall and must stay recoverable.
+    if config.watchdog_stall_seconds > 0 {
+        let stall = Duration::from_secs(config.watchdog_stall_seconds);
+        let watchdog_state = node_state.clone();
+        let has_durable_history = history.head_height() > 0;
+        let needed_peers = crate::watchdog::peers_for_quorum(peers.participants.len());
+        state_resolver_handles.push(context.child("watchdog").spawn(move |_| async move {
+            crate::run_watchdog(
+                watchdog_state,
+                stall,
+                has_durable_history,
+                needed_peers,
+                watchdog,
+            )
+            .await;
+        }));
+    }
     let reshare_handle = reshare_actor.start(dkg_network);
     let stateful_handle = stateful_actor.start();
     state_resolver_handles.extend([
@@ -915,9 +914,10 @@ async fn run_node_with_elector<
         let recovered_modules = modules.read().expect("module state lock poisoned");
         let mut admission =
             MempoolValidator::new(committed_state.clone(), ExecutionConfig::new(chain_id), 0)
-                .with_native_only(genesis.simplex.is_some());
+                .with_native_only(genesis.simplex.is_some())
+                .with_block_gas_limit(gas_limit);
         admission.reset(committed_state.clone(), recovered_modules.nonces.clone());
-        let _ = validator.set(::tokio::sync::Mutex::new(admission));
+        let _ = validator.set(::tokio::sync::Mutex::new(Admission::new(admission)));
     }
     application_ready.send_replace(true);
     let gossip = TxGossip::new(
@@ -967,6 +967,7 @@ async fn run_node_with_elector<
             crate::index_finalized_block(
                 &index,
                 &execution.block,
+                execution.block.id().0,
                 execution.gas_limit,
                 &execution.receipts,
                 gas_used,
@@ -989,6 +990,7 @@ async fn run_node_with_elector<
         gas_limit,
         modules.clone(),
     )
+    .with_execution_config(execution_config)
     .with_archive(archive.clone());
     if crate::diagnostics::enabled() {
         let history = history.clone();
@@ -999,14 +1001,6 @@ async fn run_node_with_elector<
                 .child("diagnostics")
                 .spawn(move |context| crate::diagnostics::run(context, history, index, proofs)),
         );
-    }
-    if let Some(pruning) = prune_config {
-        let marshal = marshal.clone();
-        state_resolver_handles.push(context.child("marshal_floor").spawn(
-            move |context| async move {
-                crate::marshal_floor::run(context, marshal, pruning).await;
-            },
-        ));
     }
 
     let rpc_server = RpcServer::with_state_provider(node_state, rpc_addr, chain_id, state_provider)
@@ -1030,7 +1024,7 @@ async fn run_node_with_elector<
             let epochs = light_block_index.clone();
             Arc::new(move |height| {
                 history
-                    .light_block(height, &epochs)
+                    .certified_light_block(height, &epochs)
                     .map_err(|error| error.to_string())
             })
         })
@@ -1038,6 +1032,7 @@ async fn run_node_with_elector<
     let local = match rpc {
         RpcMode::Network(listener) => {
             let (rpc_handle, local) = rpc_server.start_with_local(listener)?;
+            let rpc_addr = rpc_handle.local_addr();
             context.child("rpc").spawn(move |_| async move {
                 rpc_handle.stopped().await;
                 error!("RPC server stopped unexpectedly");

@@ -13,10 +13,7 @@ use commonware_cryptography::{Sha256, sha256::Digest};
 use commonware_storage::{
     merkle::{MAX_PROOF_DIGESTS_PER_ELEMENT, mmr},
     qmdb::{
-        any::{
-            ordered::variable::{Operation as StoredOperation, Update},
-            value::VariableEncoding,
-        },
+        any::value::VariableEncoding,
         current::ordered::proof::constant::{ExclusionProof, KeyValueProof},
     },
 };
@@ -28,7 +25,6 @@ pub use vera_modules::kv_store::{
 pub type Membership = KeyValueProof<mmr::Family, Vec<u8>, Digest, 32>;
 /// Current-state absence evidence, including the surrounding ordered span.
 pub type Exclusion = ExclusionProof<mmr::Family, Vec<u8>, VariableEncoding<Bytes>, Digest, 32>;
-type Operation = StoredOperation<mmr::Family, Vec<u8>, Bytes>;
 
 /// One authenticated entry in a complete prefix.
 #[derive(Clone, Debug)]
@@ -78,32 +74,11 @@ fn exclusion_config() -> <Exclusion as Read>::Cfg {
 }
 
 fn included(key: &[u8], value: &Bytes, proof: &Membership, root: &Digest) -> bool {
-    proof.proof.verify::<Sha256, _>(
-        Operation::Update(Update {
-            key: key.to_vec(),
-            value: value.clone(),
-            next_key: proof.next_key.clone(),
-        }),
-        root,
-    )
+    proof.verify::<Sha256, VariableEncoding<Bytes>>(key.to_vec(), value.clone(), root)
 }
 
 fn excluded(key: &[u8], proof: &Exclusion, root: &Digest) -> bool {
-    match proof {
-        Exclusion::KeyValue(proof, record) => {
-            let start = record.key.as_slice();
-            let end = record.next_key.as_slice();
-            let within = if start < end {
-                key > start && key < end
-            } else {
-                key > start || key < end
-            };
-            within && proof.verify::<Sha256, _>(Operation::Update(record.clone()), root)
-        }
-        Exclusion::Commit(proof, metadata) => {
-            proof.verify::<Sha256, _>(Operation::CommitFloor(metadata.clone(), proof.loc), root)
-        }
-    }
+    proof.verify::<Sha256>(&key.to_vec(), root)
 }
 
 /// Verify bounded native membership or absence at an authenticated partition root.

@@ -1,18 +1,24 @@
 //! Vera genesis configuration.
 
-use std::{collections::HashSet, path::Path, str::FromStr};
+use std::{path::Path, str::FromStr};
 
-use crate::state::GenesisState;
-use alloy_evm::revm::primitives::{Address, U256, keccak256};
-use commonware_codec::ReadExt as _;
+use crate::{
+    VeraGenesisError,
+    state::GenesisState,
+    validators::{PRECOMPILE_SENTINEL_BYTECODE, validator_storage_entries},
+};
+use alloy_evm::revm::primitives::{Address, U256};
 use serde::{Deserialize, Serialize};
+use vera_modules::validator_registry::layout::ADDRESS as VALIDATOR_REGISTRY_ADDRESS;
 
-/// Vera-extended genesis configuration.
+/// Vera genesis configuration: the EVM allocations and code together with
+/// the deployment's operators, seeded policies, validators and consensus
+/// parameters.
 ///
-/// Extends the base EVM genesis with vera-specific fields:
-/// - `native_mint`: NativeMint precompile configuration
-/// - `chain_name`: Human-readable chain identifier
+/// A key this struct does not define is an error, so a misspelled optional
+/// section cannot fall back to its default unnoticed.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct VeraGenesis {
     /// Chain ID.
     pub chain_id: u64,
@@ -37,17 +43,11 @@ pub struct VeraGenesis {
     /// ring itself.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub node_demerits: Vec<vera_modules::vera::rings::reports::NodeDemeritSeed>,
-    /// Chain name (e.g., "vera-devnet").
-    #[serde(default = "default_chain_name")]
-    pub chain_name: String,
     /// Genesis timestamp.
     #[serde(default = "default_timestamp")]
     pub timestamp: u64,
     /// Initial account allocations.
     pub allocations: Vec<GenesisAllocation>,
-    /// NativeMint precompile configuration.
-    #[serde(default)]
-    pub native_mint: NativeMintConfig,
     /// Genesis validators for the ValidatorRegistry precompile.
     #[serde(default)]
     pub validators: Vec<ValidatorConfig>,
@@ -78,16 +78,13 @@ const fn default_blocks_per_epoch() -> u64 {
     20
 }
 
-fn default_chain_name() -> String {
-    "verad".to_string()
-}
-
 const fn default_timestamp() -> u64 {
     0
 }
 
 /// A single genesis allocation entry.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GenesisAllocation {
     /// Account address (hex with 0x prefix).
     pub address: String,
@@ -97,6 +94,7 @@ pub struct GenesisAllocation {
 
 /// A genesis validator entry for the ValidatorRegistry precompile.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ValidatorConfig {
     /// EVM address (hex with 0x prefix).
     pub evm_address: String,
@@ -108,6 +106,7 @@ pub struct ValidatorConfig {
 
 /// Arbitrary contract bytecode to deploy at genesis.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GenesisContract {
     /// Contract address (hex with 0x prefix).
     pub address: String,
@@ -117,6 +116,7 @@ pub struct GenesisContract {
 
 /// Pre-set storage slot at genesis.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GenesisStorage {
     /// Account address (hex with 0x prefix).
     pub address: String,
@@ -124,59 +124,6 @@ pub struct GenesisStorage {
     pub slot: String,
     /// Storage value (hex with 0x prefix).
     pub value: String,
-}
-
-/// Configuration for the NativeMint precompile.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct NativeMintConfig {
-    /// Admin address for the NativeMint precompile.
-    #[serde(default)]
-    pub admin: Option<String>,
-    /// Initial whitelisted minter addresses.
-    #[serde(default)]
-    pub minters: Vec<String>,
-    /// Native token denom name.
-    #[serde(default = "default_denom")]
-    pub denom: String,
-}
-
-fn default_denom() -> String {
-    "abrl".to_string()
-}
-
-/// Errors from genesis loading.
-#[derive(Debug)]
-pub enum VeraGenesisError {
-    /// IO error reading the genesis file.
-    Io(std::io::Error),
-    /// JSON parsing error.
-    Json(serde_json::Error),
-    /// Error parsing address or balance values.
-    Parse(String),
-}
-
-impl std::fmt::Display for VeraGenesisError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(e) => write!(f, "io error: {}", e),
-            Self::Json(e) => write!(f, "json error: {}", e),
-            Self::Parse(e) => write!(f, "parse error: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for VeraGenesisError {}
-
-impl From<std::io::Error> for VeraGenesisError {
-    fn from(e: std::io::Error) -> Self {
-        Self::Io(e)
-    }
-}
-
-impl From<serde_json::Error> for VeraGenesisError {
-    fn from(e: serde_json::Error) -> Self {
-        Self::Json(e)
-    }
 }
 
 impl VeraGenesis {
@@ -309,7 +256,6 @@ impl VeraGenesis {
             placed_policies: Vec::new(),
             node_demerits: Vec::new(),
             chain_id: 9001,
-            chain_name: "vera-devnet".to_string(),
             timestamp: 0,
             allocations: vec![
                 GenesisAllocation {
@@ -321,11 +267,6 @@ impl VeraGenesis {
                     balance: "1000000000000000000000".to_string(),
                 },
             ],
-            native_mint: NativeMintConfig {
-                admin: Some("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string()),
-                minters: vec!["0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string()],
-                denom: "abrl".to_string(),
-            },
             validators: Vec::new(),
             contracts: Vec::new(),
             extra_storage: Vec::new(),
@@ -335,143 +276,6 @@ impl VeraGenesis {
             timestamp_step_secs: None,
         }
     }
-}
-
-// ── ValidatorRegistry storage layout ──────────────────────────────────
-//
-// Must match the layout in vera-executor/src/precompiles/validator_registry.rs.
-
-const VALIDATOR_REGISTRY_ADDRESS: Address = {
-    let mut bytes = [0u8; 20];
-    bytes[18] = 0x08;
-    bytes[19] = 0x13;
-    Address::new(bytes)
-};
-
-/// EVM `INVALID` opcode — causes revert on direct calls. Same as Tempo.
-const PRECOMPILE_SENTINEL_BYTECODE: &[u8] = &[0xfe];
-
-const MAX_P2P_ADDRESS_LEN: usize = 32;
-
-const SLOT_POLICY_ID: U256 = U256::ZERO;
-const SLOT_VALIDATOR_COUNT: U256 = U256::from_limbs([1, 0, 0, 0]);
-const SLOT_VALIDATORS_ARRAY_BASE: U256 = U256::from_limbs([2, 0, 0, 0]);
-const SLOT_VALIDATORS_MAPPING_BASE: U256 = U256::from_limbs([3, 0, 0, 0]);
-
-fn vr_mapping_slot(key: Address, base: U256) -> U256 {
-    let mut buf = [0u8; 64];
-    buf[12..32].copy_from_slice(key.as_slice());
-    buf[32..64].copy_from_slice(&base.to_be_bytes::<32>());
-    U256::from_be_bytes(keccak256(buf).0)
-}
-
-fn vr_array_element_slot(base: U256, index: u64) -> U256 {
-    let hash = keccak256(base.to_be_bytes::<32>());
-    U256::from_be_bytes(hash.0).wrapping_add(U256::from(index))
-}
-
-fn vr_pack_address_active(addr: Address, active: bool) -> U256 {
-    let mut bytes = [0u8; 32];
-    bytes[..20].copy_from_slice(addr.as_slice());
-    bytes[20] = u8::from(active);
-    U256::from_be_bytes(bytes)
-}
-
-fn vr_address_to_padded_u256(addr: Address) -> U256 {
-    let mut buf = [0u8; 32];
-    buf[12..32].copy_from_slice(addr.as_slice());
-    U256::from_be_bytes(buf)
-}
-
-fn validate_genesis_p2p_address(addr: &str) -> Result<(), VeraGenesisError> {
-    if addr.is_empty() {
-        return Err(VeraGenesisError::Parse(
-            "validator p2p address is empty".into(),
-        ));
-    }
-    if addr.len() > MAX_P2P_ADDRESS_LEN {
-        return Err(VeraGenesisError::Parse(format!(
-            "validator p2p address exceeds {MAX_P2P_ADDRESS_LEN} bytes: {addr}"
-        )));
-    }
-    addr.parse::<std::net::SocketAddr>().map_err(|e| {
-        VeraGenesisError::Parse(format!("invalid validator p2p address '{addr}': {e}"))
-    })?;
-    Ok(())
-}
-
-fn validator_storage_entries(
-    validators: &[ValidatorConfig],
-) -> Result<Vec<(U256, U256)>, VeraGenesisError> {
-    let mut seen = HashSet::new();
-    for v in validators {
-        let addr = Address::from_str(&v.evm_address)
-            .map_err(|e| VeraGenesisError::Parse(format!("invalid validator address: {e}")))?;
-        if !seen.insert(addr) {
-            return Err(VeraGenesisError::Parse(format!(
-                "duplicate validator address: {addr}"
-            )));
-        }
-    }
-
-    let mut entries = Vec::new();
-
-    entries.push((SLOT_POLICY_ID, U256::ZERO));
-    entries.push((SLOT_VALIDATOR_COUNT, U256::from(validators.len())));
-
-    for (i, v) in validators.iter().enumerate() {
-        let addr = Address::from_str(&v.evm_address)
-            .map_err(|e| VeraGenesisError::Parse(format!("invalid validator address: {e}")))?;
-        if addr == Address::ZERO {
-            return Err(VeraGenesisError::Parse(
-                "validator address cannot be zero".into(),
-            ));
-        }
-        let consensus_bytes = hex::decode(&v.consensus_pubkey)
-            .map_err(|e| VeraGenesisError::Parse(format!("invalid consensus pubkey: {e}")))?;
-        if consensus_bytes.len() != 32 {
-            return Err(VeraGenesisError::Parse(format!(
-                "consensus pubkey must be 32 bytes, got {}",
-                consensus_bytes.len()
-            )));
-        }
-        let mut consensus: [u8; 32] = [0u8; 32];
-        consensus.copy_from_slice(&consensus_bytes);
-        if consensus == [0u8; 32] {
-            return Err(VeraGenesisError::Parse(
-                "consensus pubkey cannot be all zeros".into(),
-            ));
-        }
-        vera_domain::PublicKey::read(&mut commonware_codec::Copying(consensus.as_slice()))
-            .map_err(|error| {
-                VeraGenesisError::Parse(format!("invalid consensus pubkey: {error}"))
-            })?;
-        validate_genesis_p2p_address(&v.p2p_address)?;
-
-        let addr_slot = vr_array_element_slot(SLOT_VALIDATORS_ARRAY_BASE, i as u64);
-        entries.push((addr_slot, vr_address_to_padded_u256(addr)));
-
-        let entry_base = vr_mapping_slot(addr, SLOT_VALIDATORS_MAPPING_BASE);
-        entries.push((entry_base, vr_pack_address_active(addr, true)));
-        entries.push((
-            entry_base.wrapping_add(U256::from(1)),
-            U256::from_be_bytes(consensus),
-        ));
-        entries.push((entry_base.wrapping_add(U256::from(2)), U256::from(i)));
-        let p2p_bytes = v.p2p_address.as_bytes();
-        entries.push((
-            entry_base.wrapping_add(U256::from(3)),
-            U256::from(p2p_bytes.len()),
-        ));
-        let mut padded = [0u8; 32];
-        padded[..p2p_bytes.len()].copy_from_slice(p2p_bytes);
-        entries.push((
-            entry_base.wrapping_add(U256::from(4)),
-            U256::from_be_bytes(padded),
-        ));
-    }
-
-    Ok(entries)
 }
 
 #[cfg(test)]
@@ -498,7 +302,6 @@ mod tests {
         let parsed: VeraGenesis = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.chain_id, 9001);
         assert_eq!(parsed.allocations.len(), 2);
-        assert_eq!(parsed.native_mint.denom, "abrl");
     }
 
     #[test]
@@ -520,7 +323,7 @@ mod tests {
 
         let loaded = VeraGenesis::load(&path).unwrap();
         assert_eq!(loaded.chain_id, genesis.chain_id);
-        assert_eq!(loaded.chain_name, genesis.chain_name);
+        assert_eq!(loaded.allocations.len(), genesis.allocations.len());
     }
 
     #[test]
@@ -531,13 +334,11 @@ mod tests {
             placed_policies: Vec::new(),
             node_demerits: Vec::new(),
             chain_id: 1,
-            chain_name: "test".to_string(),
             timestamp: 0,
             allocations: vec![GenesisAllocation {
                 address: "not-an-address".to_string(),
                 balance: "100".to_string(),
             }],
-            native_mint: NativeMintConfig::default(),
             validators: Vec::new(),
             contracts: Vec::new(),
             extra_storage: Vec::new(),
@@ -557,10 +358,8 @@ mod tests {
             placed_policies: Vec::new(),
             node_demerits: Vec::new(),
             chain_id: 1,
-            chain_name: "test".to_string(),
             timestamp: 0,
             allocations: Vec::new(),
-            native_mint: NativeMintConfig::default(),
             validators,
             contracts: Vec::new(),
             extra_storage: Vec::new(),
@@ -587,6 +386,83 @@ mod tests {
         ]);
         let err = genesis.to_genesis_state().unwrap_err();
         assert!(err.to_string().contains("duplicate validator address"));
+    }
+
+    #[test]
+    fn genesis_rejects_a_consensus_key_shared_by_two_validators() {
+        use commonware_codec::Encode as _;
+        use commonware_cryptography::Signer as _;
+
+        let key = hex::encode(
+            commonware_cryptography::ed25519::PrivateKey::from_seed(1)
+                .public_key()
+                .encode(),
+        );
+        let genesis = genesis_with_validators(vec![
+            ValidatorConfig {
+                evm_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
+                consensus_pubkey: key.clone(),
+                p2p_address: "127.0.0.1:30300".to_string(),
+            },
+            ValidatorConfig {
+                evm_address: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8".to_string(),
+                consensus_pubkey: key,
+                p2p_address: "127.0.0.1:30301".to_string(),
+            },
+        ]);
+        let err = genesis.to_genesis_state().unwrap_err();
+        assert!(err.to_string().contains("duplicate consensus pubkey"));
+    }
+
+    #[test]
+    fn unknown_keys_are_rejected_at_the_top_level_and_in_allocations() {
+        let mut value = serde_json::to_value(VeraGenesis::devnet()).unwrap();
+        value["operator"] = serde_json::Value::Null;
+        let error = serde_json::from_value::<VeraGenesis>(value).unwrap_err();
+        assert!(error.to_string().contains("unknown field `operator`"));
+
+        let mut value = serde_json::to_value(VeraGenesis::devnet()).unwrap();
+        value["allocations"][0]["nonce"] = 1.into();
+        assert!(serde_json::from_value::<VeraGenesis>(value).is_err());
+    }
+
+    #[test]
+    fn unknown_keys_are_rejected_in_seeded_records() {
+        let seeded = |section: &str, entry: serde_json::Value| {
+            let mut value = serde_json::to_value(VeraGenesis::devnet()).unwrap();
+            value[section] = serde_json::Value::Array(vec![entry]);
+            value
+        };
+        let policy =
+            serde_json::json!({ "definition": "name: seeded", "marshal_type": "ShortYaml" });
+        let placed = serde_json::json!({
+            "definition": "name: seeded",
+            "marshal_type": "ShortYaml",
+            "counter": 1,
+            "owner": "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+        });
+        let demerit = serde_json::json!({
+            "ring_id": "ring",
+            "node_key": "node",
+            "points": 1,
+            "window_started_at": 0,
+        });
+        for (section, entry, extra) in [
+            ("policies", policy, "owner"),
+            ("placed_policies", placed, "owners"),
+            ("node_demerits", demerit, "window"),
+        ] {
+            serde_json::from_value::<VeraGenesis>(seeded(section, entry.clone())).unwrap();
+            let mut entry = entry;
+            entry[extra] = 5.into();
+            let error = serde_json::from_value::<VeraGenesis>(seeded(section, entry)).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("unknown field `{extra}`")),
+                "{section}: {error}"
+            );
+        }
     }
 
     #[test]

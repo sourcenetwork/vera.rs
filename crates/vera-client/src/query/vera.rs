@@ -51,24 +51,6 @@ impl VeraClient {
         IVera::getDelegationsBySubmitterCall::abi_decode_returns(&result)
             .map_err(|e| ClientError::AbiDecode(e.to_string()))
     }
-
-    /// Fetch the chain configuration.
-    pub async fn get_chain_config(&self) -> Result<Bytes, ClientError> {
-        let calldata = IVera::getChainConfigCall {}.abi_encode();
-        let result = self.eth_call(VERA_ADDRESS, calldata.into()).await?;
-        let decoded = IVera::getChainConfigCall::abi_decode_returns(&result)
-            .map_err(|e| ClientError::AbiDecode(e.to_string()))?;
-        Ok(decoded)
-    }
-
-    /// Fetch current Vera module parameters.
-    pub async fn get_hub_params(&self) -> Result<Bytes, ClientError> {
-        let calldata = IVera::getParamsCall {}.abi_encode();
-        let result = self.eth_call(VERA_ADDRESS, calldata.into()).await?;
-        let decoded = IVera::getParamsCall::abi_decode_returns(&result)
-            .map_err(|e| ClientError::AbiDecode(e.to_string()))?;
-        Ok(decoded)
-    }
 }
 
 #[cfg(test)]
@@ -111,22 +93,5 @@ mod tests {
         );
         let decoded = IVera::getJWSTokensByAccountCall::abi_decode(&encoded).unwrap();
         assert_eq!(decoded.account, account);
-    }
-
-    #[test]
-    fn get_chain_config_calldata_selector() {
-        let calldata = IVera::getChainConfigCall {}.abi_encode();
-        assert_eq!(calldata.len(), 4);
-        assert_eq!(
-            &calldata[..4],
-            <IVera::getChainConfigCall as SolCall>::SELECTOR
-        );
-    }
-
-    #[test]
-    fn get_params_calldata_selector() {
-        let calldata = IVera::getParamsCall {}.abi_encode();
-        assert_eq!(calldata.len(), 4);
-        assert_eq!(&calldata[..4], <IVera::getParamsCall as SolCall>::SELECTOR);
     }
 }

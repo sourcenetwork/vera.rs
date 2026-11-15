@@ -1,11 +1,55 @@
 # Registration commitments
 
 An actor may commit to object registrations before revealing their identifiers.
-A reveal can replace an existing owner only if the commitment's revision is no
-later than the existing registration's creation revision. The resulting owner
+A reveal can replace an existing owner only if the commitment's revision is
+strictly earlier than the existing registration's creation revision. A commitment
+of the same revision does not outrank the registration, and a commitment that has
+already been revealed cannot be revealed again to amend the record it created.
+The current owner cannot amend its own registration. The resulting owner
 record retains the commitment's creation timestamp, so a later commitment cannot
-override an earlier claim after an amendment. Its submission ID and signer identify
-the reveal; the amendment event records the reveal's own execution timestamp.
+override an earlier claim after an amendment. Its submission ID and signer
+identify the reveal; the amendment event records the reveal's own execution
+timestamp.
+
+A transfer is final for the owner the object left. The transfer records that
+owner as having relinquished the object, and a reveal that would amend the
+object's registration is refused with an authorization error for a relinquished
+actor, whichever of its commitments it reveals and however old that commitment
+is. An actor who committed to the object twice, or committed and then
+registered it directly, therefore cannot transfer the object and afterwards
+take it back with the commitment it held in reserve. The owner is recorded
+whoever submitted the transfer, including a manager of the owner relation, so
+an owner cannot avoid the record by submitting the transfer through a second
+identity that holds manager rights.
+
+A transfer to an actor who had relinquished the object removes that actor's
+record. The actor holds the object again by a transfer its owner or a manager
+authorized, and has the same standing as any other owner: if a still-valid
+earlier commitment of another actor later amends the registration, the actor
+may reclaim the object with a commitment older still. After A transfers to B
+and B transfers back to A, B is recorded as having relinquished the object and
+A is not.
+
+A transfer gives the transferee no priority over anyone else. The transferred
+record keeps its creation timestamp, so a still-valid commitment that another
+actor made strictly earlier amends the transferee's ownership as it would have
+amended the transferor's. A registration followed by a transfer to an
+accomplice does not defeat an earlier commitment.
+
+The relinquishment marker is the empty value at
+`relinquished/{policy_id}/{resource_hex}/{object_hex}/{actor_digest}`, where
+the digest is the hexadecimal SHA-256 of `vera/acp-relinquished/v1`, a zero
+byte and the actor's canonical DID. It is part of ACP state and of the native
+state commitment. It survives archive, unarchive, transfers between other
+actors and amendments by other actors, and is deleted by a transfer of the
+object to the actor it names. A transfer to the current owner writes and
+deletes no marker. An object holds at most one marker per actor that has
+transferred it away and not received it back, each written by a paid
+transfer; markers are not expired
+by time, because a transfer carries no clock and commitment lifetimes are an
+operator parameter that can change, and they are removed when the policy is
+deleted. Native recovery rejects a marker that is malformed, has a value, or
+names an unregistered object or an absent policy.
 
 Native and optional EVM execution supply this metadata through the same module
 command path. Delegated commands preserve the actor as owner and the worker as
@@ -45,7 +89,11 @@ commitment beyond the verifier's existing proof-shape checks.
 Owner queries inspect at most two records. Missing ownership returns unregistered;
 malformed, duplicate or mismatched ownership records return an error. Unarchive
 uses the same validation, including actor, policy, object and storage-key binding.
-Archived ownership remains reserved for its previous owner.
+Archived ownership remains reserved for its previous owner against plain
+registration and against any commitment that is not older than it. A strictly
+older commitment amends an archived registration like a live one: the claimant
+becomes the unarchived owner, the amendment is recorded, and the grants
+invalidated by the archive stay invalid.
 
 The registration leaf is `vera/registration-leaf/v1` followed by a zero byte and
 the Borsh encoding of four strings: policy ID, resource, object ID and the actor's

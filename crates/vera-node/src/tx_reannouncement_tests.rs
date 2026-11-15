@@ -78,8 +78,8 @@ fn dropped_and_peer_rejected_initial_delivery_remains_retryable() {
             1,
             sender.clone(),
         );
-        gossip.forward_local(tx.clone()).await;
-        gossip.forward_local(tx.clone()).await;
+        gossip.forward(tx.id(), tx.clone()).await;
+        gossip.forward(tx.id(), tx.clone()).await;
         let held_sender = gossip.sender.lock().await;
         assert!(gossip.reannounce().now_or_never().is_some());
         drop(held_sender);
@@ -115,7 +115,7 @@ fn peer_transactions_and_pruned_local_entries_are_not_reannounced() {
             1,
             sender.clone(),
         );
-        gossip.forward_local(local.clone()).await;
+        gossip.forward(local.id(), local.clone()).await;
         pool.prune(&[local.id()]);
         context.sleep(Duration::from_secs(20)).await;
         gossip.reannounce().await;
@@ -125,7 +125,7 @@ fn peer_transactions_and_pruned_local_entries_are_not_reannounced() {
         let cancelled = Tx::new(vec![6].into());
         assert!(pool.insert(cancelled.clone()));
         let held_sender = gossip.sender.lock().await;
-        let mut forwarding = Box::pin(gossip.forward_local(cancelled.clone()));
+        let mut forwarding = Box::pin(gossip.forward(cancelled.id(), cancelled.clone()));
         assert!(forwarding.as_mut().now_or_never().is_none());
         drop(forwarding);
         drop(held_sender);

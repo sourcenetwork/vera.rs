@@ -29,7 +29,7 @@ pub struct RegistryParticipants {
     genesis_players: Set<PublicKey>,
     history: Arc<crate::FinalizedHistory>,
     epoch_length: NonZeroU64,
-    marshal: Option<crate::marshal_floor::VeraMarshal>,
+    marshal: Option<crate::marshal::VeraMarshal>,
 }
 
 impl std::fmt::Debug for RegistryParticipants {
@@ -58,7 +58,7 @@ impl RegistryParticipants {
             marshal: None,
         }
     }
-    pub(crate) fn with_marshal(mut self, marshal: crate::marshal_floor::VeraMarshal) -> Self {
+    pub(crate) fn with_marshal(mut self, marshal: crate::marshal::VeraMarshal) -> Self {
         self.marshal = Some(marshal);
         self
     }

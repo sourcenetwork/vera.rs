@@ -1,7 +1,6 @@
 //! Core [`VeraClient`] struct with JSON-RPC transport.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 
 use alloy_primitives::{Address, B256, Bytes, FixedBytes, U256};
 use serde::de::DeserializeOwned;
@@ -11,6 +10,9 @@ use crate::error::ClientError;
 use crate::types::{NativeReceipt, NodeStatus, TransactionReceipt};
 
 mod admission;
+mod envelope;
+mod simulation;
+mod submission;
 
 /// ACP precompile address (`0x0810`).
 pub const ACP_ADDRESS: Address = address_from_last_two_bytes(0x08, 0x10);
@@ -120,22 +122,7 @@ impl VeraClient {
             }
             bytes.extend_from_slice(&chunk);
         }
-        let mut value: serde_json::Value = serde_json::from_slice(&bytes)?;
-        if value.get("id").and_then(serde_json::Value::as_u64) != Some(id)
-            || value.get("jsonrpc").and_then(serde_json::Value::as_str) != Some("2.0")
-        {
-            return Err(ClientError::InvalidResponse(
-                "request ID or protocol version mismatch",
-            ));
-        }
-        if let Some(error) = value.get("error") {
-            return Err(ClientError::from_rpc(error));
-        }
-        let result = value
-            .get_mut("result")
-            .map(serde_json::Value::take)
-            .ok_or(ClientError::MissingResult)?;
-        Ok(serde_json::from_value(result)?)
+        envelope::decode(&bytes, id)
     }
 
     // ── Ethereum RPC wrappers ───────────────────────────────────────
@@ -265,80 +252,6 @@ impl VeraClient {
             .await?;
         parse_hex_u64(&hex)
     }
-
-    // ── BLS native write helper ────────────────────────────────────
-
-    /// Sign and submit a native BLS transaction, then poll for the receipt.
-    pub(crate) async fn send_native_precompile_tx(
-        &self,
-        signer: &crate::bls_signer::BlsSigner,
-        target: Address,
-        calldata: Bytes,
-    ) -> Result<TransactionReceipt, ClientError> {
-        let wire = signer.sign_native_tx(target, calldata)?;
-        let tx_hash = self.send_native_tx(&wire).await?;
-        // Native txs rely on P2P gossip to reach all validators,
-        // so use a longer timeout than EVM txs.
-        let receipt = self
-            .wait_for_receipt(tx_hash, Duration::from_millis(300), 400)
-            .await?;
-        if receipt.status == 0 {
-            return Err(ClientError::TxReverted {
-                status: 0,
-                receipt: Box::new(receipt),
-            });
-        }
-        Ok(receipt)
-    }
-
-    // ── EVM write helper ──────────────────────────────────────────
-
-    /// Sign and submit a precompile transaction, then poll for the receipt.
-    pub(crate) async fn send_precompile_tx(
-        &self,
-        signer: &crate::signer::EvmSigner,
-        target: Address,
-        calldata: Bytes,
-    ) -> Result<TransactionReceipt, ClientError> {
-        let nonce = self.get_nonce(signer.address()).await?;
-        let raw = signer.sign_tx(target, calldata, nonce)?;
-        let tx_hash = self.send_raw_transaction(&raw).await?;
-        let receipt = self
-            .wait_for_receipt(tx_hash, Duration::from_millis(300), 400)
-            .await?;
-        if receipt.status == 0 {
-            return Err(ClientError::TxReverted {
-                status: 0,
-                receipt: Box::new(receipt),
-            });
-        }
-        Ok(receipt)
-    }
-
-    // ── Receipt polling ─────────────────────────────────────────────
-
-    /// Poll for a transaction receipt until it appears or attempts are exhausted.
-    pub async fn wait_for_receipt(
-        &self,
-        tx_hash: B256,
-        interval: Duration,
-        max_attempts: u32,
-    ) -> Result<TransactionReceipt, ClientError> {
-        for _ in 0..max_attempts {
-            match self.get_transaction_receipt(tx_hash).await {
-                Ok(Some(receipt)) => return Ok(receipt),
-                Ok(None) => {}
-                // Throttling is transient: the submission already succeeded,
-                // so aborting here would report a spurious failure.
-                Err(error) if error.is_throttled() => {}
-                Err(error) => return Err(error),
-            }
-            tokio::time::sleep(interval).await;
-        }
-        Err(ClientError::ReceiptTimeout {
-            attempts: max_attempts,
-        })
-    }
 }
 
 /// Parse a hex-encoded policy ID string into a 32-byte fixed array.
@@ -372,7 +285,8 @@ fn parse_hex_u256(hex: &str) -> Result<U256, ClientError> {
     };
     let bytes =
         hex::decode(&padded).map_err(|e| ClientError::AbiDecode(format!("invalid hex: {e}")))?;
-    Ok(U256::from_be_slice(&bytes))
+    U256::try_from_be_slice(&bytes)
+        .ok_or_else(|| ClientError::AbiDecode("hex value exceeds 256 bits".into()))
 }
 
 fn parse_hex_b256(hex: &str) -> Result<B256, ClientError> {
@@ -419,6 +333,16 @@ mod tests {
     fn parse_hex_u256_ok() {
         let val = parse_hex_u256("0x3b9aca00").unwrap();
         assert_eq!(val, U256::from(1_000_000_000u64));
+    }
+
+    #[test]
+    fn parse_hex_u256_rejects_more_than_256_bits() {
+        assert_eq!(parse_hex_u256("0x").unwrap(), U256::ZERO);
+        let oversized = format!("0x{}", "0".repeat(66));
+        assert!(matches!(
+            parse_hex_u256(&oversized),
+            Err(ClientError::AbiDecode(_))
+        ));
     }
 
     #[test]
@@ -469,3 +393,7 @@ mod tests {
 
 #[cfg(test)]
 mod permission_transport;
+#[cfg(test)]
+mod stub;
+#[cfg(test)]
+mod submission_tests;

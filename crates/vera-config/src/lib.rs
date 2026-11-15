@@ -3,8 +3,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+mod discovery;
+pub use discovery::{DiscoveryConfig, DiscoveryConfigError, HandshakeRate, MAX_DURATION};
+
 mod error;
 pub use error::ConfigError;
+
+mod explicit;
 
 mod execution;
 pub use execution::{DEFAULT_GAS_LIMIT, ExecutionConfig};

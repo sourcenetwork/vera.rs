@@ -6,6 +6,7 @@ use tokio::sync::broadcast;
 use tracing::{trace, warn};
 
 use vera_domain::GossipHeader;
+use vera_indexer::{MAX_LOG_SELECTOR_ALTERNATIVES, MAX_LOG_TOPIC_POSITIONS};
 
 use crate::types::{AddressFilter, RpcBlock, RpcLog, TopicFilter};
 
@@ -29,19 +30,30 @@ struct LogSubscriptionParams {
     topics: Option<Vec<Option<TopicFilter>>>,
 }
 
-impl From<LogSubscriptionParams> for SubscriptionLogFilter {
-    fn from(params: LogSubscriptionParams) -> Self {
+impl SubscriptionLogFilter {
+    /// Apply the `eth_getLogs` selector limits: the filter is retained and
+    /// compared with every finalized log for the subscription's lifetime.
+    fn new(params: LogSubscriptionParams) -> Result<Self, &'static str> {
         let addresses = params
             .address
             .map(AddressFilter::into_vec)
             .unwrap_or_default();
-        let topics = params
-            .topics
-            .unwrap_or_default()
+        let positions = params.topics.unwrap_or_default();
+        if positions.len() > MAX_LOG_TOPIC_POSITIONS {
+            return Err("a log filter constrains at most four topic positions");
+        }
+        let topics: Vec<Vec<B256>> = positions
             .into_iter()
             .map(|t| t.map(TopicFilter::into_vec).unwrap_or_default())
             .collect();
-        Self { addresses, topics }
+        if addresses.len() > MAX_LOG_SELECTOR_ALTERNATIVES
+            || topics
+                .iter()
+                .any(|position| position.len() > MAX_LOG_SELECTOR_ALTERNATIVES)
+        {
+            return Err("a log filter selector lists at most 64 alternatives");
+        }
+        Ok(Self { addresses, topics })
     }
 }
 
@@ -187,21 +199,26 @@ impl EthSubscriptionApiServer for EthSubscriptionApiImpl {
                 crate::header_subscribe::stream_headers(pending, headers_tx).await?;
             }
             "logs" => {
-                let filter: SubscriptionLogFilter = match params {
-                    Some(v) => match serde_json::from_value::<LogSubscriptionParams>(v) {
-                        Ok(p) => p.into(),
-                        Err(e) => {
-                            let _ = pending
-                                .reject(jsonrpsee::types::ErrorObjectOwned::owned(
-                                    crate::error::codes::INVALID_PARAMS,
-                                    format!("invalid log filter parameters: {e}"),
-                                    None::<()>,
-                                ))
-                                .await;
-                            return Ok(());
-                        }
+                let filter = params.map_or_else(
+                    || Ok(SubscriptionLogFilter::default()),
+                    |v| {
+                        serde_json::from_value::<LogSubscriptionParams>(v)
+                            .map_err(|e| format!("invalid log filter parameters: {e}"))
+                            .and_then(|p| SubscriptionLogFilter::new(p).map_err(str::to_owned))
                     },
-                    None => SubscriptionLogFilter::default(),
+                );
+                let filter = match filter {
+                    Ok(filter) => filter,
+                    Err(message) => {
+                        let _ = pending
+                            .reject(jsonrpsee::types::ErrorObjectOwned::owned(
+                                crate::error::codes::INVALID_PARAMS,
+                                message,
+                                None::<()>,
+                            ))
+                            .await;
+                        return Ok(());
+                    }
                 };
 
                 let sink = pending.accept().await?;
@@ -289,14 +306,12 @@ mod tests {
     use alloy_primitives::{Address, B256, Bytes, U64};
 
     use super::*;
-    use crate::server::JsonRpcServer;
-
-    /// Spins up a [`JsonRpcServer`] on an ephemeral port with subscription support.
+    /// Spins up the server on an ephemeral port with subscription support.
     ///
     /// Returns the server handle, the bound address, and the broadcast senders
     /// for heads and logs.
     async fn setup_test_server() -> (
-        jsonrpsee_server::ServerHandle,
+        crate::RpcServerHandle,
         std::net::SocketAddr,
         broadcast::Sender<RpcBlock>,
         broadcast::Sender<Vec<RpcLog>>,
@@ -304,11 +319,14 @@ mod tests {
         let heads_tx = broadcast::channel::<RpcBlock>(16).0;
         let logs_tx = broadcast::channel::<Vec<RpcLog>>(16).0;
 
-        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let server =
-            JsonRpcServer::new(addr, 1).with_subscriptions(heads_tx.clone(), logs_tx.clone());
-
-        let (handle, bound_addr) = server.start().await.expect("server should start");
+        let (handle, _local) = crate::RpcServer::new(
+            crate::NodeState::new(1, 0, 1),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .with_subscriptions(heads_tx.clone(), logs_tx.clone())
+        .start_with_local(None)
+        .expect("server should start");
+        let bound_addr = handle.local_addr();
         (handle, bound_addr, heads_tx, logs_tx)
     }
 
@@ -483,11 +501,43 @@ mod tests {
                 None,
             ]),
         };
-        let filter: SubscriptionLogFilter = params.into();
+        let filter = SubscriptionLogFilter::new(params).unwrap();
         assert_eq!(filter.addresses.len(), 1);
         assert_eq!(filter.topics.len(), 2);
         assert_eq!(filter.topics[0].len(), 1);
         assert!(filter.topics[1].is_empty()); // None -> wildcard
+    }
+
+    #[test]
+    fn oversized_subscription_filters_are_rejected() {
+        let limit = MAX_LOG_SELECTOR_ALTERNATIVES;
+        let accepted = LogSubscriptionParams {
+            address: Some(AddressFilter::Multiple(vec![Address::ZERO; limit])),
+            topics: Some(vec![
+                Some(TopicFilter::Multiple(vec![B256::ZERO; limit]));
+                MAX_LOG_TOPIC_POSITIONS
+            ]),
+        };
+        assert!(SubscriptionLogFilter::new(accepted).is_ok());
+        for rejected in [
+            LogSubscriptionParams {
+                address: Some(AddressFilter::Multiple(vec![Address::ZERO; limit + 1])),
+                topics: None,
+            },
+            LogSubscriptionParams {
+                address: None,
+                topics: Some(vec![Some(TopicFilter::Multiple(vec![
+                    B256::ZERO;
+                    limit + 1
+                ]))]),
+            },
+            LogSubscriptionParams {
+                address: None,
+                topics: Some(vec![None; MAX_LOG_TOPIC_POSITIONS + 1]),
+            },
+        ] {
+            assert!(SubscriptionLogFilter::new(rejected).is_err());
+        }
     }
 
     // ---- Integration tests exercising real WebSocket subscriptions ----
@@ -785,5 +835,27 @@ mod tests {
             .await;
 
         assert!(result.is_err(), "invalid filter params should be rejected");
+    }
+
+    #[tokio::test]
+    async fn test_logs_subscription_oversized_filter_rejected() {
+        let (_handle, addr, _heads_tx, _logs_tx) = setup_test_server().await;
+        let client = jsonrpsee::ws_client::WsClientBuilder::default()
+            .build(format!("ws://{addr}"))
+            .await
+            .unwrap();
+        let wildcards = serde_json::json!({"topics": [null, null, null, null, null]});
+        let error = client
+            .subscribe::<serde_json::Value, _>(
+                "eth_subscribe",
+                jsonrpsee::rpc_params!["logs", wildcards],
+                "eth_unsubscribe",
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("four topic positions"),
+            "{error}"
+        );
     }
 }

@@ -3,6 +3,7 @@
 use alloy_primitives::{Address, B256};
 use revm::database_interface::DBErrorMarker;
 use thiserror::Error;
+use vera_modules::native_account::NonceError;
 
 /// Errors that can occur during block execution.
 #[derive(Debug, Error)]
@@ -66,6 +67,20 @@ pub enum ExecutionError {
 
 impl DBErrorMarker for ExecutionError {}
 
+impl From<NonceError> for ExecutionError {
+    fn from(error: NonceError) -> Self {
+        match error {
+            NonceError::Mismatch { did, expected, got } => {
+                Self::NonceMismatch { did, expected, got }
+            }
+            NonceError::Overflow(did) => Self::InvalidTx(format!("nonce overflow for {did}")),
+            NonceError::Malformed(did) => {
+                Self::InvalidTx(format!("stored nonce for {did} is malformed"))
+            }
+        }
+    }
+}
+
 impl ExecutionError {
     /// Whether execution failed because local state could not be read reliably.
     #[must_use]
@@ -73,10 +88,7 @@ impl ExecutionError {
         matches!(
             self,
             Self::State(
-                vera_traits::StateDbError::Storage(_)
-                    | vera_traits::StateDbError::CodeNotFound(_)
-                    | vera_traits::StateDbError::LockPoisoned
-                    | vera_traits::StateDbError::RootComputation(_)
+                vera_traits::StateDbError::Storage(_) | vera_traits::StateDbError::CodeNotFound(_)
             )
         )
     }
@@ -98,7 +110,7 @@ mod tests {
 
     #[test]
     fn test_state_error_from() {
-        let inner = StateDbError::LockPoisoned;
+        let inner = StateDbError::Storage("disk error".into());
         let err: ExecutionError = inner.into();
         assert!(matches!(err, ExecutionError::State(_)));
     }
@@ -109,10 +121,8 @@ mod tests {
             ExecutionError::State(StateDbError::Storage("disk error".into()))
                 .is_local_state_failure()
         );
-        assert!(ExecutionError::State(StateDbError::LockPoisoned).is_local_state_failure());
         assert!(
-            ExecutionError::State(StateDbError::RootComputation("unavailable".into()))
-                .is_local_state_failure()
+            ExecutionError::State(StateDbError::CodeNotFound(B256::ZERO)).is_local_state_failure()
         );
         assert!(!ExecutionError::InvalidTx("bad nonce".into()).is_local_state_failure());
         assert!(

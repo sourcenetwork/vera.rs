@@ -185,7 +185,7 @@ fn permission_evidence_replays_deny_and_revocation_at_one_revision() {
         .await
         .unwrap();
         let verify = |proof: &PermissionProof, root, limits| {
-            verify_permission_proof(root, 7, &policy, &request, proof, limits)
+            verify_permission_proof(root, &policy, &request, proof, limits)
         };
         assert!(!verify(&proof, root, PERMISSION_LIMITS).unwrap());
         assert!(

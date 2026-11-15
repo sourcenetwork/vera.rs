@@ -2,7 +2,6 @@ use super::*;
 use alloy_primitives::B256;
 use commonware_consensus::types::Height;
 use commonware_cryptography::Digestible as _;
-use commonware_storage::merkle::{Location, mmr};
 use commonware_utils::NZUsize;
 use vera_domain::{ConsensusPublicKey, LightBlock, verify_finalized_block};
 
@@ -36,11 +35,6 @@ impl OrderedCheckpoint {
             return Err(AppError::RootMismatch("native checkpoint targets"));
         }
         let db = &block.db_targets;
-        for target in [&db.accounts, &db.storage, &db.code] {
-            if target.floor >= target.tip || !Location::<mmr::Family>::new(target.tip).is_valid() {
-                return Err(AppError::Execution("invalid execution sync range".into()));
-            }
-        }
         let root = vera_qmdb::StateRoot::compute(
             B256::from(db.accounts.root.0),
             B256::from(db.storage.root.0),

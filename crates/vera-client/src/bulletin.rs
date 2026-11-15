@@ -6,8 +6,7 @@ use vera_domain::ConsensusPublicKey;
 use vera_modules::bulletin::keys;
 pub use vera_modules::bulletin::types::{Collaborator, Namespace, Post};
 use vera_permission::{
-    ModuleId, PAGE_PROOF_BYTES, PAGE_RESPONSE_BYTES, PrefixPageRequest, PrefixPageResponse,
-    RECORD_PROOF_BYTES, current::MAX_KEY_BYTES,
+    ModuleId, PAGE_PROOF_BYTES, PrefixPageRequest, RECORD_PROOF_BYTES, current::MAX_KEY_BYTES,
 };
 
 use crate::{ClientError, VeraClient};
@@ -291,15 +290,9 @@ impl VeraClient {
             prefix,
             limit,
         };
-        request.validate()?;
-        let response: PrefixPageResponse = self
-            .rpc_call_bounded(
-                "vera_getCurrentPrefixPageProof",
-                serde_json::json!([request, minimum]),
-                PAGE_RESPONSE_BYTES,
-            )
+        let (response, page) = self
+            .verified_prefix_page(&request, minimum, trusted, PAGE_PROOF_BYTES)
             .await?;
-        let page = response.verify(&request, minimum, trusted, PAGE_PROOF_BYTES)?;
         let records = page
             .entries
             .iter()

@@ -8,29 +8,23 @@ use alloy_primitives::{Address, B256, U256, keccak256};
 use tracing::{error, trace, warn};
 use vera_crypto::bls;
 use vera_domain::{Block, NativeTx};
-use vera_executor::{BlockContext, ExecutionReceipt};
+use vera_executor::ExecutionReceipt;
 use vera_indexer::{BlockIndex, IndexedBlock, IndexedLog, IndexedReceipt, IndexedTransaction};
 use vera_jsonrpc::{BlockTransactions, RpcBlock, RpcLog};
 
 /// Index a finalized block into the block index.
+///
+/// `block_hash` is the block's identifier, which the caller computes once per
+/// finalized block: deriving it re-encodes and hashes the whole block.
+/// Returns the hash of each transaction in block order, as indexed.
 pub fn index_finalized_block(
     index: &BlockIndex,
     block: &Block,
+    block_hash: B256,
     gas_limit: u64,
     receipts: &[ExecutionReceipt],
     gas_used: u64,
-) {
-    let block_hash = block.id().0;
-    let header = alloy_consensus::Header {
-        number: block.height,
-        timestamp: block.timestamp,
-        gas_limit,
-        beneficiary: Address::ZERO,
-        base_fee_per_gas: Some(0),
-        ..Default::default()
-    };
-    let block_context = BlockContext::new(header, B256::ZERO, block.prevrandao);
-
+) -> Vec<B256> {
     // Build a lookup map from tx_hash → receipt. Receipts are ordered by
     // execution order (natives first, then EVMs), not by block tx position.
     let receipt_map: HashMap<B256, &ExecutionReceipt> =
@@ -44,13 +38,12 @@ pub fn index_finalized_block(
     for (i, tx) in block.txs.iter().enumerate() {
         let is_native = !tx.bytes.is_empty() && NativeTx::is_native_tx(tx.bytes[0]);
 
-        let (tx_hash, sender, to, value, gas_limit, gas_price, input, nonce, signer_did) =
+        let (tx_hash, sender, to, value, tx_gas_limit, gas_price, input, nonce, signer_did) =
             if is_native {
                 match NativeTx::decode_wire(&tx.bytes) {
                     Ok(native_tx) => {
-                        let did = bls::deserialize_pubkey(native_tx.bls_pubkey.as_slice())
-                            .ok()
-                            .and_then(|pk| bls::did_from_bls_pubkey(&pk).ok());
+                        let did =
+                            bls::did_from_compressed_pubkey(native_tx.bls_pubkey.as_slice()).ok();
                         (
                             native_tx.tx_id().0,
                             Address::ZERO,
@@ -58,7 +51,7 @@ pub fn index_finalized_block(
                             U256::ZERO,
                             0u64,
                             0u128,
-                            native_tx.calldata.clone(),
+                            native_tx.calldata,
                             native_tx.nonce,
                             did,
                         )
@@ -107,7 +100,7 @@ pub fn index_finalized_block(
             from: sender,
             to,
             value,
-            gas_limit,
+            gas_limit: tx_gas_limit,
             gas_price,
             input,
             nonce,
@@ -164,37 +157,32 @@ pub fn index_finalized_block(
         parent_hash: block.parent.0,
         state_root: block.state_root.0,
         module_state_root: block.module_state_root,
-        timestamp: block_context.header.timestamp,
-        gas_limit: block_context.header.gas_limit,
+        timestamp: block.timestamp,
+        gas_limit,
         gas_used,
-        base_fee_per_gas: block_context.header.base_fee_per_gas,
+        base_fee_per_gas: Some(0),
         prevrandao: block.prevrandao,
-        transaction_hashes: tx_hashes,
+        transaction_hashes: tx_hashes.clone(),
     };
 
     index.insert_block(indexed_block, indexed_txs, indexed_receipts);
     trace!(height = block.height, "indexed finalized block");
+    tx_hashes
 }
 
 /// Build RPC subscription data from a finalized block and its receipts.
+///
+/// `tx_hashes` are the block's transaction hashes in block order, as returned
+/// by [`index_finalized_block`].
 pub fn subscription_data(
     block: &Block,
+    block_hash: B256,
     gas_limit: u64,
     receipts: &[ExecutionReceipt],
     gas_used: u64,
+    tx_hashes: &[B256],
 ) -> (RpcBlock, Vec<RpcLog>) {
     use alloy_primitives::{Bytes, U64};
-
-    let block_hash = block.id().0;
-    let header = alloy_consensus::Header {
-        number: block.height,
-        timestamp: block.timestamp,
-        gas_limit,
-        beneficiary: Address::ZERO,
-        base_fee_per_gas: Some(0),
-        ..Default::default()
-    };
-    let block_context = BlockContext::new(header, B256::ZERO, block.prevrandao);
 
     let rpc_block = RpcBlock {
         hash: block_hash,
@@ -204,33 +192,19 @@ pub fn subscription_data(
         transactions_root: B256::ZERO,
         receipts_root: B256::ZERO,
         logs_bloom: Bytes::new(),
-        timestamp: U64::from(block_context.header.timestamp),
-        gas_limit: U64::from(block_context.header.gas_limit),
+        timestamp: U64::from(block.timestamp),
+        gas_limit: U64::from(gas_limit),
         gas_used: U64::from(gas_used),
         extra_data: Bytes::new(),
         mix_hash: block.prevrandao,
         nonce: Default::default(),
-        base_fee_per_gas: block_context.header.base_fee_per_gas.map(U256::from),
+        base_fee_per_gas: Some(U256::ZERO),
         miner: Address::ZERO,
         difficulty: U256::ZERO,
         total_difficulty: U256::ZERO,
         uncles: vec![],
         size: U64::ZERO,
-        transactions: BlockTransactions::Hashes(
-            block
-                .txs
-                .iter()
-                .map(|tx| {
-                    if !tx.bytes.is_empty() && NativeTx::is_native_tx(tx.bytes[0]) {
-                        NativeTx::decode_wire(&tx.bytes)
-                            .map(|ntx| ntx.tx_id().0)
-                            .unwrap_or_else(|_| keccak256(&tx.bytes))
-                    } else {
-                        keccak256(&tx.bytes)
-                    }
-                })
-                .collect(),
-        ),
+        transactions: BlockTransactions::Hashes(tx_hashes.to_vec()),
     };
 
     let receipt_map: HashMap<B256, &ExecutionReceipt> =
@@ -238,15 +212,7 @@ pub fn subscription_data(
 
     let mut rpc_logs = Vec::new();
     let mut block_log_index: u64 = 0;
-    for (i, tx) in block.txs.iter().enumerate() {
-        let is_native = !tx.bytes.is_empty() && NativeTx::is_native_tx(tx.bytes[0]);
-        let tx_hash = if is_native {
-            NativeTx::decode_wire(&tx.bytes)
-                .map(|ntx| ntx.tx_id().0)
-                .unwrap_or_else(|_| keccak256(&tx.bytes))
-        } else {
-            keccak256(&tx.bytes)
-        };
+    for (i, &tx_hash) in tx_hashes.iter().enumerate() {
         if let Some(receipt) = receipt_map.get(&tx_hash) {
             for log in receipt.logs() {
                 let idx = block_log_index;
@@ -274,3 +240,7 @@ pub fn subscription_data(
 
     (rpc_block, rpc_logs)
 }
+
+#[cfg(test)]
+#[path = "finalize_tests.rs"]
+mod tests;

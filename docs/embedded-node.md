@@ -45,7 +45,9 @@ takes the directory, so a holder that arrives in between is waited for instead.
 
 Reopening the directory reuses the stored genesis (`solo-genesis.json`) and
 share. A different chain identifier, operator policy or validator key is
-rejected, and so is a directory that holds a genesis without its share. Losing
+rejected, and so is a directory that holds a genesis without its share. A first
+start interrupted after the share is stored leaves the genesis as
+`solo-genesis.pending`; the next start publishes it. Losing
 `secrets.json` or `validator.key` makes the deployment unrecoverable; back them
 up with the rest of the directory.
 
@@ -71,10 +73,13 @@ Tokio, and from any thread. After the node stops they fail with
   in-process.
 - `subscribe` returns a `LocalSubscription`; `vera_subscribeHeaders` delivers
   each finalized header. Dropping the subscription ends it, and it ends when the
-  node stops.
+  node stops. A consumer that falls more than 64 headers behind skips to the
+  oldest retained header and keeps receiving; heights show the gap, and
+  `vera_getLightBlock` fills it.
 
 Set `EmbeddedConfig::rpc_listen` to also serve the same methods over the
-network. It is off by default.
+network. It is off by default. The address is bound during start, so an
+address in use fails the start.
 
 ## Threads
 
@@ -209,6 +214,11 @@ host reserves no port and nothing outside the machine can connect. A
 connection from the same machine is accepted only from a peer the node tracks,
 after the authenticated handshake. Use another address only when other
 validators must reach the node.
+
+The embedded listener states the local discovery settings, which admit
+loopback and private addresses, instead of the daemon's recommended profile
+([settings](operating.md#configuration-knobs-operators-own)). `EmbeddedConfig`
+does not expose them.
 
 ## Disk
 

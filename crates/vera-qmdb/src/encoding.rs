@@ -32,18 +32,6 @@ impl StorageKey {
         buf[28..60].copy_from_slice(&self.slot.to_be_bytes::<32>());
         buf
     }
-
-    /// Decode from bytes.
-    pub fn from_bytes(bytes: &[u8; 60]) -> Self {
-        let address = Address::from_slice(&bytes[0..20]);
-        let generation = u64::from_be_bytes(bytes[20..28].try_into().unwrap());
-        let slot = U256::from_be_slice(&bytes[28..60]);
-        Self {
-            address,
-            generation,
-            slot,
-        }
-    }
 }
 
 /// Account encoding utility.
@@ -85,19 +73,13 @@ mod tests {
 
     use super::*;
 
-    #[rstest]
-    #[case(Address::repeat_byte(0xAB), 1, U256::from(42u64))]
-    #[case(Address::ZERO, 0, U256::ZERO)]
-    #[case(Address::repeat_byte(0xFF), u64::MAX, U256::MAX)]
-    fn storage_key_roundtrip(
-        #[case] address: Address,
-        #[case] generation: u64,
-        #[case] slot: U256,
-    ) {
-        let key = StorageKey::new(address, generation, slot);
+    #[test]
+    fn storage_key_orders_address_generation_slot() {
+        let key = StorageKey::new(Address::repeat_byte(0xAB), 1, U256::from(42u64));
         let bytes = key.to_bytes();
-        let decoded = StorageKey::from_bytes(&bytes);
-        assert_eq!(decoded, key);
+        assert_eq!(&bytes[..20], &[0xAB; 20]);
+        assert_eq!(&bytes[20..28], &1u64.to_be_bytes());
+        assert_eq!(&bytes[28..], &U256::from(42u64).to_be_bytes::<32>());
     }
 
     #[rstest]

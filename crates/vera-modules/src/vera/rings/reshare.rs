@@ -29,7 +29,6 @@ pub fn ring_deployment_label(root: [u8; 32], deployment_id: u64) -> String {
 impl RingRecord {
     /// Build Orbis reshare sign bytes from a validated current record and its pending target.
     pub fn reshare_signing_bytes(&self, deployment_id: u64) -> Result<Vec<u8>> {
-        self.validate(&self.id)?;
         let RingState::Active { keys } = &self.state else {
             return Err(invalid("ring is not active"));
         };

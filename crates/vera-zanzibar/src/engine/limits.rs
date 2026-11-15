@@ -7,7 +7,7 @@ use crate::error::{Error, Result};
 
 /// Maximum active expression evaluations in one permission traversal.
 pub const MAX_EVALUATION_DEPTH: usize = 64;
-/// Maximum expression visits and relationship candidates per check or batch.
+/// Maximum expression visits and relationship candidates per check.
 pub const MAX_EVALUATION_STEPS: usize = 10_000;
 
 /// Optional caller-owned accounting shared across independently bounded checks.

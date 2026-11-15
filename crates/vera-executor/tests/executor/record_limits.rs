@@ -208,6 +208,50 @@ fn oversized_native_registration_rolls_back_and_allows_next_nonce(#[case] batch:
     );
 }
 
+#[rstest]
+#[case(100, true)]
+#[case(250, false)]
+fn native_batch_that_exhausts_its_allowance_fails_and_commits_nothing(
+    #[case] calls: usize,
+    #[case] success: bool,
+) {
+    let (executor, policy) = fixture();
+    let parent = executor.snapshot();
+    let batch = IAcp::batchCallsCall {
+        calls: (0..calls)
+            .map(|index| register(policy, &format!("object-{index}")).into())
+            .collect(),
+    }
+    .abi_encode();
+    let (request, actor) = native(0, batch);
+    let state = MockStateDb::new();
+    let txs = [request];
+    let (outcome, next) = executor
+        .execute_with_modules(&state, &context(), &txs, parent.clone())
+        .unwrap();
+    assert_eq!(outcome.executed_tx_indices, Some(vec![0]));
+    assert_eq!(outcome.receipts.len(), 1);
+    assert_eq!(outcome.receipts[0].success(), success);
+    assert_eq!(
+        outcome.receipts[0].logs().len(),
+        if success { calls } else { 0 }
+    );
+    assert_eq!(module_state(&next).nonces.get_nonce(&actor).unwrap(), 1);
+    if success {
+        assert!(outcome.gas_used < NATIVE_LIMIT);
+    } else {
+        assert_eq!(outcome.gas_used, NATIVE_LIMIT);
+        assert!(next.changes_from(&parent)[..3].iter().all(Vec::is_empty));
+    }
+    let (verified, _) = executor
+        .execute_with_modules(&state, &context().with_verification(), &txs, parent)
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(verified.receipts).unwrap(),
+        serde_json::to_value(outcome.receipts).unwrap()
+    );
+}
+
 #[test]
 fn oversized_evm_registration_rolls_back_but_consumes_account_nonce() {
     let (executor, policy) = fixture();

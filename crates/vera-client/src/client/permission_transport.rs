@@ -1,5 +1,6 @@
 use super::*;
 use std::io::{BufRead, Read, Write};
+use std::time::Duration;
 
 #[tokio::test]
 async fn transport_capacity_is_released_on_cancellation() {

@@ -33,11 +33,32 @@ impl AcpModule {
         submission: &TxExecCtx,
         budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
+        self.execute_stamped_policy_cmd(
+            actor,
+            policy_id,
+            command,
+            SuppliedMetadata::default(),
+            block,
+            submission,
+            budget,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn execute_stamped_policy_cmd(
+        &mut self,
+        actor: &Did,
+        policy_id: &str,
+        command: PolicyCmd,
+        supplied: SuppliedMetadata,
+        block: &BlockExecCtx,
+        submission: &TxExecCtx,
+        budget: &CommandBudget,
+    ) -> Result<PolicyCmdResult> {
         let mut candidate = self.clone();
-        let result = budget
-            .finish(candidate.apply_contextual_policy_cmd(
-                actor, policy_id, command, block, submission, budget,
-            ))?;
+        let result = budget.finish(candidate.apply_contextual_policy_cmd(
+            actor, policy_id, command, supplied, block, submission, budget,
+        ))?;
         *self = candidate;
         Ok(result)
     }
@@ -48,6 +69,7 @@ impl AcpModule {
         actor: &Did,
         policy_id: &str,
         command: PolicyCmd,
+        supplied: SuppliedMetadata,
         block: &BlockExecCtx,
         submission: &TxExecCtx,
         budget: &CommandBudget,
@@ -68,13 +90,6 @@ impl AcpModule {
                 "invalid policy command execution context".into(),
             ));
         }
-        let mut metadata = RecordMetadata {
-            creation_ts: block.timestamp.clone(),
-            tx_hash: submission.tx_hash.clone(),
-            tx_signer: submission.signer.clone(),
-            owner_did: actor.to_string(),
-        };
-        let event_metadata = metadata.clone();
         if let PolicyCmd::RevealRegistration {
             registrations_commitment_id,
             ..
@@ -105,34 +120,13 @@ impl AcpModule {
             if commitment.expired || expired {
                 return Err(AcpError::CommitmentExpired { id: commitment.id });
             }
-            metadata.creation_ts = issued.clone();
         }
-        let mut result = self.direct_policy_cmd_with_budget(actor, policy_id, command, budget)?;
-        match &mut result {
-            PolicyCmdResult::RegisterObject { record }
-            | PolicyCmdResult::SetRelationship {
-                record_existed: false,
-                record,
-            } => {
-                record.metadata = metadata;
-                self.set_relationship_with_budget(record, budget)?;
-            }
-            PolicyCmdResult::CommitRegistrations {
-                registrations_commitment,
-            } => {
-                registrations_commitment.metadata = metadata;
-                self.update_commitment_with_budget(registrations_commitment, Some(budget))?;
-            }
-            PolicyCmdResult::RevealRegistration { record, event } => {
-                record.metadata = metadata;
-                self.set_relationship_with_budget(record, budget)?;
-                if let Some(event) = event {
-                    event.metadata = event_metadata;
-                    self.update_amendment_event_with_budget(event, Some(budget))?;
-                }
-            }
-            _ => {}
-        }
-        Ok(result)
+        let stamp = CommandStamp {
+            creation_ts: block.timestamp.clone(),
+            tx_hash: submission.tx_hash.clone(),
+            tx_signer: submission.signer.clone(),
+            supplied,
+        };
+        self.apply_policy_cmd(actor, policy_id, command, &stamp, budget)
     }
 }

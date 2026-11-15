@@ -7,7 +7,6 @@ sol! {
     interface IVera {
         // ── Events ──────────────────────────────────────────────────────
 
-        event JWSTokenCreated(string indexed tokenHash, string issuerDid);
         event JWSTokenInvalidated(string indexed tokenHash, string issuerDid);
 
         // ── Write methods ───────────────────────────────────────────────
@@ -15,8 +14,6 @@ sol! {
         function invalidateJWS(string tokenHash) external;
 
         function revokeDelegation(string token) external;
-
-        function updateParams(bytes params) external;
 
         function applyAdministration(bytes request) external;
 
@@ -51,9 +48,5 @@ sol! {
         function getDelegationsBySubmitter(
             string submitter
         ) external view returns (bytes);
-
-        function getChainConfig() external view returns (bytes);
-
-        function getParams() external view returns (bytes);
     }
 }

@@ -1,359 +1,245 @@
-use std::sync::Arc;
-
 use crate::did::Did;
 use crate::thread_bounds::MaybeBoxFuture;
 
 use super::cache::{CheckCache, CheckKey, NodeId, NodeTrail};
+use super::outcome::{Assumed, Outcome};
 use super::PermissionEngine;
 use crate::error::{Error, Result};
 use crate::expression::RelationExpression;
 use crate::store::ZanzibarStore;
 use crate::types::Subject;
 
-/// Evaluation result paired with a `tainted` flag.
-///
-/// A result is *tainted* when it depended on a cycle truncation (a node revisited
-/// on the current trail, evaluated as `false`). Such a result is only valid for
-/// the trail that produced it — the same node reached via a different trail can
-/// resolve differently — so a tainted result must NOT be memoized in the
-/// trail-independent [`CheckCache`].
-type Eval = (bool, bool);
+/// One object and the subject whose access to it is being decided.
+#[derive(Clone, Copy)]
+pub(crate) struct Goal<'a> {
+    pub(crate) policy_id: &'a str,
+    pub(crate) resource: &'a str,
+    pub(crate) object_id: &'a str,
+    pub(crate) subject: &'a Did,
+}
 
 impl<S: ZanzibarStore + ?Sized> PermissionEngine<S> {
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn evaluate_expr_cached<'a>(
+    /// Evaluate `relation` on the goal's object as one node of the search.
+    pub(crate) fn evaluate_node<'a>(
         &'a self,
-        policy_id: &'a str,
-        resource: &'a str,
-        object_id: &'a str,
+        goal: Goal<'a>,
         relation: &'a str,
-        subject: &'a Did,
-        expression: &'a RelationExpression,
-        trail: NodeTrail,
-        cache: Arc<CheckCache>,
-    ) -> MaybeBoxFuture<'a, Result<Eval>> {
+        trail: &'a NodeTrail,
+        cache: &'a CheckCache,
+    ) -> MaybeBoxFuture<'a, Result<Outcome>> {
         Box::pin(async move {
-            let key = CheckKey::new(policy_id, resource, object_id, relation, subject);
-            if let Some(cached) = cache.get(&key).await {
+            let node = NodeId::new(goal.resource, goal.object_id, relation);
+            if let Some(position) = trail.position(&node) {
+                return Ok(Outcome::truncated(position));
+            }
+            let key = CheckKey::new(goal.policy_id, node.clone(), goal.subject);
+            if let Some(known) = cache.get(&key).await {
                 cache.budget.charge()?;
-                // Only untainted results are ever stored, so a hit is trail-independent.
-                return Ok((cached, false));
+                return Ok(known);
             }
-
-            let (value, tainted) = self
-                .evaluate_expr_inner(
-                    policy_id,
-                    resource,
-                    object_id,
-                    relation,
-                    subject,
-                    expression,
-                    trail,
-                    cache.clone(),
-                )
-                .await?;
-
-            if !tainted {
-                cache.set(key, value).await;
-            }
-
-            Ok((value, tainted))
+            let expression = self
+                .lookup
+                .get_expression(goal.policy_id, goal.resource, relation)?;
+            let (trail, position) = trail.with_node(node)?;
+            let outcome = self
+                .evaluate_expression(goal, relation, expression, &trail, cache)
+                .await?
+                .settle(position);
+            cache.close(key, position, outcome).await;
+            Ok(outcome)
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn evaluate_expr_inner<'a>(
+    fn evaluate_expression<'a>(
         &'a self,
-        policy_id: &'a str,
-        resource: &'a str,
-        object_id: &'a str,
+        goal: Goal<'a>,
         relation: &'a str,
-        subject: &'a Did,
         expression: &'a RelationExpression,
-        trail: NodeTrail,
-        cache: Arc<CheckCache>,
-    ) -> MaybeBoxFuture<'a, Result<Eval>> {
+        trail: &'a NodeTrail,
+        cache: &'a CheckCache,
+    ) -> MaybeBoxFuture<'a, Result<Outcome>> {
         Box::pin(async move {
             let _evaluation = cache.budget.enter()?;
             match expression {
-                RelationExpression::This => {
-                    let granted = self
-                        .store
-                        .check_permission_direct(policy_id, resource, object_id, relation, subject)
-                        .await?;
-                    if granted {
-                        return Ok((true, false));
-                    }
-                    let mut tainted = false;
-                    for target in self
-                        .store
-                        .get_relation_subjects(policy_id, resource, object_id, relation)
-                        .await?
-                    {
-                        cache.budget.charge()?;
-                        let Subject::EntitySet {
-                            resource,
-                            object_id,
-                            relation,
-                        } = target
-                        else {
-                            continue;
-                        };
-                        if relation.is_empty() {
-                            if self.lookup.is_actor_resource(policy_id, &resource)
-                                && object_id == subject.as_str()
-                            {
-                                return Ok((true, false));
-                            }
-                            continue;
-                        }
-                        let node_id = NodeId::new(&resource, &object_id, &relation);
-                        if trail.contains(&node_id) {
-                            tainted = true;
-                            continue;
-                        }
-                        let expression = self
-                            .lookup
-                            .get_expression(policy_id, &resource, &relation)?;
-                        let (granted, target_tainted) = self
-                            .evaluate_expr_cached(
-                                policy_id,
-                                &resource,
-                                &object_id,
-                                &relation,
-                                subject,
-                                expression,
-                                trail.with_node(node_id),
-                                cache.clone(),
-                            )
-                            .await?;
-                        if granted {
-                            return Ok((true, target_tainted));
-                        }
-                        tainted |= target_tainted;
-                    }
-                    Ok((false, tainted))
-                }
+                RelationExpression::This => self.evaluate_this(goal, relation, trail, cache).await,
 
-                RelationExpression::ComputedUserset {
-                    relation: computed_rel,
-                } => {
-                    let node_id = NodeId::new(resource, object_id, computed_rel);
-                    if trail.contains(&node_id) {
-                        // Cycle truncation: trail-dependent, must not be cached.
-                        return Ok((false, true));
-                    }
-                    let new_trail = trail.with_node(node_id);
-
-                    let computed_expr =
-                        self.lookup
-                            .get_expression(policy_id, resource, computed_rel)?;
-
-                    self.evaluate_expr_cached(
-                        policy_id,
-                        resource,
-                        object_id,
-                        computed_rel,
-                        subject,
-                        computed_expr,
-                        new_trail,
-                        cache.clone(),
-                    )
-                    .await
+                RelationExpression::ComputedUserset { relation } => {
+                    self.evaluate_node(goal, relation, trail, cache).await
                 }
 
                 RelationExpression::TupleToUserset {
                     tuple_relation,
                     computed_relation,
                 } => {
-                    let mut tainted = false;
-
-                    let targets = self
-                        .store
-                        .get_relation_targets(policy_id, resource, object_id, tuple_relation)
-                        .await?;
-
-                    for target in targets {
-                        cache.budget.charge()?;
-                        let node_id =
-                            NodeId::new(&target.resource, &target.object_id, computed_relation);
-                        if trail.contains(&node_id) {
-                            // Skipping a cycled target taints the eventual `false`.
-                            tainted = true;
-                            continue;
-                        }
-                        let new_trail = trail.with_node(node_id);
-
-                        let target_expr = self.lookup.get_expression(
-                            policy_id,
-                            &target.resource,
-                            computed_relation,
-                        )?;
-
-                        let (granted, t) = self
-                            .evaluate_expr_cached(
-                                policy_id,
-                                &target.resource,
-                                &target.object_id,
-                                computed_relation,
-                                subject,
-                                target_expr,
-                                new_trail,
-                                cache.clone(),
-                            )
-                            .await?;
-                        if granted {
-                            return Ok((true, t));
-                        }
-                        tainted |= t;
-                    }
-
-                    let subjects = self
-                        .store
-                        .get_relation_subjects(policy_id, resource, object_id, tuple_relation)
-                        .await?;
-
-                    for subj in subjects {
-                        cache.budget.charge()?;
-                        match subj {
-                            Subject::EntitySet {
-                                resource: target_resource,
-                                object_id: target_object_id,
-                                relation: _,
-                            } => {
-                                let node_id = NodeId::new(
-                                    &target_resource,
-                                    &target_object_id,
-                                    computed_relation,
-                                );
-                                if trail.contains(&node_id) {
-                                    tainted = true;
-                                    continue;
-                                }
-                                let new_trail = trail.with_node(node_id);
-
-                                let target_expr = self.lookup.get_expression(
-                                    policy_id,
-                                    &target_resource,
-                                    computed_relation,
-                                )?;
-
-                                let (granted, t) = self
-                                    .evaluate_expr_cached(
-                                        policy_id,
-                                        &target_resource,
-                                        &target_object_id,
-                                        computed_relation,
-                                        subject,
-                                        target_expr,
-                                        new_trail,
-                                        cache.clone(),
-                                    )
-                                    .await?;
-                                if granted {
-                                    return Ok((true, t));
-                                }
-                                tainted |= t;
-                            }
-                            Subject::Wildcard | Subject::TypedWildcard { .. } => {
-                                return Ok((true, false));
-                            }
-                            Subject::Entity(_) => {
-                                continue;
-                            }
-                        }
-                    }
-
-                    Ok((false, tainted))
+                    self.evaluate_tuple_to_userset(
+                        goal,
+                        tuple_relation,
+                        computed_relation,
+                        trail,
+                        cache,
+                    )
+                    .await
                 }
 
                 RelationExpression::Union(exprs) => {
-                    let mut tainted = false;
+                    let mut assumed = Assumed::default();
                     for expr in exprs {
-                        let (granted, t) = self
-                            .evaluate_expr_inner(
-                                policy_id,
-                                resource,
-                                object_id,
-                                relation,
-                                subject,
-                                expr,
-                                trail.clone(),
-                                cache.clone(),
-                            )
-                            .await?;
-                        if granted {
-                            // A true short-circuits on this branch alone.
-                            return Ok((true, t));
+                        match self
+                            .evaluate_expression(goal, relation, expr, trail, cache)
+                            .await?
+                        {
+                            Outcome::Granted => return Ok(Outcome::Granted),
+                            Outcome::Denied(nodes) => assumed = assumed.union(nodes),
                         }
-                        tainted |= t;
                     }
-                    Ok((false, tainted))
+                    Ok(Outcome::Denied(assumed))
                 }
 
                 RelationExpression::Intersection(exprs) => {
-                    let mut tainted = false;
                     for expr in exprs {
-                        let (granted, t) = self
-                            .evaluate_expr_inner(
-                                policy_id,
-                                resource,
-                                object_id,
-                                relation,
-                                subject,
-                                expr,
-                                trail.clone(),
-                                cache.clone(),
-                            )
+                        let outcome = self
+                            .evaluate_expression(goal, relation, expr, trail, cache)
                             .await?;
-                        if !granted {
-                            // A false short-circuits on this branch alone.
-                            return Ok((false, t));
+                        if matches!(outcome, Outcome::Denied(_)) {
+                            return Ok(outcome);
                         }
-                        tainted |= t;
                     }
-                    Ok((true, tainted))
+                    Ok(Outcome::Granted)
                 }
 
                 RelationExpression::Difference { base, subtract } => {
-                    let (base_granted, base_tainted) = self
-                        .evaluate_expr_inner(
-                            policy_id,
-                            resource,
-                            object_id,
-                            relation,
-                            subject,
-                            base,
-                            trail.clone(),
-                            cache.clone(),
-                        )
+                    let base = self
+                        .evaluate_expression(goal, relation, base, trail, cache)
                         .await?;
-
-                    if !base_granted {
-                        return Ok((false, base_tainted));
+                    if matches!(base, Outcome::Denied(_)) {
+                        return Ok(base);
                     }
-
-                    let (subtract_granted, subtract_tainted) = self
-                        .evaluate_expr_inner(
-                            policy_id,
-                            resource,
-                            object_id,
-                            relation,
-                            subject,
-                            subtract,
-                            trail,
-                            cache.clone(),
-                        )
-                        .await?;
-
                     // A truncated cycle is not proof of absence. Negating it
                     // could grant the very permission being excluded.
-                    if subtract_tainted {
-                        return Err(Error::IndeterminateExclusion);
-                    }
-                    Ok((!subtract_granted, base_tainted))
+                    self.evaluate_expression(goal, relation, subtract, trail, cache)
+                        .await?
+                        .as_exact()
+                        .map(|excluded| Outcome::exact(!excluded))
+                        .ok_or(Error::IndeterminateExclusion)
                 }
             }
         })
+    }
+
+    async fn evaluate_this(
+        &self,
+        goal: Goal<'_>,
+        relation: &str,
+        trail: &NodeTrail,
+        cache: &CheckCache,
+    ) -> Result<Outcome> {
+        let Goal {
+            policy_id,
+            resource,
+            object_id,
+            subject,
+        } = goal;
+        if self
+            .store
+            .check_permission_direct(policy_id, resource, object_id, relation, subject)
+            .await?
+        {
+            return Ok(Outcome::Granted);
+        }
+        let subjects = self
+            .store
+            .get_relation_subjects(policy_id, resource, object_id, relation)
+            .await?;
+        // A typed wildcard grants before any userset is followed, so a failing
+        // userset cannot mask it.
+        if subjects.iter().any(Subject::is_typed_wildcard) {
+            return Ok(Outcome::Granted);
+        }
+        let mut assumed = Assumed::default();
+        for target in &subjects {
+            cache.budget.charge()?;
+            let Subject::EntitySet {
+                resource,
+                object_id,
+                relation,
+            } = target
+            else {
+                continue;
+            };
+            if relation.is_empty() {
+                if self.lookup.is_actor_resource(policy_id, resource)
+                    && object_id == subject.as_str()
+                {
+                    return Ok(Outcome::Granted);
+                }
+                continue;
+            }
+            let target = Goal {
+                resource,
+                object_id,
+                ..goal
+            };
+            match self.evaluate_node(target, relation, trail, cache).await? {
+                Outcome::Granted => return Ok(Outcome::Granted),
+                Outcome::Denied(nodes) => assumed = assumed.union(nodes),
+            }
+        }
+        Ok(Outcome::Denied(assumed))
+    }
+
+    async fn evaluate_tuple_to_userset(
+        &self,
+        goal: Goal<'_>,
+        tuple_relation: &str,
+        computed_relation: &str,
+        trail: &NodeTrail,
+        cache: &CheckCache,
+    ) -> Result<Outcome> {
+        let subjects = self
+            .store
+            .get_relation_subjects(
+                goal.policy_id,
+                goal.resource,
+                goal.object_id,
+                tuple_relation,
+            )
+            .await?;
+        if subjects.iter().any(Subject::is_any_wildcard) {
+            return Ok(Outcome::Granted);
+        }
+        let mut assumed = Assumed::default();
+        for target in &subjects {
+            cache.budget.charge()?;
+            let Subject::EntitySet {
+                resource,
+                object_id,
+                ..
+            } = target
+            else {
+                continue;
+            };
+            // A tuple may name an actor as an object of the actor resource,
+            // which need not declare the computed relation.
+            if self.lookup.is_actor_resource(goal.policy_id, resource)
+                && !self
+                    .lookup
+                    .declares(goal.policy_id, resource, computed_relation)
+            {
+                continue;
+            }
+            let target = Goal {
+                resource,
+                object_id,
+                ..goal
+            };
+            match self
+                .evaluate_node(target, computed_relation, trail, cache)
+                .await?
+            {
+                Outcome::Granted => return Ok(Outcome::Granted),
+                Outcome::Denied(nodes) => assumed = assumed.union(nodes),
+            }
+        }
+        Ok(Outcome::Denied(assumed))
     }
 }

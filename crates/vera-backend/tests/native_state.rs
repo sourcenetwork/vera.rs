@@ -19,8 +19,7 @@ use vera_modules::{
     bulletin::keys as bulletin_keys,
     kv_store::{InMemoryKvStore, ModuleKvStore},
     module_state::{ModuleChanges, combine_module_roots},
-    types::{BlockExecCtx, TxExecCtx},
-    vera::types::ChainConfig,
+    types::{BlockExecCtx, Timestamp, TxExecCtx},
 };
 use vera_zanzibar::{Relationship, Subject};
 
@@ -135,13 +134,20 @@ fn authorization_survives_forks_restart_and_rewind() {
                 .unwrap();
             first_state
                 .vera
-                .set_chain_config(ChainConfig {
-                    allow_zero_fee_txs: true,
-                    ignore_bearer_auth: false,
-                })
+                .store_or_update_jws_token(
+                    &BlockExecCtx::default(),
+                    "delegation",
+                    &owner,
+                    READER,
+                    Timestamp::default(),
+                    Timestamp {
+                        seconds: 60,
+                        block_height: 0,
+                    },
+                )
                 .unwrap();
             first_state.nonces.check_and_increment(OWNER, 0).unwrap();
-            // Clone resets dirty tracking; the delta must still include the policy and namespace.
+            // The delta is taken across a clone boundary and must still include the policy and namespace.
             let first_state = first_state.clone();
             let first = native::prepare(set.new_batches().await, first_state.diff_from(&empty))
                 .await

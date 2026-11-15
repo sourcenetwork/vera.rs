@@ -11,6 +11,7 @@ pub const DEFAULT_WS_ADDR: &str = "0.0.0.0:8546";
 
 /// RPC server configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct RpcConfig {
     /// HTTP JSON-RPC server address.
     #[serde(default = "default_http_addr")]

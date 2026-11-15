@@ -48,11 +48,12 @@ fn native(nonce: u64, calldata: Vec<u8>) -> (Bytes, String) {
 
 fn native_gas_used(tx: &Bytes) -> u64 {
     let executor = VeraExecutor::new(9001);
-    let outcome = executor
-        .execute(
+    let (outcome, _) = executor
+        .execute_with_modules(
             &MockStateDb::new(),
             &context(NATIVE_LIMIT),
             std::slice::from_ref(tx),
+            executor.snapshot(),
         )
         .unwrap();
     assert_eq!(outcome.executed_tx_indices, Some(vec![0]));
@@ -176,7 +177,12 @@ fn native_limit_is_reserved_before_nonce_or_module_changes(
     assert_eq!(outcome.gas_used, accepted * creation_gas);
     verify_selected(&executor, &state, &context, &txs, &outcome, &next);
     assert!(matches!(
-        executor.execute(&state, &context.with_verification(), &txs),
+        executor.execute_with_modules(
+            &state,
+            &context.with_verification(),
+            &txs,
+            executor.snapshot()
+        ),
         Err(ExecutionError::BlockValidation(_))
     ));
     assert_eq!(
@@ -229,7 +235,12 @@ fn failed_native_and_reverted_batch_consume_full_capacity(#[case] batch: bool) {
     assert_eq!(module_state(&next).nonces.get_nonce(&actor).unwrap(), 1);
     verify_selected(&executor, &state, &context, &txs, &outcome, &next);
     assert!(matches!(
-        executor.execute(&state, &context.with_verification(), &txs),
+        executor.execute_with_modules(
+            &state,
+            &context.with_verification(),
+            &txs,
+            executor.snapshot()
+        ),
         Err(ExecutionError::BlockValidation(_))
     ));
 }
@@ -262,10 +273,11 @@ fn evm_limit_must_fit_before_account_changes(#[case] declared: u64, #[case] acce
         assert_eq!(outcome.gas_used, 0);
         assert!(outcome.changes.accounts.is_empty());
         assert!(matches!(
-            executor.execute(
+            executor.execute_with_modules(
                 &state,
                 &context.clone().with_verification(),
-                std::slice::from_ref(&tx)
+                std::slice::from_ref(&tx),
+                executor.snapshot()
             ),
             Err(ExecutionError::BlockValidation(_))
         ));
@@ -305,7 +317,12 @@ fn native_and_evm_share_actual_usage_while_reserving_full_limits() {
     assert_eq!(outcome.changes.accounts[&RECIPIENT].balance, U256::from(1));
     verify_selected(&executor, &state, &context, &txs, &outcome, &next);
     assert!(matches!(
-        executor.execute(&state, &context.with_verification(), &txs),
+        executor.execute_with_modules(
+            &state,
+            &context.with_verification(),
+            &txs,
+            executor.snapshot()
+        ),
         Err(ExecutionError::BlockValidation(_))
     ));
 }

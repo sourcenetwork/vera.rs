@@ -3,6 +3,7 @@ mod jubjub;
 mod object_registration;
 mod pet;
 mod pet_reports;
+mod read_validation;
 mod spelling;
 
 use super::*;

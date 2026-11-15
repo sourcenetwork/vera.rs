@@ -7,6 +7,7 @@ pub const DEFAULT_GAS_LIMIT: u64 = 30_000_000;
 
 /// Execution layer configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionConfig {
     /// Maximum gas per block.
     #[serde(default = "default_gas_limit")]

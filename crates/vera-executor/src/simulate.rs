@@ -1,17 +1,24 @@
-//! Stateless EVM simulation for `eth_call` and `eth_estimateGas`.
+//! Stateless simulation for `eth_call`, `eth_estimateGas` and native dry runs.
 
 use alloy_primitives::{Address, Bytes, U256};
 use revm::{
-    Context, InspectEvm, Journal, MainBuilder,
-    context::block::BlockEnv,
+    InspectEvm, MainBuilder,
     context::result::{ExecutionResult, Output},
-    database::State,
-    primitives::{TxKind, hardfork::SpecId},
+    primitives::TxKind,
 };
 use vera_modules::ModuleState;
 use vera_traits::StateDbRead;
 
-use crate::{ExecutionError, StateDbAdapter, precompiles::VeraPrecompiles};
+use crate::ExecutionError;
+
+mod context;
+pub use context::SimulationContext;
+
+mod native;
+pub use native::{
+    MAX_SIMULATED_SIGNER_BYTES, NativeSimulateError, NativeSimulateRequest, NativeSimulateResult,
+    simulate_native_call,
+};
 
 /// Input for a simulation call (no signature, no RLP).
 #[derive(Debug)]
@@ -46,34 +53,20 @@ const BASE_TX_GAS: u64 = 21_000;
 /// Builds a full REVM context with `VeraPrecompiles` so that `eth_call` to
 /// precompile addresses (ACP queries, etc.) works correctly. When `modules`
 /// is `Some`, the precompile instances are populated with that module state
-/// so queries see persisted data.
+/// so queries see persisted data. The call observes the context's height,
+/// time, genesis record and membership limit, and carries no signer.
 pub fn simulate_call<S: StateDbRead>(
     state: &S,
-    chain_id: u64,
-    spec_id: SpecId,
+    context: &SimulationContext,
     request: &SimulateRequest,
-    block_gas_limit: u64,
     modules: Option<&ModuleState>,
 ) -> Result<SimulateResult, ExecutionError> {
-    let adapter = StateDbAdapter::new(state.clone());
-    let db = State::builder().with_database_ref(adapter).build();
-
-    type Db<S> = State<revm::database::WrapDatabaseRef<StateDbAdapter<S>>>;
-
-    let gas_limit = request.gas.unwrap_or(block_gas_limit);
+    let chain_id = context.chain_id;
+    let gas_limit = request.gas.unwrap_or(context.block_gas_limit);
 
     let tx_kind = request.to.map_or(TxKind::Create, TxKind::Call);
 
-    let ctx: Context<BlockEnv, _, _, Db<S>, Journal<Db<S>>, ()> = Context::new(db, spec_id);
-    let ctx = ctx
-        .modify_cfg_chained(|cfg| {
-            cfg.chain_id = chain_id;
-            cfg.disable_nonce_check = true;
-            cfg.disable_balance_check = true;
-        })
-        .modify_block_chained(|blk: &mut BlockEnv| {
-            blk.gas_limit = block_gas_limit;
-        });
+    let ctx = context.evm(state);
 
     let tx_env = revm::context::TxEnv::builder()
         .caller(request.from)
@@ -87,17 +80,7 @@ pub fn simulate_call<S: StateDbRead>(
         .build()
         .map_err(|e| ExecutionError::TxExecution(format!("{e:?}")))?;
 
-    let precompiles = modules.map_or_else(
-        || VeraPrecompiles::new(spec_id),
-        |m| {
-            VeraPrecompiles::with_modules(
-                spec_id,
-                m.acp.clone(),
-                m.bulletin.clone(),
-                m.vera.clone(),
-            )
-        },
-    );
+    let precompiles = context.precompiles(modules);
 
     let mut evm = ctx
         .build_mainnet_with_inspector(precompiles.inspector())
@@ -139,16 +122,22 @@ pub fn simulate_call<S: StateDbRead>(
     }
 }
 
-/// Estimate the minimum gas required for a transaction via binary search.
+/// Estimates stop within this fraction of the upper bound, which caps the
+/// simulations that fail near the gas cap at six.
+const ESTIMATE_PRECISION: u64 = 64;
+
+/// Estimate a gas limit the transaction succeeds with.
+///
+/// The search narrows downwards from the cap and never below the gas used
+/// there, so the result is near the smallest sufficient limit only when gas
+/// use does not shrink under a lower limit.
 pub fn estimate_gas<S: StateDbRead>(
     state: &S,
-    chain_id: u64,
-    spec_id: SpecId,
+    context: &SimulationContext,
     request: &SimulateRequest,
-    block_gas_limit: u64,
     modules: Option<&ModuleState>,
 ) -> Result<u64, ExecutionError> {
-    let cap = request.gas.unwrap_or(block_gas_limit);
+    let cap = request.gas.unwrap_or(context.block_gas_limit);
 
     // First check: does it succeed at the cap at all?
     let mut req_at_cap = SimulateRequest {
@@ -158,34 +147,22 @@ pub fn estimate_gas<S: StateDbRead>(
         data: request.data.clone(),
         gas: Some(cap),
     };
-    let result = simulate_call(
-        state,
-        chain_id,
-        spec_id,
-        &req_at_cap,
-        block_gas_limit,
-        modules,
-    )?;
+    let result = simulate_call(state, context, &req_at_cap, modules)?;
     if !result.success {
         return Err(ExecutionError::TxExecution(
             "execution reverted at gas cap".to_string(),
         ));
     }
 
-    let mut lo = BASE_TX_GAS;
+    // Starting here skips the limits most calls fail under; a call that uses
+    // less gas under a lower limit is estimated above its smallest limit.
+    let mut lo = BASE_TX_GAS.max(result.gas_used).saturating_sub(1);
     let mut hi = cap;
 
-    while lo + 1 < hi {
+    while lo + 1 < hi && hi - lo > hi / ESTIMATE_PRECISION {
         let mid = lo + (hi - lo) / 2;
         req_at_cap.gas = Some(mid);
-        let result = simulate_call(
-            state,
-            chain_id,
-            spec_id,
-            &req_at_cap,
-            block_gas_limit,
-            modules,
-        )?;
+        let result = simulate_call(state, context, &req_at_cap, modules)?;
         if result.success {
             hi = mid;
         } else {
@@ -224,6 +201,41 @@ mod tests {
         }
     }
 
+    const HEAD_NUMBER: u64 = 41;
+    const HEAD_TIME: u64 = 1_800_000_000;
+
+    fn context() -> SimulationContext {
+        SimulationContext::at_block(
+            &crate::ExecutionConfig::new(1),
+            30_000_000,
+            HEAD_NUMBER,
+            HEAD_TIME,
+        )
+    }
+
+    /// Initcode whose deployed code is the 32-byte word `opcode` pushes.
+    fn returning(opcode: u8) -> Bytes {
+        Bytes::from(vec![opcode, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3])
+    }
+
+    #[test]
+    fn a_call_reads_the_height_and_time_of_its_context() {
+        const NUMBER: u8 = 0x43;
+        const TIMESTAMP: u8 = 0x42;
+        for (opcode, expected) in [(NUMBER, HEAD_NUMBER), (TIMESTAMP, HEAD_TIME)] {
+            let request = SimulateRequest {
+                from: Address::ZERO,
+                to: None,
+                value: U256::ZERO,
+                data: returning(opcode),
+                gas: None,
+            };
+            let result = simulate_call(&MockState, &context(), &request, None).unwrap();
+            assert!(result.success);
+            assert_eq!(U256::from_be_slice(&result.output), U256::from(expected));
+        }
+    }
+
     #[test]
     fn simulate_simple_transfer() {
         let state = MockState;
@@ -235,7 +247,7 @@ mod tests {
             gas: None,
         };
 
-        let result = simulate_call(&state, 1, SpecId::CANCUN, &request, 30_000_000, None).unwrap();
+        let result = simulate_call(&state, &context(), &request, None).unwrap();
         assert!(result.success);
         assert!(result.gas_used >= BASE_TX_GAS);
     }
@@ -251,8 +263,9 @@ mod tests {
             gas: None,
         };
 
-        let gas = estimate_gas(&state, 1, SpecId::CANCUN, &request, 30_000_000, None).unwrap();
+        let gas = estimate_gas(&state, &context(), &request, None).unwrap();
         assert!(gas >= BASE_TX_GAS);
+        assert!(gas <= BASE_TX_GAS + BASE_TX_GAS / (ESTIMATE_PRECISION - 1));
     }
 
     #[test]
@@ -266,7 +279,7 @@ mod tests {
             gas: Some(100_000),
         };
 
-        let result = simulate_call(&state, 1, SpecId::CANCUN, &request, 30_000_000, None).unwrap();
+        let result = simulate_call(&state, &context(), &request, None).unwrap();
         assert!(result.success);
     }
 }

@@ -3,9 +3,8 @@ use async_trait::async_trait;
 use crate::did::Did;
 use crate::thread_bounds::MaybeSendSync;
 
-use super::StorePolicyOptions;
 use crate::error::Result;
-use crate::types::{ObjectRef, Policy, Relationship, Subject};
+use crate::types::{Policy, Relationship, Subject};
 
 /// Trait for Zanzibar policy and relationship storage.
 ///
@@ -17,20 +16,6 @@ use crate::types::{ObjectRef, Policy, Relationship, Subject};
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 pub trait ZanzibarStore: MaybeSendSync {
     async fn store_policy(&self, policy: &Policy) -> Result<()>;
-
-    async fn store_policy_with_options(
-        &self,
-        policy: &Policy,
-        options: &StorePolicyOptions,
-    ) -> Result<()> {
-        if options.validate {
-            policy.validate()?;
-        }
-        if options.enforce_dpi {
-            policy.validate_dpi()?;
-        }
-        self.store_policy(policy).await
-    }
 
     async fn get_policy(&self, policy_id: &str) -> Result<Option<Policy>>;
 
@@ -54,6 +39,9 @@ pub trait ZanzibarStore: MaybeSendSync {
         subject: &Subject,
     ) -> Result<bool>;
 
+    /// Whether a tuple names `subject` itself or the untyped wildcard. Typed
+    /// wildcards and usersets are resolved by the engine from
+    /// [`get_relation_subjects`](Self::get_relation_subjects).
     async fn check_permission_direct(
         &self,
         policy_id: &str,
@@ -70,14 +58,6 @@ pub trait ZanzibarStore: MaybeSendSync {
         object_id: &str,
         relation: &str,
     ) -> Result<Vec<Subject>>;
-
-    async fn get_relation_targets(
-        &self,
-        policy_id: &str,
-        resource: &str,
-        object_id: &str,
-        relation: &str,
-    ) -> Result<Vec<ObjectRef>>;
 
     async fn delete_object_relationships(
         &self,

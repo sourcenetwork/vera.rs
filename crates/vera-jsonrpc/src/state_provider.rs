@@ -2,6 +2,7 @@
 
 use alloy_primitives::{Address, B256, Bytes, U256};
 use async_trait::async_trait;
+use vera_domain::{NativeCallRequest, NativeCallSimulation};
 
 use crate::{
     error::RpcError,
@@ -79,6 +80,16 @@ pub trait StateProvider: Send + Sync {
         Err(RpcError::NotImplemented)
     }
 
+    /// Dry-run a native module call as the DID the request names.
+    ///
+    /// The DID is not authenticated and nothing is written.
+    async fn simulate_native_call(
+        &self,
+        _request: NativeCallRequest,
+    ) -> Result<NativeCallSimulation, RpcError> {
+        Err(RpcError::NotImplemented)
+    }
+
     /// Get logs matching the given filter.
     async fn get_logs(&self, _filter: RpcLogFilter) -> Result<Vec<RpcLog>, RpcError> {
         Err(RpcError::NotImplemented)
@@ -149,6 +160,6 @@ impl StateProvider for NoopStateProvider {
     }
 
     async fn block_number(&self) -> Result<u64, RpcError> {
-        Err(RpcError::NotImplemented)
+        Ok(0)
     }
 }

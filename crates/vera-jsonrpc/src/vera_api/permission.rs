@@ -1,6 +1,6 @@
-use super::{VeraApiImpl, VeraApiServer};
+use super::VeraApiImpl;
 use crate::error::codes;
-use alloy_primitives::{B256, U64};
+use alloy_primitives::B256;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use std::{
     sync::atomic::{AtomicU64, Ordering},
@@ -73,9 +73,14 @@ impl VeraApiImpl {
         let mut lock_time = Duration::ZERO;
         let mut proof_time = Duration::ZERO;
         let mut finality_time = Duration::ZERO;
-        let result = tokio::time::timeout(Duration::from_secs(2), async {
+        let result = tokio::time::timeout(super::capture::EVIDENCE_DEADLINE, async {
             let (selected, proof, _permit) = loop {
                 attempts += 1;
+                if !super::capture::head_reaches(index, minimum_height)? {
+                    phase = "publication";
+                    super::record::wait_for_proof_progress(&mut updates).await;
+                    continue;
+                }
                 let captured = {
                     phase = "storage_lock";
                     let stage = started.map(|_| Instant::now());
@@ -169,7 +174,7 @@ impl VeraApiImpl {
         height: u64,
     ) -> RpcResult<PermissionProof> {
         validate_request(policy, request, PERMISSION_LIMITS).map_err(request_error)?;
-        let light = self.get_light_block(U64::from(height)).await?;
+        let light = self.light_block(height).await?;
         let root: B256 = light.module_state_root.parse().map_err(error)?;
         let snapshot = self.permission_snapshot()?;
         let databases = self

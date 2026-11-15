@@ -87,6 +87,50 @@ class CompareTests(unittest.TestCase):
         self.assertTrue(any('workflows/s' in row['metric'] for row in result['metrics']))
         self.assertIn('Shared workload runner source `head`', (self.root / 'comparison.md').read_text())
 
+    def discovery_fixture(self, recorded):
+        def fixture(path):
+            run = self.shared_run_fixture(path)
+            if recorded[path.parent.name.rstrip('12')] is not None:
+                run[1]['discovery_section'] = recorded[path.parent.name.rstrip('12')]
+            return run
+        return fixture
+
+    def test_base_before_the_discovery_setting_stays_comparable(self):
+        self.shared_driver()
+        self.identity['head']['discovery_setting'] = True
+        self.identity['base']['discovery_setting'] = False
+        self.write_identity()
+        with patch('compare_pr.load_run', side_effect=self.discovery_fixture(dict(head=True, base=False))):
+            self.assertFalse(compare(self.root))
+        result = json.loads((self.root / 'comparison-report.json').read_text())
+        self.assertFalse(result['errors'])
+        self.assertFalse(result['configuration_differences'])
+        self.assertTrue(all(row['change_percent'] is not None for row in result['metrics']))
+
+    def test_discovery_section_must_follow_each_node_source(self):
+        self.shared_driver()
+        self.identity['head']['discovery_setting'] = True
+        self.identity['base']['discovery_setting'] = False
+        self.write_identity()
+        for recorded in (dict(head=True, base=True), dict(head=False, base=False), dict(head=True, base=None)):
+            with self.subTest(recorded=recorded):
+                with patch('compare_pr.load_run', side_effect=self.discovery_fixture(recorded)):
+                    self.assertTrue(compare(self.root))
+                result = json.loads((self.root / 'comparison-report.json').read_text())
+                self.assertTrue(all('discovery section differs' in error for error in result['errors'][:2]))
+        del self.identity['base']['discovery_setting']
+        self.write_identity()
+        with patch('compare_pr.load_run', side_effect=self.discovery_fixture(dict(head=True, base=False))):
+            self.assertTrue(compare(self.root))
+        result = json.loads((self.root / 'comparison-report.json').read_text())
+        self.assertTrue(all('incomplete discovery setting' in error for error in result['errors'][:2]))
+
+    def test_comparison_recorded_before_discovery_provenance_is_accepted(self):
+        self.shared_driver()
+        with patch('compare_pr.load_run', side_effect=self.discovery_fixture(dict(head=True, base=True))):
+            self.assertFalse(compare(self.root))
+        self.assertFalse(json.loads((self.root / 'comparison-report.json').read_text())['errors'])
+
     def incompatible_driver(self):
         self.shared_driver()
         self.identity['head']['proof_schema'] = dict(SCHEMAS['relationship/v5/'])

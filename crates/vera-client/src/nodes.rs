@@ -59,23 +59,16 @@ pub fn encode_node_request(
 
 impl VeraClient {
     /// Submit an authorized node command. Retain the returned ID for certified receipt recovery.
+    ///
+    /// [`ClientError::SubmissionUnknown`] carries the same ID when the reply is lost;
+    /// see [`Self::confirm_submission`].
     pub async fn submit_node_request(
         &self,
         submitter: &BlsSigner,
         signed: &SignedNodeRequest,
     ) -> Result<B256, ClientError> {
-        let wire = submitter.sign_native_tx(VERA_ADDRESS, encode_node_request(signed)?)?;
-        let expected: B256 = vera_domain::NativeTx::decode_wire(&wire)
-            .map_err(|e| ClientError::Signing(e.to_string()))?
-            .tx_id()
-            .0;
-        let submitted = self.send_native_tx(&wire).await?;
-        if submitted != expected {
-            return Err(ClientError::InvalidResponse(
-                "node submission identifier mismatch",
-            ));
-        }
-        Ok(submitted)
+        self.submit_native(submitter, VERA_ADDRESS, encode_node_request(signed)?)
+            .await
     }
 
     /// Read node metadata with caller-provided consensus trust and minimum revision.

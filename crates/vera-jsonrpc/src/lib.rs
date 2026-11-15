@@ -31,7 +31,9 @@ mod local;
 pub use local::{LocalRpc, LocalRpcError, LocalSubscription};
 
 mod server;
-pub use server::{JsonRpcServer, RpcServer, RpcServerHandle, ServerError};
+pub use server::{RpcServer, RpcServerHandle, ServerError};
+
+mod simulation_slots;
 
 mod state;
 pub use state::{NodeState, NodeStatus};

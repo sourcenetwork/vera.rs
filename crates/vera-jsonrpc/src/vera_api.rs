@@ -5,11 +5,12 @@ use std::sync::Arc;
 use alloy_primitives::{B256, Bytes, U64};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
-use commonware_cryptography::Hasher as _;
-use vera_domain::{LightBlock, ModuleId};
+use vera_domain::{LightBlock, ModuleId, NativeCallRequest, NativeCallSimulation};
 
 #[cfg(test)]
 mod admission_tests;
+mod capture;
+mod light;
 mod page;
 mod permission;
 mod policy;
@@ -27,11 +28,13 @@ use crate::{
     error::RpcError,
     eth::TxSubmitCallback,
     state::{NodeState, NodeStatus},
+    state_provider::StateProvider,
     types::{RpcLog, RpcNativeReceipt},
 };
 
 /// Durable light-block lookup, executed outside the asynchronous RPC worker.
-pub type LightBlockLookup = Arc<dyn Fn(u64) -> Result<LightBlock, String> + Send + Sync>;
+/// `Ok(None)` means the revision has no finalization certificate yet.
+pub type LightBlockLookup = Arc<dyn Fn(u64) -> Result<Option<LightBlock>, String> + Send + Sync>;
 
 /// Durable receipt evidence lookup, executed on a bounded blocking worker.
 pub type ReceiptProofLookup =
@@ -72,6 +75,18 @@ pub trait VeraApi {
     /// Returns the on-chain native nonce for a BLS identity.
     #[method(name = "getNativeNonce")]
     async fn get_native_nonce(&self, did: String) -> RpcResult<U64>;
+
+    /// Dry-runs a native module call as the DID the request names, at the
+    /// head revision, without a signature or a sequence.
+    ///
+    /// The DID is not authenticated: the answer says what that DID could do
+    /// and authorizes nothing. No state is written and no revision records
+    /// the outcome.
+    #[method(name = "simulateNativeCall")]
+    async fn simulate_native_call(
+        &self,
+        request: NativeCallRequest,
+    ) -> RpcResult<NativeCallSimulation>;
 
     /// Return bounded evidence for evaluating this request at a finalized revision.
     #[method(name = "getPermissionProof")]
@@ -154,6 +169,7 @@ pub struct VeraApiImpl {
     light_block_lookup: Option<LightBlockLookup>,
     receipt_proof_lookup: Option<ReceiptProofLookup>,
     archive: Option<crate::ArchiveReader>,
+    simulator: Option<Arc<dyn StateProvider>>,
 }
 
 impl std::fmt::Debug for VeraApiImpl {
@@ -184,7 +200,16 @@ impl VeraApiImpl {
             light_block_lookup: None,
             receipt_proof_lookup: None,
             archive: None,
+            simulator: None,
         }
+    }
+
+    /// Dry-run native calls through the provider `eth_call` executes on, so
+    /// both share its simulation slots.
+    #[must_use]
+    pub fn with_simulator(mut self, provider: Arc<dyn StateProvider>) -> Self {
+        self.simulator = Some(provider);
+        self
     }
 
     /// Set the block index and shared module state for receipt/nonce queries.
@@ -360,6 +385,16 @@ impl VeraApiServer for VeraApiImpl {
         Ok(U64::from(nonce))
     }
 
+    async fn simulate_native_call(
+        &self,
+        request: NativeCallRequest,
+    ) -> RpcResult<NativeCallSimulation> {
+        let Some(simulator) = &self.simulator else {
+            return Err(RpcError::NotImplemented.into());
+        };
+        Ok(simulator.simulate_native_call(request).await?)
+    }
+
     async fn get_permission_proof(
         &self,
         policy: String,
@@ -437,43 +472,17 @@ impl VeraApiServer for VeraApiImpl {
 
     async fn get_light_block(&self, height: U64) -> RpcResult<LightBlock> {
         let height: u64 = height.to();
-        if let Some(light_index) = &self.light_block_index {
-            let finalization = self
-                .index
-                .as_ref()
-                .and_then(|index| index.get_block_by_number(height))
-                .and_then(|block| {
-                    let digest = commonware_cryptography::Sha256::hash(&[block.hash.as_slice()]).0;
-                    light_index.get_finalization(&digest)
-                });
-            if let Some(finalization) = finalization
-                && let Some(material) = light_index.get_epoch_material(finalization.epoch)
-            {
-                return LightBlock::from_encoded_block(
-                    &finalization.block,
-                    &finalization.bytes,
-                    &material.bytes,
-                )
-                .map_err(|error| {
-                    RpcError::Internal(format!("light block assembly failed: {error}")).into()
-                });
-            }
+        let cached = {
+            let _permit = self.state.proof_permit()?;
+            self.cached_light_block(height)?
+        };
+        match cached {
+            Some(light) => Ok(light),
+            None => self
+                .archived_light_block(height)
+                .await?
+                .ok_or_else(|| light::certificate_not_found(height)),
         }
-        if let Some(lookup) = &self.light_block_lookup {
-            let lookup = lookup.clone();
-            let permit = self.state.light_lookup_permit()?;
-            return tokio::task::spawn_blocking(move || {
-                let _permit = permit;
-                lookup(height)
-            })
-            .await
-            .map_err(|error| RpcError::Internal(format!("light block lookup failed: {error}")))?
-            .map_err(|error| RpcError::Internal(error).into());
-        }
-        Err(RpcError::Internal(format!(
-            "finalization certificate not found for height {height}"
-        ))
-        .into())
     }
 }
 

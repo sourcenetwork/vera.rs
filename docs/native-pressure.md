@@ -85,10 +85,14 @@ large-payload saturation, maximum throughput or WAN behavior.
 
 After finalization, Vera resets the admission validator to committed worker
 sequences and rechecks retained requests in their original admission order.
-Their signatures were authenticated at admission. Rechecks still validate the
-deployment, target and public key before reserving the next worker sequence.
-The compressed-key path uses blst validation, including rejection of infinity
-and non-subgroup points, and derives the DID from the canonical key encoding.
+Their signatures were authenticated at admission. The node keeps each pending
+request's signer and sequence from admission, keyed by the hash of its bytes,
+and a recheck replays that reservation without decoding the request or
+validating its key again. A pending request without a retained admission result
+is decoded: the deployment, target and public key are validated before the next
+worker sequence is reserved. That compressed-key path uses blst validation,
+including rejection of infinity and non-subgroup points, and derives the DID
+from the canonical key encoding.
 
 Component fixture version 6 measures the former Arkworks decode-and-identify
 path and the blst path against the same compressed key, with the same warmup and

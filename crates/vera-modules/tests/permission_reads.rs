@@ -404,3 +404,27 @@ fn every_spelling_of_an_actor_captures_and_replays_the_same_reads() {
     }
     assert!(stores.windows(2).all(|pair| pair[0] == pair[1]));
 }
+
+#[test]
+fn a_direct_miss_scans_the_relation_once() {
+    const READERS: usize = 100;
+    let shared = WritableFixture(Arc::new(RwLock::new(fixture(
+        Subject::Entity(Did::new(ALICE).unwrap()),
+        true,
+    ))));
+    let adapter = QmdbZanzibarStore::new(shared.clone());
+    for index in 0..READERS {
+        let reader = Did::new(format!("did:key:reader{index}")).unwrap();
+        let relationship = Relationship::with_entity("document", "report", "reader", reader);
+        block_on(adapter.store_relationship(POLICY, &relationship)).unwrap();
+    }
+    let store = shared.0.read().unwrap().clone();
+    let mut stranger = request();
+    stranger.actor = Actor(Did::new("did:key:stranger").unwrap());
+    let limits = ReadLimits {
+        records: READERS + 28,
+        ..LIMITS
+    };
+    let capture = ReadCapture::new(store, limits);
+    assert!(!evaluate_access_request(capture, POLICY, &stranger).unwrap());
+}

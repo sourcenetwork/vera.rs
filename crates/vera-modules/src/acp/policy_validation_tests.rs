@@ -326,3 +326,45 @@ fn policy_id_listing_preflights_all_bytes_before_decoding_and_preserves_corrupti
         Err(AcpError::QueryBudgetExceeded)
     ));
 }
+
+#[test]
+fn the_deepest_accepted_expression_survives_restoration() {
+    use vera_zanzibar::expression::MAX_EXPRESSION_DEPTH;
+
+    const DEFINITION: &str = "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n      - name: blocked\n    permissions:\n      - name: read\n        expr: EXPRESSION\n      - name: write\n        expr: reader\n";
+    let owner = Did::new("did:key:owner").unwrap();
+    for (specification, wrappers) in [("", 1), ("spec: defra\n", 2)] {
+        let with = |subtractions: usize| {
+            let expression = format!("reader{}", " - blocked".repeat(subtractions));
+            format!(
+                "{specification}{}",
+                DEFINITION.replace("EXPRESSION", &expression)
+            )
+        };
+        let deepest = MAX_EXPRESSION_DEPTH - wrappers;
+        let mut module = AcpModule::new();
+        let policy = module
+            .create_policy(&owner, &with(deepest), PolicyMarshalingType::ShortYaml)
+            .unwrap()
+            .policy
+            .id;
+        let before = module.store.serialize();
+        for subtractions in [deepest + 1, 59, 127] {
+            let rejected = with(subtractions);
+            assert!(
+                module
+                    .create_policy(&owner, &rejected, PolicyMarshalingType::ShortYaml)
+                    .is_err()
+            );
+            assert!(
+                module
+                    .edit_policy(&owner, &policy, &rejected, PolicyMarshalingType::ShortYaml)
+                    .is_err()
+            );
+            assert_eq!(module.store.serialize(), before);
+        }
+        let restored = AcpModule::from_store(InMemoryKvStore::deserialize(&before).unwrap());
+        restored.validate_restored_state().unwrap();
+        assert_eq!(restored.query_policy(&policy).unwrap().policy.id, policy);
+    }
+}

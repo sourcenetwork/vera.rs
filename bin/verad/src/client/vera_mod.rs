@@ -1,9 +1,12 @@
-//! Vera module subcommands (chain config, params, JWS tokens).
+//! Vera module subcommands (relay grants, JWS tokens).
 
 use alloy_primitives::Address;
 use clap::Subcommand;
 
-use super::context::ClientContext;
+use super::{
+    context::ClientContext,
+    parse::{self, bytes_to_json},
+};
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum VeraCommand {
@@ -18,10 +21,6 @@ pub(crate) enum VeraCommand {
         #[arg(long, default_value_t = 0)]
         minimum_revision: u64,
     },
-    /// Fetch chain configuration.
-    ChainConfig,
-    /// Fetch current Vera module parameters.
-    Params,
     /// Look up a JWS token by hash.
     GetToken {
         /// Token hash string.
@@ -52,12 +51,7 @@ impl VeraCommand {
                 trusted_key,
                 minimum_revision,
             } => {
-                let bytes = hex::decode(trusted_key.strip_prefix("0x").unwrap_or(&trusted_key))
-                    .map_err(|error| eyre::eyre!("invalid --trusted-key hex: {error}"))?;
-                let trusted = commonware_codec::DecodeExt::decode(commonware_codec::Copying(
-                    bytes.as_slice(),
-                ))
-                .map_err(|error| eyre::eyre!("invalid --trusted-key: {error}"))?;
+                let trusted = parse::trusted_key(&trusted_key)?;
                 let record = ctx
                     .client
                     .read_relay_grant(&issuer, minimum_revision, &trusted)
@@ -67,17 +61,6 @@ impl VeraCommand {
                     "timestamp": record.timestamp,
                     "grant": record.value,
                 }))?;
-            }
-
-            Self::ChainConfig => {
-                let data = ctx.client.get_chain_config().await?;
-                let json = bytes_to_json(&data);
-                ctx.print_json(&json)?;
-            }
-            Self::Params => {
-                let data = ctx.client.get_hub_params().await?;
-                let json = bytes_to_json(&data);
-                ctx.print_json(&json)?;
             }
             Self::GetToken { token_hash } => {
                 let (found, record) = ctx.client.get_jws_token(&token_hash).await?;
@@ -109,9 +92,4 @@ impl VeraCommand {
         }
         Ok(())
     }
-}
-
-fn bytes_to_json(data: &[u8]) -> serde_json::Value {
-    serde_json::from_slice(data)
-        .unwrap_or_else(|_| serde_json::Value::String(format!("0x{}", hex::encode(data))))
 }

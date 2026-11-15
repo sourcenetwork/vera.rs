@@ -999,33 +999,7 @@ async fn canonical_module_test() {
         "BLS namespace owner_did should match BLS signer DID"
     );
 
-    // ── G: Vera Module — Config, Params, Token Queries + Invalidation ─
-
-    // G1. Read chain config (eth_call to 0x0812)
-    let chain_config = client
-        .get_chain_config()
-        .await
-        .expect("get_chain_config should work");
-    assert!(!chain_config.is_empty(), "chain config should be non-empty");
-    let config_json: serde_json::Value =
-        serde_json::from_slice(&chain_config).expect("chain config should be valid JSON");
-    assert!(
-        config_json.is_object(),
-        "chain config should be a JSON object"
-    );
-
-    // G2. Read Vera params (eth_call to 0x0812)
-    let vera_params = client
-        .get_hub_params()
-        .await
-        .expect("get_hub_params should work");
-    assert!(!vera_params.is_empty(), "vera params should be non-empty");
-    let params_json: serde_json::Value =
-        serde_json::from_slice(&vera_params).expect("vera params should be valid JSON");
-    assert!(
-        params_json.is_object(),
-        "vera params should be a JSON object"
-    );
+    // ── G: Vera Module — Token Queries + Invalidation ─
 
     // G3. Query non-existent token — should return found=false
     let (found, record) = client

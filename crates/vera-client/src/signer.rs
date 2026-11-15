@@ -3,7 +3,6 @@
 use alloy_consensus::{SignableTransaction, TxLegacy};
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Address, Bytes, Signature, TxKind, U256, keccak256};
-use k256::ecdsa::SigningKey;
 use k256_native::ecdsa::SigningKey as NativeSigningKey;
 
 use crate::error::ClientError;
@@ -23,13 +22,6 @@ pub struct EvmSigner {
 
 impl EvmSigner {
     /// Create a signer from a secp256k1 signing key and chain ID.
-    pub fn new(signing_key: SigningKey, chain_id: u64) -> Self {
-        let key =
-            NativeSigningKey::from_slice(&signing_key.to_bytes()).expect("valid secp256k1 key");
-        Self::from_native_key(key, chain_id)
-    }
-
-    /// Create a signer without converting through the legacy signing key type.
     pub fn from_native_key(signing_key: NativeSigningKey, chain_id: u64) -> Self {
         let point = signing_key.verifying_key().to_sec1_point(false);
         let hash = keccak256(&point.as_bytes()[1..]);
@@ -111,10 +103,10 @@ mod tests {
 
     use super::*;
 
-    fn test_key() -> SigningKey {
+    fn test_key() -> NativeSigningKey {
         let mut secret = [0u8; 32];
         secret[31] = 1;
-        SigningKey::from_bytes((&secret).into()).expect("valid key")
+        NativeSigningKey::from_slice(&secret).expect("valid key")
     }
 
     #[test]
@@ -133,20 +125,20 @@ mod tests {
 
     #[test]
     fn address_is_deterministic() {
-        let signer1 = EvmSigner::new(test_key(), 1);
-        let signer2 = EvmSigner::new(test_key(), 1);
+        let signer1 = EvmSigner::from_native_key(test_key(), 1);
+        let signer2 = EvmSigner::from_native_key(test_key(), 1);
         assert_eq!(signer1.address(), signer2.address());
     }
 
     #[test]
     fn chain_id_stored() {
-        let signer = EvmSigner::new(test_key(), 42);
+        let signer = EvmSigner::from_native_key(test_key(), 42);
         assert_eq!(signer.chain_id(), 42);
     }
 
     #[test]
     fn sign_tx_produces_valid_envelope() {
-        let signer = EvmSigner::new(test_key(), 1337);
+        let signer = EvmSigner::from_native_key(test_key(), 1337);
         let to = Address::repeat_byte(0xab);
         let calldata = Bytes::from(vec![0xde, 0xad]);
 
@@ -159,7 +151,7 @@ mod tests {
 
     #[test]
     fn sign_tx_correct_chain_id() {
-        let signer = EvmSigner::new(test_key(), 42);
+        let signer = EvmSigner::from_native_key(test_key(), 42);
         let raw = signer.sign_tx(Address::ZERO, Bytes::new(), 0).unwrap();
         let envelope = alloy_consensus::TxEnvelope::decode_2718(&mut raw.as_slice()).unwrap();
         assert_eq!(envelope.chain_id(), Some(42));
@@ -167,7 +159,7 @@ mod tests {
 
     #[test]
     fn sign_tx_correct_nonce() {
-        let signer = EvmSigner::new(test_key(), 1);
+        let signer = EvmSigner::from_native_key(test_key(), 1);
         let raw = signer.sign_tx(Address::ZERO, Bytes::new(), 99).unwrap();
         let envelope = alloy_consensus::TxEnvelope::decode_2718(&mut raw.as_slice()).unwrap();
         assert_eq!(envelope.nonce(), 99);
@@ -175,7 +167,7 @@ mod tests {
 
     #[test]
     fn sign_tx_correct_gas_fields() {
-        let signer = EvmSigner::new(test_key(), 1);
+        let signer = EvmSigner::from_native_key(test_key(), 1);
         let raw = signer.sign_tx(Address::ZERO, Bytes::new(), 0).unwrap();
         let envelope = alloy_consensus::TxEnvelope::decode_2718(&mut raw.as_slice()).unwrap();
         assert_eq!(envelope.gas_limit(), GAS_LIMIT);
@@ -183,7 +175,7 @@ mod tests {
 
     #[test]
     fn sign_tx_correct_recipient() {
-        let signer = EvmSigner::new(test_key(), 1);
+        let signer = EvmSigner::from_native_key(test_key(), 1);
         let to = Address::repeat_byte(0xcd);
         let raw = signer.sign_tx(to, Bytes::new(), 0).unwrap();
         let envelope = alloy_consensus::TxEnvelope::decode_2718(&mut raw.as_slice()).unwrap();
@@ -192,7 +184,7 @@ mod tests {
 
     #[test]
     fn sign_tx_different_nonces_differ() {
-        let signer = EvmSigner::new(test_key(), 1);
+        let signer = EvmSigner::from_native_key(test_key(), 1);
         let raw1 = signer.sign_tx(Address::ZERO, Bytes::new(), 0).unwrap();
         let raw2 = signer.sign_tx(Address::ZERO, Bytes::new(), 1).unwrap();
         assert_ne!(raw1, raw2);
@@ -203,8 +195,8 @@ mod tests {
         use alloy_signer::SignerSync;
         use alloy_signer_local::PrivateKeySigner;
 
-        let legacy = PrivateKeySigner::from_signing_key(test_key());
-        let signer = EvmSigner::new(test_key(), 1337);
+        let legacy = PrivateKeySigner::from_slice(&test_key().to_bytes()).unwrap();
+        let signer = EvmSigner::from_native_key(test_key(), 1337);
         assert_eq!(signer.address(), legacy.address());
         for nonce in [0, 1, 99, u64::MAX] {
             let to = Address::repeat_byte(0xab);
@@ -228,7 +220,7 @@ mod tests {
     fn signed_transaction_recovers_known_address() {
         use alloy_consensus::transaction::SignerRecoverable;
 
-        let signer = EvmSigner::new(test_key(), 1337);
+        let signer = EvmSigner::from_native_key(test_key(), 1337);
         let expected: Address = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
             .parse()
             .unwrap();

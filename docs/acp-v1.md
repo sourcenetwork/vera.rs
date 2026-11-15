@@ -29,7 +29,7 @@ The reference is Go `acp_core` v0.8.2, used by Go Vera at
 | GetPolicyCatalogue | `query_policy_catalogue`; declared names, known live objects and actors |
 | EvaluateTheorem | `evaluate_theorem`; authorization and delegation assertions |
 | AmendRegistration / RevealRegistration | authenticated commitment/reveal workflow; callers cannot choose a privileged principal or arbitrary earlier timestamp |
-| SetParams / GetParams | Go core parameters are empty. Vera's operational parameters use the existing operator-authorized configuration |
+| SetParams / GetParams | `getParams` reads the ACP parameters. There is no parameter-write call; operators set them through administration |
 | GetRuntimeManager | host plumbing, replaced by execution context and the module store |
 
 Native calls are declared in `acp/abi.rs`. `VeraClient` exposes typed methods in
@@ -57,7 +57,8 @@ Creating a policy does not grant management rights over objects registered by
 other actors. Managers can be recursive usersets, so revoking their group membership
 revokes management authority. Ownership cannot be added or deleted with ordinary
 relationship commands. Transfer changes the owner while preserving registration
-priority and other grants. Archive invalidates outgoing grants by advancing the
+priority and other grants, and bars the previous owner from claiming the object
+back with a [registration commitment](registration-commitments.md). Archive invalidates outgoing grants by advancing the
 target object incarnation and retains the archived owner at incarnation zero. Unarchive restores ownership
 without reviving those grants; physical removal runs under the cleanup budget.
 
@@ -162,7 +163,8 @@ native record can make progress with a fresh budget. Cleanup follows the policy'
 relationship, commitment and amendment indexes; it does not scan unrelated
 policies. Object cleanup selects an obsolete target incarnation and cannot remove
 newly regranted relationships. Policy deletion retains object-state points until
-its physical relationships and related cleanup metadata are gone.
+its physical relationships and related cleanup metadata are gone, and then
+removes the policy's relinquishment markers before its commitments.
 
 Commitments are removed with their policy, root and expiry indexes. Expiry of a
 retired commitment cannot recreate those indexes. The retirement marker and queue
@@ -304,6 +306,17 @@ their existing read limits; required incarnation points share those limits. Proo
 reads do not consume native execution gas.
 This is deterministic work accounting, not an instruction count or latency bound.
 
+`evaluateTheorem` charges its 1,000-unit dispatch base plus one allowance shared by
+the whole call: the policy identifier and source bytes before parsing, the policy
+read, and every assertion's reads and evaluator steps at the prices above.
+Authorization assertions use the permission accounting and delegation assertions
+the management accounting described below. An exhausted allowance returns
+out-of-gas for the call; it is never recorded as an assertion error. Rejected
+sources retain the work spent on them. The module exposes
+`evaluate_theorem_with_budget`; `evaluate_theorem` retains an unlimited allowance.
+A read-only call made through the client is limited by its call's gas, so a
+report over many assertions or wide relations can run out of gas there.
+
 ## Management authorization work
 
 Policy commands and `checkManagementAuthority` use a caller-owned `CommandBudget`.
@@ -333,27 +346,33 @@ units, including in nested batches. Failed native transactions continue to charg
 the full native transaction allowance, as before.
 
 Relationship point storage for set/delete, register, transfer, unarchive and reveal
-uses the same allowance, including contextual and supplied-metadata rewrites.
+uses the same allowance. A command writes each record once, already carrying its
+submission and supplied metadata.
 Policy, existing relationship, object-incarnation, physical/logical pair-count,
 subject-directory and object-pair-count reads reserve work before copying or decoding. Prepared replacements
 and deletions cost 200 units plus two per 16 encoded key/value bytes; JSON encoding
 reserves bytes before extending its buffer. Primary records, both count mirrors,
 changed directories, logical counts and object counters each pay once per prepared write. Applying
 a complete prepared plan does not charge those writes again. Idempotent grants
-still pay for their reads and return the original record; metadata-only rewrites
+still pay for their reads and return the original record; unarchive rewrites
 validate counters without charging nonexistent counter writes.
 
-Reveal also charges its commitment and policy-liveness reads, amendment counter
-and collision reads, and the amendment record/index writes. Exhaustion during a
-late metadata or amendment rewrite restores every earlier command change and
+Transfer also pays one write for the previous owner's relinquishment marker,
+whether the owner or a manager of the owner relation submitted it, and one
+point read for the new owner's marker, with one deletion when that marker
+exists; a transfer to the current owner pays none of these. Reveal also charges its
+commitment and policy-liveness reads, amendment counter
+and collision reads, and the amendment record/index writes. A reveal that would
+amend an existing registration pays one point read for the claimant's
+relinquishment marker; a reveal of an unregistered object does not. Exhaustion during a
+late amendment write restores every earlier command change and
 preserves the spent allowance. The public `RecordStore` preparation hooks retain
 unmetered defaults for generic stores and maintenance; the command-only adapter
 uses them explicitly and rejects direct unprepared writes.
 
 Commitment creation also reserves parameter, allocation-counter and identifier
 collision reads, then the counter, Borsh record and expiry/root/policy index writes
-before publication. Contextual restamping charges the previous-record read and
-all index removals/replacements before applying any of them. Each prepared index
+before publication. Each prepared index
 operation pays once; the prepaid record encoding is not charged again when the
 plan is applied. End-block expiry uses the same persistence logic with its own
 existing bounded maintenance schedule, outside transaction command allowances.

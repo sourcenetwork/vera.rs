@@ -37,6 +37,7 @@ impl AcpModule {
             }
         }
         self.validate_relation_state()?;
+        self.validate_relinquishments()?;
         for (key, _) in self.store.prefix_iter(keys::ACCESS_DECISION_PREFIX) {
             let id = std::str::from_utf8(&key[keys::ACCESS_DECISION_PREFIX.len()..])
                 .map_err(|_| AcpError::State("invalid access decision key".into()))?;
@@ -348,7 +349,7 @@ mod tests {
         let owner_relation = Relationship::with_entity("file", "report", "owner", owner.clone());
         let canonical =
             keys::relationship_key(&policy, &keys::relationship_storage_key(&owner_relation, 0));
-        let legacy = keys::relationship_key(&policy, &owner_relation.storage_key());
+        let legacy = keys::relationship_key(&policy, "/rel/file/report/owner/0000000000000000");
         let mut legacy_store = original.clone();
         legacy_store.put(&legacy, legacy_store.get(&canonical).unwrap());
         legacy_store.delete(&canonical);

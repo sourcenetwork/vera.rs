@@ -5,7 +5,7 @@ use rand::RngCore;
 use vera_client::{BlsSigner, EvmSigner, Secp256k1SigningKey, create_bearer_token};
 use zeroize::Zeroizing;
 
-use super::context::ClientContext;
+use super::{context::ClientContext, parse};
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum KeysCommand {
@@ -75,19 +75,8 @@ impl KeysCommand {
                 }))?;
             }
             Self::ShowBls { key } => {
-                let hex_key = key.strip_prefix("0x").unwrap_or(&key);
-                let bytes = hex::decode(hex_key).map_err(|e| eyre::eyre!("invalid hex: {e}"))?;
-                if bytes.len() != 32 {
-                    return Err(eyre::eyre!(
-                        "BLS secret key must be 32 bytes, got {}",
-                        bytes.len()
-                    ));
-                }
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(&bytes);
-                let fr = <ark_bls12_381::Fr as ark_ff::PrimeField>::from_le_bytes_mod_order(&arr);
-                let signer =
-                    BlsSigner::new(fr, 0).map_err(|e| eyre::eyre!("BLS signer init: {e}"))?;
+                let signer = BlsSigner::new(parse::bls_scalar(&key)?, 0)
+                    .map_err(|e| eyre::eyre!("BLS signer init: {e}"))?;
                 ctx.print_json(&serde_json::json!({
                     "did": signer.did(),
                     "pubkey": format!("0x{}", hex::encode(signer.pubkey_bytes())),

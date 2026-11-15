@@ -5,10 +5,12 @@
 use clap::Parser;
 use tracing_subscriber::{fmt::writer::BoxMakeWriter, prelude::*};
 
+mod chain_id;
 mod cli;
 mod client;
 mod probe;
 mod rpc_address;
+mod run_args;
 mod testnet;
 
 fn main() -> eyre::Result<()> {

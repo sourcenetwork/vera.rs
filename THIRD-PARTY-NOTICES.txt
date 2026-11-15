@@ -8,8 +8,8 @@ Original texts are reproduced below and identified by SHA-256. For texts from
 upstream source trees, the source URL includes the reviewed revision. Aurora's
 package records a dirty source tree; see its package-specific notice below.
 
-Cargo.lock SHA-256: 8196d26661e34c100fdfd861037d44f1a0f7f4324e286c238948045b824b19c1
-Packages: 537
+Cargo.lock SHA-256: cdb265808946c89cd922b4abfa8d3b14f2fd447d32b7a6f7f6059438367f79c9
+Packages: 536
 
 PACKAGE INDEX
 =============
@@ -1909,9 +1909,6 @@ vera-modules 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
 
 vera-node 0.1.2 | MIT
-  f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
-
-vera-overlay 0.1.2 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
 vera-permission 0.1.2 | MIT

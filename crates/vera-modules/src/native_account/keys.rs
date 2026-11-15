@@ -1,7 +1,6 @@
 //! Native account key prefixes and builders.
 //!
-//! Key format for future QMDB integration. Value encoding: `u64` as 8-byte
-//! little-endian (Borsh convention).
+//! Values are a `u64` nonce in 8-byte little-endian form.
 
 /// KV prefix for per-DID nonce tracking.
 pub const NATIVE_NONCE_PREFIX: &[u8] = b"native_nonce/";

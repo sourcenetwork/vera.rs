@@ -8,7 +8,6 @@ use std::{
 };
 
 use commonware_codec::Encode as _;
-use commonware_cryptography::Digestible as _;
 use tokio::sync::broadcast;
 use tracing::trace;
 use vera_app::FinalizedSink;
@@ -24,7 +23,7 @@ use crate::{
     CommittedState, FinalizedHistory,
     finalize::{index_finalized_block, subscription_data},
     history::restore_epoch,
-    tx_gossip::{SharedValidator, recheck},
+    tx_gossip::{SharedValidator, recheck, release},
 };
 
 /// Encoded finalization artifacts fetched from marshal after a block commits.
@@ -156,6 +155,10 @@ impl FinalizedSink for NodeSink {
         self.node_state.inc_proposed();
     }
 
+    async fn rejected(&self) {
+        release(&self.mempool, &self.validator).await;
+    }
+
     async fn finalized(&self, block: &Block, receipts: Vec<ExecutionReceipt>) {
         let started = (tracing::enabled!(target: "vera_diagnostics", tracing::Level::DEBUG)
             || tracing::enabled!(target: "vera_publication_diagnostics", tracing::Level::DEBUG)
@@ -210,7 +213,16 @@ impl FinalizedSink for NodeSink {
         self.node_state.set_backfilling(false);
 
         let gas_used = receipts.iter().map(|r| r.gas_used).sum();
-        index_finalized_block(&self.index, block, self.gas_limit, &receipts, gas_used);
+        // One identifier serves indexing, subscriptions, the header and the light index.
+        let id = block.id();
+        let tx_hashes = index_finalized_block(
+            &self.index,
+            block,
+            id.0,
+            self.gas_limit,
+            &receipts,
+            gas_used,
+        );
         self.node_state.record_finalized(
             block.height,
             block.context.round.epoch().get(),
@@ -230,20 +242,28 @@ impl FinalizedSink for NodeSink {
                 history_us = (persisted - lookup).as_micros(), index_us,
                 "finalized revision publication");
         }
-        let (rpc_block, rpc_logs) = subscription_data(block, self.gas_limit, &receipts, gas_used);
-        if self.heads.send(rpc_block).is_err() {
-            trace!(height = block.height, "no newHeads subscribers");
-        }
-        if !rpc_logs.is_empty() && self.logs.send(rpc_logs).is_err() {
-            trace!(height = block.height, "no logs subscribers");
+        if self.heads.receiver_count() > 0 || self.logs.receiver_count() > 0 {
+            let (rpc_block, rpc_logs) =
+                subscription_data(block, id.0, self.gas_limit, &receipts, gas_used, &tx_hashes);
+            if self.heads.send(rpc_block).is_err() {
+                trace!(height = block.height, "no newHeads subscribers");
+            }
+            if !rpc_logs.is_empty() && self.logs.send(rpc_logs).is_err() {
+                trace!(height = block.height, "no logs subscribers");
+            }
         }
         restore_epoch(&self.light_index, block);
         let height = block.height;
         if let Some(artifacts) = artifacts {
-            let mut header = GossipHeader::from_block(block, self.chain_id, self.publisher_index);
+            let mut header = GossipHeader::from_block_with_hash(
+                block,
+                id.0,
+                self.chain_id,
+                self.publisher_index,
+            );
             header.set_signature(&artifacts.certificate);
             self.light_index.insert_finalization(
-                block.digest().0,
+                id.digest().0,
                 StoredFinalization {
                     epoch: artifacts.epoch,
                     bytes: artifacts.finalization,

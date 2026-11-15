@@ -24,6 +24,23 @@ pub enum SubjectRestriction {
 }
 
 impl SubjectRestriction {
+    /// Collect the resources whose objects may be entity-set subjects.
+    /// Returns `true` when the restriction admits entity sets of any resource,
+    /// in which case the collected resources are incomplete.
+    pub(crate) fn entity_set_resources<'a>(&'a self, resources: &mut Vec<&'a str>) -> bool {
+        match self {
+            Self::EntitySet { resource, .. } => {
+                resources.push(resource);
+                false
+            }
+            Self::AnyOf(inner) => inner
+                .iter()
+                .any(|restriction| restriction.entity_set_resources(resources)),
+            Self::Any => true,
+            Self::Entity | Self::TypedWildcard { .. } | Self::Actor => false,
+        }
+    }
+
     pub fn satisfies(&self, subject: &Subject) -> std::result::Result<(), String> {
         match self {
             SubjectRestriction::Entity => match subject {
@@ -179,13 +196,6 @@ impl Subject {
             Self::TypedWildcard { resource } => Some(resource),
             _ => None,
         }
-    }
-
-    pub fn storage_hash(&self) -> String {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.hash(&mut hasher);
-        format!("{:016x}", hasher.finish())
     }
 }
 

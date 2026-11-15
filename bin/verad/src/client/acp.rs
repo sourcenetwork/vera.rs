@@ -2,10 +2,9 @@
 
 use std::path::PathBuf;
 
-use alloy_primitives::FixedBytes;
 use clap::Subcommand;
 
-use super::context::ClientContext;
+use super::{context::ClientContext, parse::bytes_to_json};
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum AcpCommand {
@@ -158,7 +157,7 @@ impl AcpCommand {
                 ctx.print_json(&receipt)?;
             }
             Self::GetPolicy { policy_id } => {
-                let id = parse_policy_id(&policy_id)?;
+                let id = vera_client::parse_policy_id(&policy_id)?;
                 let data = ctx.client.get_policy(id).await?;
                 let json = bytes_to_json(&data);
                 ctx.print_json(&json)?;
@@ -177,7 +176,7 @@ impl AcpCommand {
                 resource,
                 object_id,
             } => {
-                let id = parse_policy_id(&policy_id)?;
+                let id = vera_client::parse_policy_id(&policy_id)?;
                 let receipt = if let Some(bls) = ctx.bls_signer.as_ref() {
                     ctx.client
                         .native_register_object(bls, id, &object_id, &resource)
@@ -195,7 +194,7 @@ impl AcpCommand {
                 resource,
                 object_id,
             } => {
-                let id = parse_policy_id(&policy_id)?;
+                let id = vera_client::parse_policy_id(&policy_id)?;
                 let receipt = if let Some(bls) = ctx.bls_signer.as_ref() {
                     ctx.client
                         .native_archive_object(bls, id, &object_id, &resource)
@@ -213,7 +212,7 @@ impl AcpCommand {
                 resource,
                 object_id,
             } => {
-                let id = parse_policy_id(&policy_id)?;
+                let id = vera_client::parse_policy_id(&policy_id)?;
                 let (registered, record) = ctx
                     .client
                     .get_object_owner(id, &resource, &object_id)
@@ -230,7 +229,7 @@ impl AcpCommand {
                 relation,
                 actor,
             } => {
-                let id = parse_policy_id(&policy_id)?;
+                let id = vera_client::parse_policy_id(&policy_id)?;
                 let receipt = if let Some(bls) = ctx.bls_signer.as_ref() {
                     ctx.client
                         .native_set_relationship(bls, id, &resource, &object_id, &relation, &actor)
@@ -250,7 +249,7 @@ impl AcpCommand {
                 relation,
                 actor,
             } => {
-                let id = parse_policy_id(&policy_id)?;
+                let id = vera_client::parse_policy_id(&policy_id)?;
                 let receipt = if let Some(bls) = ctx.bls_signer.as_ref() {
                     ctx.client
                         .native_delete_relationship(
@@ -272,7 +271,7 @@ impl AcpCommand {
                 relation,
                 actor,
             } => {
-                let id = parse_policy_id(&policy_id)?;
+                let id = vera_client::parse_policy_id(&policy_id)?;
                 let has = ctx
                     .client
                     .has_relationship(id, &resource, &object_id, &relation, &actor)
@@ -286,7 +285,7 @@ impl AcpCommand {
                 permission,
                 actor,
             } => {
-                let id = parse_policy_id(&policy_id)?;
+                let id = vera_client::parse_policy_id(&policy_id)?;
                 let allowed = ctx
                     .client
                     .verify_access_request(
@@ -306,7 +305,7 @@ impl AcpCommand {
                 permission,
                 actor,
             } => {
-                let id = parse_policy_id(&policy_id)?;
+                let id = vera_client::parse_policy_id(&policy_id)?;
                 let receipt = if let Some(bls) = ctx.bls_signer.as_ref() {
                     ctx.client
                         .native_check_access(
@@ -340,7 +339,7 @@ impl AcpCommand {
                 relation,
                 actor,
             } => {
-                let id = parse_policy_id(&policy_id)?;
+                let id = vera_client::parse_policy_id(&policy_id)?;
                 let data = ctx
                     .client
                     .filter_relationships(id, &resource, &object_id, &relation, &actor)
@@ -363,21 +362,4 @@ fn read_policy_input(yaml: Option<String>, file: Option<PathBuf>) -> eyre::Resul
             "provide either a YAML string or --file, not both"
         )),
     }
-}
-
-fn parse_policy_id(hex: &str) -> eyre::Result<FixedBytes<32>> {
-    let hex = hex.strip_prefix("0x").unwrap_or(hex);
-    let bytes = hex::decode(hex).map_err(|e| eyre::eyre!("invalid policy ID hex: {e}"))?;
-    if bytes.len() != 32 {
-        return Err(eyre::eyre!(
-            "policy ID must be 32 bytes, got {}",
-            bytes.len()
-        ));
-    }
-    Ok(FixedBytes::from_slice(&bytes))
-}
-
-fn bytes_to_json(data: &[u8]) -> serde_json::Value {
-    serde_json::from_slice(data)
-        .unwrap_or_else(|_| serde_json::Value::String(format!("0x{}", hex::encode(data))))
 }

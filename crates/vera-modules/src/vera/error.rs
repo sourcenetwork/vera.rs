@@ -27,9 +27,6 @@ pub enum VeraError {
     #[error("unauthorized: {reason}")]
     Unauthorized { reason: String },
 
-    #[error("chain config already set")]
-    ChainConfigAlreadySet,
-
     #[error("state error: {0}")]
     State(String),
 }

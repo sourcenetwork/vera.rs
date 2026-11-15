@@ -57,6 +57,12 @@ Unix, `0` elsewhere). Set `0` when driving a daemon that predates
 `--rpc-listener-fd`; the harness then uses address-based binding. The configuration
 record includes `inherit_rpc_listener`.
 
+An optional thirteenth argument controls the `[network.discovery]` section of
+the generated node configuration (`1` by default). Set `0` when driving a daemon
+that predates the setting: it rejects the section as an unknown key and always
+runs the local discovery values the section states, so both settings give the
+same listener. The configuration record includes `discovery_section`.
+
 Use the same epoch length when comparing timing presets or implementation
 changes. Short epochs exercise frequent DKG transitions. A run that finishes
 inside one long epoch measures steady-state traffic and does not qualify

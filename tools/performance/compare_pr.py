@@ -7,7 +7,7 @@ from pathlib import Path
 from statistics import median
 
 from report import load_run
-from protocol import baseline_incompatible, incompatibility_reason, validate_unavailable
+from protocol import baseline_incompatible, discovery_section, incompatibility_reason, validate_unavailable
 
 TAGS = ('head1', 'base1', 'base2', 'head2')
 COMPONENTS = ('native_bls_verify', 'acp_owner_read_capture', 'consensus_certificate_verify')
@@ -126,6 +126,9 @@ def compare(directory):
                 manifest, config, _, passed, *_ = run
                 side = tag.rstrip('12')
                 validate_provenance(identity, side, tag, manifest)
+                stated = discovery_section(identity, side)
+                if stated is not None and config.get('discovery_section') is not stated:
+                    raise ValueError(f'{tag}: discovery section differs from its node source')
                 if not passed:
                     raise ValueError(f'{tag}: correctness/completeness/recovery gate failed')
                 runs[tag] = run
@@ -151,7 +154,10 @@ def compare(directory):
                 continue
             # Queue and protocol limits can change intentionally; show those changes
             # instead of attributing the resulting delta solely to execution speed.
-            ignored = {'node_data_dirs', 'signing_seconds', 'update_preparation_seconds', 'signed_bytes'}
+            # A node that predates the discovery setting runs the values the section
+            # states for the other side, so its absence is not a configuration change.
+            ignored = {'node_data_dirs', 'signing_seconds', 'update_preparation_seconds', 'signed_bytes',
+                       'discovery_section'}
             configs = {tag: {k: v for k, v in run[1].items() if k not in ignored} for tag, run in runs.items()}
             comparable = all(configs[tag] == configs['head1'] for tag in TAGS)
             if not comparable:

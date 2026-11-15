@@ -134,7 +134,6 @@ impl PrefixPageResponse {
         maximum_bytes: usize,
     ) -> Result<VerifiedPrefixPage, PermissionError> {
         request.validate()?;
-        encoded_size(&self.page, maximum_bytes.min(PAGE_PROOF_BYTES))?;
         encoded_size(&self.revision, LIGHT_BLOCK_RESPONSE_BYTES)?;
         let (_, root) = verify_light_block(&self.revision, trusted)?;
         if self.revision.height < minimum_height {

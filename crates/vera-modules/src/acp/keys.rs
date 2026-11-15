@@ -16,7 +16,6 @@ pub const ACCESS_DECISION_PREFIX: &[u8] = b"access_decision/";
 pub const COMMITMENT_PREFIX: &[u8] = b"commitment/";
 /// Amendment event prefix (auto-increment objects).
 pub const AMENDMENT_EVENT_PREFIX: &[u8] = b"amendment_event/";
-/// Signed policy command replay cache prefix.
 /// Module parameters key.
 pub const PARAMS_KEY: &[u8] = b"p_acp";
 

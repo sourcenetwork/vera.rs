@@ -44,7 +44,7 @@ impl VeraModule {
         token: &str,
         object: &ThresholdObject,
     ) -> Result<StoredObject> {
-        object.validate()?;
+        let id = object.validated_id()?;
         let operation = DelegatedOperation::StoreThresholdObject(object);
         acp.with_delegation(
             self,
@@ -67,7 +67,6 @@ impl VeraModule {
                     {
                         return Err(invalid("PET attachment presence does not match ring mode"));
                     }
-                    let id = object.id()?;
                     let kind = object.kind();
                     let key = object_key(kind, &id)?;
                     if vera.store.get_ref(&key).is_some() {
@@ -80,7 +79,7 @@ impl VeraModule {
                         revision: context.timestamp.clone(),
                         object: object.clone(),
                     };
-                    record.validate(kind, &id)?;
+                    record.validate_binding()?;
                     let bytes = serde_json::to_vec(&record).map_err(invalid)?;
                     if bytes.len() > MAX_OBJECT_RECORD_BYTES {
                         return Err(invalid("object record exceeds byte limit"));

@@ -207,6 +207,18 @@ impl VeraModule {
         {
             return Err(invalid("ring request deployment or expiry"));
         }
+        // The signature is checked before the ring is read, so a request that
+        // nobody signed costs no state access.
+        let node_key = super::nodes::key_shape(&request.node_key).map_err(invalid)?;
+        if signed.signature.len() != 128 {
+            return Err(invalid("invalid ring signature length"));
+        }
+        let signature = hex::decode(&signed.signature).map_err(invalid)?;
+        if hex::encode(&signature) != signed.signature {
+            return Err(invalid("noncanonical ring signature"));
+        }
+        vera_crypto::secp256k1::verify_digest(&node_key, &request.signing_digest()?, &signature)
+            .map_err(invalid)?;
         let mut record = self
             .threshold_ring(&request.ring_id)?
             .ok_or_else(|| invalid("ring not found"))?;
@@ -219,20 +231,6 @@ impl VeraModule {
         {
             return Err(invalid("signer is not a ring participant"));
         }
-        super::nodes::node_key(&request.node_key).map_err(invalid)?;
-        if signed.signature.len() != 128 {
-            return Err(invalid("invalid ring signature length"));
-        }
-        let signature = hex::decode(&signed.signature).map_err(invalid)?;
-        if hex::encode(&signature) != signed.signature {
-            return Err(invalid("noncanonical ring signature"));
-        }
-        vera_crypto::secp256k1::verify_digest(
-            &hex::decode(&request.node_key).map_err(invalid)?,
-            &request.signing_digest()?,
-            &signature,
-        )
-        .map_err(invalid)?;
         let RingState::Pending {
             keys,
             confirmations,
@@ -243,10 +241,8 @@ impl VeraModule {
         match &request.command {
             RingParticipantCommand::Cancel => {
                 record.state = RingState::Cancelled {
-                    by: vera_crypto::secp256k1::did_from_secp256k1_pubkey(
-                        &hex::decode(&request.node_key).map_err(invalid)?,
-                    )
-                    .map_err(invalid)?,
+                    by: vera_crypto::secp256k1::did_from_secp256k1_pubkey(&node_key)
+                        .map_err(invalid)?,
                 };
                 self.store.delete(&ring_key(&record.id)?);
                 record.sequence = record

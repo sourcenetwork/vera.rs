@@ -29,6 +29,7 @@ pub struct TestClusterBuilder {
     binary: Option<PathBuf>,
     rust_log: Option<String>,
     inherit_rpc_listener: bool,
+    discovery_section: bool,
 }
 
 impl fmt::Debug for TestClusterBuilder {
@@ -44,6 +45,7 @@ impl fmt::Debug for TestClusterBuilder {
             .field("binary", &self.binary)
             .field("rust_log", &self.rust_log)
             .field("inherit_rpc_listener", &self.inherit_rpc_listener)
+            .field("discovery_section", &self.discovery_section)
             .finish()
     }
 }
@@ -62,6 +64,7 @@ impl Default for TestClusterBuilder {
             binary: None,
             rust_log: None,
             inherit_rpc_listener: cfg!(unix),
+            discovery_section: true,
         }
     }
 }
@@ -148,6 +151,16 @@ impl TestClusterBuilder {
         self
     }
 
+    /// Write the `[network.discovery]` section into each node config (default).
+    ///
+    /// Disable only to drive a node build that predates the setting: it rejects
+    /// the section as an unknown key and always runs the local discovery values.
+    #[must_use]
+    pub const fn discovery_section(mut self, enabled: bool) -> Self {
+        self.discovery_section = enabled;
+        self
+    }
+
     /// Build and start the cluster.
     pub async fn build(self) -> eyre::Result<TestCluster> {
         let n = self.node_count;
@@ -163,7 +176,8 @@ impl TestClusterBuilder {
         let node_config = NodeConfigBuilder::new()
             .chain_id(chain_id)
             .preset(self.preset)
-            .rpc_max_connections(self.rpc_max_connections);
+            .rpc_max_connections(self.rpc_max_connections)
+            .discovery_section(self.discovery_section);
 
         let consensus = self
             .consensus_override

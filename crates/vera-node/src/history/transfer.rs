@@ -42,13 +42,7 @@ impl FinalizedHistory {
             "invalid history chunk limit"
         );
         let snapshot = self.db.snapshot();
-        ensure!(
-            snapshot.get(IMPORT)?.is_none(),
-            "history import is not published"
-        );
-        let (head, _): (u64, [u8; 32]) =
-            borsh::from_slice(&snapshot.get(HEAD)?.context("missing history head")?)?;
-        ensure!(height > 0 && height <= head, "history height unavailable");
+        check_published(&snapshot, height)?;
         let record = snapshot
             .get_pinned(key(RECORD, height))?
             .context("history record unavailable")?;
@@ -60,6 +54,11 @@ impl FinalizedHistory {
             offset,
             bytes: record[start..end].to_vec(),
         })
+    }
+
+    /// Fail unless `height` is retained and not behind an unpublished import.
+    pub(super) fn check_published(&self, height: u64) -> Result<()> {
+        check_published(&self.db.snapshot(), height)
     }
 
     /// Start, resume, or advance an import anchored by independently verified finalization.
@@ -204,6 +203,17 @@ impl FinalizedHistory {
         }
         Ok(())
     }
+}
+
+fn check_published(snapshot: &regolith_store::Snapshot, height: u64) -> Result<()> {
+    ensure!(
+        snapshot.get(IMPORT)?.is_none(),
+        "history import is not published"
+    );
+    let (head, _): (u64, [u8; 32]) =
+        borsh::from_slice(&snapshot.get(HEAD)?.context("missing history head")?)?;
+    ensure!(height > 0 && height <= head, "history height unavailable");
+    Ok(())
 }
 
 fn vector<'a>(input: &mut &'a [u8]) -> Result<&'a [u8]> {

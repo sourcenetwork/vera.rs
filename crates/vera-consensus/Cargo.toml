@@ -22,7 +22,6 @@ parking_lot.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
-rstest.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 
 [lints]

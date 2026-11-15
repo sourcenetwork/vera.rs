@@ -5,6 +5,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 mod traits;
-pub use traits::{Digest, Mempool, TxId};
+pub use traits::{Mempool, TxId};
 
 pub mod components;

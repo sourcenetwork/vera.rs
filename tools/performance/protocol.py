@@ -11,6 +11,7 @@ SCHEMAS = {
 }
 KEYS = 'crates/vera-modules/src/acp/keys.rs'
 TYPES = 'crates/vera-modules/src/acp/types.rs'
+DISCOVERY = 'crates/vera-config/src/discovery.rs'
 
 
 def source_schema(source, revision):
@@ -52,6 +53,27 @@ def source_storage_version(source, revision):
     if len(packages) != 1 or not re.fullmatch(r'\d{4}\.\d+\.\d+', packages[0]):
         raise ValueError('unrecognized Commonware storage version')
     return packages[0]
+
+
+def source_discovery_setting(source, revision):
+    """Whether node configuration at this revision accepts `[network.discovery]`."""
+    listed = subprocess.check_output(['git', 'ls-tree', '--name-only', revision, '--', DISCOVERY],
+                                     cwd=source, text=True)
+    return listed.splitlines() == [DISCOVERY]
+
+
+def discovery_section(identity, side):
+    """Whether a side's generated node configuration states discovery settings.
+
+    None for comparisons recorded before nodes had the setting.
+    """
+    present = ['discovery_setting' in identity[revision] for revision in ('head', 'base')]
+    if not any(present):
+        return None
+    if not all(present) or any(type(identity[revision]['discovery_setting']) is not bool
+                               for revision in ('head', 'base')):
+        raise ValueError('incomplete discovery setting provenance')
+    return identity[side]['discovery_setting']
 
 
 def incompatibility_reason(identity):

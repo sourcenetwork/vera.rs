@@ -1,4 +1,4 @@
-//! Aliases for
+//! Aliases for the consensus types blocks carry.
 
 /// Consensus digest type alias.
 pub type ConsensusDigest = commonware_cryptography::sha256::Digest;

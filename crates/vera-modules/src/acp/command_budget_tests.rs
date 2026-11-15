@@ -268,3 +268,48 @@ fn management_rejects_unpaid_corrupt_policy_before_decode_and_preserves_actor_ro
         assert!(budget.consumed() > 0);
     }
 }
+
+#[test]
+fn a_command_without_supplied_metadata_writes_its_record_once() {
+    let (original, policy) = fixture();
+    let actor = did("owner");
+    let block = BlockExecCtx {
+        timestamp: crate::types::Timestamp {
+            block_height: 9,
+            seconds: 90,
+        },
+        ..Default::default()
+    };
+    let tx = TxExecCtx {
+        signer: actor.to_string(),
+        tx_hash: vec![7; 32],
+        sequence: 1,
+    };
+    let plain = CommandBudget::new(u64::MAX);
+    let mut contextual = original.clone();
+    contextual
+        .execute_policy_cmd_with_budget(&actor, &policy, grant(), &block, &tx, &plain)
+        .unwrap();
+    let with_metadata = CommandBudget::new(u64::MAX);
+    let mut supplied = original;
+    supplied
+        .execute_policy_cmd_with_metadata_and_budget(
+            &actor,
+            &policy,
+            types::PolicyCommandRequest {
+                command: grant(),
+                metadata: SuppliedMetadata::default(),
+            },
+            &block,
+            &tx,
+            &with_metadata,
+        )
+        .unwrap();
+    assert_eq!(supplied.store.serialize(), contextual.store.serialize());
+    let input = CommandBudget::new(u64::MAX);
+    input.metadata(&SuppliedMetadata::default()).unwrap();
+    assert_eq!(
+        with_metadata.consumed(),
+        plain.consumed() + input.consumed()
+    );
+}

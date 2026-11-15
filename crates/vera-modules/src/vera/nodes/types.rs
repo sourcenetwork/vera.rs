@@ -141,6 +141,14 @@ pub struct SignedNodeRequest {
 }
 
 pub(super) fn validate_key(key: &str) -> Result<Vec<u8>> {
+    let bytes = key_shape(key)?;
+    vera_crypto::secp256k1::decode_pubkey(&bytes).map_err(invalid)?;
+    Ok(bytes)
+}
+
+/// The one accepted spelling of a compressed key, without the curve check
+/// that registration performs.
+pub(in crate::vera) fn key_shape(key: &str) -> Result<Vec<u8>> {
     if key.len() != 66 {
         return Err(invalid("node keys must contain 33 bytes"));
     }
@@ -148,7 +156,9 @@ pub(super) fn validate_key(key: &str) -> Result<Vec<u8>> {
     if hex::encode(&bytes) != key {
         return Err(invalid("node keys must use lowercase hexadecimal"));
     }
-    vera_crypto::secp256k1::decode_pubkey(&bytes).map_err(invalid)?;
+    if !matches!(bytes[0], 0x02 | 0x03) {
+        return Err(invalid("node keys must be compressed points"));
+    }
     Ok(bytes)
 }
 

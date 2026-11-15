@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use vera_acp::{
-    policy_yaml::{build_policy, parse_policy_yaml, validate_policy_expressions},
+    policy_yaml::{build_policy, parse_policy_yaml},
     MemoryZanzibarStore, PermissionEngine, Policy, Relationship, Subject, ZanzibarStore,
 };
 use vera_identity::Did;
@@ -103,7 +103,6 @@ fn rejects_unknown_duplicate_and_ambiguous_schema() {
 #[test]
 fn cross_object_owner_is_a_valid_permission_target() {
     let parsed = parse_policy_yaml("name: files\nresources:\n  - name: file\n    relations:\n      - name: parent\n        types: [file]\n    permissions:\n      - name: read\n        expr: parent->owner\n").unwrap();
-    validate_policy_expressions(&parsed).unwrap();
     build_policy(&parsed, 1).unwrap();
 }
 
@@ -112,6 +111,9 @@ fn malformed_expressions_return_errors_without_panicking() {
     for expression in [
         "éé + reader".to_string(),
         format!("{}reader{}", "(".repeat(129), ")".repeat(129)),
+        "reader ^ reader".to_string(),
+        "reader + missing".to_string(),
+        "reader + parent->read".to_string(),
     ] {
         let definition = POLICY.replace("expr: reader", &format!("expr: {expression}"));
         assert!(build_policy(&parse_policy_yaml(&definition).unwrap(), 1).is_err());

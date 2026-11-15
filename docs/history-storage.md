@@ -225,8 +225,16 @@ power cut across the validator's other stores.
 
 Startup still decodes every retained execution record, checks receipt commitments
 and ancestry through the selected durable anchor, restores epoch material and
-reconciles query mappings and certificates. Transaction indexes are constructed
-only for the most recent 1,024 revisions, matching the resident cache limit. Older
+reconciles query mappings. Transaction indexes are constructed and certificates
+read only for the most recent 1,024 revisions, matching the resident cache
+limits. An older certificate is not decoded at startup: a malformed one fails the
+proof request that reads it, and one that was never stored is treated as an
+ancestor finalized through a descendant. When the history head is at most 1,024
+revisions past the anchor and its mappings are current, recovery removes only
+the discarded revisions' hash mappings, in the batch that rewinds the head, and
+restores any submission mapping they had overwritten. A missing or mismatched
+mapping head, a longer or unreadable suffix, or a pending import rebuilds every
+mapping. Older
 executions and receipts remain available through durable history lookups;
 consumers still verify their finality evidence independently. Cache eviction does not weaken history validation or change durability.
 

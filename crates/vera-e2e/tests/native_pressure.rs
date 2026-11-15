@@ -89,6 +89,8 @@ fn read_error_kind(error: &ClientError) -> &'static str {
         ClientError::Permission(vera_permission::PermissionError::Limit) => "proof-limit",
         ClientError::Permission(_) => "proof-invalid",
         ClientError::Finalization(_) => "finality-invalid",
+        ClientError::ReceiptUnavailable { source, .. }
+        | ClientError::SubmissionUnknown { source, .. } => read_error_kind(source),
         ClientError::Transport(error) if error.is_timeout() => "transport-timeout",
         ClientError::ReceiptTimeout { .. } => "receipt-deadline",
         ClientError::Transport(_) => "transport",

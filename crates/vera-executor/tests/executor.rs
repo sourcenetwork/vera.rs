@@ -8,9 +8,9 @@ use std::{
 use alloy_consensus::Header;
 use alloy_primitives::{Address, B256, Bytes, U256};
 use rstest::rstest;
-use vera_executor::{BlockContext, BlockExecutor, RevmExecutor};
+use vera_executor::{BlockContext, VeraExecutor};
 use vera_qmdb::{AccountUpdate, ChangeSet};
-use vera_traits::{StateDb, StateDbError, StateDbRead, StateDbWrite};
+use vera_traits::{StateDbError, StateDbRead};
 
 /// Account data stored in the mock state database.
 #[derive(Clone, Debug, Default)]
@@ -32,8 +32,6 @@ struct MockStateDb {
     accounts: Arc<RwLock<HashMap<Address, MockAccount>>>,
     /// Contract code indexed by code hash.
     code: Arc<RwLock<HashMap<B256, Bytes>>>,
-    /// Current state root.
-    state_root: Arc<RwLock<B256>>,
 }
 
 impl MockStateDb {
@@ -109,8 +107,9 @@ impl StateDbRead for MockStateDb {
     }
 }
 
-impl StateDbWrite for MockStateDb {
-    async fn commit(&self, changes: ChangeSet) -> Result<B256, StateDbError> {
+impl MockStateDb {
+    /// Apply an executed change set the way the backend does.
+    fn commit(&self, changes: ChangeSet) {
         let mut accounts = self.accounts.write().unwrap();
         let mut code_store = self.code.write().unwrap();
 
@@ -137,140 +136,29 @@ impl StateDbWrite for MockStateDb {
                 }
             }
         }
-
-        // Generate a simple state root from account count.
-        let root = B256::from_slice(&[accounts.len() as u8; 32]);
-        *self.state_root.write().unwrap() = root;
-        Ok(root)
     }
-
-    async fn compute_root(&self, _changes: &ChangeSet) -> Result<B256, StateDbError> {
-        // Simplified: just return current state root.
-        Ok(*self.state_root.read().unwrap())
-    }
-
-    fn merge_changes(&self, mut older: ChangeSet, newer: ChangeSet) -> ChangeSet {
-        older.merge(newer);
-        older
-    }
-}
-
-impl StateDb for MockStateDb {
-    async fn state_root(&self) -> Result<B256, StateDbError> {
-        Ok(*self.state_root.read().unwrap())
-    }
-}
-
-// ----------------------------------------------------------------------------
-// Tests for RevmExecutor creation with different chain IDs
-// ----------------------------------------------------------------------------
-
-#[rstest]
-#[case(1, "Ethereum Mainnet")]
-#[case(11155111, "Sepolia")]
-#[case(42161, "Arbitrum One")]
-#[case(10, "Optimism")]
-#[case(137, "Polygon")]
-#[case(u64::MAX, "Max chain ID")]
-fn test_revm_executor_chain_ids(#[case] chain_id: u64, #[case] _name: &str) {
-    let executor = RevmExecutor::new(chain_id);
-    assert_eq!(executor.chain_id(), chain_id);
-}
-
-#[test]
-fn test_revm_executor_default_chain_id() {
-    let executor = RevmExecutor::default();
-    assert_eq!(executor.chain_id(), 1);
 }
 
 // ----------------------------------------------------------------------------
 // Tests for execute with empty transaction list
 // ----------------------------------------------------------------------------
 
-#[test]
-fn test_execute_empty_transactions_returns_empty_outcome() {
-    let executor = RevmExecutor::new(1);
-    let state = MockStateDb::new();
-    let context = BlockContext::new(Header::default(), B256::ZERO, B256::ZERO);
-    let txs: Vec<Bytes> = vec![];
-
-    let outcome = executor
-        .execute(&state, &context, &txs)
-        .expect("execution should succeed");
-
-    assert!(outcome.changes.is_empty());
-    assert!(outcome.receipts.is_empty());
-    assert_eq!(outcome.gas_used, 0);
-}
-
 #[rstest]
 #[case(1)]
 #[case(137)]
 #[case(42161)]
-fn test_execute_empty_transactions_different_chains(#[case] chain_id: u64) {
-    let executor = RevmExecutor::new(chain_id);
+fn test_execute_empty_transactions_returns_empty_outcome(#[case] chain_id: u64) {
+    let executor = VeraExecutor::new(chain_id);
     let state = MockStateDb::new();
     let context = BlockContext::new(Header::default(), B256::ZERO, B256::ZERO);
-    let txs: Vec<Bytes> = vec![];
 
-    let outcome = executor
-        .execute(&state, &context, &txs)
+    let (outcome, _) = executor
+        .execute_with_modules(&state, &context, &[], executor.snapshot())
         .expect("execution should succeed");
 
     assert!(outcome.changes.is_empty());
     assert!(outcome.receipts.is_empty());
     assert_eq!(outcome.gas_used, 0);
-}
-
-// ----------------------------------------------------------------------------
-// Tests for validate_header
-// ----------------------------------------------------------------------------
-
-#[test]
-fn test_validate_header_succeeds_with_valid_gas_limit() {
-    let executor = RevmExecutor::new(1);
-    let header = Header {
-        gas_limit: 30_000_000,
-        ..Default::default()
-    };
-
-    let result = <RevmExecutor as BlockExecutor<MockStateDb>>::validate_header(&executor, &header);
-
-    assert!(result.is_ok());
-}
-
-#[test]
-fn test_validate_header_fails_with_gas_limit_below_minimum() {
-    let executor = RevmExecutor::new(1);
-    let header = Header {
-        gas_limit: 1000,
-        ..Default::default()
-    };
-
-    let result = <RevmExecutor as BlockExecutor<MockStateDb>>::validate_header(&executor, &header);
-
-    assert!(result.is_err());
-}
-
-#[rstest]
-#[case(0, 30_000_000)]
-#[case(1, 30_000_000)]
-#[case(1_000_000, 30_000_000)]
-#[case(u64::MAX, 30_000_000)]
-fn test_validate_header_succeeds_with_various_block_numbers(
-    #[case] number: u64,
-    #[case] gas_limit: u64,
-) {
-    let executor = RevmExecutor::new(1);
-    let header = Header {
-        number,
-        gas_limit,
-        ..Default::default()
-    };
-
-    let result = <RevmExecutor as BlockExecutor<MockStateDb>>::validate_header(&executor, &header);
-
-    assert!(result.is_ok());
 }
 
 // ----------------------------------------------------------------------------
@@ -411,9 +299,8 @@ async fn test_mock_state_db_commit_stores_changes() {
         },
     );
 
-    let root = state.commit(changes).await.unwrap();
+    state.commit(changes);
 
-    assert_ne!(root, B256::ZERO);
     assert_eq!(state.nonce(&address).await.unwrap(), 10);
     assert_eq!(state.balance(&address).await.unwrap(), U256::from(5000));
 }
@@ -448,7 +335,7 @@ async fn test_mock_state_db_commit_handles_selfdestruct() {
         },
     );
 
-    state.commit(changes).await.unwrap();
+    state.commit(changes);
 
     assert!(matches!(
         state.nonce(&address).await,
@@ -477,7 +364,7 @@ async fn test_mock_state_db_commit_stores_code() {
         },
     );
 
-    state.commit(changes).await.unwrap();
+    state.commit(changes);
 
     assert_eq!(state.code(&code_hash).await.unwrap(), Bytes::from(code));
 }
@@ -503,114 +390,13 @@ async fn test_mock_state_db_insert_code() {
     assert_eq!(state.code(&code_hash).await.unwrap(), code);
 }
 
-#[tokio::test]
-async fn test_mock_state_db_state_root() {
-    let state = MockStateDb::new();
-
-    let root = state.state_root().await.unwrap();
-
-    assert_eq!(root, B256::ZERO);
-}
-
-#[test]
-fn test_mock_state_db_merge_changes() {
-    let state = MockStateDb::new();
-    let address = Address::from([0x01; 20]);
-
-    let mut older = ChangeSet::new();
-    older.insert(
-        address,
-        AccountUpdate {
-            created: true,
-            selfdestructed: false,
-            nonce: 1,
-            balance: U256::from(100),
-            code_hash: B256::ZERO,
-            code: None,
-            storage: std::collections::BTreeMap::new(),
-        },
-    );
-
-    let mut newer = ChangeSet::new();
-    newer.insert(
-        address,
-        AccountUpdate {
-            created: false,
-            selfdestructed: false,
-            nonce: 5,
-            balance: U256::from(500),
-            code_hash: B256::ZERO,
-            code: None,
-            storage: std::collections::BTreeMap::new(),
-        },
-    );
-
-    let merged = state.merge_changes(older, newer);
-
-    let update = merged.accounts.get(&address).unwrap();
-    assert_eq!(update.nonce, 5);
-    assert_eq!(update.balance, U256::from(500));
-}
-
-// ----------------------------------------------------------------------------
-// Tests for exists() default implementation
-// ----------------------------------------------------------------------------
-
-#[tokio::test]
-async fn test_mock_state_db_exists_returns_false_for_missing_account() {
-    let state = MockStateDb::new();
-    let address = Address::from([0x01; 20]);
-
-    assert!(!state.exists(&address).await.unwrap());
-}
-
-#[tokio::test]
-async fn test_mock_state_db_exists_returns_true_for_account_with_nonce() {
-    let state = MockStateDb::new();
-    let address = Address::from([0x01; 20]);
-    state.insert_account(
-        address,
-        MockAccount {
-            nonce: 1,
-            ..Default::default()
-        },
-    );
-
-    assert!(state.exists(&address).await.unwrap());
-}
-
-#[tokio::test]
-async fn test_mock_state_db_exists_returns_true_for_account_with_balance() {
-    let state = MockStateDb::new();
-    let address = Address::from([0x01; 20]);
-    state.insert_account(
-        address,
-        MockAccount {
-            nonce: 0,
-            balance: U256::from(1),
-            ..Default::default()
-        },
-    );
-
-    assert!(state.exists(&address).await.unwrap());
-}
-
-#[tokio::test]
-async fn test_mock_state_db_exists_returns_false_for_empty_account() {
-    let state = MockStateDb::new();
-    let address = Address::from([0x01; 20]);
-    state.insert_account(address, MockAccount::default());
-
-    assert!(!state.exists(&address).await.unwrap());
-}
-
 // ----------------------------------------------------------------------------
 // Tests for executor with populated state
 // ----------------------------------------------------------------------------
 
 #[test]
 fn test_execute_with_populated_state() {
-    let executor = RevmExecutor::new(1);
+    let executor = VeraExecutor::new(1);
     let state = MockStateDb::new();
 
     // Populate some accounts.
@@ -634,10 +420,8 @@ fn test_execute_with_populated_state() {
     );
 
     let context = BlockContext::new(Header::default(), B256::ZERO, B256::ZERO);
-    let txs: Vec<Bytes> = vec![];
-
-    let outcome = executor
-        .execute(&state, &context, &txs)
+    let (outcome, _) = executor
+        .execute_with_modules(&state, &context, &[], executor.snapshot())
         .expect("execution should succeed");
 
     // Empty transactions still produce empty outcome.
@@ -646,8 +430,17 @@ fn test_execute_with_populated_state() {
     assert_eq!(outcome.gas_used, 0);
 }
 
+#[path = "executor/call_authority.rs"]
+mod call_authority;
+
+#[path = "executor/encoding.rs"]
+mod encoding;
+
 #[path = "executor/rollback.rs"]
 mod rollback;
+
+#[path = "executor/evm_state.rs"]
+mod evm_state;
 
 #[path = "executor/sequence.rs"]
 mod sequence;

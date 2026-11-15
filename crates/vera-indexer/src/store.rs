@@ -188,15 +188,6 @@ impl BlockIndex {
         cache.revisions.get(revision).cloned()
     }
 
-    /// Find a receipt's revision without cloning logs.
-    pub fn receipt_block_hash(&self, hash: &B256) -> Option<B256> {
-        self.cache
-            .read()
-            .receipts
-            .get(hash)
-            .map(|(revision, _)| *revision)
-    }
-
     /// Returns the current head number.
     #[must_use]
     pub fn head_block_number(&self) -> u64 {
@@ -239,16 +230,6 @@ impl BlockIndex {
     #[must_use]
     pub fn block_count(&self) -> usize {
         self.cache.read().revisions.len()
-    }
-    /// Number of resident submissions.
-    #[must_use]
-    pub fn transaction_count(&self) -> usize {
-        self.cache.read().transactions.len()
-    }
-    /// Number of resident receipts.
-    #[must_use]
-    pub fn receipt_count(&self) -> usize {
-        self.cache.read().receipts.len()
     }
     /// Whether the cache has no revisions.
     #[must_use]
@@ -640,32 +621,6 @@ mod tests {
 
         index.insert_block(create_test_block(2, B256::repeat_byte(2)), vec![], vec![]);
         assert_eq!(index.block_count(), 2);
-    }
-
-    #[test]
-    fn test_transaction_count() {
-        let index = BlockIndex::new();
-        assert_eq!(index.transaction_count(), 0);
-
-        let block_hash = B256::repeat_byte(1);
-        let tx1 = create_test_tx(B256::repeat_byte(2), block_hash, 1);
-        let tx2 = create_test_tx(B256::repeat_byte(3), block_hash, 1);
-
-        index.insert_block(create_test_block(1, block_hash), vec![tx1, tx2], vec![]);
-        assert_eq!(index.transaction_count(), 2);
-    }
-
-    #[test]
-    fn test_receipt_count() {
-        let index = BlockIndex::new();
-        assert_eq!(index.receipt_count(), 0);
-
-        let block_hash = B256::repeat_byte(1);
-        let tx_hash = B256::repeat_byte(2);
-        let receipt = create_test_receipt(tx_hash, block_hash, 1);
-
-        index.insert_block(create_test_block(1, block_hash), vec![], vec![receipt]);
-        assert_eq!(index.receipt_count(), 1);
     }
 
     #[test]

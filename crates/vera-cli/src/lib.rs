@@ -6,6 +6,8 @@
 
 mod backtrace;
 pub use backtrace::Backtracing;
+mod durable_file;
+pub use durable_file::{sync_parent, write_durable};
 #[cfg(unix)]
 mod listener;
 #[cfg(unix)]

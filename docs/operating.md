@@ -23,6 +23,20 @@ dialable address. Two paths produce that material:
   trusted-dealer material locally; see [wan-gates.md](wan-gates.md) for a
   worked multi-host example.
 
+`testnet` and `devnet` write one chain ID into the genesis and every node
+configuration. A built-in genesis takes `--chain-id`; a genesis read from
+`--genesis`, or the one a devnet stored on its first run, keeps its own, and a
+different `--chain-id` is rejected before anything is written. `devnet` treats
+a `chain_id` written in its `--config` file the same way when the flag is
+absent; `testnet` writes its own node configurations and does not read one.
+Explicit `--base-p2p-port` and `--base-rpc-port` ranges must fit below port
+65536 and must not overlap each other; system-chosen ports avoid an explicit
+range.
+
+`verad client` signs for the top-level `--chain-id`, which `--client-chain-id`
+may repeat but not contradict. Without either flag it uses `VERA_CHAIN_ID`,
+then 9001.
+
 Set the shared genesis `timestamp` to a nonzero Unix time near network launch.
 It is recorded in the genesis block and must remain unchanged for restarts.
 Nodes reject a zero timestamp or an existing genesis record that differs from
@@ -40,6 +54,19 @@ Run a node with:
 verad --config nodeN/config.toml --data-dir nodeN \
      --chain-id <id> validator --peers peers.json
 ```
+
+`peers.json` is rejected when a `participants` entry is not a hexadecimal key
+string or when a key is listed twice. Block beneficiaries come from the
+validator entries of `genesis.json`, not from the order of `peers.json`.
+
+`--leader-timeout-ms`, `--notarization-timeout-ms` and `--nullify-retry-ms`
+must satisfy 0 < leader < notarization and retry > 0. When the genesis selects
+pipelining, the notarization timeout must also be below its `stall_timeout_ms`.
+A node given other values stops before opening storage.
+
+`verad genesis` replaces `genesis.json` through a synced temporary file and a
+rename, so an interrupted ceremony leaves the original document or the
+completed one.
 
 `validator.key` and `secrets.json` in the data directory are the node's
 identity: they are created owner-only and must never be regenerated for an
@@ -112,6 +139,11 @@ A successful Linux job does not replace the other release gates.
 | `secrets.json` | BLS shares and DKG state (owner-only, atomic writes) |
 | `history/` | Durable execution and finalization records |
 | `native-genesis.bin` | Published after all seven partitions first seal |
+
+`config.toml` and `genesis.json` reject keys they do not define, so a misspelled
+section fails at startup instead of selecting its default. `genesis.json` must
+list at least one registry validator, each with a distinct address and consensus
+key.
 
 Retain `validator.key` and `secrets.json` together with independently provisioned
 genesis, configuration, and peer material. Recovering the remaining state depends
@@ -220,9 +252,67 @@ rejected. Restore a complete compatible backup or use authenticated recovery.
   has lost its quorum is not restarted in a loop. A deployment whose only
   validator is this node needs no peer. The quorum size comes from the
   validator count in `peers.json` at startup, not from the active set after
-  operator changes. The check runs every 30 seconds. Multi-validator stalls
+  operator changes. The check runs every 30 seconds. The timer starts after
+  startup has validated finalized history, so the length of that scan does not
+  count as a stall; journal alignment and query-state hydration that follow do.
+  Multi-validator stalls
   have been exercised in unit tests only, not qualified on a deployment. Snapshot
   initialization has its separate deadline; supervised restart does not guarantee recovery.
+- **Peer discovery** (`[network.discovery]`): the consensus listener and the
+  genesis DKG run Commonware's recommended discovery profile, with Commonware's
+  values. Each setting below can be stated on its own; one left out keeps the
+  recommended value. Unknown keys, zero durations or counts, and a handshake
+  rate finer than one nanosecond per attempt fail startup. So does a duration
+  longer than 365 days (31536000 seconds, 31536000000 ms), which for a
+  handshake rate bounds `window_ms`: the listener's rate limiters cannot count
+  past 584 years and would stop the node after startup.
+
+  | Setting | Recommended | Meaning |
+  | --- | --- | --- |
+  | `allow_private_ips` | `false` | Dial and accept peers on private, loopback and link-local addresses |
+  | `reconnect_cooldown_ms` | 60000 | Shortest time between two connection reservations for one peer |
+  | `max_concurrent_handshakes` | 512 | Handshakes in progress at once |
+  | `handshakes_per_ip` | `{ count = 1, window_ms = 5000 }` | Handshake attempts admitted from one IP address; `count` is also the burst |
+  | `handshakes_per_subnet` | `{ count = 64, window_ms = 1000 }` | Handshake attempts admitted from one IP subnet |
+  | `dial_interval_ms` | 1000 | Average time between two dial attempts across all peers |
+  | `dial_failures_before_refresh` | 2 | Failed dials of a peer before its address is requested again |
+  | `peer_gossip_interval_ms` | 50000 | Time between gossip rounds about known peers |
+  | `block_duration_seconds` | 14400 | Time a peer blocked for invalid data stays refused |
+
+  The recommended values are read from the Commonware release the node is
+  built with (commonware-p2p 2026.10.0 for this table), not copied into Vera.
+
+  State a setting when the deployment needs it:
+  - Validators that reach each other on RFC 1918 or other non-global
+    addresses, for example inside one VPC, set `allow_private_ips = true` on
+    every node. Without it a bootstrapper or gossiped peer at such an address
+    is never dialed.
+  - Several validators behind one source address (one NAT gateway, one host)
+    share the per-IP handshake allowance; raise `handshakes_per_ip` or they
+    connect one every five seconds.
+  - A lower `reconnect_cooldown_ms` shortens the wait before a restarted
+    validator is dialed again. It also lets any peer reconnect that often.
+  - `peer_gossip_interval_ms` should be the same on every validator: a node
+    accepts one gossip message per half of its own interval and treats a
+    faster sender as exceeding its rate.
+
+  `verad testnet`, `verad devnet`, the e2e harness and the embedded node run
+  several nodes on one address, or a listener on loopback, where the per-IP
+  allowance and the cooldown would stall connection setup. They state the
+  values of Commonware's local profile instead: private addresses allowed,
+  1000 ms cooldown, 1024 concurrent handshakes, 16 handshakes per second per
+  IP and 128 per subnet, 500 ms dial interval, one dial failure before a
+  refresh, 5000 ms gossip interval and a one-hour block duration. `testnet`
+  writes them into each `config.toml`; `devnet` applies them to whatever its
+  `--config` leaves unstated. Remove the `[network.discovery]` tables before
+  using generated configuration between separate hosts.
+
+  Qualification limit: the recommended profile is covered by unit tests of the
+  values applied to the listener. Its behaviour between separate hosts, in
+  particular reconnection after a restart under the 60-second cooldown and
+  the per-IP handshake allowance, has not been exercised; local clusters and
+  the e2e gate run the local values. It belongs to the four-host WAN
+  qualification.
 - **History backend**: Regolith with synchronous writes in every build. There
   is no backend-selection feature. Foreign directory layouts are rejected before
   opening the store.
@@ -231,7 +321,8 @@ rejected. Restore a complete compatible backup or use authenticated recovery.
   startup uses that address and port; `--rpc-port` changes only its port, preserving
   the interface. Without a config file, validators retain the indexed default
   port (`8545 + validator_index`); devnet defaults to 8545. Malformed listen
-  addresses fail startup instead of falling back to a wildcard interface.
+  addresses fail startup instead of falling back to a wildcard interface, and
+  so does an RPC address that cannot be bound.
   The JSON-RPC server enforces its own batch, subscription and body-size limits (see
   [permission-proofs.md](permission-proofs.md) for proof-path budgets).
 
@@ -399,8 +490,10 @@ failure coverage alongside the completed-partition recovery matrix.
   Disabling diagnostics leaves backend statistics disabled. These counters are
   sampled independently and reset on reopening; compare intervals within one
   process. They do not measure physical-device writes or individual sync latency.
-- Consensus warnings (`floor not updated`, view skips) at `warn` are normal
-  during epoch transitions; sustained notarization timeouts are not.
+- View-skip warnings at `warn` are normal during epoch transitions; sustained
+  notarization timeouts are not. `floor not updated` can appear while snapshot
+  startup re-floors a stalled initialization. Pruning does not set the marshal
+  floor: the stateful actor prunes marshal from the same retention settings.
 
 ## Capacity reference
 
@@ -439,6 +532,16 @@ workloads and measurement boundaries.
 - Certificate and proof endpoints apply fixed budgets; a client exceeding
   them receives retryable `-32002` errors and must back off, not reconnect
   harder.
+- `eth_call` and `eth_estimateGas`, which carry the Rust client's typed
+  queries, share four slots per node with `vera_simulateNativeCall`. Up to 64
+  more callers wait at most two seconds for a slot; a caller beyond those, or
+  one whose wait expires, receives the same retryable `-32002`. The client
+  does not retry it.
+- `vera_simulateNativeCall` dry-runs a module call as any DID the caller
+  names, without a signature. It writes nothing and reads the committed module
+  state that module queries read; it is not an access decision and authorizes
+  nothing.
+  See [simulation.md](simulation.md).
 
 ## Native consumer configuration
 

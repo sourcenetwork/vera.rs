@@ -1,13 +1,9 @@
 //! Committed EVM state, for RPC queries and mempool validation.
-//!
-//! Writes go through the stateful actor, so the write half of [`StateDb`]
-//! only exists to satisfy the validator's bound and always errors.
 
 use alloy_primitives::{Address, B256, Bytes, U256};
 use vera_backend::{AccountKey, CodeKey, StorageKey, VeraStateSet};
-use vera_qmdb::ChangeSet;
 use vera_qmdb::{AccountEncoding, StorageKey as StorageSlotKey};
-use vera_traits::{StateDb, StateDbError, StateDbRead, StateDbWrite};
+use vera_traits::{StateDbError, StateDbRead};
 
 /// Committed EVM state read through the shared database set.
 #[derive(Clone)]
@@ -33,7 +29,7 @@ impl CommittedState {
         Self { set }
     }
 
-    async fn account(&self, address: &Address) -> Result<Option<AccountRecord>, StateDbError> {
+    async fn record(&self, address: &Address) -> Result<Option<AccountRecord>, StateDbError> {
         let db = self.set.0.read().await;
         let record = db
             .get(&AccountKey::new(address.into_array()))
@@ -47,7 +43,7 @@ impl CommittedState {
     }
 
     async fn require_account(&self, address: &Address) -> Result<AccountRecord, StateDbError> {
-        self.account(address)
+        self.record(address)
             .await?
             .ok_or(StateDbError::AccountNotFound(*address))
     }
@@ -66,6 +62,13 @@ impl StateDbRead for CommittedState {
         Ok(self.require_account(address).await?.2)
     }
 
+    async fn account(&self, address: &Address) -> Result<Option<(u64, U256, B256)>, StateDbError> {
+        Ok(self
+            .record(address)
+            .await?
+            .map(|(nonce, balance, code_hash, _)| (nonce, balance, code_hash)))
+    }
+
     async fn code(&self, code_hash: &B256) -> Result<Bytes, StateDbError> {
         let db = self.set.2.read().await;
         db.get(&CodeKey::new(code_hash.0))
@@ -76,37 +79,12 @@ impl StateDbRead for CommittedState {
     }
 
     async fn storage(&self, address: &Address, slot: &U256) -> Result<U256, StateDbError> {
-        let Some((_, _, _, generation)) = self.account(address).await? else {
+        let Some((_, _, _, generation)) = self.record(address).await? else {
             return Ok(U256::ZERO);
         };
         let db = self.set.1.read().await;
         let key = StorageKey::new(StorageSlotKey::new(*address, generation, *slot).to_bytes());
         let value = db.get(&key).await.map_err(storage_err)?;
         Ok(value.map_or(U256::ZERO, |v| v.0))
-    }
-}
-
-fn read_only() -> StateDbError {
-    StateDbError::RootComputation("committed state is written by the stateful actor".into())
-}
-
-impl StateDbWrite for CommittedState {
-    async fn commit(&self, _changes: ChangeSet) -> Result<B256, StateDbError> {
-        Err(read_only())
-    }
-
-    async fn compute_root(&self, _changes: &ChangeSet) -> Result<B256, StateDbError> {
-        Err(read_only())
-    }
-
-    fn merge_changes(&self, mut older: ChangeSet, newer: ChangeSet) -> ChangeSet {
-        older.merge(newer);
-        older
-    }
-}
-
-impl StateDb for CommittedState {
-    async fn state_root(&self) -> Result<B256, StateDbError> {
-        Err(read_only())
     }
 }

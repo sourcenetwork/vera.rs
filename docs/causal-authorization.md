@@ -126,7 +126,7 @@ use last-writer-wins or union permissions.
 | `AcpModule::edit_policy` | Requires the stored owner, replaces the definition, preserves resource names, and prunes relationships for removed relations. | Takes no expected parent; does not retain a policy revision DAG. Existing online behavior remains unchanged. |
 | `AcpModule::bearer_edit_policy` | Checks delegated authority before invoking the policy edit. | A worker signature does not make an offline branch authoritative. Any future parent/context fields must be included in the signed operation. |
 | `evaluate_access_request` | Uses the shared Rust evaluator over fallible policy and relationship records. | Proof-backed callers must authenticate records and supply complete required evidence. |
-| `verify_permission_proof` | Verifies bounded evidence and evaluates at a supplied root and height. | Caller must independently authenticate that finalized root; the result says nothing about later revocations. |
+| `verify_permission_proof` | Verifies bounded evidence and evaluates at a supplied root. | Caller must independently authenticate that finalized root; the result says nothing about later revocations. |
 | `PermissionResponse::verify` | Authenticates finality, enforces the requested minimum revision, and verifies permission evidence. | Historical validity is not a grant to submit a later offline write. Caller owns additional freshness policy. |
 | `VeraClient::verify_current_access` | Fetches evidence and verifies locally. | Still requires a remote request; not a disconnected check. |
 | `VeraClient::verify_access_at` | Fetches evidence for a selected authenticated revision and verifies locally. | Also requires transport; it does not fetch or resolve an offline policy branch. |

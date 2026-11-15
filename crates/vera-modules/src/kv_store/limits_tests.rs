@@ -50,7 +50,6 @@ fn native_bounds_retain_changes_across_nested_clones() {
         let mut nested = first.clone();
         nested.put(b"other", vec![3]);
         let candidate = nested.clone();
-        assert!(candidate.dirty_entries().is_empty());
         assert!(!candidate.changes_fit_native_bounds(&base));
         assert_eq!(base.get_ref(b"existing"), Some(&[1][..]));
         assert!(!base.has(b"added"));

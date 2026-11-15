@@ -9,10 +9,13 @@ pub use vera_modules::vera::objects::{
 };
 use vera_modules::vera::{
     abi::IVera,
-    objects::{MAX_OBJECT_RECORD_BYTES, object_key},
+    objects::{MAX_OBJECT_RECORD_BYTES, MAX_OBJECT_REQUEST_BYTES, object_key},
 };
 
 /// Encode an actor-delegated registration for durable worker submission.
+///
+/// The encoded request is held to the ceiling the node enforces, so a request
+/// it would refuse is never signed.
 pub fn encode_threshold_object(
     object: &ThresholdObject,
     token: &str,
@@ -20,8 +23,15 @@ pub fn encode_threshold_object(
     object
         .validate()
         .map_err(|e| ClientError::Signing(e.to_string()))?;
+    let request = serde_json::to_vec(object)?;
+    if request.len() > MAX_OBJECT_REQUEST_BYTES {
+        return Err(ClientError::Signing(format!(
+            "object request is {} bytes, above the {MAX_OBJECT_REQUEST_BYTES}-byte limit",
+            request.len()
+        )));
+    }
     Ok(IVera::storeThresholdObjectCall {
-        request: serde_json::to_vec(object)?.into(),
+        request: request.into(),
         bearerToken: token.into(),
     }
     .abi_encode()

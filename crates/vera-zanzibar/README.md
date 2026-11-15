@@ -3,7 +3,8 @@
 A permission engine for Vera access-control policies. It evaluates relationships
 and userset expressions, including unions, intersections and exclusions. Storage
 is supplied through the `ZanzibarStore` trait; `MemoryZanzibarStore` is
-available for in-memory use. Unresolved exclusions fail closed.
+available for in-memory use. Cycles among relationships resolve to the
+reachable membership; an exclusion that depends on itself fails closed.
 
 ## Installation
 

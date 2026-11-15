@@ -19,7 +19,6 @@ use std::{
 
 use commonware_runtime::Runner as _;
 use tokio::sync::oneshot;
-use vera_config::{NetworkConfig, NodeConfig};
 use vera_domain::ConsensusPublicKey;
 use vera_genesis::VeraGenesis;
 use vera_jsonrpc::LocalRpc;
@@ -62,16 +61,7 @@ impl EmbeddedNode {
         if let Some(reason) = config.history_memory.rejection() {
             return Err(EmbedError::Config(reason));
         }
-        let node_config = NodeConfig {
-            chain_id: config.genesis.chain_id,
-            data_dir: config.data_dir.clone(),
-            network: NetworkConfig {
-                listen_addr: config.p2p_listen.to_string(),
-                ..NetworkConfig::default()
-            },
-            pruning: config.pruning,
-            ..NodeConfig::default()
-        };
+        let node_config = config.node_config();
         let (genesis, peers) = crate::prepare_solo(&node_config, &config.genesis)?;
         let consensus_key = *genesis
             .decode_epoch_info()
@@ -80,22 +70,19 @@ impl EmbeddedNode {
             .output
             .public()
             .public();
-        let stall_timeout_ms = genesis
-            .simplex
-            .map_or(u64::MAX, |parameters| parameters.stall_timeout_ms);
         let verification_threads = std::num::NonZeroUsize::new(threads.verification);
         if threads.workers == 0 || threads.max_blocking == 0 || verification_threads.is_none() {
             return Err(EmbedError::Config("thread counts must be nonzero"));
         }
-        // Simplex requires this ordering and aborts its engine otherwise.
-        if config.leader_timeout.is_zero()
-            || config.certification_timeout <= config.leader_timeout
-            || u128::from(stall_timeout_ms) <= config.certification_timeout.as_millis()
-        {
-            return Err(EmbedError::Config(
-                "timeouts must satisfy 0 < leader < certification < genesis stall timeout",
-            ));
-        }
+        crate::consensus_timeouts::validate(
+            config.leader_timeout,
+            config.certification_timeout,
+            config.timeout_retry,
+            genesis
+                .simplex
+                .map(|parameters| std::time::Duration::from_millis(parameters.stall_timeout_ms)),
+        )
+        .map_err(|error| EmbedError::Config(error.reason()))?;
         if config
             .pacing
             .is_some_and(|pacing| pacing.idle >= config.leader_timeout)

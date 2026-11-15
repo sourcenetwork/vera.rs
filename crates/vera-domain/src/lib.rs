@@ -15,12 +15,6 @@ pub use limits::*;
 mod aliases;
 pub use aliases::{ConsensusContext, ConsensusDigest, PublicKey};
 
-mod commitment;
-pub use commitment::{AccountChange, StateChanges, StateChangesCfg};
-
-mod events;
-pub use events::{LedgerEvent, LedgerEvents};
-
 mod db_targets;
 pub use db_targets::{DbTarget, DbTargets};
 
@@ -36,6 +30,9 @@ pub use idents::{BlockId, Idents, StateRoot, TxId};
 mod native_tx;
 pub use native_tx::{NATIVE_TX_TYPE, NativeTx, NativeTxPayload};
 
+mod native_simulation;
+pub use native_simulation::{NativeCallRequest, NativeCallSimulation, SimulatedLog};
+
 mod light_block;
 pub use light_block::{
     ConsensusPublicKey, EpochMaterial, LIGHT_BLOCK_MAX_ARTIFACT_BYTES, LIGHT_BLOCK_MAX_DESCENDANTS,
@@ -47,7 +44,7 @@ mod module_id;
 pub use module_id::ModuleId;
 
 mod gossip;
-pub use gossip::{GOSSIP_HEADER_SIZE, GossipHeader};
+pub use gossip::GossipHeader;
 
 mod tx;
 pub use tx::{Tx, TxCfg};

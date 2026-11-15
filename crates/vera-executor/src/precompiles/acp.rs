@@ -26,6 +26,8 @@ mod queries;
 mod query_budget_tests;
 #[cfg(test)]
 mod spelling_tests;
+#[cfg(test)]
+mod theorem_budget_tests;
 mod validation;
 #[cfg(test)]
 mod validation_tests;
@@ -36,8 +38,7 @@ use revm::precompile::{PrecompileError, PrecompileOutput};
 use vera_identity::Did;
 use vera_modules::acp::abi::IAcp;
 use vera_modules::acp::types::{
-    AccessRequest, AcpParams, Actor, Object, Operation, PolicyCmd, PolicyMarshalingType,
-    RelationshipSelector,
+    AccessRequest, Actor, Object, Operation, PolicyCmd, PolicyMarshalingType, RelationshipSelector,
 };
 use vera_modules::acp::{AcpModule, PolicyEditBudget, QueryBudget};
 use vera_modules::types::{BlockExecCtx, TxExecCtx};
@@ -45,8 +46,8 @@ use vera_modules::vera::VeraModule;
 
 use super::{
     ACP_ADDRESS, DispatchResult, DispatchReturn, decode_error, did_from_signer, err_dispatch,
-    event_log, is_out_of_gas, json_bytes, ok_dispatch, oog_dispatch, out_of_gas_error,
-    recoverable_message,
+    event_log, internal_fault_reason, is_out_of_gas, json_bytes, ok_dispatch, oog_dispatch,
+    out_of_gas_error, recoverable_message,
 };
 
 /// Base gas cost for reads and each batch wrapper.
@@ -208,7 +209,8 @@ fn batch_revert(
 }
 
 fn batch_error(index: usize, err: PrecompileError) -> PrecompileError {
-    if is_out_of_gas(&err) {
+    // Both are recognised by their leading sentinel, which a prefix would hide.
+    if is_out_of_gas(&err) || internal_fault_reason(&err).is_some() {
         return err;
     }
     match err {
@@ -437,23 +439,6 @@ fn dispatch_validated(
         | IAcp::checkAccessCall::SELECTOR
         | IAcp::verifyAccessRequestCall::SELECTOR => {
             permissions::dispatch(module, vera, block_ctx, tx_ctx, input, gas_limit)
-        }
-
-        IAcp::updateParamsCall::SELECTOR => {
-            if gas_limit < WRITE_GAS {
-                return Ok(oog_dispatch());
-            }
-            let call = IAcp::updateParamsCall::abi_decode(input).map_err(decode_error)?;
-            let authority = did_from_signer(&tx_ctx.signer)?;
-            let params: AcpParams = serde_json::from_slice(&call.params)
-                .map_err(|e| PrecompileError::Fatal(format!("params JSON decode: {e}")))?;
-
-            match module.update_params(&authority, params) {
-                Ok(()) => {}
-                Err(e) => return Ok(err_dispatch(e)),
-            }
-
-            Ok(ok_dispatch(WRITE_GAS, Vec::new(), vec![]))
         }
 
         // ── Read methods ─────────────────────────────────────────────

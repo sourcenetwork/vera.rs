@@ -12,9 +12,6 @@ pub enum AcpError {
     #[error("invalid policy: {reason}")]
     InvalidPolicy { reason: String },
 
-    #[error("access denied for policy {policy_id}")]
-    AccessDenied { policy_id: String },
-
     #[error("invalid access request: {reason}")]
     InvalidAccessRequest { reason: String },
 
@@ -38,15 +35,6 @@ pub enum AcpError {
 
     #[error("invalid bearer token: {reason}")]
     InvalidBearerToken { reason: String },
-
-    #[error("replay detected: payload already processed")]
-    ReplayDetected,
-
-    #[error("expiration delta {delta} exceeds limit {max}")]
-    ExpirationDeltaTooLarge { delta: u64, max: u64 },
-
-    #[error("command expired at height {height}")]
-    CommandExpired { height: u64 },
 
     #[error("policy creation work allowance exceeded")]
     PolicyCreateBudgetExceeded,

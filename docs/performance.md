@@ -603,6 +603,14 @@ Before measurement, each node's `validator --help` is checked for
 support it; otherwise both use address-based startup. Probe failures fail the job.
 The selected mode and each binary's capability are recorded in `comparison.json`,
 and the workload configuration records the selected mode.
+The `[network.discovery]` section of the generated node configuration is decided
+for each side on its own: a side gets it exactly when its committed source has
+`crates/vera-config/src/discovery.rs`. A node that predates the setting rejects
+the section and always runs the local discovery values the section states, so
+both sides run the same listener settings and the difference does not suppress
+deltas. `comparison.json` records `discovery_setting` per side, each workload
+configuration records `discovery_section`, and the comparison fails a pass whose
+record differs from its node source.
 Component executables remain specific to each revision. All binaries are preserved
 before four passes run in head/base/base/head order, with no compilation or chart
 rendering between them.

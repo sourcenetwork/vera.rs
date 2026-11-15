@@ -1,10 +1,8 @@
 mod bounded_yaml;
 mod parse;
 mod schema;
-mod validate;
 
-pub use parse::{check_duplicate_yaml_keys, parse_policy_yaml};
-pub use validate::validate_policy_expressions;
+pub use parse::parse_policy_yaml;
 
 use std::collections::BTreeMap;
 
@@ -243,7 +241,7 @@ pub fn build_policy(parsed: &ParsedPolicy, counter: u64) -> crate::error::Result
                 RelationExpression::computed_userset("owner")
             } else {
                 let user_expr = RelationExpression::parse(&perm.expr)?;
-                // DPI: every permission must include 'owner' in its expression
+                // The owner holds every permission, whatever the expression says.
                 RelationExpression::Union(vec![
                     RelationExpression::computed_userset("owner"),
                     user_expr,

@@ -5,18 +5,22 @@
 
 use std::sync::Arc;
 
-use alloy_primitives::{Address, B256, Bytes, U64, U256};
+use alloy_primitives::{Address, B256, Bytes, KECCAK256_EMPTY, U64, U256};
 use async_trait::async_trait;
 use vera_indexer::{BlockIndex, IndexedBlock, IndexedReceipt, IndexedTransaction, LogFilter};
 use vera_traits::{StateDbError, StateDbRead};
 
+use vera_domain::{NativeCallRequest, NativeCallSimulation};
 use vera_executor::{
-    SharedModuleState, SimulateRequest, SpecId, estimate_gas as executor_estimate_gas,
-    simulate_call,
+    ExecutionConfig, SharedModuleState, SimulateRequest, SpecId,
+    estimate_gas as executor_estimate_gas, simulate_call,
 };
+
+mod simulation;
 
 use crate::{
     error::RpcError,
+    simulation_slots::SimulationSlots,
     state_provider::StateProvider,
     types::{
         BlockNumberOrTag, BlockTag, BlockTransactions, CallRequest, RpcBlock, RpcLog, RpcLogFilter,
@@ -33,17 +37,17 @@ use crate::{
 pub struct IndexedStateProvider<S> {
     index: Arc<BlockIndex>,
     state: S,
-    chain_id: u64,
-    spec_id: SpecId,
+    config: ExecutionConfig,
     block_gas_limit: u64,
     modules: SharedModuleState,
     archive: Option<crate::ArchiveReader>,
+    simulations: SimulationSlots,
 }
 
 impl<S> IndexedStateProvider<S> {
     /// Creates a new indexed state provider.
     #[must_use]
-    pub const fn new(
+    pub fn new(
         index: Arc<BlockIndex>,
         state: S,
         chain_id: u64,
@@ -54,16 +58,24 @@ impl<S> IndexedStateProvider<S> {
         Self {
             index,
             state,
-            chain_id,
-            spec_id,
+            config: ExecutionConfig::new(chain_id).with_spec_id(spec_id),
             block_gas_limit,
             modules,
             archive: None,
+            simulations: SimulationSlots::default(),
         }
     }
 }
 
 impl<S> IndexedStateProvider<S> {
+    /// Simulate under the deployment's execution configuration, which binds
+    /// the genesis record and the membership limit module calls observe.
+    #[must_use]
+    pub const fn with_execution_config(mut self, config: ExecutionConfig) -> Self {
+        self.config = config;
+        self
+    }
+
     /// Enable bounded historical point reads when entries are absent from memory.
     pub fn with_archive(mut self, archive: crate::ArchiveReader) -> Self {
         self.archive = Some(archive);
@@ -76,11 +88,11 @@ impl<S: Clone> Clone for IndexedStateProvider<S> {
         Self {
             index: Arc::clone(&self.index),
             state: self.state.clone(),
-            chain_id: self.chain_id,
-            spec_id: self.spec_id,
+            config: self.config.clone(),
             block_gas_limit: self.block_gas_limit,
             modules: Arc::clone(&self.modules),
             archive: self.archive.clone(),
+            simulations: self.simulations.clone(),
         }
     }
 }
@@ -90,8 +102,9 @@ impl<S: StateDbRead + Send + Sync + 'static> StateProvider for IndexedStateProvi
     async fn balance(
         &self,
         address: Address,
-        _block: Option<BlockNumberOrTag>,
+        block: Option<BlockNumberOrTag>,
     ) -> Result<U256, RpcError> {
+        reject_historical_block(&block)?;
         self.state
             .balance(&address)
             .await
@@ -101,21 +114,27 @@ impl<S: StateDbRead + Send + Sync + 'static> StateProvider for IndexedStateProvi
     async fn nonce(
         &self,
         address: Address,
-        _block: Option<BlockNumberOrTag>,
+        block: Option<BlockNumberOrTag>,
     ) -> Result<u64, RpcError> {
+        reject_historical_block(&block)?;
         self.state.nonce(&address).await.map_err(state_error_to_rpc)
     }
 
     async fn code(
         &self,
         address: Address,
-        _block: Option<BlockNumberOrTag>,
+        block: Option<BlockNumberOrTag>,
     ) -> Result<Bytes, RpcError> {
+        reject_historical_block(&block)?;
         let code_hash = self
             .state
             .code_hash(&address)
             .await
             .map_err(state_error_to_rpc)?;
+        // An account without code has no code record to read.
+        if code_hash == KECCAK256_EMPTY || code_hash == B256::ZERO {
+            return Ok(Bytes::new());
+        }
         self.state
             .code(&code_hash)
             .await
@@ -126,8 +145,9 @@ impl<S: StateDbRead + Send + Sync + 'static> StateProvider for IndexedStateProvi
         &self,
         address: Address,
         slot: U256,
-        _block: Option<BlockNumberOrTag>,
+        block: Option<BlockNumberOrTag>,
     ) -> Result<U256, RpcError> {
+        reject_historical_block(&block)?;
         self.state
             .storage(&address, &slot)
             .await
@@ -192,16 +212,28 @@ impl<S: StateDbRead + Send + Sync + 'static> StateProvider for IndexedStateProvi
     }
 
     async fn get_logs(&self, filter: RpcLogFilter) -> Result<Vec<RpcLog>, RpcError> {
-        let from_block = filter
-            .from_block
-            .as_ref()
-            .map(|b| self.resolve_block_number(b))
-            .transpose()?;
-        let to_block = filter
-            .to_block
-            .as_ref()
-            .map(|b| self.resolve_block_number(b))
-            .transpose()?;
+        let (from_block, to_block) = if let Some(hash) = filter.block_hash {
+            if filter.from_block.is_some() || filter.to_block.is_some() {
+                return Err(RpcError::InvalidParams(
+                    "blockHash cannot be combined with fromBlock or toBlock".into(),
+                ));
+            }
+            let number = self.revision_number(hash).await?;
+            (Some(number), Some(number))
+        } else {
+            (
+                filter
+                    .from_block
+                    .as_ref()
+                    .map(|b| self.resolve_block_number(b))
+                    .transpose()?,
+                filter
+                    .to_block
+                    .as_ref()
+                    .map(|b| self.resolve_block_number(b))
+                    .transpose()?,
+            )
+        };
 
         let mut log_filter = LogFilter::new();
         if let Some(from) = from_block {
@@ -214,6 +246,11 @@ impl<S: StateDbRead + Send + Sync + 'static> StateProvider for IndexedStateProvi
             log_filter = log_filter.address(addr_filter.into_vec());
         }
         if let Some(topics) = filter.topics {
+            if topics.len() > vera_indexer::MAX_LOG_TOPIC_POSITIONS {
+                return Err(RpcError::InvalidParams(
+                    "a log filter constrains at most four topic positions".into(),
+                ));
+            }
             for (i, topic_filter) in topics.into_iter().enumerate() {
                 if let Some(tf) = topic_filter {
                     log_filter = log_filter.topic(i, tf.into_vec());
@@ -251,21 +288,12 @@ impl<S: StateDbRead + Send + Sync + 'static> StateProvider for IndexedStateProvi
         block: Option<BlockNumberOrTag>,
     ) -> Result<Bytes, RpcError> {
         reject_historical_block(&block)?;
-        let sim_request = call_request_to_simulate(&request);
-        let modules = self
-            .modules
-            .read()
-            .map_err(|_| RpcError::Internal("lock poisoned".to_string()))?;
-        let result = simulate_call(
-            &self.state,
-            self.chain_id,
-            self.spec_id,
-            &sim_request,
-            self.block_gas_limit,
-            Some(&*modules),
-        )
-        .map_err(|e| RpcError::ExecutionFailed(e.to_string()))?;
-        drop(modules);
+        let request = call_request_to_simulate(&request);
+        let result = self
+            .simulate(move |state, context, modules| {
+                simulate_call(state, context, &request, Some(modules))
+            })
+            .await?;
         if result.success {
             Ok(result.output)
         } else {
@@ -281,24 +309,38 @@ impl<S: StateDbRead + Send + Sync + 'static> StateProvider for IndexedStateProvi
         block: Option<BlockNumberOrTag>,
     ) -> Result<u64, RpcError> {
         reject_historical_block(&block)?;
-        let sim_request = call_request_to_simulate(&request);
-        let modules = self
-            .modules
-            .read()
-            .map_err(|_| RpcError::Internal("lock poisoned".to_string()))?;
-        executor_estimate_gas(
-            &self.state,
-            self.chain_id,
-            self.spec_id,
-            &sim_request,
-            self.block_gas_limit,
-            Some(&*modules),
-        )
-        .map_err(|e| RpcError::ExecutionFailed(e.to_string()))
+        let request = call_request_to_simulate(&request);
+        self.simulate(move |state, context, modules| {
+            executor_estimate_gas(state, context, &request, Some(modules))
+        })
+        .await
+    }
+
+    async fn simulate_native_call(
+        &self,
+        request: NativeCallRequest,
+    ) -> Result<NativeCallSimulation, RpcError> {
+        self.simulate_native(request).await
     }
 }
 
 impl<S> IndexedStateProvider<S> {
+    async fn revision_number(&self, hash: B256) -> Result<u64, RpcError> {
+        if let Some(block) = self.index.get_block_by_hash(&hash) {
+            return Ok(block.number);
+        }
+        let archived = match &self.archive {
+            Some(archive) => archive
+                .read(vera_indexer::IndexQuery::RevisionHash(hash))
+                .await?
+                .and_then(|index| index.get_block_by_hash(&hash)),
+            None => None,
+        };
+        archived
+            .map(|block| block.number)
+            .ok_or_else(|| RpcError::InvalidParams(format!("unknown block hash {hash}")))
+    }
+
     fn resolve_block_number(&self, block: &BlockNumberOrTag) -> Result<u64, RpcError> {
         match block {
             BlockNumberOrTag::Number(n) => Ok(n.to::<u64>()),
@@ -349,8 +391,6 @@ fn state_error_to_rpc(err: StateDbError) -> RpcError {
         StateDbError::AccountNotFound(addr) => RpcError::AccountNotFound(addr.to_string()),
         StateDbError::CodeNotFound(hash) => RpcError::StateError(format!("code not found: {hash}")),
         StateDbError::Storage(msg) => RpcError::StateError(msg),
-        StateDbError::LockPoisoned => RpcError::Internal("lock poisoned".to_string()),
-        StateDbError::RootComputation(msg) => RpcError::StateError(msg),
     }
 }
 
@@ -442,6 +482,10 @@ fn indexed_receipt_to_rpc(receipt: IndexedReceipt) -> RpcTransactionReceipt {
 }
 
 #[cfg(test)]
+#[path = "indexed_provider/simulation_tests.rs"]
+mod simulation_tests;
+
+#[cfg(test)]
 mod tests {
     use std::sync::RwLock;
 
@@ -449,6 +493,7 @@ mod tests {
     use vera_indexer::IndexedLog;
 
     use super::*;
+    use crate::simulation_slots::{SIMULATION_SLOTS, SIMULATION_WAITERS};
     use vera_executor::SpecId;
 
     #[tokio::test]
@@ -938,5 +983,283 @@ mod tests {
             .await
             .unwrap();
         assert!(block.is_none());
+    }
+
+    fn provider(index: Arc<BlockIndex>) -> IndexedStateProvider<MockState> {
+        IndexedStateProvider::new(
+            index,
+            MockState,
+            1,
+            SpecId::CANCUN,
+            30_000_000,
+            default_modules(),
+        )
+    }
+
+    #[tokio::test]
+    async fn state_reads_reject_historical_selectors() {
+        let provider = provider(Arc::new(BlockIndex::new()));
+        let address = Address::ZERO;
+        for block in [
+            BlockNumberOrTag::Number(U64::from(16)),
+            BlockNumberOrTag::Tag(BlockTag::Earliest),
+        ] {
+            let block = Some(block);
+            for error in [
+                provider.balance(address, block.clone()).await.unwrap_err(),
+                provider
+                    .storage(address, U256::ZERO, block.clone())
+                    .await
+                    .unwrap_err(),
+                provider
+                    .nonce(address, block.clone())
+                    .await
+                    .map(|_| ())
+                    .unwrap_err(),
+                provider
+                    .code(address, block.clone())
+                    .await
+                    .map(|_| ())
+                    .unwrap_err(),
+            ] {
+                assert!(matches!(error, RpcError::NotImplemented));
+            }
+        }
+        for block in [
+            None,
+            Some(BlockNumberOrTag::Latest),
+            Some(BlockNumberOrTag::Tag(BlockTag::Finalized)),
+        ] {
+            assert!(provider.balance(address, block.clone()).await.is_ok());
+            assert!(provider.nonce(address, block.clone()).await.is_ok());
+            assert!(provider.code(address, block.clone()).await.is_ok());
+            assert!(provider.storage(address, U256::ZERO, block).await.is_ok());
+        }
+    }
+
+    #[tokio::test]
+    async fn log_queries_by_block_hash_select_that_revision_only() {
+        use crate::{ArchiveReader, NodeState};
+        let resident = Arc::new(BlockIndex::new());
+        let retained = Arc::new(BlockIndex::new());
+        let hashes = [B256::with_last_byte(1), B256::with_last_byte(2)];
+        for (height, index) in [(1, &retained), (2, &resident)] {
+            let hash = hashes[height as usize - 1];
+            index.insert_block(
+                create_test_block(height, hash),
+                vec![],
+                vec![create_test_receipt(hash, hash, height)],
+            );
+        }
+        let archived = hashes[0];
+        let archive = ArchiveReader::new(NodeState::new(1, 0, 1), {
+            let retained = retained.clone();
+            Arc::new(move |query, _| {
+                Ok(match query {
+                    vera_indexer::IndexQuery::Revision(1) => Some(retained.clone()),
+                    vera_indexer::IndexQuery::RevisionHash(hash) if hash == archived => {
+                        Some(retained.clone())
+                    }
+                    _ => None,
+                })
+            })
+        });
+        let provider = provider(resident).with_archive(archive);
+        let by_hash = |hash| RpcLogFilter {
+            block_hash: Some(hash),
+            ..Default::default()
+        };
+        for (hash, height) in [(hashes[0], 1), (hashes[1], 2)] {
+            let logs = provider.get_logs(by_hash(hash)).await.unwrap();
+            assert_eq!(logs.len(), 1);
+            assert_eq!(logs[0].block_hash, hash);
+            assert_eq!(logs[0].block_number, U64::from(height));
+        }
+        assert_eq!(
+            provider
+                .get_logs(RpcLogFilter::default())
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+        for filter in [
+            by_hash(B256::repeat_byte(9)),
+            RpcLogFilter {
+                from_block: Some(BlockNumberOrTag::Number(U64::from(1))),
+                ..by_hash(hashes[1])
+            },
+            RpcLogFilter {
+                topics: Some(vec![None; 5]),
+                ..Default::default()
+            },
+        ] {
+            let error: jsonrpsee::types::ErrorObjectOwned =
+                provider.get_logs(filter).await.unwrap_err().into();
+            assert_eq!(error.code(), crate::error::codes::INVALID_PARAMS);
+        }
+    }
+
+    type Gate = (
+        tokio::sync::mpsc::UnboundedSender<()>,
+        std::sync::mpsc::Receiver<()>,
+    );
+
+    /// Blocks its first account read until released, as a slow execution would.
+    #[derive(Clone)]
+    struct GatedState(Arc<std::sync::Mutex<Option<Gate>>>);
+
+    impl StateDbRead for GatedState {
+        async fn nonce(&self, _address: &Address) -> Result<u64, StateDbError> {
+            let gate = self.0.lock().unwrap().take();
+            if let Some((entered, release)) = gate {
+                entered.send(()).unwrap();
+                release.recv().unwrap();
+            }
+            Ok(0)
+        }
+
+        async fn balance(&self, _address: &Address) -> Result<U256, StateDbError> {
+            Ok(U256::MAX)
+        }
+
+        async fn code_hash(&self, _address: &Address) -> Result<B256, StateDbError> {
+            Ok(KECCAK256_EMPTY)
+        }
+
+        async fn code(&self, _code_hash: &B256) -> Result<Bytes, StateDbError> {
+            Ok(Bytes::new())
+        }
+
+        async fn storage(&self, _address: &Address, _slot: &U256) -> Result<U256, StateDbError> {
+            Ok(U256::ZERO)
+        }
+    }
+
+    #[tokio::test]
+    async fn simulations_run_off_the_module_lock_under_bounded_admission() {
+        let (entered, mut entries) = tokio::sync::mpsc::unbounded_channel();
+        let (release, gate) = std::sync::mpsc::channel();
+        let modules = default_modules();
+        let provider = IndexedStateProvider::new(
+            Arc::new(BlockIndex::new()),
+            GatedState(Arc::new(std::sync::Mutex::new(Some((entered, gate))))),
+            1,
+            SpecId::CANCUN,
+            30_000_000,
+            modules.clone(),
+        );
+        let request = || CallRequest {
+            to: Some(Address::repeat_byte(1)),
+            ..Default::default()
+        };
+        let running = provider.clone();
+        let call = tokio::spawn(async move { running.call(request(), None).await });
+        tokio::time::timeout(std::time::Duration::from_secs(5), entries.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        // Finalization publishes module state while the execution is still running.
+        drop(
+            modules
+                .try_write()
+                .expect("simulation must not hold the module lock"),
+        );
+        let mut others = Vec::new();
+        for _ in 1..SIMULATION_SLOTS {
+            others.push(provider.simulations.acquire().await.unwrap());
+        }
+        let queued = provider.clone();
+        let estimate = tokio::spawn(async move { queued.estimate_gas(request(), None).await });
+        wait_for_waiters(&provider.simulations, 1).await;
+        assert!(!estimate.is_finished());
+        let waiters: Vec<_> = (1..SIMULATION_WAITERS)
+            .map(|_| {
+                let slots = provider.simulations.clone();
+                tokio::spawn(async move { slots.acquire().await.map(drop) })
+            })
+            .collect();
+        wait_for_waiters(&provider.simulations, SIMULATION_WAITERS).await;
+        let busy: jsonrpsee::types::ErrorObjectOwned = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            provider.call(request(), None),
+        )
+        .await
+        .expect("a full queue must refuse without waiting for a slot")
+        .unwrap_err()
+        .into();
+        assert_eq!(busy.code(), crate::error::codes::RESOURCE_UNAVAILABLE);
+        assert_eq!(busy.data().unwrap().get(), r#"{"retryable":true}"#);
+        release.send(()).unwrap();
+        assert!(call.await.unwrap().unwrap().is_empty());
+        assert!(estimate.await.unwrap().unwrap() >= 21_000);
+        drop(others);
+        for waiter in waiters {
+            waiter.await.unwrap().unwrap();
+        }
+    }
+
+    /// Returns once `waiters` callers queue behind fully occupied slots.
+    async fn wait_for_waiters(slots: &SimulationSlots, waiters: usize) {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while slots.free_places() != SIMULATION_WAITERS - waiters {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    /// Holds accounts without code and no code records, as committed state does.
+    #[derive(Clone)]
+    struct CodelessState(B256);
+
+    impl StateDbRead for CodelessState {
+        async fn nonce(&self, _address: &Address) -> Result<u64, StateDbError> {
+            Ok(0)
+        }
+
+        async fn balance(&self, _address: &Address) -> Result<U256, StateDbError> {
+            Ok(U256::ZERO)
+        }
+
+        async fn code_hash(&self, _address: &Address) -> Result<B256, StateDbError> {
+            Ok(self.0)
+        }
+
+        async fn code(&self, code_hash: &B256) -> Result<Bytes, StateDbError> {
+            Err(StateDbError::CodeNotFound(*code_hash))
+        }
+
+        async fn storage(&self, _address: &Address, _slot: &U256) -> Result<U256, StateDbError> {
+            Ok(U256::ZERO)
+        }
+    }
+
+    #[tokio::test]
+    async fn an_account_without_code_reads_as_empty_code() {
+        for hash in [KECCAK256_EMPTY, B256::ZERO] {
+            let provider = IndexedStateProvider::new(
+                Arc::new(BlockIndex::new()),
+                CodelessState(hash),
+                1,
+                SpecId::CANCUN,
+                30_000_000,
+                default_modules(),
+            );
+            assert!(provider.code(Address::ZERO, None).await.unwrap().is_empty());
+        }
+        let missing = IndexedStateProvider::new(
+            Arc::new(BlockIndex::new()),
+            CodelessState(B256::repeat_byte(7)),
+            1,
+            SpecId::CANCUN,
+            30_000_000,
+            default_modules(),
+        );
+        assert!(matches!(
+            missing.code(Address::ZERO, None).await,
+            Err(RpcError::StateError(_))
+        ));
     }
 }

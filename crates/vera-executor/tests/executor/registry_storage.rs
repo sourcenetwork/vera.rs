@@ -447,6 +447,38 @@ fn native_membership_rejects_truncated_record_fields(#[case] offset: u64, #[case
 }
 
 #[rstest]
+#[case(0xf1)]
+#[case(0xf2)]
+#[case(0xf4)]
+fn a_called_contract_cannot_change_membership_as_the_signer(#[case] opcode: u8) {
+    let (state, executor) = authorized_state();
+    let contract = Address::repeat_byte(0x22);
+    super::rollback::install(
+        &state,
+        contract,
+        super::rollback::requiring_code(VALIDATOR_REGISTRY_ADDRESS, opcode, None),
+    );
+    let calldata = IValidatorRegistry::addValidatorCall {
+        evmAddr: Address::repeat_byte(0x11),
+        consensusPubkey: "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+            .parse()
+            .unwrap(),
+        p2pAddr: "127.0.0.1:3000".into(),
+    }
+    .abi_encode();
+    let (outcome, _) =
+        execute_with_executor(&state, TxKind::Call(contract), calldata.into(), executor);
+    assert_eq!(outcome.receipts.len(), 1);
+    assert!(!outcome.receipts[0].success());
+    assert!(
+        !outcome
+            .changes
+            .accounts
+            .contains_key(&VALIDATOR_REGISTRY_ADDRESS)
+    );
+}
+
+#[rstest]
 #[case(None)]
 #[case(Some(false))]
 #[case(Some(true))]
@@ -606,8 +638,14 @@ fn registry_status_checks_the_full_member_index(#[case] index: U256, #[case] suc
     assert_eq!(outcome.receipts[0].success(), success);
     let changes = outcome.changes.accounts.get(&VALIDATOR_REGISTRY_ADDRESS);
     if success {
-        let packed = changes.unwrap().storage[&member_slot(member)].to_be_bytes::<32>();
-        assert_eq!(packed[20], 1);
+        // Re-activating an active member leaves its slot as stored, so no write is reported.
+        let slot = member_slot(member);
+        let stored = registered.changes.accounts[&VALIDATOR_REGISTRY_ADDRESS].storage[&slot];
+        let current = changes
+            .and_then(|account| account.storage.get(&slot))
+            .copied()
+            .unwrap_or(stored);
+        assert_eq!(current.to_be_bytes::<32>()[20], 1);
     } else {
         assert!(changes.is_none_or(|account| account.storage.is_empty()));
     }
@@ -684,7 +722,7 @@ fn epoch_rosters_capture_the_boundary_branch_and_survive_later_changes() {
         .execute_with_modules(&state, &verification, &[registration], parent)
         .unwrap();
     assert!(selected.changes_from(&verified).iter().all(Vec::is_empty));
-    futures::executor::block_on(state.commit(outcome.changes)).unwrap();
+    state.commit(outcome.changes);
     context.header.number = 19;
     let (_, later) = executor
         .execute_with_modules(&state, &context, &[backup_member_call(1)], selected.clone())
