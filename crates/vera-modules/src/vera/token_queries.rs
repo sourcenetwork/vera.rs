@@ -54,9 +54,12 @@ impl VeraModule {
                 .map_err(|e| VeraError::State(format!("invalid token record: {e}")))?;
             Self::validate_token_selector(&record.token_hash)?;
             Self::validate_token_selector(&record.issuer_did)?;
-            if !record.authorized_account.is_empty() {
-                Self::validate_token_selector(&record.authorized_account)?;
+            if record.authorized_account.is_empty() {
+                return Err(VeraError::State(
+                    "token record has no authorized account".into(),
+                ));
             }
+            Self::validate_token_selector(&record.authorized_account)?;
             if record_key(&record) != key {
                 return Err(VeraError::State("token index does not match record".into()));
             }
@@ -143,5 +146,21 @@ mod tests {
         vera.store
             .put(&keys::jws_token_key("hash"), borsh::to_vec(&token).unwrap());
         assert!(vera.get_jws_tokens_by_account("account").is_err());
+    }
+
+    #[test]
+    fn a_token_record_without_an_authorized_account_is_malformed() {
+        let mut vera = VeraModule::new();
+        let mut token = record("hash");
+        vera.set_jws_token(&token).unwrap();
+        let issuer = Did::new(token.issuer_did.clone()).unwrap();
+        assert_eq!(vera.get_jws_tokens_by_did(&issuer).unwrap().len(), 1);
+        token.authorized_account.clear();
+        vera.store
+            .put(&keys::jws_token_key("hash"), borsh::to_vec(&token).unwrap());
+        assert!(matches!(
+            vera.get_jws_tokens_by_did(&issuer),
+            Err(VeraError::State(reason)) if reason.contains("no authorized account")
+        ));
     }
 }

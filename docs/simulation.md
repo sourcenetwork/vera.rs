@@ -22,9 +22,22 @@ A simulated call observes the deployment and the node's head revision:
 Time-dependent module paths, such as token validity and expiry, are evaluated
 at the head revision's time. `NUMBER` and `TIMESTAMP` read the same height and
 time in contract code. A request executed later runs in a later revision, so a
-simulated success does not guarantee that a submission succeeds. Before the
-node has indexed a revision, the height and time are zero and module writes
-are refused.
+simulated success does not guarantee that a submission succeeds.
+
+The height, time and module snapshot are read together when the call starts
+executing, after any wait for an execution slot, so a call that queued observes
+the head at the moment it runs. Module values and the execution index are
+published separately as a revision finalizes; a call that starts between the
+two can observe one revision's values at the adjacent revision's height and
+time.
+
+While the node's head is still genesis, before the first revision is
+finalized, the height is zero. Policy commands and policy creation are refused
+there, as `invalid policy command execution context` and `invalid policy
+creation context`: the records they write are bound to the revision that
+executes them, no request executes in genesis, and the modules reject a zero
+height rather than store a record that names it. Dry runs of those calls
+succeed once the first revision is indexed. Queries are not affected.
 
 Account reads and simulations answer for current state only: an explicit block
 number or `earliest` fails with -32004.

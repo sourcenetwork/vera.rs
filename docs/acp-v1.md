@@ -358,7 +358,9 @@ still pay for their reads and return the original record; unarchive rewrites
 validate counters without charging nonexistent counter writes.
 
 Transfer also pays one write for the previous owner's relinquishment marker,
-unless the object is transferred to its current owner. Reveal also charges its
+whether the owner or a manager of the owner relation submitted it, and one
+point read for the new owner's marker, with one deletion when that marker
+exists; a transfer to the current owner pays none of these. Reveal also charges its
 commitment and policy-liveness reads, amendment counter
 and collision reads, and the amendment record/index writes. A reveal that would
 amend an existing registration pays one point read for the claimant's

@@ -41,16 +41,15 @@ impl StateDbRead for EmptyState {
     }
 }
 
-fn provider(modules: SharedModuleState) -> IndexedStateProvider<EmptyState> {
-    let index = Arc::new(BlockIndex::new());
+fn insert_head(index: &BlockIndex, number: u64, timestamp: u64) {
     index.insert_block(
         IndexedBlock {
-            hash: B256::repeat_byte(7),
-            number: HEAD_NUMBER,
+            hash: B256::from(U256::from(number)),
+            number,
             parent_hash: B256::ZERO,
             state_root: B256::ZERO,
             module_state_root: B256::ZERO,
-            timestamp: HEAD_TIME,
+            timestamp,
             gas_limit: 30_000_000,
             gas_used: 0,
             base_fee_per_gas: None,
@@ -60,6 +59,11 @@ fn provider(modules: SharedModuleState) -> IndexedStateProvider<EmptyState> {
         vec![],
         vec![],
     );
+}
+
+fn provider(modules: SharedModuleState) -> IndexedStateProvider<EmptyState> {
+    let index = Arc::new(BlockIndex::new());
+    insert_head(&index, HEAD_NUMBER, HEAD_TIME);
     IndexedStateProvider::new(
         index,
         EmptyState,
@@ -282,4 +286,62 @@ async fn a_native_simulation_beyond_the_shared_slots_is_refused_as_retryable() {
         .await
         .unwrap();
     assert!(admitted.success);
+}
+
+#[tokio::test]
+async fn a_call_that_waited_for_a_slot_observes_the_head_published_meanwhile() {
+    let (modules, policy) = committed();
+    let provider = provider(modules);
+    let slots = provider.simulations.clone();
+    let index = provider.index.clone();
+    let mut running = Vec::new();
+    for _ in 0..SIMULATION_SLOTS {
+        running.push(slots.acquire().await.unwrap());
+    }
+
+    const NUMBER: u8 = 0x43;
+    let request = CallRequest {
+        input: Some(Bytes::from(vec![
+            NUMBER, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3,
+        ])),
+        ..Default::default()
+    };
+    let call = tokio::spawn({
+        let (provider, request) = (provider.clone(), request.clone());
+        async move { provider.call(request, None).await }
+    });
+    let estimate = tokio::spawn({
+        let provider = provider.clone();
+        async move { provider.estimate_gas(request, None).await }
+    });
+    let native = tokio::spawn({
+        let local = local(provider);
+        async move {
+            local
+                .request::<NativeCallSimulation>(
+                    "vera_simulateNativeCall",
+                    delete_policy(OWNER, policy),
+                )
+                .await
+        }
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while slots.free_places() != SIMULATION_WAITERS - 3 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+
+    insert_head(&index, HEAD_NUMBER + 1, HEAD_TIME + 5);
+    drop(running);
+    assert_eq!(
+        U256::from_be_slice(&call.await.unwrap().unwrap()),
+        U256::from(HEAD_NUMBER + 1)
+    );
+    assert!(estimate.await.unwrap().unwrap() >= 21_000);
+    let native = native.await.unwrap().unwrap();
+    assert!(native.success, "{:?}", native.reason);
+    assert_eq!(native.block_number, U64::from(HEAD_NUMBER + 1));
+    assert_eq!(native.timestamp, U64::from(HEAD_TIME + 5));
 }

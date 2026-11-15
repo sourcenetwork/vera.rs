@@ -355,15 +355,25 @@ mod tests {
         let account = "did:key:z6MkmjY8GnV5iJjM2BXSVn4MoDbZZbLffKHsygxC4BLd5v8P";
         let mut module = VeraModule::new();
         let mut acp = AcpModule::new();
-        let block = BlockExecCtx::default();
+        let now = Timestamp {
+            seconds: 1_800_000_000,
+            block_height: 9,
+        };
+        let block = BlockExecCtx {
+            timestamp: now.clone(),
+            ..Default::default()
+        };
         module
             .store_or_update_jws_token(
                 &block,
                 "token",
                 &did_from_signer(issuer).unwrap(),
                 account,
-                Timestamp::default(),
-                Timestamp::default(),
+                now.clone(),
+                Timestamp {
+                    seconds: now.seconds + 3_600,
+                    ..now
+                },
             )
             .unwrap();
         let hash = vera_modules::vera::keys::hash_jws_token("token");

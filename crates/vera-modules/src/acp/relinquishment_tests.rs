@@ -2,7 +2,14 @@ use super::registration_priority_tests::{commit, owner, reveal};
 use super::registration_tests::{execute, setup};
 use super::*;
 
-fn transfer(module: &mut AcpModule, from: &Did, to: &Did, policy: &str, object: &Object, at: u64) {
+pub(super) fn transfer(
+    module: &mut AcpModule,
+    from: &Did,
+    to: &Did,
+    policy: &str,
+    object: &Object,
+    at: u64,
+) {
     execute(
         module,
         from,
@@ -16,7 +23,7 @@ fn transfer(module: &mut AcpModule, from: &Did, to: &Did, policy: &str, object: 
     .unwrap();
 }
 
-fn refused(
+pub(super) fn refused(
     module: &mut AcpModule,
     actor: &Did,
     policy: &str,
@@ -31,14 +38,14 @@ fn refused(
     assert_eq!(module.store.serialize(), before);
 }
 
-fn restore(module: &AcpModule) -> AcpModule {
+pub(super) fn restore(module: &AcpModule) -> AcpModule {
     let restored =
         AcpModule::from_store(InMemoryKvStore::deserialize(&module.store.serialize()).unwrap());
     restored.validate_restored_state().unwrap();
     restored
 }
 
-fn markers(module: &AcpModule) -> usize {
+pub(super) fn markers(module: &AcpModule) -> usize {
     module.store.prefix_iter(relinquishment::PREFIX).count()
 }
 
@@ -98,33 +105,6 @@ fn a_marker_survives_restoration_archive_and_unarchive() {
         refused(&mut module, &first, &policy, &reserve, at + 1);
     }
     assert_eq!(markers(&module), 1);
-}
-
-#[test]
-fn a_transfer_writes_one_marker_per_previous_owner_and_none_for_a_transfer_to_itself() {
-    let (mut module, first, second, policy, object) = setup();
-    execute(
-        &mut module,
-        &first,
-        &policy,
-        PolicyCmd::RegisterObject(object.clone()),
-        5,
-    )
-    .unwrap();
-    transfer(&mut module, &first, &first, &policy, &object, 6);
-    assert_eq!(markers(&module), 0);
-    transfer(&mut module, &first, &second, &policy, &object, 7);
-    transfer(&mut module, &second, &first, &policy, &object, 8);
-    transfer(&mut module, &first, &second, &policy, &object, 9);
-    assert_eq!(markers(&module), 2);
-    for actor in [&first, &second] {
-        assert!(
-            module
-                .store
-                .has(&relinquishment::key(&policy, &object, actor.as_str()))
-        );
-    }
-    restore(&module);
 }
 
 #[test]

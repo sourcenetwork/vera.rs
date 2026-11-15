@@ -28,20 +28,27 @@ impl<S: StateDbRead> IndexedStateProvider<S> {
     /// neither occupies a worker nor holds the lock finalization publishes under.
     /// A caller waits briefly for a slot behind a bounded queue; the slot stays
     /// taken until the execution ends, even if the caller leaves.
+    ///
+    /// The head context is read under the module lock once the slot is held,
+    /// so a call that waited does not run newer values at an older height.
     pub(super) async fn simulate<T: Send + 'static>(
         &self,
-        run: impl FnOnce(&S, &ModuleState) -> Result<T, ExecutionError> + Send + 'static,
+        run: impl FnOnce(&S, &SimulationContext, &ModuleState) -> Result<T, ExecutionError>
+        + Send
+        + 'static,
     ) -> Result<T, RpcError> {
         let permit = self.simulations.acquire().await?;
-        let modules = self
-            .modules
-            .read()
-            .map_err(|_| RpcError::Internal("lock poisoned".to_string()))?
-            .clone();
+        let (context, modules) = {
+            let modules = self
+                .modules
+                .read()
+                .map_err(|_| RpcError::Internal("lock poisoned".to_string()))?;
+            (self.head_context(), modules.clone())
+        };
         let state = self.state.clone();
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            run(&state, &modules)
+            run(&state, &context, &modules)
         })
         .await
         .map_err(|error| RpcError::Internal(error.to_string()))?
@@ -55,10 +62,10 @@ impl<S: StateDbRead> IndexedStateProvider<S> {
     ) -> Result<NativeCallSimulation, RpcError> {
         let request = NativeSimulateRequest::new(&request.signer, request.target, request.calldata)
             .map_err(|error: NativeSimulateError| RpcError::InvalidParams(error.to_string()))?;
-        let context = self.head_context();
-        let result = self
-            .simulate(move |state, modules| {
-                simulate_native_call(state, &context, &request, modules)
+        let (result, context) = self
+            .simulate(move |state, context, modules| {
+                simulate_native_call(state, context, &request, modules)
+                    .map(|result| (result, *context))
             })
             .await?;
         Ok(NativeCallSimulation {

@@ -18,7 +18,17 @@ actor, whichever of its commitments it reveals and however old that commitment
 is. An actor who committed to the object twice, or committed and then
 registered it directly, therefore cannot transfer the object and afterwards
 take it back with the commitment it held in reserve. The owner is recorded
-whoever submitted the transfer, including a manager of the owner relation.
+whoever submitted the transfer, including a manager of the owner relation, so
+an owner cannot avoid the record by submitting the transfer through a second
+identity that holds manager rights.
+
+A transfer to an actor who had relinquished the object removes that actor's
+record. The actor holds the object again by a transfer its owner or a manager
+authorized, and has the same standing as any other owner: if a still-valid
+earlier commitment of another actor later amends the registration, the actor
+may reclaim the object with a commitment older still. After A transfers to B
+and B transfers back to A, B is recorded as having relinquished the object and
+A is not.
 
 A transfer gives the transferee no priority over anyone else. The transferred
 record keeps its creation timestamp, so a still-valid commitment that another
@@ -30,11 +40,12 @@ The relinquishment marker is the empty value at
 `relinquished/{policy_id}/{resource_hex}/{object_hex}/{actor_digest}`, where
 the digest is the hexadecimal SHA-256 of `vera/acp-relinquished/v1`, a zero
 byte and the actor's canonical DID. It is part of ACP state and of the native
-state commitment. It survives archive, unarchive, later transfers and
-amendments by other actors, and it stays in force if the actor later owns the
-object again and loses it to an amendment. A transfer to the current owner
-writes no marker. An object holds at most one marker per actor that has
-transferred it away, each written by a paid transfer; markers are not expired
+state commitment. It survives archive, unarchive, transfers between other
+actors and amendments by other actors, and is deleted by a transfer of the
+object to the actor it names. A transfer to the current owner writes and
+deletes no marker. An object holds at most one marker per actor that has
+transferred it away and not received it back, each written by a paid
+transfer; markers are not expired
 by time, because a transfer carries no clock and commitment lifetimes are an
 operator parameter that can change, and they are removed when the policy is
 deleted. Native recovery rejects a marker that is malformed, has a value, or

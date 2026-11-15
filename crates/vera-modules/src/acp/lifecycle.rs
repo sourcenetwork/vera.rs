@@ -60,7 +60,8 @@ impl AcpModule {
     }
 
     /// Transfer a live registration without changing its priority or other grants.
-    /// The previous owner can no longer claim the object by commitment.
+    /// The previous owner can no longer claim the object by commitment, whoever
+    /// submitted the transfer; the new owner is cleared of an earlier transfer away.
     pub fn transfer_object(
         &mut self,
         actor: &Did,
@@ -140,6 +141,7 @@ impl AcpModule {
         self.set_relationship_with_budget(&record, budget)?;
         if previous_owner != new_owner.as_str() {
             self.relinquish_with_budget(policy_id, object, &previous_owner, budget)?;
+            self.reclaim_with_budget(policy_id, object, new_owner.as_str(), budget)?;
         }
         Ok(record)
     }

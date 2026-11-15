@@ -94,6 +94,23 @@ impl AcpModule {
         }
     }
 
+    /// Remove the marker of an actor the object is transferred to, who holds
+    /// the object again and is no longer an owner it was transferred from.
+    pub(super) fn reclaim_with_budget(
+        &mut self,
+        policy: &str,
+        object: &Object,
+        actor: &str,
+        budget: &CommandBudget,
+    ) -> Result<()> {
+        if self.relinquished_with_budget(policy, object, actor, budget)? {
+            let key = key(policy, object, actor);
+            budget.finish(budget.permissions.records.write(&key, None))?;
+            self.store.delete(&key);
+        }
+        Ok(())
+    }
+
     /// A live policy keeps markers only for registered objects; a retired policy
     /// keeps them until their cleanup phase, after the owner records are gone.
     pub(super) fn validate_relinquishments(&self) -> Result<()> {
@@ -126,3 +143,7 @@ impl AcpModule {
 #[cfg(test)]
 #[path = "relinquishment_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "relinquishment_transfer_tests.rs"]
+mod transfer_tests;

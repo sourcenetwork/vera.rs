@@ -289,9 +289,10 @@ impl<S: StateDbRead + Send + Sync + 'static> StateProvider for IndexedStateProvi
     ) -> Result<Bytes, RpcError> {
         reject_historical_block(&block)?;
         let request = call_request_to_simulate(&request);
-        let context = self.head_context();
         let result = self
-            .simulate(move |state, modules| simulate_call(state, &context, &request, Some(modules)))
+            .simulate(move |state, context, modules| {
+                simulate_call(state, context, &request, Some(modules))
+            })
             .await?;
         if result.success {
             Ok(result.output)
@@ -309,9 +310,8 @@ impl<S: StateDbRead + Send + Sync + 'static> StateProvider for IndexedStateProvi
     ) -> Result<u64, RpcError> {
         reject_historical_block(&block)?;
         let request = call_request_to_simulate(&request);
-        let context = self.head_context();
-        self.simulate(move |state, modules| {
-            executor_estimate_gas(state, &context, &request, Some(modules))
+        self.simulate(move |state, context, modules| {
+            executor_estimate_gas(state, context, &request, Some(modules))
         })
         .await
     }
