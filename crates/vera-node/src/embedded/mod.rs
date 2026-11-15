@@ -19,7 +19,6 @@ use std::{
 
 use commonware_runtime::Runner as _;
 use tokio::sync::oneshot;
-use vera_config::{NetworkConfig, NodeConfig};
 use vera_domain::ConsensusPublicKey;
 use vera_genesis::VeraGenesis;
 use vera_jsonrpc::LocalRpc;
@@ -62,16 +61,7 @@ impl EmbeddedNode {
         if let Some(reason) = config.history_memory.rejection() {
             return Err(EmbedError::Config(reason));
         }
-        let node_config = NodeConfig {
-            chain_id: config.genesis.chain_id,
-            data_dir: config.data_dir.clone(),
-            network: NetworkConfig {
-                listen_addr: config.p2p_listen.to_string(),
-                ..NetworkConfig::default()
-            },
-            pruning: config.pruning,
-            ..NodeConfig::default()
-        };
+        let node_config = config.node_config();
         let (genesis, peers) = crate::prepare_solo(&node_config, &config.genesis)?;
         let consensus_key = *genesis
             .decode_epoch_info()

@@ -215,6 +215,11 @@ connection from the same machine is accepted only from a peer the node tracks,
 after the authenticated handshake. Use another address only when other
 validators must reach the node.
 
+The embedded listener states the local discovery settings, which admit
+loopback and private addresses, instead of the daemon's recommended profile
+([settings](operating.md#configuration-knobs-operators-own)). `EmbeddedConfig`
+does not expose them.
+
 ## Disk
 
 `EmbeddedConfig::pruning` sets how much consensus archive and state journal the

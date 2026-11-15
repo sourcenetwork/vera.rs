@@ -59,6 +59,12 @@ stops:
   authenticated state transfer. Each channel permits 1,000 messages/second per
   peer with a burst of 64. Commonware sizes queues from retained-peer count
   times burst size, so the burst also controls startup queue allocation.
+  The listener and the genesis DKG run Commonware's recommended discovery
+  profile; `[network.discovery]` states individual settings instead, and an
+  absent one keeps Commonware's value. `testnet`, `devnet`, the e2e harness and
+  the embedded node state `DiscoveryConfig::local()`, the values of Commonware's
+  local profile. The recommended profile has not been exercised between
+  separate hosts. See docs/operating.md#configuration-knobs-operators-own.
 - **Consensus:** the Commonware `marshal` actor (block archive + finalization
   storage) driven by the glue `orchestrator` running Simplex with a
   `FixedEpocher` over genesis `blocks_per_epoch`. The elector uses bounded leader

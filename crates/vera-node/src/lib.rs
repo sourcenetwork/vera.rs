@@ -54,6 +54,7 @@ mod participants;
 pub use participants::{RegistryParticipants, validator_address};
 
 mod peer_capacity;
+mod peer_discovery;
 
 mod proposal_hold;
 pub use proposal_hold::ProposalHold;

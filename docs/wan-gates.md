@@ -41,7 +41,14 @@ the JSON-RPC port of that node's `config.toml`.
    It does not modify a template that omits native consensus parameters.
 
 2. Edit each `nodeN/config.toml`: set `network.dialable_addr` to that host's
-   reachable `ip:p2p_port`. Replace every loopback address in the shared
+   reachable `ip:p2p_port`, and delete the `[network.discovery]` section with
+   its `handshakes_per_ip` and `handshakes_per_subnet` tables. The generator
+   writes those local-cluster values for nodes sharing one address; without
+   them a node runs Commonware's recommended discovery profile, which is the
+   profile this gate qualifies. Hosts that reach each other on private
+   addresses keep only `allow_private_ips = true` under `[network.discovery]`
+   ([settings](operating.md#configuration-knobs-operators-own)). Record the
+   discovery settings each host ran with. Replace every loopback address in the shared
    `peers.json` bootstrappers with the corresponding host's address, keeping the
    public-key mapping unchanged. Set the same addresses in every generated
    `genesis.json` validator entry before starting any node; all four genesis

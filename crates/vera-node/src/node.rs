@@ -20,7 +20,6 @@ use commonware_consensus::{
     },
     types::{Epoch, FixedEpocher, Height, ViewDelta},
 };
-use commonware_cryptography::ChaCha20Poly1305;
 use commonware_cryptography::{Digested, Digestible as _, Signer as _};
 use commonware_glue::{
     dkg::{
@@ -39,10 +38,6 @@ use commonware_p2p::{Ingress, Provider as _, authenticated::discovery};
 use commonware_parallel::{Rayon, Sequential};
 use commonware_runtime::{Handle, Spawner as _, Supervisor as _, buffer::paged::CacheRef, tokio};
 use commonware_storage::{archive::prunable, translator::TwoCap};
-use commonware_stream::{
-    cups::{self, Cups},
-    sake::{self, Sake},
-};
 use commonware_utils::{NZDuration, NZU64, NZUsize, sequence::Unit};
 use tracing::{error, info};
 use vera_app::{
@@ -64,10 +59,9 @@ use vera_jsonrpc::{IndexedStateProvider, NodeState, RpcServer, TxSubmitCallback}
 use crate::{
     BACKFILL_CHANNEL, BROADCAST_CHANNEL, CERTIFICATE_CHANNEL, CommittedState, DKG_CHANNEL,
     DKG_PROBE_CHANNEL, DynamicProvider, FileSecretStore, IO_BUFFER_SIZE, MAILBOX_SIZE,
-    MAX_BLOCK_TXS, MAX_MESSAGE_SIZE, MAX_PARTICIPANTS, MAX_SUPPORTED_MODE, MAX_TX_BYTES,
-    MEMPOOL_CHANNEL, NAMESPACE, NodeOptions, NodeSettings, P2P_SUFFIX, PAGE_SIZE, RESOLVER_CHANNEL,
-    REVEAL, Registrar, RegistryParticipants, RpcMode, SHARING_MODE, TxGossip, VOTE_CHANNEL,
-    VrfElectorConfig,
+    MAX_BLOCK_TXS, MAX_PARTICIPANTS, MAX_SUPPORTED_MODE, MAX_TX_BYTES, MEMPOOL_CHANNEL, NAMESPACE,
+    NodeOptions, NodeSettings, PAGE_SIZE, RESOLVER_CHANNEL, REVEAL, Registrar,
+    RegistryParticipants, RpcMode, SHARING_MODE, TxGossip, VOTE_CHANNEL, VrfElectorConfig,
     peer_capacity::PeerCapacity,
     rejoin,
     sink::{FinalizationArtifacts, FinalizationLookup, NodeSink, SinkParts},
@@ -240,25 +234,14 @@ async fn run_node_with_elector<
         .map(|(pk, addr)| (pk.clone(), Ingress::Socket(*addr)))
         .collect();
     let max_peers_per_set = peer_capacity.tracked();
-    let mut p2p_config = discovery::Config::local(
-        Cups::<_, ChaCha20Poly1305>::new(
-            Sake {
-                signer: signing_key.clone(),
-                synchrony_bound: std::time::Duration::from_secs(5),
-                max_handshake_age: std::time::Duration::from_secs(10),
-                version: sake::Version::V1,
-            },
-            cups::Version::V1,
-        ),
-        &[NAMESPACE, P2P_SUFFIX].concat(),
+    let p2p_config = crate::peer_discovery::config(
+        signing_key.clone(),
         listen,
         dial,
         bootstrappers,
         max_peers_per_set,
-        MAX_MESSAGE_SIZE,
-        MAILBOX_SIZE,
-    );
-    p2p_config.mailbox_size = MAILBOX_SIZE;
+        &config.network.discovery,
+    )?;
     let channel_rate = sizing.channel_rate();
     let (mut p2p, oracle) = discovery::Network::new(context.child("network"), p2p_config);
     let vote_network = p2p.register(VOTE_CHANNEL, channel_rate);

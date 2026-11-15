@@ -166,6 +166,10 @@ impl GlobalArgs {
 
     fn run_devnet(&self, args: &DevnetArgs) -> eyre::Result<()> {
         let mut config = self.load_config()?;
+        config.network.discovery = config
+            .network
+            .discovery
+            .or(vera_config::DiscoveryConfig::local());
         let stored_genesis = config.data_dir.join("devnet-genesis.json");
         let persist = args.genesis.is_none() && !stored_genesis.exists();
         let mut genesis = match &args.genesis {

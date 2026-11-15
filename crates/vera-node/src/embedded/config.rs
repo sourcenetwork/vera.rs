@@ -2,7 +2,7 @@
 
 use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
-use vera_config::PruningConfig;
+use vera_config::{DiscoveryConfig, NetworkConfig, NodeConfig, PruningConfig};
 
 use super::{ThreadBudget, ThreadSetup};
 use crate::{HistoryMemory, NodeSizing, SoloGenesis, SoloPacing};
@@ -90,6 +90,22 @@ impl EmbeddedConfig {
         }
     }
 
+    /// The daemon configuration of this node. Its listener may sit on
+    /// loopback, so it states the local discovery settings.
+    pub(super) fn node_config(&self) -> NodeConfig {
+        NodeConfig {
+            chain_id: self.genesis.chain_id,
+            data_dir: self.data_dir.clone(),
+            network: NetworkConfig {
+                listen_addr: self.p2p_listen.to_string(),
+                discovery: DiscoveryConfig::local(),
+                ..NetworkConfig::default()
+            },
+            pruning: self.pruning.clone(),
+            ..NodeConfig::default()
+        }
+    }
+
     /// The threads a node started with this configuration creates.
     #[must_use]
     pub fn thread_budget(&self) -> ThreadBudget {
@@ -103,5 +119,33 @@ impl EmbeddedConfig {
             verification: self.verification_threads,
             history: crate::history::BACKGROUND_THREADS,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use vera_modules::vera::administration::OperatorPolicy;
+
+    use super::*;
+
+    #[test]
+    fn the_node_configuration_states_the_local_discovery_settings() {
+        let genesis = SoloGenesis {
+            chain_id: 9_271,
+            operators: OperatorPolicy {
+                threshold: 1,
+                keys: vec![
+                    "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798".into(),
+                ],
+            },
+            timestamp: 1_800_000_000,
+            policies: Vec::new(),
+        };
+        let listen = "127.0.0.1:0".parse().unwrap();
+        let config = EmbeddedConfig::new("/tmp/embedded", genesis, listen).node_config();
+        assert_eq!(config.chain_id, 9_271);
+        assert_eq!(config.network.listen_addr, "127.0.0.1:0");
+        assert_eq!(config.network.discovery, DiscoveryConfig::local());
+        assert_eq!(config.pruning, Some(EmbeddedConfig::RETENTION));
     }
 }

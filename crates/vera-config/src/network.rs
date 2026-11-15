@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::DiscoveryConfig;
+
 /// Default listen address.
 pub const DEFAULT_LISTEN_ADDR: &str = "0.0.0.0:30303";
 
@@ -17,6 +19,10 @@ pub struct NetworkConfig {
     /// Use this when behind NAT/firewall to specify the publicly reachable address.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dialable_addr: Option<String>,
+
+    /// Peer discovery settings stated instead of Commonware's recommended values.
+    #[serde(default, skip_serializing_if = "DiscoveryConfig::is_recommended")]
+    pub discovery: DiscoveryConfig,
 }
 
 impl Default for NetworkConfig {
@@ -24,6 +30,7 @@ impl Default for NetworkConfig {
         Self {
             listen_addr: DEFAULT_LISTEN_ADDR.to_string(),
             dialable_addr: None,
+            discovery: DiscoveryConfig::default(),
         }
     }
 }
@@ -48,6 +55,7 @@ mod tests {
         let config = NetworkConfig {
             listen_addr: "127.0.0.1:9000".to_string(),
             dialable_addr: Some("1.2.3.4:9000".to_string()),
+            discovery: DiscoveryConfig::local(),
         };
         let serialized = serde_json::to_string(&config).expect("serialize");
         let deserialized: NetworkConfig = serde_json::from_str(&serialized).expect("deserialize");
@@ -59,6 +67,7 @@ mod tests {
         let config = NetworkConfig {
             listen_addr: "0.0.0.0:8080".to_string(),
             dialable_addr: None,
+            discovery: DiscoveryConfig::local(),
         };
         let serialized = toml::to_string(&config).expect("serialize toml");
         let deserialized: NetworkConfig = toml::from_str(&serialized).expect("deserialize toml");
@@ -77,6 +86,7 @@ mod tests {
         let config = NetworkConfig::default();
         let serialized = serde_json::to_string(&config).expect("serialize");
         assert!(!serialized.contains("dialable_addr"));
+        assert!(!serialized.contains("discovery"));
     }
 
     #[test]
@@ -94,6 +104,7 @@ mod tests {
         let config = NetworkConfig {
             listen_addr: "10.0.0.1:5555".to_string(),
             dialable_addr: Some("external.host:5555".to_string()),
+            ..Default::default()
         };
         assert_eq!(config, config.clone());
         assert_ne!(config, NetworkConfig::default());

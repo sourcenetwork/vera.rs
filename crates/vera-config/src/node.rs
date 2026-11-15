@@ -160,7 +160,9 @@ impl NodeConfig {
 
     /// Parse configuration from a TOML string.
     pub fn from_toml(s: &str) -> Result<Self, ConfigError> {
-        Ok(toml::from_str(s)?)
+        let config: Self = toml::from_str(s)?;
+        config.network.discovery.validate()?;
+        Ok(config)
     }
 
     /// Load configuration from a JSON file.
@@ -174,7 +176,9 @@ impl NodeConfig {
 
     /// Parse configuration from a JSON string.
     pub fn from_json(s: &str) -> Result<Self, ConfigError> {
-        Ok(serde_json::from_str(s)?)
+        let config: Self = serde_json::from_str(s)?;
+        config.network.discovery.validate()?;
+        Ok(config)
     }
 
     /// Serialize configuration to a TOML string.

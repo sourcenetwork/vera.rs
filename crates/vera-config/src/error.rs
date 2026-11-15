@@ -22,6 +22,10 @@ pub enum ConfigError {
     #[error("failed to parse JSON config: {0}")]
     JsonParse(#[from] serde_json::Error),
 
+    /// A discovery override the listener cannot run with.
+    #[error(transparent)]
+    Discovery(#[from] crate::DiscoveryConfigError),
+
     /// Failed to serialize configuration to TOML.
     #[error("failed to serialize config to TOML: {0}")]
     TomlSerialize(#[from] toml::ser::Error),

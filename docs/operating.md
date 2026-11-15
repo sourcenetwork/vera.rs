@@ -258,6 +258,58 @@ rejected. Restore a complete compatible backup or use authenticated recovery.
   Multi-validator stalls
   have been exercised in unit tests only, not qualified on a deployment. Snapshot
   initialization has its separate deadline; supervised restart does not guarantee recovery.
+- **Peer discovery** (`[network.discovery]`): the consensus listener and the
+  genesis DKG run Commonware's recommended discovery profile, with Commonware's
+  values. Each setting below can be stated on its own; one left out keeps the
+  recommended value. Unknown keys, zero durations or counts, and a handshake
+  rate finer than one nanosecond per attempt fail startup.
+
+  | Setting | Recommended | Meaning |
+  | --- | --- | --- |
+  | `allow_private_ips` | `false` | Dial and accept peers on private, loopback and link-local addresses |
+  | `reconnect_cooldown_ms` | 60000 | Shortest time between two connection reservations for one peer |
+  | `max_concurrent_handshakes` | 512 | Handshakes in progress at once |
+  | `handshakes_per_ip` | `{ count = 1, window_ms = 5000 }` | Handshake attempts admitted from one IP address; `count` is also the burst |
+  | `handshakes_per_subnet` | `{ count = 64, window_ms = 1000 }` | Handshake attempts admitted from one IP subnet |
+  | `dial_interval_ms` | 1000 | Average time between two dial attempts across all peers |
+  | `dial_failures_before_refresh` | 2 | Failed dials of a peer before its address is requested again |
+  | `peer_gossip_interval_ms` | 50000 | Time between gossip rounds about known peers |
+  | `block_duration_seconds` | 14400 | Time a peer blocked for invalid data stays refused |
+
+  The recommended values are read from the Commonware release the node is
+  built with (commonware-p2p 2026.10.0 for this table), not copied into Vera.
+
+  State a setting when the deployment needs it:
+  - Validators that reach each other on RFC 1918 or other non-global
+    addresses, for example inside one VPC, set `allow_private_ips = true` on
+    every node. Without it a bootstrapper or gossiped peer at such an address
+    is never dialed.
+  - Several validators behind one source address (one NAT gateway, one host)
+    share the per-IP handshake allowance; raise `handshakes_per_ip` or they
+    connect one every five seconds.
+  - A lower `reconnect_cooldown_ms` shortens the wait before a restarted
+    validator is dialed again. It also lets any peer reconnect that often.
+  - `peer_gossip_interval_ms` should be the same on every validator: a node
+    accepts one gossip message per half of its own interval and treats a
+    faster sender as exceeding its rate.
+
+  `verad testnet`, `verad devnet`, the e2e harness and the embedded node run
+  several nodes on one address, or a listener on loopback, where the per-IP
+  allowance and the cooldown would stall connection setup. They state the
+  values of Commonware's local profile instead: private addresses allowed,
+  1000 ms cooldown, 1024 concurrent handshakes, 16 handshakes per second per
+  IP and 128 per subnet, 500 ms dial interval, one dial failure before a
+  refresh, 5000 ms gossip interval and a one-hour block duration. `testnet`
+  writes them into each `config.toml`; `devnet` applies them to whatever its
+  `--config` leaves unstated. Remove the `[network.discovery]` tables before
+  using generated configuration between separate hosts.
+
+  Qualification limit: the recommended profile is covered by unit tests of the
+  values applied to the listener. Its behaviour between separate hosts, in
+  particular reconnection after a restart under the 60-second cooldown and
+  the per-IP handshake allowance, has not been exercised; local clusters and
+  the e2e gate run the local values. It belongs to the four-host WAN
+  qualification.
 - **History backend**: Regolith with synchronous writes in every build. There
   is no backend-selection feature. Foreign directory layouts are rejected before
   opening the store.

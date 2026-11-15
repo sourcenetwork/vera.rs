@@ -189,6 +189,7 @@ pub(crate) fn run(
             network: vera_config::NetworkConfig {
                 listen_addr: format!("0.0.0.0:{}", p2p_ports[i]),
                 dialable_addr: None,
+                discovery: vera_config::DiscoveryConfig::local(),
             },
             rpc: vera_config::RpcConfig {
                 http_addr: format!("0.0.0.0:{}", rpc_ports[i]),
@@ -395,7 +396,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_genesis_and_node_configuration_share_the_chain_id() {
+    fn generated_configuration_shares_the_chain_id_and_states_local_discovery() {
         let dir =
             std::env::temp_dir().join(format!("verad-testnet-chain-id-{}", std::process::id()));
         let chain_ids = |network: &Path| {
@@ -413,6 +414,16 @@ mod tests {
         let flagged = dir.join("flagged");
         run(Some(1234), flagged.clone(), &init_only(None)).unwrap();
         assert_eq!(chain_ids(&flagged), (1234, 1234));
+        for node in 0..4 {
+            let config = flagged.join(format!("node{node}")).join("config.toml");
+            assert_eq!(
+                vera_config::NodeConfig::load(Some(&config))
+                    .unwrap()
+                    .network
+                    .discovery,
+                vera_config::DiscoveryConfig::local()
+            );
+        }
 
         let template = flagged.join("node0").join("genesis.json");
         let inherited = dir.join("inherited");

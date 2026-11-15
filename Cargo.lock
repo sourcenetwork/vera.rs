@@ -7260,6 +7260,7 @@ dependencies = [
  "tokio",
  "tracing",
  "vera-cli",
+ "vera-config",
  "vera-domain",
  "vera-modules",
  "vera-node",

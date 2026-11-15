@@ -113,8 +113,8 @@ impl NodeConfigBuilder {
 
     /// Build a TOML config string for a specific node directory and ports.
     ///
-    /// Generates the config as a TOML string matching vera's NodeConfig format,
-    /// avoiding a direct dependency on vera-config.
+    /// The nodes of a cluster share one host, so the config states the local
+    /// discovery settings.
     pub fn build_config_toml(
         &self,
         data_dir: &std::path::Path,
@@ -132,12 +132,16 @@ listen_addr = "0.0.0.0:{p2p_port}"
 http_addr = "0.0.0.0:{rpc_port}"
 ws_addr = "0.0.0.0:{rpc_port}"
 max_connections = {rpc_max_connections}
-"#,
+
+{discovery}"#,
             chain_id = self.chain_id,
             data_dir = data_dir.display(),
             p2p_port = p2p_port,
             rpc_port = rpc_port,
             rpc_max_connections = self.rpc_max_connections,
+            discovery = vera_config::DiscoveryConfig::local()
+                .toml_section()
+                .expect("local discovery settings serialize"),
         )
     }
 
@@ -188,6 +192,21 @@ mod tests {
 
         let resolved = builder.consensus();
         assert_eq!(resolved.leader_timeout, Duration::from_millis(42));
+    }
+
+    #[test]
+    fn a_generated_config_states_the_local_discovery_settings() {
+        let toml = NodeConfigBuilder::new().build_config_toml(
+            std::path::Path::new("/tmp/node0"),
+            30_303,
+            8_545,
+        );
+        let config = vera_config::NodeConfig::from_toml(&toml).unwrap();
+        assert_eq!(config.network.listen_addr, "0.0.0.0:30303");
+        assert_eq!(
+            config.network.discovery,
+            vera_config::DiscoveryConfig::local()
+        );
     }
 
     #[test]
