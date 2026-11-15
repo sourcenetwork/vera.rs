@@ -162,8 +162,10 @@ definitions differ. Policies created later take counters above the highest one
 seeded and above the number of policies seeded.
 
 The list is part of the deployment's identity: reopening a directory with a
-different list is refused. A seeded policy records no creating transaction,
-worker or creation revision.
+different list is refused. A list that does not compile, or names one
+identifier twice, is refused with `SoloError::Policies` before anything is
+stored, so a corrected list starts in the same directory. A seeded policy
+records no creating transaction, worker or creation revision.
 
 ## Shutdown
 

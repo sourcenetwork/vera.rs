@@ -54,6 +54,9 @@ pub enum SoloError {
     /// The stored genesis is unreadable or inconsistent.
     #[error("stored genesis: {0}")]
     Genesis(String),
+    /// A seeded policy does not compile, or two share an identifier.
+    #[error("seeded policies: {0}")]
+    Policies(String),
     /// The directory belongs to a deployment with a different identity.
     #[error("data directory holds a different deployment: {0}")]
     Mismatch(&'static str),
@@ -150,6 +153,12 @@ fn create(
         .operators
         .validate()
         .map_err(|error| SoloError::Genesis(error.to_string()))?;
+    // Compiled before anything is stored: a stored seed list fixes the
+    // deployment's identity, so a refused one could not be corrected in place.
+    vera_modules::ModuleState::default()
+        .acp
+        .initialize_placed_policies(&identity.policies)
+        .map_err(|error| SoloError::Policies(error.to_string()))?;
     let (epoch_info, shares) = crate::bootstrap::random_setup([local.clone()])
         .map_err(|error| SoloError::Share(format!("{error:#}")))?;
     let share = shares
