@@ -40,7 +40,10 @@ pub mod rings;
 pub mod threshold_objects;
 /// Certified token lifecycle reads.
 pub mod tokens;
-pub use vera_domain::{ExecutionReceipt, ReceiptResponse, ReceiptResponseError};
+pub use vera_domain::{
+    ExecutionReceipt, NativeCallRequest, NativeCallSimulation, ReceiptResponse,
+    ReceiptResponseError, SimulatedLog,
+};
 pub use vera_permission::{
     AccessRequest, Actor, ModuleId, Object, Operation, PERMISSION_LIMITS, PermissionLimits,
     PermissionProof, PermissionRead, PermissionResponse, PolicyPrefixPageProof,

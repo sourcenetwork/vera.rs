@@ -123,13 +123,13 @@ pub(super) fn out_of_gas_error() -> PrecompileError {
     PrecompileError::Fatal(OUT_OF_GAS_MESSAGE.to_string())
 }
 
-pub(super) fn is_out_of_gas(error: &PrecompileError) -> bool {
+pub(crate) fn is_out_of_gas(error: &PrecompileError) -> bool {
     matches!(error, PrecompileError::Fatal(message) if message == OUT_OF_GAS_MESSAGE)
 }
 
 /// Message carried by a recoverable dispatch error, without the fatal-error
 /// display prefix — module-style reverts report the bare cause.
-pub(super) fn recoverable_message(error: &PrecompileError) -> String {
+pub(crate) fn recoverable_message(error: &PrecompileError) -> String {
     match error {
         PrecompileError::Fatal(message) => message.clone(),
         other => other.to_string(),
@@ -155,7 +155,7 @@ pub(super) fn ok_dispatch(gas: u64, ret: Vec<u8>, logs: Vec<Log>) -> DispatchRes
     }
 }
 
-pub(super) fn err_dispatch(e: impl core::fmt::Display) -> DispatchResult {
+pub(crate) fn err_dispatch(e: impl core::fmt::Display) -> DispatchResult {
     DispatchResult {
         precompile: module_error(e),
         logs: vec![],

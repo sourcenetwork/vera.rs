@@ -335,6 +335,7 @@ async fn run_node_with_elector<
             .await?
             .with_payload(Payload::EpochInfo(epoch_info.clone()));
     let executor = executor.with_genesis_id(genesis_block.id().0.0);
+    let execution_config = executor.config().clone();
 
     // Marshal, broadcast, archives.
     let resolver = marshal_resolver::init(
@@ -1006,6 +1007,7 @@ async fn run_node_with_elector<
         gas_limit,
         modules.clone(),
     )
+    .with_execution_config(execution_config)
     .with_archive(archive.clone());
     if crate::diagnostics::enabled() {
         let history = history.clone();

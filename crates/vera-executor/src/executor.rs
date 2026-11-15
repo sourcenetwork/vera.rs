@@ -1,7 +1,6 @@
 //! VeraExecutor — EVM executor with vera precompiles (ACP, Bulletin, Vera)
 //! and native BLS transaction support.
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::{
@@ -32,23 +31,15 @@ use vera_modules::types::{BlockExecCtx, Timestamp, TxExecCtx};
 use vera_modules::vera::VeraModule;
 use vera_traits::StateDbRead;
 
-use crate::precompiles::{
-    DispatchReturn, VALIDATOR_REGISTRY_ADDRESS, VeraPrecompiles, dispatch_to_module,
-};
-
-/// Whether a module call ran to completion: not a revert, a halt, an error or a panic.
-fn succeeded(dispatch: &std::thread::Result<DispatchReturn>) -> bool {
-    matches!(dispatch, Ok(Ok(result)) if result.precompile.status.is_success())
-}
-
-/// Gas budget for native BLS transactions dispatched to modules.
-const NATIVE_TX_GAS_LIMIT: u64 = 1_000_000;
+use crate::precompiles::VeraPrecompiles;
 
 mod gas_budget;
 pub(crate) mod native_authentication;
+pub(crate) mod native_dispatch;
 
 use gas_budget::BlockGasBudget;
 use native_authentication::{AuthenticatedNativeTx, authenticate_native_tx};
+use native_dispatch::{NATIVE_TX_GAS_LIMIT, NativeCall, dispatch_native_call};
 
 /// Block executor with vera precompiles (ACP, Bulletin, Vera).
 ///
@@ -217,62 +208,19 @@ impl VeraExecutor {
             signer: signer_did,
         };
 
-        let before = (acp.clone(), bulletin.clone(), vera.clone());
-        let checkpoint = journal.journal_mut().checkpoint();
-        let mut dispatch_result = catch_unwind(AssertUnwindSafe(|| {
-            if native_tx.target == VALIDATOR_REGISTRY_ADDRESS {
-                journal
-                    .journal_mut()
-                    .load_account(VALIDATOR_REGISTRY_ADDRESS)
-                    .map_err(|error| {
-                        crate::precompiles::internal_fault(format!(
-                            "membership account read failed: {error:?}"
-                        ))
-                    })?;
-                journal
-                    .journal_mut()
-                    .touch_account(VALIDATOR_REGISTRY_ADDRESS);
-                return crate::precompiles::validator_registry::dispatch_with_journal(
-                    journal,
-                    acp,
-                    vera,
-                    self.config.max_active_members(),
-                    &tx_ctx,
-                    &native_tx.calldata,
-                    NATIVE_TX_GAS_LIMIT,
-                );
-            }
-            dispatch_to_module(
-                acp,
-                bulletin,
-                vera,
-                native_tx.target,
-                &native_tx.calldata,
-                block_ctx,
-                &tx_ctx,
-                NATIVE_TX_GAS_LIMIT,
-            )
-            .expect("target validated above")
-        }));
-
-        if succeeded(&dispatch_result)
-            && !(acp.store().changes_fit_native_bounds(before.0.store())
-                && bulletin.store().changes_fit_native_bounds(before.1.store())
-                && vera.store().changes_fit_native_bounds(before.2.store()))
-        {
-            let mut rejected =
-                crate::precompiles::err_dispatch("module record exceeds native storage bounds");
-            rejected.precompile.gas_used = NATIVE_TX_GAS_LIMIT;
-            dispatch_result = Ok(Ok(rejected));
-        }
-
-        // A halt is a failure like a revert: an exhausted allowance commits nothing.
-        if succeeded(&dispatch_result) {
-            journal.journal_mut().checkpoint_commit();
-        } else {
-            (*acp, *bulletin, *vera) = before;
-            journal.journal_mut().checkpoint_revert(checkpoint);
-        }
+        let dispatch_result = dispatch_native_call(
+            &NativeCall {
+                target: native_tx.target,
+                calldata: &native_tx.calldata,
+                max_active_members: self.config.max_active_members(),
+            },
+            block_ctx,
+            &tx_ctx,
+            acp,
+            bulletin,
+            vera,
+            journal,
+        );
 
         let failed_receipt = || {
             ExecutionReceipt::new(

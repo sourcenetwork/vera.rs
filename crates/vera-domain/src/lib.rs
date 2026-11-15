@@ -30,6 +30,9 @@ pub use idents::{BlockId, Idents, StateRoot, TxId};
 mod native_tx;
 pub use native_tx::{NATIVE_TX_TYPE, NativeTx, NativeTxPayload};
 
+mod native_simulation;
+pub use native_simulation::{NativeCallRequest, NativeCallSimulation, SimulatedLog};
+
 mod light_block;
 pub use light_block::{
     ConsensusPublicKey, EpochMaterial, LIGHT_BLOCK_MAX_ARTIFACT_BYTES, LIGHT_BLOCK_MAX_DESCENDANTS,

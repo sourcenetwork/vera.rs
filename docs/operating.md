@@ -478,9 +478,15 @@ workloads and measurement boundaries.
   them receives retryable `-32002` errors and must back off, not reconnect
   harder.
 - `eth_call` and `eth_estimateGas`, which carry the Rust client's typed
-  queries, run four at a time per node. Up to 64 more callers wait at most two
-  seconds for a slot; a caller beyond those, or one whose wait expires,
-  receives the same retryable `-32002`. The client does not retry it.
+  queries, share four slots per node with `vera_simulateNativeCall`. Up to 64
+  more callers wait at most two seconds for a slot; a caller beyond those, or
+  one whose wait expires, receives the same retryable `-32002`. The client
+  does not retry it.
+- `vera_simulateNativeCall` dry-runs a module call as any DID the caller
+  names, without a signature. It writes nothing and reads the committed module
+  state that module queries read; it is not an access decision and authorizes
+  nothing.
+  See [simulation.md](simulation.md).
 
 ## Native consumer configuration
 

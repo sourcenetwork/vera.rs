@@ -253,7 +253,8 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
         let net_api = NetApiImpl::new(chain_id).with_node_state((*node_state).clone());
         let web3_api = Web3ApiImpl::new();
         let vera_api = {
-            let mut api = VeraApiImpl::new(node_state, tx_submit);
+            let mut api =
+                VeraApiImpl::new(node_state, tx_submit).with_simulator(Arc::new(state_provider));
             if let (Some(idx), Some(mods)) = (vera_index, vera_modules) {
                 api = api.with_index_and_modules(idx, mods);
             }

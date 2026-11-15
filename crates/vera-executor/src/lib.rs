@@ -45,7 +45,11 @@ mod mempool;
 pub use mempool::{MempoolValidator, PreValidatedNativeTx, TxValidationResult};
 
 mod simulate;
-pub use simulate::{SimulateRequest, SimulateResult, estimate_gas, simulate_call};
+pub use simulate::{
+    MAX_SIMULATED_SIGNER_BYTES, NativeSimulateError, NativeSimulateRequest, NativeSimulateResult,
+    SimulateRequest, SimulateResult, SimulationContext, estimate_gas, simulate_call,
+    simulate_native_call,
+};
 
 pub mod precompiles;
 pub use precompiles::VALIDATOR_REGISTRY_ADDRESS;

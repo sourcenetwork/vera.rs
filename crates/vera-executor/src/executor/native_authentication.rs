@@ -14,6 +14,11 @@ const NATIVE_TARGETS: [Address; 4] = [
     VALIDATOR_REGISTRY_ADDRESS,
 ];
 
+/// Whether a native request may be addressed to `target`.
+pub(crate) fn is_native_target(target: &Address) -> bool {
+    NATIVE_TARGETS.contains(target)
+}
+
 pub(crate) struct AuthenticatedNativeTx {
     pub(crate) native_tx: NativeTx,
     pub(crate) signer_did: String,
@@ -29,7 +34,7 @@ pub(crate) fn decode_native_tx(chain_id: u64, tx_bytes: &[u8]) -> Result<NativeT
             got: native_tx.chain_id,
         });
     }
-    if !NATIVE_TARGETS.contains(&native_tx.target) {
+    if !is_native_target(&native_tx.target) {
         return Err(ExecutionError::UnknownNativeTarget(native_tx.target));
     }
     Ok(native_tx)

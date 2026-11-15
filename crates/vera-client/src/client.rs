@@ -11,6 +11,7 @@ use crate::types::{NativeReceipt, NodeStatus, TransactionReceipt};
 
 mod admission;
 mod envelope;
+mod simulation;
 mod submission;
 
 /// ACP precompile address (`0x0810`).

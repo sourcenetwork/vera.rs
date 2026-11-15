@@ -2,6 +2,7 @@
 
 use alloy_primitives::{Address, B256, Bytes, U256};
 use async_trait::async_trait;
+use vera_domain::{NativeCallRequest, NativeCallSimulation};
 
 use crate::{
     error::RpcError,
@@ -76,6 +77,16 @@ pub trait StateProvider: Send + Sync {
         _request: CallRequest,
         _block: Option<BlockNumberOrTag>,
     ) -> Result<u64, RpcError> {
+        Err(RpcError::NotImplemented)
+    }
+
+    /// Dry-run a native module call as the DID the request names.
+    ///
+    /// The DID is not authenticated and nothing is written.
+    async fn simulate_native_call(
+        &self,
+        _request: NativeCallRequest,
+    ) -> Result<NativeCallSimulation, RpcError> {
         Err(RpcError::NotImplemented)
     }
 

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use alloy_primitives::{B256, Bytes, U64};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
-use vera_domain::{LightBlock, ModuleId};
+use vera_domain::{LightBlock, ModuleId, NativeCallRequest, NativeCallSimulation};
 
 #[cfg(test)]
 mod admission_tests;
@@ -28,6 +28,7 @@ use crate::{
     error::RpcError,
     eth::TxSubmitCallback,
     state::{NodeState, NodeStatus},
+    state_provider::StateProvider,
     types::{RpcLog, RpcNativeReceipt},
 };
 
@@ -74,6 +75,18 @@ pub trait VeraApi {
     /// Returns the on-chain native nonce for a BLS identity.
     #[method(name = "getNativeNonce")]
     async fn get_native_nonce(&self, did: String) -> RpcResult<U64>;
+
+    /// Dry-runs a native module call as the DID the request names, at the
+    /// head revision, without a signature or a sequence.
+    ///
+    /// The DID is not authenticated: the answer says what that DID could do
+    /// and authorizes nothing. No state is written and no revision records
+    /// the outcome.
+    #[method(name = "simulateNativeCall")]
+    async fn simulate_native_call(
+        &self,
+        request: NativeCallRequest,
+    ) -> RpcResult<NativeCallSimulation>;
 
     /// Return bounded evidence for evaluating this request at a finalized revision.
     #[method(name = "getPermissionProof")]
@@ -156,6 +169,7 @@ pub struct VeraApiImpl {
     light_block_lookup: Option<LightBlockLookup>,
     receipt_proof_lookup: Option<ReceiptProofLookup>,
     archive: Option<crate::ArchiveReader>,
+    simulator: Option<Arc<dyn StateProvider>>,
 }
 
 impl std::fmt::Debug for VeraApiImpl {
@@ -186,7 +200,16 @@ impl VeraApiImpl {
             light_block_lookup: None,
             receipt_proof_lookup: None,
             archive: None,
+            simulator: None,
         }
+    }
+
+    /// Dry-run native calls through the provider `eth_call` executes on, so
+    /// both share its simulation slots.
+    #[must_use]
+    pub fn with_simulator(mut self, provider: Arc<dyn StateProvider>) -> Self {
+        self.simulator = Some(provider);
+        self
     }
 
     /// Set the block index and shared module state for receipt/nonce queries.
@@ -360,6 +383,16 @@ impl VeraApiServer for VeraApiImpl {
             .get_nonce(&did)
             .map_err(|e| RpcError::Internal(e.to_string()))?;
         Ok(U64::from(nonce))
+    }
+
+    async fn simulate_native_call(
+        &self,
+        request: NativeCallRequest,
+    ) -> RpcResult<NativeCallSimulation> {
+        let Some(simulator) = &self.simulator else {
+            return Err(RpcError::NotImplemented.into());
+        };
+        Ok(simulator.simulate_native_call(request).await?)
     }
 
     async fn get_permission_proof(

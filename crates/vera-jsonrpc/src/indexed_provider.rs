@@ -10,10 +10,13 @@ use async_trait::async_trait;
 use vera_indexer::{BlockIndex, IndexedBlock, IndexedReceipt, IndexedTransaction, LogFilter};
 use vera_traits::{StateDbError, StateDbRead};
 
+use vera_domain::{NativeCallRequest, NativeCallSimulation};
 use vera_executor::{
-    ExecutionError, ModuleState, SharedModuleState, SimulateRequest, SpecId,
+    ExecutionConfig, SharedModuleState, SimulateRequest, SpecId,
     estimate_gas as executor_estimate_gas, simulate_call,
 };
+
+mod simulation;
 
 use crate::{
     error::RpcError,
@@ -34,8 +37,7 @@ use crate::{
 pub struct IndexedStateProvider<S> {
     index: Arc<BlockIndex>,
     state: S,
-    chain_id: u64,
-    spec_id: SpecId,
+    config: ExecutionConfig,
     block_gas_limit: u64,
     modules: SharedModuleState,
     archive: Option<crate::ArchiveReader>,
@@ -56,8 +58,7 @@ impl<S> IndexedStateProvider<S> {
         Self {
             index,
             state,
-            chain_id,
-            spec_id,
+            config: ExecutionConfig::new(chain_id).with_spec_id(spec_id),
             block_gas_limit,
             modules,
             archive: None,
@@ -67,6 +68,14 @@ impl<S> IndexedStateProvider<S> {
 }
 
 impl<S> IndexedStateProvider<S> {
+    /// Simulate under the deployment's execution configuration, which binds
+    /// the genesis record and the membership limit module calls observe.
+    #[must_use]
+    pub const fn with_execution_config(mut self, config: ExecutionConfig) -> Self {
+        self.config = config;
+        self
+    }
+
     /// Enable bounded historical point reads when entries are absent from memory.
     pub fn with_archive(mut self, archive: crate::ArchiveReader) -> Self {
         self.archive = Some(archive);
@@ -79,8 +88,7 @@ impl<S: Clone> Clone for IndexedStateProvider<S> {
         Self {
             index: Arc::clone(&self.index),
             state: self.state.clone(),
-            chain_id: self.chain_id,
-            spec_id: self.spec_id,
+            config: self.config.clone(),
             block_gas_limit: self.block_gas_limit,
             modules: Arc::clone(&self.modules),
             archive: self.archive.clone(),
@@ -281,11 +289,9 @@ impl<S: StateDbRead + Send + Sync + 'static> StateProvider for IndexedStateProvi
     ) -> Result<Bytes, RpcError> {
         reject_historical_block(&block)?;
         let request = call_request_to_simulate(&request);
-        let (chain_id, spec_id, gas_limit) = (self.chain_id, self.spec_id, self.block_gas_limit);
+        let context = self.head_context();
         let result = self
-            .simulate(move |state, modules| {
-                simulate_call(state, chain_id, spec_id, &request, gas_limit, Some(modules))
-            })
+            .simulate(move |state, modules| simulate_call(state, &context, &request, Some(modules)))
             .await?;
         if result.success {
             Ok(result.output)
@@ -303,37 +309,18 @@ impl<S: StateDbRead + Send + Sync + 'static> StateProvider for IndexedStateProvi
     ) -> Result<u64, RpcError> {
         reject_historical_block(&block)?;
         let request = call_request_to_simulate(&request);
-        let (chain_id, spec_id, gas_limit) = (self.chain_id, self.spec_id, self.block_gas_limit);
+        let context = self.head_context();
         self.simulate(move |state, modules| {
-            executor_estimate_gas(state, chain_id, spec_id, &request, gas_limit, Some(modules))
+            executor_estimate_gas(state, &context, &request, Some(modules))
         })
         .await
     }
-}
 
-impl<S: StateDbRead> IndexedStateProvider<S> {
-    /// Run an execution off the async workers against a module snapshot, so it
-    /// neither occupies a worker nor holds the lock finalization publishes under.
-    /// A caller waits briefly for a slot behind a bounded queue; the slot stays
-    /// taken until the execution ends, even if the caller leaves.
-    async fn simulate<T: Send + 'static>(
+    async fn simulate_native_call(
         &self,
-        run: impl FnOnce(&S, &ModuleState) -> Result<T, ExecutionError> + Send + 'static,
-    ) -> Result<T, RpcError> {
-        let permit = self.simulations.acquire().await?;
-        let modules = self
-            .modules
-            .read()
-            .map_err(|_| RpcError::Internal("lock poisoned".to_string()))?
-            .clone();
-        let state = self.state.clone();
-        tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            run(&state, &modules)
-        })
-        .await
-        .map_err(|error| RpcError::Internal(error.to_string()))?
-        .map_err(|error| RpcError::ExecutionFailed(error.to_string()))
+        request: NativeCallRequest,
+    ) -> Result<NativeCallSimulation, RpcError> {
+        self.simulate_native(request).await
     }
 }
 
@@ -493,6 +480,10 @@ fn indexed_receipt_to_rpc(receipt: IndexedReceipt) -> RpcTransactionReceipt {
         effective_gas_price: U256::ZERO,
     }
 }
+
+#[cfg(test)]
+#[path = "indexed_provider/simulation_tests.rs"]
+mod simulation_tests;
 
 #[cfg(test)]
 mod tests {

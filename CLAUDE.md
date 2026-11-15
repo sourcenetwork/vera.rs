@@ -350,11 +350,18 @@ range or filter. Reversed ranges fail with -32602. Results are never silently
 truncated. These limits also apply when compatibility methods are enabled on a
 native service.
 
-`eth_call` and `eth_estimateGas` execute on the blocking pool against a
-snapshot of module state, so they hold neither an async worker nor the lock
-finalization publishes under. Four run at a time per node and up to 64 more
-wait at most two seconds for a slot; a caller beyond the 64, or one whose wait
-expires, gets the retryable -32002. A slot stays taken until its execution ends.
+`eth_call`, `eth_estimateGas` and `vera_simulateNativeCall` execute on the
+blocking pool against a snapshot of module state, so they hold neither an
+async worker nor the lock finalization publishes under. They share four slots
+per node, and up to 64 more callers wait at most two seconds for one; a caller
+beyond the 64, or one whose wait expires, gets the retryable -32002. A slot
+stays taken until its execution ends. Each observes the head revision's height
+and time, the deployment's genesis record and its membership limit, and writes
+nothing. `eth_call` carries no signer, so module writes revert there.
+`vera_simulateNativeCall` dry-runs a module call as a named DID without a
+signature or sequence and returns success or the refusal reason, gas and logs.
+It is unauthenticated: it answers what a DID could do and authorizes nothing.
+Its input is bounded like a native submission. See `docs/simulation.md`.
 An estimate is a limit the call succeeded with. The search stops within 1/64 of
 its upper bound and starts from the gas used at the cap, so a call that uses
 less gas under a lower limit can be estimated well above its smallest
@@ -376,7 +383,7 @@ time out after ten seconds, and socket closure after one second.
 | `eth_*` | `eth_sendRawTransaction`, `eth_call`, `eth_getStorageAt`, `eth_getTransactionReceipt`, … | Optional compatibility clients; legacy submissions are disabled in pipelined mode |
 | `eth_subscribe` | `newHeads`, `logs` | Indexers, light clients |
 | `vera_subscribeHeaders` | `vera_header` notifications; `vera_unsubscribeHeaders` cancellation | Native verified consumers |
-| `vera_*` | `vera_nodeStatus`, `vera_sendNativeTx`, `vera_getTransactionReceipt`, `vera_getNativeNonce`, current permission/record proofs and light blocks | Native Defra, Orbis, Trust and verification clients |
+| `vera_*` | `vera_nodeStatus`, `vera_sendNativeTx`, `vera_simulateNativeCall` (unauthenticated dry run), `vera_getTransactionReceipt`, `vera_getNativeNonce`, current permission/record proofs and light blocks | Native Defra, Orbis, Trust and verification clients |
 
 ### Light-client material
 
