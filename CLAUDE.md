@@ -86,6 +86,15 @@ stops:
 - **Watchdog:** a finality stall stops the node only while it is connected to
   enough peers for a voting quorum, or is the only validator. The peer count
   in `vera_nodeStatus` is sampled from the network's connection metric.
+- **Backups:** `NodeOptions::backup` runs the same actors under a network key
+  that is in no committee: a verify-only scheme, an observing reshare actor,
+  no share, and submissions refused with a retryable error. A validator's
+  network key stays its validator key, because Commonware accepts votes and
+  epoch-probe replies by that key. `NodeOptions::devices` adds backups to
+  every tracked peer set as secondary peers, so a validator accepts them and
+  never dials them. A backup's watchdog counts a stall only while a peer is
+  connected, and its restart re-arms state sync once the deployment may have
+  moved past the retained consensus revisions.
 
 The finalization callback persists execution and certificate history together
 in one durable batch before returning to Commonware's acknowledgement path. Disk writes run
@@ -454,7 +463,13 @@ history is not pruned. A host may hold the key material itself:
 `EmbeddedConfig::adopt` opens it in an empty directory or the one that already
 holds it without writing either secret, and `EmbeddedNode::export` returns it
 for another device. The export carries no state, and nothing yet prevents two
-devices from both validating, which forks the deployment. See `docs/embedded-node.md`.
+devices from both validating, which forks the deployment.
+`EmbeddedConfig::backup` instead starts a backup from the genesis record alone:
+it follows the active device at a given address under its own `DeviceKey`,
+catches up by snapshot from an empty directory, re-executes blocks, serves
+reads and proofs, and holds no validator key or share. The active device lists
+its backups' keys in `EmbeddedConfig::backups`, which is configuration, not
+state. A backup cannot become active. See `docs/embedded-node.md`.
 
 ## Crate Structure
 
