@@ -55,7 +55,6 @@ mod restoration;
 mod retirement;
 mod retirement_cleanup;
 mod spelling;
-pub mod theorem;
 pub use registration_queries::{MAX_REGISTRATION_LEAF_BYTES, MAX_REGISTRATION_OBJECTS};
 pub mod decision;
 mod decision_cleanup;

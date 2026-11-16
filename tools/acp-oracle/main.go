@@ -79,12 +79,6 @@ func evaluate(engine *services.EngineService, id string, step Step) Outcome {
 		if err == nil {
 			result.Blob = string(response.Record.GetMetadata().GetSupplied().GetBlob())
 		}
-	case "theorem":
-		var response *types.EvaluateTheoremResponse
-		response, err = engine.EvaluateTheorem(ctx, &types.EvaluateTheoremRequest{PolicyId: id, PolicyTheorem: step.Policy})
-		if err == nil {
-			result.Value = &response.Result.Ok
-		}
 	case "register":
 		_, err = engine.RegisterObject(ctx, &types.RegisterObjectRequest{PolicyId: id, Object: obj, Metadata: &types.SuppliedMetadata{Blob: []byte(step.Blob)}})
 	case "set":

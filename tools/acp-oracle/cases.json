@@ -824,64 +824,6 @@
     ]
   },
   {
-    "name": "theorem-assertions",
-    "policy": "name: edits\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n    permissions:\n      - name: read\n        expr: reader\n",
-    "steps": [
-      {
-        "op": "register",
-        "actor": "did:key:owner",
-        "resource": "file",
-        "object": "report",
-        "relation": "reader",
-        "subject": "did:key:reader"
-      },
-      {
-        "op": "set",
-        "actor": "did:key:owner",
-        "resource": "file",
-        "object": "report",
-        "relation": "reader",
-        "subject": "did:key:reader"
-      },
-      {
-        "op": "theorem",
-        "actor": "did:key:owner",
-        "resource": "file",
-        "object": "report",
-        "relation": "reader",
-        "subject": "did:key:reader",
-        "policy": "Authorizations { file:report#read@did:key:reader } Delegations { did:key:owner > file:report#reader }"
-      },
-      {
-        "op": "theorem",
-        "actor": "did:key:owner",
-        "resource": "file",
-        "object": "report",
-        "relation": "reader",
-        "subject": "did:key:reader",
-        "policy": "Authorizations { !file:report#read@did:key:stranger } Delegations {}"
-      },
-      {
-        "op": "theorem",
-        "actor": "did:key:owner",
-        "resource": "file",
-        "object": "report",
-        "relation": "reader",
-        "subject": "did:key:reader",
-        "policy": "Authorizations { file:report#read@did:key:stranger } Delegations {}"
-      },
-      {
-        "op": "theorem",
-        "actor": "did:key:owner",
-        "resource": "file",
-        "object": "report",
-        "relation": "reader",
-        "subject": "did:key:reader",
-        "policy": "Authorizations { file:\"report\"#read@did:key:reader } Delegations {}"
-      }
-    ]
-  },
-  {
     "name": "incoming-userset-pruning",
     "policy": "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: writer\n        types: [actor]\n      - name: admin\n        types: [actor, group->member]\n        manages: [reader, owner]\n      - name: parent\n        types: [file]\n    permissions:\n      - name: read\n        expr: reader + parent->read\n      - name: edit\n        expr: writer - reader\n  - name: group\n    relations:\n      - name: member\n        types: [actor]\n",
     "steps": [

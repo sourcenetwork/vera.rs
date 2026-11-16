@@ -154,7 +154,7 @@ behaves as the same request in the canonical spelling:
 | Token subject | The authenticated submitter, and the token record's authorized account |
 | Relationship subject, transfer target, bulletin collaborator | The stored relationship, its storage key and the collaborator record |
 | Object of the policy's `actor` resource, as an object or as an object-edge or userset subject | The stored relationship and its storage key |
-| Actor and actor-resource objects of an access check, theorem or relationship query | The evaluated actor and the selected relationships |
+| Actor and actor-resource objects of an access check or relationship query | The evaluated actor and the selected relationships |
 | Creator and actor of a recorded decision | The decision record and its identifier |
 | Revoking caller, token lookup by issuer or account | The issuer or account the token records |
 

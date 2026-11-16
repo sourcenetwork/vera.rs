@@ -2,7 +2,6 @@ use super::*;
 use crate::dispatch::ModuleStatus;
 use vera_modules::acp::{
     pages::{RecordPage, RelationshipPageRequest},
-    theorem::TheoremReport,
     types::{
         PolicyCmdResult, PolicyCommandRequest, PolicyCreation, PolicyRecord, RelationshipRecord,
         SuppliedMetadata,
@@ -134,11 +133,6 @@ fn native_lifecycle_dispatch_preserves_metadata_and_enforces_ownership() {
         actor: "did:key:owner".into(),
     });
     assert!(!IAcp::checkManagementAuthorityCall::abi_decode_returns(&output).unwrap());
-    let output = f.call(IAcp::evaluateTheoremCall { policyId: policy, source: "Authorizations { file:report#read@did:key:next } Delegations { !did:key:owner > file:report#reader }".into() });
-    let bytes = IAcp::evaluateTheoremCall::abi_decode_returns(&output).unwrap();
-    let report: TheoremReport = serde_json::from_slice(&bytes).unwrap();
-    assert!(report.ok);
-    assert_eq!(report.theorem_count, 2);
     let output = f.call(IAcp::getRelationshipsPageCall {
         policyId: policy,
         request: serde_json::to_vec(&RelationshipPageRequest {

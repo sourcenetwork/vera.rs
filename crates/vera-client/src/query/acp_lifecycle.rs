@@ -49,25 +49,6 @@ impl VeraClient {
         Ok(serde_json::from_slice(&bytes)?)
     }
 
-    /// Evaluate policy assertions at the endpoint's current state; the report is not certified evidence.
-    /// Unauthenticated; evaluate locally over a verified `vera_getCurrentPolicySnapshot` capture for evidence.
-    pub async fn evaluate_policy_theorem(
-        &self,
-        policy_id: FixedBytes<32>,
-        source: &str,
-    ) -> Result<vera_modules::acp::theorem::TheoremReport, ClientError> {
-        let call = IAcp::evaluateTheoremCall {
-            policyId: policy_id,
-            source: source.into(),
-        };
-        let output = self
-            .view_call(ACP_ADDRESS, call.abi_encode().into())
-            .await?;
-        let bytes = IAcp::evaluateTheoremCall::abi_decode_returns(&output)
-            .map_err(|error| ClientError::AbiDecode(error.to_string()))?;
-        Ok(serde_json::from_slice(&bytes)?)
-    }
-
     /// Read an endpoint's live object catalogue. This response carries no finality proof.
     /// Unauthenticated; the verified read is [`VeraClient::read_policy_page`].
     pub async fn get_policy_catalogue(

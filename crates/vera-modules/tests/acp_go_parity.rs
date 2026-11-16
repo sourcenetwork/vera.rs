@@ -101,7 +101,6 @@ fn evaluate(module: &mut AcpModule, policy: &str, step: &Step) -> Result<Outcome
             result.blob =
                 String::from_utf8(module.query_policy(policy)?.supplied_metadata.blob).unwrap()
         }
-        "theorem" => result.value = Some(module.evaluate_theorem(policy, &step.policy)?.ok),
         "check" => {
             result.value = Some(module.query_verify_access_request(
                 policy,

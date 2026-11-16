@@ -89,17 +89,6 @@ pub(super) async fn lifecycle(
             .await
             .unwrap()
     );
-    let theorem = format!(
-        "Authorizations {{ file:report#read@{} }} Delegations {{ !{} > file:report#reader }}",
-        next.did(),
-        owner.did()
-    );
-    let report = client
-        .evaluate_policy_theorem(policy, &theorem)
-        .await
-        .unwrap();
-    assert!(report.ok);
-    assert_eq!(report.theorem_count, 2);
     receipts.push(
         client
             .native_archive_object(next, policy, "report", "file")
