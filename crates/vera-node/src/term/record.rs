@@ -29,6 +29,10 @@ pub(crate) struct TermRecord {
     /// Whether the consensus journal in the directory holds votes this
     /// device cast as the validator.
     pub voted: bool,
+    /// Whether the consensus archives and state journals must be taken
+    /// again from the device this one follows: they hold blocks a later term
+    /// voided, which cannot be cut out of them.
+    pub resync: bool,
 }
 
 impl TermRecord {
@@ -113,6 +117,7 @@ mod tests {
             handed_over: Some(change(3)),
             taking_over: None,
             voted: true,
+            resync: false,
         };
         record.store(directory.path()).unwrap();
         assert_eq!(TermRecord::load(directory.path()).unwrap(), record);

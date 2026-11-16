@@ -12,6 +12,7 @@ mod probe;
 mod record;
 mod refusal;
 mod reporter;
+mod rewind;
 mod switching;
 mod wire;
 
@@ -24,6 +25,7 @@ pub(crate) use probe::Probe;
 pub(crate) use record::TermRecord;
 pub use refusal::TermRefusal;
 pub(crate) use reporter::TermReporter;
+pub(crate) use rewind::{acknowledge, discarded, resync_after, rewind};
 pub use switching::{Device, Switching};
 
 use alloy_primitives::B256;

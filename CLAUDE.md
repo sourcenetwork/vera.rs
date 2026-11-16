@@ -462,8 +462,8 @@ history is not pruned. A host may hold the key material itself:
 `SoloDeployment` pairs the genesis record with the validator key and share,
 `EmbeddedConfig::adopt` opens it in an empty directory or the one that already
 holds it without writing either secret, and `EmbeddedNode::export` returns it
-for another device. The export carries no state, and nothing yet prevents two
-devices from both validating, which forks the deployment.
+for another device. The export carries no state, and two devices started as
+validator fork the deployment until one learns the other's term.
 `EmbeddedConfig::backup` instead starts a backup from the genesis record alone:
 it follows the active device at a given address under its own `DeviceKey`,
 catches up by snapshot from an empty directory, re-executes blocks, serves
@@ -495,7 +495,11 @@ they stand on channel 17. An active device whose newest block is older than
 proposes, and `EmbeddedNode::demoted` resolves if one holds a later term; a
 device that wakes alone proposes on. A backup holding a certificate stops with
 `TermRefusal::LowerTerm` on a finalized block of a lower term above the cut.
-Blocks carry no certificate, so re-execution alone accepts any term at or
+A device that follows a term whose cut is below blocks it finalized in a
+lower term reports their submissions (`EmbeddedNode::discarded`,
+`discarded-submissions.json`), drops those records from history and removes
+`commonware/`, then takes state from the holder and imports history from the
+cut. Blocks carry no certificate, so re-execution alone accepts any term at or
 above the parent's. See `docs/active-term.md`.
 
 ## Crate Structure

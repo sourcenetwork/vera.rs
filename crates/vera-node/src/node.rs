@@ -159,6 +159,7 @@ async fn run_node_with_elector<
         )
     })?;
     let mut term_record = crate::term::TermRecord::load(&config.data_dir)?;
+    let data_dir = config.data_dir.clone();
     let chain_id = config.chain_id;
     anyhow::ensure!(
         chain_id == genesis.chain_id,
@@ -646,20 +647,35 @@ async fn run_node_with_elector<
     let (headers_tx, _) = ::tokio::sync::broadcast::channel(64);
 
     let validator: SharedValidator = Arc::new(OnceLock::new());
+    let term = seat
+        .as_ref()
+        .map(|seat| seat.view.guard.clone())
+        .unwrap_or_default();
     let finalization_marshal = marshal.clone();
+    let finalization_term = term.clone();
     let finalization_lookup: FinalizationLookup = Arc::new(move |height| {
         let marshal = finalization_marshal.clone();
+        let lookup_term = finalization_term.clone();
         Box::pin(async move {
             // Marshal dispatches only after its finalized archive is durable.
             // Ancestors finalized by a descendant need not have a certificate.
-            marshal
-                .get_finalization(Height::new(height))
-                .await
-                .map(|finalization| FinalizationArtifacts {
-                    epoch: finalization.proposal.round.epoch().get(),
-                    certificate: finalization.certificate.encode().to_vec(),
-                    finalization: finalization.encode().to_vec(),
-                })
+            let finalization = marshal.get_finalization(Height::new(height)).await?;
+            // A device that took the deployment over may hold the certificate
+            // of a block of the term before whose block never arrived. The
+            // archive keeps the first certificate it stored for a height.
+            if lookup_term.term() > 0 {
+                let block = marshal
+                    .get_block(Identifier::Height(Height::new(height)))
+                    .await?;
+                if block.digest() != finalization.proposal.payload {
+                    return None;
+                }
+            }
+            Some(finalization).map(|finalization| FinalizationArtifacts {
+                epoch: finalization.proposal.round.epoch().get(),
+                certificate: finalization.certificate.encode().to_vec(),
+                finalization: finalization.encode().to_vec(),
+            })
         })
     });
     let sink = NodeSink::new(SinkParts {
@@ -684,10 +700,6 @@ async fn run_node_with_elector<
         move || index.head_block_number()
     });
     let participant_addresses = crate::beneficiaries::from_genesis(&genesis)?;
-    let term = seat
-        .as_ref()
-        .map(|seat| seat.view.guard.clone())
-        .unwrap_or_default();
     // A device that announced a handover and now follows refuses the blocks
     // it would itself have built above the final one.
     if let (true, Some(change)) = (is_backup, &term_record.handed_over) {
@@ -749,6 +761,8 @@ async fn run_node_with_elector<
     let sync_history_peer = history_peer.clone();
     let sync_status = node_state.clone();
     let sync_term = term.clone();
+    let (term_refused, mut term_refusals) = ::tokio::sync::mpsc::unbounded_channel();
+    let sync_refused = term_refused.clone();
     let (stateful_actor, stateful_mailbox) = Stateful::new(
         context.child("stateful"),
         StatefulConfig {
@@ -771,6 +785,16 @@ async fn run_node_with_elector<
                     return Err("synchronized history anchor mismatch".into());
                 }
                 let selected = selected.inner();
+                // A snapshot does not pass through execution, so the term of
+                // the block it is taken at is checked here.
+                if !sync_term.admits(selected.height, selected.term) {
+                    let _ = sync_refused.send(crate::TermRefusal::LowerTerm {
+                        height: selected.height,
+                        term: selected.term,
+                        held: sync_term.term(),
+                    });
+                    return std::future::pending().await;
+                }
                 let mut updates = sync_peers.subscribe().await;
                 let peers = updates
                     .recv()
@@ -862,9 +886,10 @@ async fn run_node_with_elector<
     let orchestrator_handle =
         orchestrator_actor.start(vote_network, certificate_network, resolver_network);
 
-    let (term_reporter, mut term_refusals) = crate::term::TermReporter::new(
+    let term_reporter = crate::term::TermReporter::new(
         crate::finalization_diagnostics::Reporter::new(stateful_mailbox.clone()),
         term.clone(),
+        term_refused,
     );
     let reporters = Reporters::from((
         term_reporter,
@@ -1017,6 +1042,9 @@ async fn run_node_with_elector<
                     anyhow::bail!("validator actor stopped during startup: {result:?}");
                 }
                 databases = &mut subscribe_databases => break databases,
+                Some(refusal) = term_refusals.recv() => {
+                    return Err(crate::term::resync_after(&data_dir, refusal));
+                }
                 _ = stalled => {}
                 _ = ::tokio::time::sleep_until(deadline) => {
                     anyhow::bail!(
@@ -1032,6 +1060,9 @@ async fn run_node_with_elector<
                 anyhow::bail!("validator actor stopped during startup: {result:?}");
             }
             databases = &mut subscribe_databases => databases,
+            Some(refusal) = term_refusals.recv() => {
+                return Err(crate::term::resync_after(&data_dir, refusal));
+            }
         }
     };
     let native_databases = databases.native_databases();
@@ -1159,6 +1190,18 @@ async fn run_node_with_elector<
             genesis_id: genesis_block.id().0,
             hold,
             index: block_index.clone(),
+            finalized: {
+                let marshal = marshal.clone();
+                Arc::new(move |height| {
+                    let marshal = marshal.clone();
+                    Box::pin(async move {
+                        marshal
+                            .get_block(Identifier::Height(Height::new(height)))
+                            .await
+                            .is_some()
+                    })
+                })
+            },
             modules: modules.clone(),
             status: node_state.clone(),
             network: term_network,
@@ -1224,7 +1267,9 @@ async fn run_node_with_elector<
     ::tokio::select! {
         result = &mut startup_actors => result,
         result = Handle::select(state_resolver_handles) => result,
-        Some(refusal) = term_refusals.recv() => return Err(refusal.into()),
+        Some(refusal) = term_refusals.recv() => {
+            return Err(crate::term::resync_after(&data_dir, refusal));
+        }
     }
     .map_err(|e| anyhow::anyhow!("validator actor failed: {e:?}"))
 }

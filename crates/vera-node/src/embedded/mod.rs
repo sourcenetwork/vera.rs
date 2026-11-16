@@ -32,8 +32,8 @@ pub use thread_budget::ThreadBudget;
 pub use thread_setup::ThreadSetup;
 
 use crate::{
-    NodeOptions, NodeSettings, RpcMode, SoloDeployment, SoloError, SoloKeys, TermRefusal,
-    WatchdogMode,
+    DiscardedSubmission, NodeOptions, NodeSettings, RpcMode, SoloDeployment, SoloError, SoloKeys,
+    TermRefusal, WatchdogMode,
     term::{Accept, TermControl, TermRecord, device_id},
 };
 
@@ -107,7 +107,15 @@ impl EmbeddedNode {
         };
         let is_backup = backup.is_some();
         if config.switching.is_some() {
+            // Nothing below may touch a directory another node runs on.
+            let storage = config.data_dir.join("commonware");
+            if storage.is_dir() {
+                directory::refuse_held(&storage)?;
+            }
             crate::term::settle_role(&config.data_dir, is_backup)?;
+            if is_backup {
+                crate::term::rewind(&config.data_dir, config.history_memory)?;
+            }
         }
         let identity = backup.as_ref().map_or_else(
             || peers.participants[0].clone(),
@@ -410,9 +418,17 @@ impl EmbeddedNode {
     /// stops and starts again in place as a backup of that device. A refusal
     /// leaves the node running.
     ///
+    /// Blocks this device finalized above the certificate's cut are void in
+    /// the new term. The device drops them, takes its state again from the
+    /// holder, and returns the submissions those blocks had finalized, which
+    /// no other device holds; see [`Self::discarded`].
+    ///
     /// An error after the certificate was accepted leaves the node stopped;
     /// a start with [`EmbeddedConfig::following`] completes the switch.
-    pub async fn follow(&mut self, certificate: TermCertificate) -> Result<(), EmbedError> {
+    pub async fn follow(
+        &mut self,
+        certificate: TermCertificate,
+    ) -> Result<Vec<DiscardedSubmission>, EmbedError> {
         let switching = self
             .config
             .switching
@@ -428,7 +444,25 @@ impl EmbeddedNode {
         if self.term.certificate().as_ref() != Some(&certificate) {
             self.term.accept(certificate, Accept::Follow).await?;
         }
-        self.restart(config).await
+        self.restart(config).await?;
+        self.discarded()
+    }
+
+    /// The finalized submissions that rewinds of this device voided and the
+    /// host has not acknowledged, in the order they had executed.
+    ///
+    /// A device that follows a later term drops the blocks it finalized
+    /// above that term's cut. The report is written before they are dropped
+    /// and kept in the data directory, so it survives a restart. The host
+    /// submits again what it still wants, to the active device, and then
+    /// calls [`Self::acknowledge_discarded`].
+    pub fn discarded(&self) -> Result<Vec<DiscardedSubmission>, EmbedError> {
+        Ok(crate::term::discarded(&self.data_dir)?)
+    }
+
+    /// Forget the report [`Self::discarded`] returns.
+    pub fn acknowledge_discarded(&self) -> Result<(), EmbedError> {
+        Ok(crate::term::acknowledge(&self.data_dir)?)
     }
 
     /// Resolves when this active device learns that another device holds a

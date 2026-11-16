@@ -28,17 +28,18 @@ pub(crate) struct TermReporter<R> {
 }
 
 impl<R> TermReporter<R> {
-    pub(crate) fn new(inner: R, guard: TermGuard) -> (Self, mpsc::UnboundedReceiver<TermRefusal>) {
-        let (refused, refusals) = mpsc::unbounded_channel();
-        (
-            Self {
-                inner,
-                guard,
-                refused,
-                parked: Arc::default(),
-            },
-            refusals,
-        )
+    /// Refusals are sent to `refused`, whose receiver ends the node.
+    pub(crate) fn new(
+        inner: R,
+        guard: TermGuard,
+        refused: mpsc::UnboundedSender<TermRefusal>,
+    ) -> Self {
+        Self {
+            inner,
+            guard,
+            refused,
+            parked: Arc::default(),
+        }
     }
 }
 

@@ -36,6 +36,9 @@ const FORMAT: &[u8] = b"format";
 const GENESIS: &[u8] = b"genesis";
 const HEAD: &[u8] = b"head";
 
+mod cut;
+pub use cut::DiscardedSubmission;
+pub(crate) use cut::Standing;
 mod membership;
 pub(crate) use membership::roster_from_boundary;
 mod query;
@@ -166,7 +169,10 @@ impl FinalizedHistory {
         genesis: &Block,
         memory: Option<HistoryMemory>,
     ) -> Result<Self> {
-        let path = path.as_ref();
+        Self::open_identified(path.as_ref(), &genesis.id().0, memory)
+    }
+
+    fn open_identified(path: &Path, genesis: &B256, memory: Option<HistoryMemory>) -> Result<Self> {
         let db = DB::open_default(path, memory)?;
         match db.get(FORMAT)? {
             Some(version) => {
@@ -179,7 +185,7 @@ impl FinalizedHistory {
                     "unfinished format 2 history import requires the previous binary"
                 );
                 ensure!(
-                    db.get(GENESIS)?.as_deref() == Some(genesis.id().0.as_slice()),
+                    db.get(GENESIS)?.as_deref() == Some(genesis.as_slice()),
                     "finalized history belongs to another genesis"
                 );
             }
@@ -187,8 +193,8 @@ impl FinalizedHistory {
                 ensure!(store_is_empty(&db)?, "missing finalized history format");
                 let mut batch = WriteBatch::default();
                 batch.put(FORMAT, [1]);
-                batch.put(GENESIS, genesis.id().0);
-                let head = borsh::to_vec(&(0u64, genesis.id().0.0))?;
+                batch.put(GENESIS, genesis);
+                let head = borsh::to_vec(&(0u64, genesis.0))?;
                 batch.put(HEAD, &head);
                 batch.put(QUERY_HEAD, &head);
                 write(&db, batch)?;

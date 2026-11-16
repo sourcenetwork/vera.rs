@@ -23,6 +23,11 @@ use crate::ProposalHold;
 const SETTLE: Duration = Duration::from_secs(2);
 const POLL: Duration = Duration::from_millis(100);
 
+/// Whether the consensus archive holds a finalized block at a height.
+/// Execution may not have reached it yet.
+pub(crate) type Finalized =
+    Arc<dyn Fn(u64) -> futures::future::BoxFuture<'static, bool> + Send + Sync>;
+
 /// What the term actor works with.
 pub(crate) struct Parts<S, R> {
     pub seat: TermSeat,
@@ -34,6 +39,7 @@ pub(crate) struct Parts<S, R> {
     pub genesis_id: B256,
     pub hold: ProposalHold,
     pub index: Arc<BlockIndex>,
+    pub finalized: Finalized,
     pub modules: SharedModuleState,
     pub status: NodeState,
     pub network: (S, R),
@@ -51,6 +57,7 @@ struct Actor<S, R> {
     genesis_id: B256,
     hold: ProposalHold,
     index: Arc<BlockIndex>,
+    finalized: Finalized,
     modules: SharedModuleState,
     status: NodeState,
     sender: S,
@@ -79,6 +86,7 @@ where
         genesis_id: parts.genesis_id,
         hold: parts.hold,
         index: parts.index,
+        finalized: parts.finalized,
         modules: parts.modules,
         status: parts.status,
         sender: parts.network.0,
@@ -114,7 +122,7 @@ where
                 let _ = reply.send(self.resume());
             }
             Command::Offer { reply } => {
-                let _ = reply.send(self.offer());
+                let _ = reply.send(self.offer().await);
             }
             Command::Accept {
                 certificate,
@@ -259,17 +267,41 @@ where
         Ok(())
     }
 
-    fn offer(&self) -> Result<TermChange, TermRefusal> {
+    async fn offer(&self) -> Result<TermChange, TermRefusal> {
         let holder = self.this_device()?;
         if !self.backup {
             return Err(TermRefusal::Active);
         }
+        let cut = self.executed(self.switching()?.answer_timeout).await?;
         Ok(TermChange {
             genesis_id: self.genesis_id,
             term: self.seen() + 1,
             holder,
-            cut: self.head(),
+            cut,
         })
+    }
+
+    /// The newest block, once execution has reached every finalized block
+    /// the consensus archive holds. A cut chosen below such a block would
+    /// void a block this device is about to apply.
+    ///
+    /// A finalization whose block never arrived does not count: the block is
+    /// lost with the device that built it.
+    async fn executed(&self, wait: Duration) -> Result<TermCut, TermRefusal> {
+        let deadline = tokio::time::Instant::now() + wait;
+        loop {
+            let head = self.head();
+            if !(self.finalized)(head.height + 1).await {
+                return Ok(head);
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(TermRefusal::NotAtCut {
+                    head: head.height + 1,
+                    cut: head.height,
+                });
+            }
+            tokio::time::sleep(POLL).await;
+        }
     }
 
     fn verify(&self, certificate: &TermCertificate) -> Result<(), TermRefusal> {
@@ -345,12 +377,13 @@ where
         let deadline = tokio::time::Instant::now() + wait;
         loop {
             let head = self.head();
-            if head == *cut {
+            let above = (self.finalized)(cut.height + 1).await;
+            if head == *cut && !above {
                 return Ok(());
             }
-            if head.height >= cut.height || tokio::time::Instant::now() >= deadline {
+            if above || head.height >= cut.height || tokio::time::Instant::now() >= deadline {
                 return Err(TermRefusal::NotAtCut {
-                    head: head.height,
+                    head: head.height.max(cut.height + u64::from(above)),
                     cut: cut.height,
                 });
             }
@@ -366,6 +399,7 @@ where
             handed_over: None,
             taking_over: None,
             voted: self.record.voted,
+            resync: self.record.resync,
         };
         record.store(&self.data_dir)?;
         self.record = record;

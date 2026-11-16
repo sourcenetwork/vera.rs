@@ -78,6 +78,17 @@ pub enum TermRefusal {
         /// The term this device holds.
         held: u64,
     },
+    /// This device's block at the cut's height is not the cut: its history
+    /// left the deployment's below the block the term builds on. The
+    /// directory cannot follow; a backup started in an empty one can.
+    #[error("this device's block {height} is not the block the term builds on")]
+    Diverged {
+        /// Height of the certificate's cut.
+        height: u64,
+    },
+    /// Finalized history could not be read or cut back.
+    #[error("finalized history: {0}")]
+    History(String),
     /// The operator policy could not be read from this device's state.
     #[error("operator policy: {0}")]
     Policy(String),

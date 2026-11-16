@@ -169,6 +169,16 @@ finalized and this backup never received is above the cut and void in the new
 term; the host shows the user how old the backup's newest block is before the
 operators approve.
 
+`takeover_change` waits, up to `Switching::answer_timeout`, until the backup
+has executed every finalized block its consensus archive holds, and fails
+with `TermRefusal::NotAtCut` while it is still behind; the host asks again. A
+cut below such a block would void a block the device is about to apply. A
+finalization whose block never arrived does not hold the takeover up: that
+block went with the device that built it. Its certificate stays in the
+archive, which keeps the first certificate stored for a height, so a node
+that holds a term serves a certificate for a height only when it certifies
+the block the node has there.
+
 `take_over` checks the certificate against the operator policy in the
 backup's own state, that it names this device, that its term is above every
 term the device holds or has seen in a block, and that the device's newest
@@ -273,3 +283,90 @@ restarts inside the window. If another device took over meanwhile, both
 finalize blocks until the woken one next asks, or the host gives it the
 certificate with `follow`. Preventing that takes a lease and an always-on
 voter, which this version does not have.
+
+## Rewinding above the cut
+
+A device that finalized blocks above the cut of a later term holds blocks
+that no other device has and that the term voided. This is the device that
+was replaced by a confirmed takeover while it was down or unreachable. When it
+starts as a backup, by `follow` or with `EmbeddedConfig::following`, it brings
+its directory back to the cut before the node opens it:
+
+1. It compares its finalized history with the cut. Records above the cut are
+   void when the first of them is in a lower term than the certificate's; a
+   term never decreases along a chain, so the rest are too. Records above
+   the cut that are already in the term were received from its holder and
+   stay.
+2. It adds every submission those records finalized to
+   `discarded-submissions.json`, then drops the records and their query
+   mappings from history.
+3. It removes `commonware/`: the consensus archives and the state journals.
+   Commonware's archives cannot be cut back, and a finalized block stays in
+   them once stored. The node then starts like a backup on an empty
+   directory. It takes the state at a block of the new term from the device
+   it follows and imports the history between the cut and that block. The
+   history up to the cut is kept, so the import does not grow with the
+   deployment's age.
+
+Each step is durable before the next begins, and an interrupted rewind is
+completed by the next start as a backup. A start never prepares a directory
+another node runs on.
+
+A device whose block at the cut's height is another block than the cut left
+the deployment's history below the cut. It cannot follow, and the start fails
+with `TermRefusal::Diverged`; the device joins again as a backup in an empty
+directory. This needs two switches that each lost blocks, with this device
+absent for both.
+
+### Discarded submissions
+
+`follow` returns the submissions the rewind voided, and
+`EmbeddedNode::discarded` returns them again until the host calls
+`acknowledge_discarded`; the report is a file, so it survives a restart.
+
+```rust
+for discarded in node.follow(certificate).await? {
+    // discarded.submission, .height, .success, .request
+}
+```
+
+Each entry carries the signed request as it was submitted. The submission
+was finalized, its receipt was served, and a client may have acted on it; it
+is not part of the deployment's history any more, and the device no longer
+serves its receipt. The host decides what to do with each: a request whose
+sequence is still the signer's next one on the new chain can be submitted
+again unchanged to the active device and keeps its identifier, and anything
+else is signed again from the intent. Requests that were only pending in the
+device's pool are not reported: they were never finalized, and they are lost
+with the process as on any restart.
+
+### A refused block
+
+A backup that stops with `TermRefusal::LowerTerm` keeps the refused block in
+its consensus archive. The node marks the directory, and the next start as a
+backup removes `commonware/` as in step 3, so the device can follow the
+holder of the term once it is given the right address. A snapshot is not
+executed block by block, so the node also checks the term of the block a
+snapshot is taken at and refuses the same way.
+
+## Limits
+
+- One validator key shared by every device. A device that holds it can
+  finalize blocks in any term; the term and its certificate tell honest
+  devices and clients which chain to follow, and they do not take the key
+  away from a stolen device. That needs key rotation, which is not built.
+- Sticky active without a lease. A fork is bounded by the wake check and by
+  clients that require certificates; it is not prevented. A confirmed
+  takeover loses whatever the replaced device finalized after the cut.
+- Catch-up after a rewind transfers the whole state. Its cost was not
+  measured, and neither was a handover or a takeover on a deployment of
+  realistic age and size.
+- A rewind removes the consensus archives, so a device that was rewound
+  serves no certificate for a block below the cut from its archive; it
+  serves them from the finalized history it kept.
+- `Switching::devices` is configuration. Nothing in state records the
+  account's devices, and a change takes a restart.
+- A backup dials one address. After a switch its host restarts it with the
+  new holder's address (`follow`, `EmbeddedConfig::following`).
+- Announced handover and takeover were exercised between two nodes in one
+  process on loopback. Three devices, and devices on separate hosts, were not.
