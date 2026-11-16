@@ -83,3 +83,75 @@ fn object_owner_requires_policy_scoped_evidence() {
     let output = verify(&serde_json::to_vec(&request).unwrap()).unwrap_err();
     assert!(output.contains("unknown field `prefix`"), "{output}");
 }
+
+fn term_certificate(approvals: Value) -> vera_domain::TermCertificate {
+    serde_json::from_value(json!({
+        "change": {
+            "genesis_id": B256::repeat_byte(1), "term": 1, "holder": B256::repeat_byte(2),
+            "cut": {"height": 9, "block": B256::repeat_byte(3)}
+        },
+        "approvals": approvals
+    }))
+    .unwrap()
+}
+
+#[test]
+fn a_term_certificate_is_checked_against_the_certified_operator_policy() {
+    // The Borsh form of an operator policy of one key at threshold 1, at sequence 0.
+    let key = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+    let mut stored = vec![1, 0, 1, 0, 0, 0, 66, 0, 0, 0];
+    stored.extend_from_slice(key.as_bytes());
+    stored.extend_from_slice(&[0; 9]);
+    let genesis = B256::repeat_byte(1);
+    let unsigned = term_certificate(json!([]));
+    assert_eq!(
+        verify_term(Some(&stored), &genesis, &unsigned).unwrap_err(),
+        "term certificate needs 1 approvals in ascending signer order"
+    );
+    let forged = term_certificate(json!([
+        {"signer": 0, "signature": format!("0x{}", "11".repeat(64))}
+    ]));
+    assert_eq!(
+        verify_term(Some(&stored), &genesis, &forged).unwrap_err(),
+        "term approval by operator 0 does not verify"
+    );
+    assert_eq!(
+        verify_term(Some(&stored), &B256::ZERO, &forged).unwrap_err(),
+        "term certificate names another deployment"
+    );
+    assert_eq!(
+        verify_term(None, &genesis, &forged).unwrap_err(),
+        "operator authority is not configured"
+    );
+    assert!(verify_term(Some(&stored[..stored.len() - 1]), &genesis, &forged).is_err());
+}
+
+#[test]
+fn a_term_certificate_request_requires_a_certified_operator_record() {
+    let revision = json!({
+        "block_hash": "", "parent_hash": "", "height": 1, "timestamp": 1,
+        "state_root": "", "module_state_root": "", "epoch": 0, "view": 0,
+        "parent_view": 0, "block": "", "finalization": "", "epoch_material": ""
+    });
+    let record = vera_permission::RecordProof {
+        module: ModuleId::Vera,
+        key: vera_modules::vera::administration::STATE_KEY
+            .to_vec()
+            .into(),
+        value: None,
+        roots: [B256::ZERO; 4],
+        proof: Bytes::new(),
+    };
+    let input = serde_json::to_vec(&json!({
+        "kind": "term_certificate", "trusted_key": "00".repeat(96),
+        "genesis_id": B256::repeat_byte(1), "minimum_height": 0,
+        "proof": {"revision": revision, "record": record},
+        "certificate": term_certificate(json!([]))
+    }))
+    .unwrap();
+    assert!(matches!(
+        serde_json::from_slice::<Request>(&input),
+        Ok(Request::TermCertificate { .. })
+    ));
+    assert!(verify(&input).is_err());
+}

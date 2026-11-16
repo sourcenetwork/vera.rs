@@ -68,6 +68,15 @@ impl OperatorPolicy {
         }
         operator_key::verify(key, digest, &signature).map_err(invalid)
     }
+
+    /// Whether `signature` is the operator at `signer`'s signature of
+    /// `digest`, in the encoding [`Self::verify_approval`] requires.
+    #[must_use]
+    pub fn verifies(&self, signer: u16, digest: &[u8; 32], signature: &[u8; 64]) -> bool {
+        self.keys
+            .get(usize::from(signer))
+            .is_some_and(|key| operator_key::verify(key, digest, signature).is_ok())
+    }
 }
 
 /// Current approval policy and the sequence expected for the next change.
@@ -79,6 +88,15 @@ pub struct AdministrationState {
     pub sequence: u64,
     /// Optional ACP policy explicitly selected to manage the membership registry.
     pub membership_policy: Option<[u8; 32]>,
+}
+
+impl AdministrationState {
+    /// Decode the stored record, rejecting trailing bytes and a malformed operator policy.
+    pub fn decode(bytes: &[u8]) -> Result<Self> {
+        let state: Self = borsh::from_slice(bytes).map_err(|error| invalid(error.to_string()))?;
+        state.policy.validate()?;
+        Ok(state)
+    }
 }
 
 /// Changes authorized by the current operator quorum.

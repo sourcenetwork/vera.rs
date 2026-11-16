@@ -36,6 +36,8 @@ pub mod relationships;
 pub mod relays;
 /// Threshold-service ring commands and certified state.
 pub mod rings;
+/// Term certificates: approving and verifying a switch of the active device.
+pub mod term;
 /// Encrypted documents and signing derivations.
 pub mod threshold_objects;
 /// Certified token lifecycle reads.

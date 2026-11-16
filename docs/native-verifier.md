@@ -54,6 +54,21 @@ registration; it does not return an archived owner as a current registration.
 Minimum height bounds the accepted revision. Callers remain responsible for any
 additional freshness requirement.
 
+Term certificate request:
+
+```json
+{"kind":"term_certificate","trusted_key":"<96-byte hex key>","genesis_id":"0x<32-byte ID>","minimum_height":1,"proof":{},"certificate":{}}
+```
+
+`proof` is the `vera_getCurrentRecordProof` result for the `vera` module's
+`admin/v1` record, and `certificate` a term certificate as
+[Terms and the active device](active-term.md#the-term-certificate) describes
+it. The verifier authenticates the operator policy at the proof's revision and
+checks the certificate's approvals against it. Success returns `height`,
+`timestamp`, `term`, `holder`, `cut_height` and `cut_block`. The caller supplies
+the genesis identifier from its own configuration and remains responsible for
+refusing a term lower than the highest it has accepted.
+
 Policy relationship page requests use `kind: "policy_prefix_page"`, with
 `trusted_key`, `policy_id`, `request`, `minimum_height` and `proof`. The request is
 an ACP `PrefixPageRequest`; proof is the unmodified

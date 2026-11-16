@@ -75,6 +75,10 @@ pub enum ClientError {
     #[error("signing error: {0}")]
     Signing(String),
 
+    /// A term certificate does not verify under the certified operator policy.
+    #[error(transparent)]
+    Term(#[from] vera_domain::TermError),
+
     /// Durable submission state could not be read, validated or persisted.
     #[error("native worker state: {0}")]
     Worker(String),

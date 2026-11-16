@@ -27,3 +27,68 @@ parent's is invalid. `vera_domain::term_extends` is the rule.
 
 Every block of a deployment that never switches its active device is in
 term 0, and the rule never fails.
+
+## The term certificate
+
+A `TermCertificate` records a switch of the active device. It changes no key:
+the blocks of the new term verify against the consensus key the deployment
+already had. It is what tells a client, or another device, which chain to
+follow when two devices finalized blocks at the same height.
+
+```json
+{
+  "change": {
+    "genesis_id": "0x<genesis block identifier>",
+    "term": 1,
+    "holder": "0x<transport key of the device active in the term>",
+    "cut": {"height": 120, "block": "0x<identifier of the block the term builds on>"}
+  },
+  "approvals": [{"signer": 0, "signature": "0x<64 bytes>"}]
+}
+```
+
+`cut` is the last block of the term before. Blocks above it in a lower term
+are void, whoever certified them.
+
+### Who signs
+
+The deployment's operator policy approves a term change, as it approves an
+administrative change. Each approval names an operator by its index in the
+policy and carries that key's signature of `TermChange::signing_digest`:
+
+```
+SHA-256("vera/term/v1\0" || genesis_id || term || holder || cut.height || cut.block)
+```
+
+with both integers as 8 bytes, big-endian. The signature encoding is the one
+[operator keys](consensus-membership.md#operator-keys) use for administrative
+approvals: ECDSA keys sign the digest as the prehash with low `s`, and Ed25519
+keys sign the 32 digest bytes as the message.
+
+The certificate does not carry the policy. A certificate verifies when it
+names the verifier's deployment, starts a term above 0, and lists at least the
+policy's threshold of approvals, in ascending signer order, each of which
+verifies; an approval that does not verify fails the certificate even when
+enough others do. The same certificate therefore serves a policy of one key at
+threshold 1 and a policy of an account key and a device key at threshold 2.
+The node holds no operator key and signs no certificate: the host collects the
+approvals. `approve_term`, `external_term_approval` and
+`external_der_term_approval` in `vera-client` build them.
+
+### Verifying one
+
+- `TermCertificate::verify` in `vera-domain` checks the structure and calls
+  back for each signature. It takes the policy's threshold and size.
+- `vera_permission::verify_term_certificate` checks a certificate against an
+  `OperatorPolicy`.
+- `VeraClient::verify_term_certificate` reads the operator policy from
+  certified state, as `read_administration` does, and checks the certificate
+  against it. It returns the revision the policy was read at.
+- The C verifier takes a `term_certificate` request; see
+  [the native verifier](native-verifier.md).
+
+The policy must come from state the verifier has authenticated. A verified
+certificate says who may propose from its term on. It does not prove that its
+cut is a finalized block; a verifier compares the cut with the blocks it has
+accepted: `TermCertificate::keeps` says whether an accepted block survives the
+switch, and `TermCertificate::admits` whether a block may carry a given term.

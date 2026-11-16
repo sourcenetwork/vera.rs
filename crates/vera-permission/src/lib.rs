@@ -43,6 +43,8 @@ mod record;
 pub use record::{RECORD_PROOF_BYTES, RECORD_RESPONSE_BYTES, RecordProof, RecordResponse};
 mod response;
 pub use response::{PERMISSION_RESPONSE_BYTES, PermissionResponse};
+mod term;
+pub use term::verify_term_certificate;
 
 /// Shared service limits; consumers may impose tighter limits.
 pub const PERMISSION_LIMITS: PermissionLimits = PermissionLimits {
