@@ -18,6 +18,7 @@ pub use committed_state::CommittedState;
 mod config;
 mod connectivity;
 mod consensus_timeouts;
+mod devices;
 pub use config::{NodeSettings, PeerSet, PeerSetError, load_peers};
 
 mod consts;
@@ -71,8 +72,8 @@ pub use secret_store::FileSecretStore;
 
 mod solo;
 pub use solo::{
-    SOLO_BLOCKS_PER_EPOCH, SOLO_STALL_TIMEOUT_MS, SoloDeployment, SoloError, SoloGenesis, SoloKeys,
-    prepare_solo,
+    DeviceKey, SOLO_BLOCKS_PER_EPOCH, SOLO_STALL_TIMEOUT_MS, SoloDeployment, SoloError,
+    SoloGenesis, SoloKeys, prepare_solo,
 };
 
 mod sink;

@@ -8,12 +8,13 @@ use commonware_cryptography::{
 };
 use commonware_glue::dkg;
 
-use super::{FileSecretStore, HeldSecretStore};
+use super::{FileSecretStore, HeldSecretStore, ObserverSecretStore};
 
 /// One store type for the reshare actor, whichever way the key material is kept.
 pub(crate) enum NodeSecretStore {
     File(FileSecretStore),
     Held(HeldSecretStore),
+    Observer(ObserverSecretStore),
 }
 
 impl dkg::SecretStore for NodeSecretStore {
@@ -21,6 +22,7 @@ impl dkg::SecretStore for NodeSecretStore {
         match self {
             Self::File(store) => store.put_share(epoch, share).await,
             Self::Held(store) => store.put_share(epoch, share).await,
+            Self::Observer(store) => store.put_share(epoch, share).await,
         }
     }
 
@@ -28,6 +30,7 @@ impl dkg::SecretStore for NodeSecretStore {
         match self {
             Self::File(store) => store.get_share(epoch).await,
             Self::Held(store) => store.get_share(epoch).await,
+            Self::Observer(store) => store.get_share(epoch).await,
         }
     }
 
@@ -35,6 +38,7 @@ impl dkg::SecretStore for NodeSecretStore {
         match self {
             Self::File(store) => store.put_seed(epoch, seed).await,
             Self::Held(store) => store.put_seed(epoch, seed).await,
+            Self::Observer(store) => store.put_seed(epoch, seed).await,
         }
     }
 
@@ -42,6 +46,7 @@ impl dkg::SecretStore for NodeSecretStore {
         match self {
             Self::File(store) => store.get_seed(epoch).await,
             Self::Held(store) => store.get_seed(epoch).await,
+            Self::Observer(store) => store.get_seed(epoch).await,
         }
     }
 
@@ -49,6 +54,7 @@ impl dkg::SecretStore for NodeSecretStore {
         match self {
             Self::File(store) => store.put_dealing(epoch, dealer, private).await,
             Self::Held(store) => store.put_dealing(epoch, dealer, private).await,
+            Self::Observer(store) => store.put_dealing(epoch, dealer, private).await,
         }
     }
 
@@ -60,6 +66,7 @@ impl dkg::SecretStore for NodeSecretStore {
         match self {
             Self::File(store) => store.get_dealing(epoch, dealer).await,
             Self::Held(store) => store.get_dealing(epoch, dealer).await,
+            Self::Observer(store) => store.get_dealing(epoch, dealer).await,
         }
     }
 
@@ -67,6 +74,7 @@ impl dkg::SecretStore for NodeSecretStore {
         match self {
             Self::File(store) => store.prune(min).await,
             Self::Held(store) => store.prune(min).await,
+            Self::Observer(store) => store.prune(min).await,
         }
     }
 }

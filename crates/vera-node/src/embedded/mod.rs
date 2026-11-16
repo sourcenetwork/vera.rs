@@ -131,6 +131,8 @@ impl EmbeddedNode {
                 .deployment
                 .as_ref()
                 .map(|deployment| deployment.keys().clone()),
+            backup: None,
+            devices: Vec::new(),
         };
         let thread_setup = config.thread_setup;
         let data_dir = config.data_dir.clone();

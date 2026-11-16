@@ -64,7 +64,7 @@ use crate::{
     RegistryParticipants, RpcMode, SHARING_MODE, TxGossip, VOTE_CHANNEL, VrfElectorConfig,
     peer_capacity::PeerCapacity,
     rejoin,
-    secret_store::{HeldSecretStore, NodeSecretStore},
+    secret_store::{HeldSecretStore, NodeSecretStore, ObserverSecretStore},
     sink::{FinalizationArtifacts, FinalizationLookup, NodeSink, SinkParts},
     spawn_tx_receiver,
     tx_admission::Admission,
@@ -123,6 +123,8 @@ async fn run_node_with_elector<
         sizing,
         hold,
         keys,
+        backup,
+        devices,
     } = options;
     let hold = hold.unwrap_or_default();
     if let RpcMode::Network(Some(listener)) = &rpc {
@@ -192,16 +194,25 @@ async fn run_node_with_elector<
             })
         })
         .transpose()?;
-    let signing_key = match &keys {
-        Some(keys) => keys.signer(),
-        None => config.validator_key()?,
+    // A validator's network identity is its consensus identity: peers accept
+    // its votes and its replies to the epoch probe by that key. A backup is in
+    // no committee and runs under a key of its own.
+    let is_backup = backup.is_some();
+    let signing_key = match (&backup, &keys) {
+        (Some(device), _) => device.signer(),
+        (None, Some(keys)) => keys.signer(),
+        (None, None) => config.validator_key()?,
     };
     let local = signing_key.public_key();
-    let validator_index = peers
-        .participants
-        .iter()
-        .position(|pk| *pk == local)
-        .ok_or_else(|| anyhow::anyhow!("validator key is not in peers.json"))?;
+    let validator_index = match peers.participants.iter().position(|pk| *pk == local) {
+        Some(_) if is_backup => anyhow::bail!("a backup cannot run under a validator key"),
+        Some(index) => index,
+        // A backup reports the validator it follows.
+        None if is_backup => 0,
+        None => anyhow::bail!("validator key is not in peers.json"),
+    };
+    let devices: Vec<_> = devices.into_iter().filter(|key| *key != local).collect();
+    let has_peers = peers.participants.len() > 1 || is_backup || !devices.is_empty();
     let epoch_info = genesis
         .decode_epoch_info()?
         .ok_or_else(|| anyhow::anyhow!("genesis.json is missing epoch_info"))?;
@@ -239,6 +250,20 @@ async fn run_node_with_elector<
         .map(|(pk, addr)| (pk.clone(), Ingress::Socket(*addr)))
         .collect();
     let max_peers_per_set = peer_capacity.tracked();
+    // The backups join every tracked set, and Commonware refuses a set
+    // larger than the one its queues were sized for.
+    let tracked: std::collections::HashSet<_> = players
+        .iter()
+        .chain(epoch_info.players.iter())
+        .chain(epoch_info.next_players.iter())
+        .chain(devices.iter())
+        .chain(std::iter::once(&local))
+        .collect();
+    anyhow::ensure!(
+        tracked.len() <= max_peers_per_set.get(),
+        "{} backup devices and the committee exceed the {max_peers_per_set} peers an epoch of {blocks_per_epoch} blocks tracks",
+        devices.len(),
+    );
     let p2p_config = crate::peer_discovery::config(
         signing_key.clone(),
         listen,
@@ -249,6 +274,7 @@ async fn run_node_with_elector<
     )?;
     let channel_rate = sizing.channel_rate();
     let (mut p2p, oracle) = discovery::Network::new(context.child("network"), p2p_config);
+    let manager = crate::devices::DeviceManager::new(oracle.clone(), devices);
     let vote_network = p2p.register(VOTE_CHANNEL, channel_rate);
     let certificate_network = p2p.register(CERTIFICATE_CHANNEL, channel_rate);
     let resolver_network = p2p.register(RESOLVER_CHANNEL, channel_rate);
@@ -296,6 +322,7 @@ async fn run_node_with_elector<
     // Epoch-0 certificate scheme.
     let provider = DynamicProvider::default();
     let mut store = match keys {
+        _ if is_backup => NodeSecretStore::Observer(ObserverSecretStore::default()),
         Some(keys) => NodeSecretStore::Held(HeldSecretStore::new(&local, keys.consensus_share())),
         None => NodeSecretStore::File(FileSecretStore::load(&secrets_path)?),
     };
@@ -372,7 +399,7 @@ async fn run_node_with_elector<
     let (probe_actor, probe_mailbox) = probe::Actor::new(probe::Config {
         floor: plan.floor().cloned(),
         context: context.child("dkg_probe"),
-        manager: oracle.clone(),
+        manager: manager.clone(),
         bootstrap: probe::Bootstrap {
             epoch: Epoch::zero(),
             participants: epoch_info.participants(),
@@ -405,7 +432,7 @@ async fn run_node_with_elector<
     let completed_sync_height = plan.completed();
     let mut snapshot_sync = plan.should_sync(config.snapshot.is_some());
     let mut probe_artifact = None;
-    if !snapshot_sync && history.head_height() > 0 && peers.participants.len() > 1 {
+    if !snapshot_sync && history.head_height() > 0 && (peers.participants.len() > 1 || is_backup) {
         // A completed state sync skips peer synchronization forever, which
         // strands a restart that fell too far behind to follow reshare
         // ceremonies forward. Ask the network for its epoch before
@@ -414,7 +441,17 @@ async fn run_node_with_elector<
         let our_epoch = history.head_height() / blocks_per_epoch.get();
         match ::tokio::time::timeout(Duration::from_secs(30), probe_mailbox.subscribe()).await {
             Ok(Ok(artifact))
-                if rejoin::stranded(our_epoch, artifact.floor.proposal.round.epoch().get()) =>
+                if rejoin::stranded(our_epoch, artifact.floor.proposal.round.epoch().get())
+                    || (is_backup
+                        && rejoin::beyond_retention(
+                            our_epoch,
+                            artifact.floor.proposal.round.epoch().get(),
+                            blocks_per_epoch,
+                            config
+                                .pruning
+                                .as_ref()
+                                .map(|pruning| pruning.retained_consensus_revisions),
+                        )) =>
             {
                 tracing::warn!(
                     our_epoch,
@@ -437,7 +474,7 @@ async fn run_node_with_elector<
         // genesis, or every bootstrapper down): fail fast with an actionable
         // error instead of hanging before consensus starts.
         None if snapshot_sync => {
-            let wait = Duration::from_secs(300);
+            let wait = Duration::from_millis(snapshot.initialization_timeout_ms);
             match ::tokio::time::timeout(wait, probe_mailbox.subscribe()).await {
                 Ok(Ok(artifact)) => Some(artifact),
                 Ok(Err(e)) => {
@@ -533,7 +570,7 @@ async fn run_node_with_elector<
         context.child("reshare"),
         reshare::Config {
             signer: signing_key.clone(),
-            manager: oracle.clone(),
+            manager: manager.clone(),
             blocker: oracle.clone(),
             participants_provider: participants_provider.clone(),
             secret_store: store,
@@ -584,8 +621,8 @@ async fn run_node_with_elector<
         validator_index as u32,
         peers.participants.len() as u32,
     );
-    // A lone validator never has a peer to count, so it skips the sampling work.
-    if peers.participants.len() > 1 {
+    // A lone validator without backups never has a peer to count, so it skips the sampling work.
+    if has_peers {
         let state = node_state.clone();
         state_resolver_handles.push(
             context
@@ -761,7 +798,7 @@ async fn run_node_with_elector<
         context.child("orchestrator"),
         orchestrator::Config {
             oracle: oracle.clone(),
-            manager: oracle.clone(),
+            manager,
             provider: provider.for_consensus(),
             marshal: marshal.clone(),
             application: deferred,
@@ -844,7 +881,12 @@ async fn run_node_with_elector<
         let stall = Duration::from_secs(config.watchdog_stall_seconds);
         let watchdog_state = node_state.clone();
         let has_durable_history = history.head_height() > 0;
-        let needed_peers = crate::watchdog::peers_for_quorum(peers.participants.len());
+        // A backup can only stall while a peer is there to follow.
+        let needed_peers = if is_backup {
+            1
+        } else {
+            crate::watchdog::peers_for_quorum(peers.participants.len())
+        };
         state_resolver_handles.push(context.child("watchdog").spawn(move |_| async move {
             crate::run_watchdog(
                 watchdog_state,
@@ -939,17 +981,26 @@ async fn run_node_with_elector<
         let gossip = gossip.clone();
         move |context| crate::tx_reannouncement::run(context, gossip)
     }));
-    state_resolver_handles.push(spawn_tx_receiver(
-        context.child("tx_receiver"),
-        mempool_receiver,
-        mempool.clone(),
-        validator.clone(),
-        chain_id,
-    ));
-    let tx_submit: TxSubmitCallback = Arc::new(move |bytes| {
-        let gossip = gossip.clone();
-        Box::pin(async move { gossip.submit(bytes).await })
-    });
+    // A backup builds no block, so it admits nothing it would have to hold.
+    let tx_submit: TxSubmitCallback = if is_backup {
+        state_resolver_handles.push(crate::tx_gossip::spawn_tx_discard(
+            context.child("tx_receiver"),
+            mempool_receiver,
+        ));
+        Arc::new(|_| Box::pin(async { Err(vera_jsonrpc::TxSubmitError::Backup) }))
+    } else {
+        state_resolver_handles.push(spawn_tx_receiver(
+            context.child("tx_receiver"),
+            mempool_receiver,
+            mempool.clone(),
+            validator.clone(),
+            chain_id,
+        ));
+        Arc::new(move |bytes| {
+            let gossip = gossip.clone();
+            Box::pin(async move { gossip.submit(bytes).await })
+        })
+    };
     let archive = vera_jsonrpc::ArchiveReader::new(node_state.clone(), {
         let history = history.clone();
         Arc::new(move |query, remaining_bytes| {

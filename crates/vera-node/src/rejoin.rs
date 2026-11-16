@@ -36,6 +36,30 @@ pub(crate) const fn stranded(our_epoch: u64, network_epoch: u64) -> bool {
     network_epoch.saturating_sub(our_epoch) >= REJOIN_EPOCHS
 }
 
+/// Whether a backup's next blocks may already be pruned by the device it follows.
+///
+/// A backup in epoch `our_epoch` may sit on that epoch's first block while the
+/// active device finalizes the last block of `network_epoch`, and the active
+/// device keeps `retained` consensus revisions: the backup's own setting, which
+/// the devices of one account share. Without a retention the active device
+/// prunes nothing. A backup deals nothing, so re-synchronizing early costs the
+/// deployment nothing.
+pub(crate) const fn beyond_retention(
+    our_epoch: u64,
+    network_epoch: u64,
+    blocks_per_epoch: std::num::NonZeroU64,
+    retained: Option<usize>,
+) -> bool {
+    let Some(retained) = retained else {
+        return false;
+    };
+    let behind = network_epoch
+        .saturating_sub(our_epoch)
+        .saturating_add(1)
+        .saturating_mul(blocks_per_epoch.get());
+    network_epoch > our_epoch && behind > (retained as u64).saturating_add(2)
+}
+
 /// Discard sync bookkeeping so the next plan initialization re-arms peer
 /// state sync. Application databases, marshal archives and durable history
 /// are untouched; the syncer supersedes them from a current floor. The DKG
@@ -78,6 +102,17 @@ mod tests {
         assert!(!stranded(u64::MAX, 0));
         assert!(!stranded(u64::MAX - 2, u64::MAX));
         assert!(stranded(u64::MAX - 3, u64::MAX));
+    }
+
+    #[test]
+    fn a_backup_resynchronizes_once_its_next_block_may_be_pruned() {
+        let epoch = std::num::NonZeroU64::new(256).unwrap();
+        assert!(!beyond_retention(4, 4, epoch, Some(512)));
+        assert!(!beyond_retention(4, 5, epoch, Some(512)));
+        assert!(beyond_retention(4, 6, epoch, Some(512)));
+        assert!(!beyond_retention(4, 6, epoch, Some(1_024)));
+        assert!(!beyond_retention(4, 400, epoch, None));
+        assert!(!beyond_retention(6, 4, epoch, Some(512)));
     }
 
     #[test]

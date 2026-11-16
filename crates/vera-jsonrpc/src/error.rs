@@ -44,6 +44,9 @@ pub enum TxSubmitError {
     /// The request failed admission validation.
     #[error("{0}")]
     Rejected(String),
+    /// This node follows its deployment as a backup and admits nothing.
+    #[error("this node is a backup of its deployment; submit to the active device")]
+    Backup,
 }
 
 impl From<TxSubmitError> for ErrorObjectOwned {
@@ -57,6 +60,11 @@ impl From<TxSubmitError> for ErrorObjectOwned {
                     Some(serde_json::json!({"retryable": true})),
                 )
             }
+            error @ TxSubmitError::Backup => ErrorObjectOwned::owned(
+                codes::RESOURCE_UNAVAILABLE,
+                error.to_string(),
+                Some(serde_json::json!({"retryable": true, "role": "backup"})),
+            ),
         }
     }
 }
@@ -149,6 +157,18 @@ impl From<RpcError> for ErrorObjectOwned {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_backup_refusal_is_retryable_and_names_the_role() {
+        let rpc: ErrorObjectOwned = TxSubmitError::Backup.into();
+        assert_eq!(rpc.code(), codes::RESOURCE_UNAVAILABLE);
+        assert!(rpc.message().contains("backup"));
+        let data: serde_json::Value = serde_json::from_str(rpc.data().unwrap().get()).unwrap();
+        assert_eq!(
+            data,
+            serde_json::json!({"retryable": true, "role": "backup"})
+        );
+    }
 
     #[test]
     fn submission_capacity_and_startup_are_retryable_but_rejections_are_not() {
