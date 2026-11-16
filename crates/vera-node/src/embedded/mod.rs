@@ -106,16 +106,14 @@ impl EmbeddedNode {
             }
         };
         let is_backup = backup.is_some();
-        if config.switching.is_some() {
-            // Nothing below may touch a directory another node runs on.
-            let storage = config.data_dir.join("commonware");
-            if storage.is_dir() {
-                directory::refuse_held(&storage)?;
-            }
-            crate::term::settle_role(&config.data_dir, is_backup)?;
-            if is_backup {
-                crate::term::rewind(&config.data_dir, config.history_memory)?;
-            }
+        // Nothing below may touch a directory another node runs on.
+        let storage = config.data_dir.join("commonware");
+        if storage.is_dir() {
+            directory::refuse_held(&storage)?;
+        }
+        crate::term::settle_role(&config.data_dir, is_backup)?;
+        if is_backup {
+            crate::term::rewind(&config.data_dir, config.history_memory)?;
         }
         let identity = backup.as_ref().map_or_else(
             || peers.participants[0].clone(),
@@ -334,6 +332,40 @@ impl EmbeddedNode {
         )
     }
 
+    /// Undo a handover that a node announced in `config`'s directory before
+    /// it stopped, so the device can start as the active device again.
+    ///
+    /// For a handover whose certificate was never issued: the host quit
+    /// before the operators approved. As with [`Self::resume`], resuming
+    /// after the successor received a certificate forks the deployment. A
+    /// device that knows another device holds a later term is refused with
+    /// [`TermRefusal::Superseded`], and one that already started to follow
+    /// the successor with [`TermRefusal::NotCertified`].
+    pub fn resume_stopped(config: &EmbeddedConfig) -> Result<(), EmbedError> {
+        let storage = config.data_dir.join("commonware");
+        if storage.is_dir() {
+            directory::refuse_held(&storage)?;
+        }
+        let this = config
+            .switching
+            .as_ref()
+            .map(|switching| device_id(&switching.device_key.public_key()))
+            .ok_or(TermRefusal::NotConfigured)?;
+        let mut record = TermRecord::load(&config.data_dir)?;
+        if let Some(certificate) = record.deciding()
+            && certificate.change.holder != this
+        {
+            return Err(TermRefusal::Superseded(Box::new(certificate.clone())).into());
+        }
+        // A device that started to follow dropped the votes it cast as the
+        // validator and validates again only under a certificate.
+        if record.followed {
+            return Err(TermRefusal::NotCertified.into());
+        }
+        record.handed_over = None;
+        Ok(record.store(&config.data_dir)?)
+    }
+
     /// The term this device holds: the term it proposes in while it is
     /// active, and the lowest it accepts above that term's cut. A deployment
     /// whose active device never changed is in term 0.
@@ -441,7 +473,8 @@ impl EmbeddedNode {
             .ok_or(TermRefusal::Holder)?;
         let config = self.config.following(&holder.key)?;
         // A device told of a later term by its wake check already stored the certificate.
-        if self.term.certificate().as_ref() != Some(&certificate) {
+        let held = self.term.certificate();
+        if held.map(|held| held.change) != Some(certificate.change) {
             self.term.accept(certificate, Accept::Follow).await?;
         }
         self.restart(config).await?;
@@ -474,6 +507,17 @@ impl EmbeddedNode {
     /// calls [`Self::follow`] with the certificate.
     pub async fn demoted(&self) -> TermCertificate {
         self.term.demoted().await
+    }
+
+    /// Resolves when another device answers this active device as the
+    /// deployment's validator and no certificate settles which of them holds
+    /// the term.
+    ///
+    /// This device proposes nothing while the other keeps answering, and
+    /// asks again at each of its turns. Nothing is stored. The host follows
+    /// with a certificate this device can verify, or stops the other device.
+    pub async fn contested(&self) -> crate::Contest {
+        self.term.contested().await
     }
 
     /// Stop this node and start one with `config` in its place.
@@ -517,9 +561,10 @@ impl Drop for EmbeddedNode {
 
 /// Refuse a role the device's stored term rules out.
 ///
-/// A device that announced a handover, or that knows another device holds
-/// the newest term, must not validate: it would finalize blocks beside the
-/// device that replaced it.
+/// A device that announced a handover, that knows another device holds the
+/// newest term, or that followed the deployment and holds no certificate
+/// naming it, must not validate: it would finalize blocks beside the active
+/// device.
 fn refuse_role(config: &EmbeddedConfig) -> Result<(), EmbedError> {
     if matches!(config.role, DeviceRole::Backup(_)) {
         return Ok(());
@@ -527,21 +572,32 @@ fn refuse_role(config: &EmbeddedConfig) -> Result<(), EmbedError> {
     if config.switching.is_some() && config.deployment.is_none() {
         return Err(TermRefusal::KeysInFiles.into());
     }
-    let record = TermRecord::load(&config.data_dir)?;
-    if let Some(change) = record.handed_over {
-        return Err(TermRefusal::HandedOver(Box::new(change)).into());
+    if let Some(switching) = &config.switching
+        && config.leader_timeout <= switching.answer_timeout
+    {
+        return Err(EmbedError::Config(
+            "the answer timeout must be shorter than the leader timeout",
+        ));
     }
-    let Some(certificate) = record.deciding().cloned() else {
-        return Ok(());
-    };
+    let record = TermRecord::load(&config.data_dir)?;
     let this = config
         .switching
         .as_ref()
         .map(|switching| device_id(&switching.device_key.public_key()));
-    if this != Some(certificate.change.holder) {
-        return Err(TermRefusal::Superseded(Box::new(certificate)).into());
+    let named = |certificate: &TermCertificate| this == Some(certificate.change.holder);
+    // A takeover this device accepted is later than a handover it announced.
+    if record.taking_over.as_ref().is_some_and(named) {
+        return Ok(());
     }
-    Ok(())
+    if let Some(change) = record.handed_over {
+        return Err(TermRefusal::HandedOver(Box::new(change)).into());
+    }
+    match record.deciding() {
+        Some(certificate) if named(certificate) => Ok(()),
+        Some(certificate) => Err(TermRefusal::Superseded(Box::new(certificate.clone())).into()),
+        None if record.followed => Err(TermRefusal::NotCertified.into()),
+        None => Ok(()),
+    }
 }
 
 /// Builds the start future in this crate.
@@ -563,5 +619,141 @@ fn joined(
     match (exit, thread.join()) {
         (Ok(result), Ok(())) => result,
         _ => Err(EmbedError::Panicked),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_primitives::B256;
+    use vera_domain::{TermChange, TermCut};
+    use vera_modules::vera::administration::OperatorPolicy;
+
+    use super::*;
+    use crate::{DeviceKey, SoloGenesis, Switching};
+
+    fn switching(directory: &std::path::Path) -> (EmbeddedConfig, B256) {
+        let genesis = SoloGenesis {
+            chain_id: 9_272,
+            operators: OperatorPolicy {
+                threshold: 1,
+                keys: vec![
+                    "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798".into(),
+                ],
+            },
+            timestamp: 1_800_000_000,
+            policies: Vec::new(),
+        };
+        let listen = "127.0.0.1:0".parse().unwrap();
+        let deployment = SoloDeployment::create(&genesis, listen).unwrap();
+        let mut config = EmbeddedConfig::adopt(directory, deployment, listen).unwrap();
+        let key = DeviceKey::generate().unwrap();
+        let this = device_id(&key.public_key());
+        config.switching = Some(Switching::new(key, Vec::new()));
+        (config, this)
+    }
+
+    fn certificate(term: u64, holder: B256) -> TermCertificate {
+        TermCertificate {
+            change: TermChange {
+                genesis_id: B256::repeat_byte(1),
+                term,
+                holder,
+                cut: TermCut {
+                    height: 10 * term,
+                    block: B256::repeat_byte(3),
+                },
+            },
+            approvals: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_takeover_this_device_accepted_outlives_the_handover_it_announced() {
+        let directory = tempfile::tempdir().unwrap();
+        let (config, this) = switching(directory.path());
+        let handed = certificate(1, B256::repeat_byte(8)).change;
+        let mut record = TermRecord {
+            handed_over: Some(handed),
+            ..TermRecord::default()
+        };
+        record.store(directory.path()).unwrap();
+        assert!(matches!(
+            refuse_role(&config),
+            Err(EmbedError::Term(TermRefusal::HandedOver(_)))
+        ));
+        record.taking_over = Some(certificate(2, this));
+        record.store(directory.path()).unwrap();
+        refuse_role(&config).unwrap();
+        record.taking_over = Some(certificate(2, B256::repeat_byte(8)));
+        record.store(directory.path()).unwrap();
+        assert!(matches!(
+            refuse_role(&config),
+            Err(EmbedError::Term(TermRefusal::HandedOver(_)))
+        ));
+    }
+
+    #[test]
+    fn a_stopped_device_resumes_a_handover_unless_it_was_replaced() {
+        let directory = tempfile::tempdir().unwrap();
+        let (config, this) = switching(directory.path());
+        let mut record = TermRecord {
+            handed_over: Some(certificate(1, B256::repeat_byte(8)).change),
+            voted: true,
+            ..TermRecord::default()
+        };
+        record.store(directory.path()).unwrap();
+        EmbeddedNode::resume_stopped(&config).unwrap();
+        refuse_role(&config).unwrap();
+        assert!(TermRecord::load(directory.path()).unwrap().voted);
+        record.followed = true;
+        record.store(directory.path()).unwrap();
+        assert!(matches!(
+            EmbeddedNode::resume_stopped(&config),
+            Err(EmbedError::Term(TermRefusal::NotCertified))
+        ));
+        record.followed = false;
+
+        record.certificate = Some(certificate(1, B256::repeat_byte(8)));
+        record.store(directory.path()).unwrap();
+        assert!(matches!(
+            EmbeddedNode::resume_stopped(&config),
+            Err(EmbedError::Term(TermRefusal::Superseded(_)))
+        ));
+        record.certificate = Some(certificate(1, this));
+        record.store(directory.path()).unwrap();
+        EmbeddedNode::resume_stopped(&config).unwrap();
+        refuse_role(&config).unwrap();
+    }
+
+    #[test]
+    fn a_backup_directory_does_not_start_as_the_validator_without_a_certificate() {
+        let directory = tempfile::tempdir().unwrap();
+        let (config, this) = switching(directory.path());
+        refuse_role(&config).unwrap();
+        crate::term::settle_role(directory.path(), false).unwrap();
+        refuse_role(&config).unwrap();
+        crate::term::settle_role(directory.path(), true).unwrap();
+        assert!(matches!(
+            refuse_role(&config),
+            Err(EmbedError::Term(TermRefusal::NotCertified))
+        ));
+        // Starting as the validator does not by itself make the device one.
+        crate::term::settle_role(directory.path(), false).unwrap();
+        assert!(matches!(
+            refuse_role(&config),
+            Err(EmbedError::Term(TermRefusal::NotCertified))
+        ));
+        let mut record = TermRecord::load(directory.path()).unwrap();
+        record.taking_over = Some(certificate(1, this));
+        record.store(directory.path()).unwrap();
+        refuse_role(&config).unwrap();
+    }
+
+    #[test]
+    fn the_answer_timeout_stays_below_the_leader_timeout() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut config, _) = switching(directory.path());
+        config.switching.as_mut().unwrap().answer_timeout = config.leader_timeout;
+        assert!(matches!(refuse_role(&config), Err(EmbedError::Config(_))));
     }
 }

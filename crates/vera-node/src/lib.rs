@@ -34,7 +34,7 @@ pub use embedded::{
 };
 
 mod term;
-pub use term::{Device, Switching, TermRefusal, TermSeat};
+pub use term::{Contest, Device, Switching, TermRefusal, TermSeat};
 
 mod finalize;
 pub use finalize::{index_finalized_block, subscription_data};

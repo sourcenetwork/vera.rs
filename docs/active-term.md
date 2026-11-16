@@ -135,16 +135,32 @@ active.follow(certificate).await?;                       // on the device that h
 `hand_over` holds back new proposals, waits up to two seconds for the blocks
 already proposed to finalize, and asks the successor where it stands until it
 reports that block as its newest, for up to `Switching::answer_timeout`
-(3 seconds by default). That block is the change's cut, so the new term loses
-nothing. A successor that is not connected or not current fails the call with
-`TermRefusal::SuccessorNotCurrent` and the device goes on as before.
+(3 seconds by default, and below the leader timeout). A proposal is counted
+from the start of its build until its height is recorded, so the block the
+handover names is the last one this device handed to consensus. That block
+is the change's cut, so the new term loses nothing. A successor that is not
+connected or not current fails the call with
+`TermRefusal::SuccessorNotCurrent`, blocks that do not finalize in time with
+`TermRefusal::Unsettled`, and the device goes on as it was before the call:
+proposing if it was, held if it was.
+
+A device that already announced a handover refuses another with
+`TermRefusal::HandedOver`, and one that another device replaced with
+`TermRefusal::Superseded`. Neither call changes whether it proposes.
 
 The announcement is stored in `term.json`. From then on the device proposes
 nothing, also after a restart: a start as the active device fails with
 `TermRefusal::HandedOver`. It follows the successor (`follow`, or a start with
 `EmbeddedConfig::following`), or the host calls `resume` when no certificate
-was issued. Only the host knows whether the successor received one; resuming
-after it did forks the deployment. A proposal that was held back is not
+was issued, or `EmbeddedNode::resume_stopped(&config)` when the node is not
+running: the host quit before the operators approved. Only the host knows
+whether the successor received a certificate; resuming after it did forks
+the deployment. Both are refused with `TermRefusal::Superseded` on a device
+that holds a certificate naming another device, and `resume_stopped` with
+`TermRefusal::NotCertified` on a device that already started to follow the
+successor: it dropped its vote journal, and it validates again only under a
+certificate. A takeover the device later
+accepts under a certificate naming it replaces the announcement. A proposal that was held back is not
 answered when the hold is lifted, so the first block after `resume`, or after
 a refused handover, can be late by the leader timeout.
 
@@ -172,18 +188,32 @@ operators approve.
 `takeover_change` waits, up to `Switching::answer_timeout`, until the backup
 has executed every finalized block its consensus archive holds, and fails
 with `TermRefusal::NotAtCut` while it is still behind; the host asks again. A
-cut below such a block would void a block the device is about to apply. A
-finalization whose block never arrived does not hold the takeover up: that
-block went with the device that built it. Its certificate stays in the
-archive, which keeps the first certificate stored for a height, so a node
-that holds a term serves a certificate for a height only when it certifies
-the block the node has there.
+cut below such a block would void a block the device is about to apply.
 
-`take_over` checks the certificate against the operator policy in the
-backup's own state, that it names this device, that its term is above every
-term the device holds or has seen in a block, and that the device's newest
-block is exactly the cut. For the final block of a handover it waits up to
-`Switching::answer_timeout`. A refusal leaves the backup running.
+Marshal stores a block and its finalization certificate separately, and a
+backup stopped between the two keeps the certificate of the block above its
+newest one without the block. While the active device is reachable the
+backup fetches the block. When it is not, the backup cannot take over:
+`takeover_change`, `take_over` and the start as validator fail with
+`TermRefusal::CertificateAboveCut`. Commonware's archive keeps the first
+certificate stored for a height and cannot be cut back, so a term started
+there could not certify its first block, and a backup fetching that height
+would be handed a certificate for another block. The device takes over once
+it has the block from the device that built it; otherwise the deployment
+continues on another backup, or this one joins again in an empty directory
+from a device that is active. Removing the certificate needs the consensus
+archives rebuilt above the cut without a peer, which is not built.
+
+`take_over` checks that the certificate names this device, that its term is
+above every term the device holds or has seen in a block, and that the
+device's newest block is exactly the cut; for the final block of a handover
+it waits up to `Switching::answer_timeout`. It then checks the certificate
+against the operator policy in the backup's state at the cut. A refusal
+leaves the backup running.
+
+A backup's directory opens as the validator only this way. A start as the
+active device in a directory that last ran as a backup, without a
+certificate naming the device, fails with `TermRefusal::NotCertified`.
 
 The accepted certificate is stored before the node restarts. The device then
 starts as the validator and checks once more that it holds no block above the
@@ -197,8 +227,11 @@ dropped, and the device starts as a backup again with
 
 `term.json` in the data directory holds the newest certificate the device
 verified, an announced handover, a takeover it accepted and has not started
-under, and whether its consensus journal holds votes it cast as the
-validator. None of it is secret.
+under, whether its consensus journal holds votes it cast as the validator,
+whether it last ran as a backup, and whether its stores must be taken again.
+None of it is secret. Every embedded node keeps it, with or without
+`switching`, so a device that validated before it was given `switching`
+drops its vote journal when it first follows.
 
 - A start as the active device is refused with `TermRefusal::Superseded` when
   the stored certificate names another device, and with
@@ -254,20 +287,40 @@ age a verifying client still accepts a state at), it asks every device in
 
 - The gap is measured on the wall clock, from the timestamp of the device's
   newest block at start and from each block it proposes afterwards. The wall
-  clock keeps running while a machine sleeps.
+  clock keeps running while a machine sleeps. A device with no block of its
+  own, a newest block dated after the local clock, or a clock set back
+  cannot show it is fresh, and asks.
+- The device asks before it builds a block and again when the block is
+  built, before consensus sees it: an idle proposer waits up to the heartbeat
+  for a first request, and a machine can sleep inside that wait.
 - Two devices that both run as the validator share one network key and cannot
   connect. The device therefore asks over a separate connection under its
   transport key, which the device that replaced it admits as a backup's. It
   dials each listed address and waits up to `Switching::answer_timeout` for
   an answer.
+- Only a device that runs as the validator answers under the validator key,
+  so any answer means another device is active, and the device does not
+  propose.
 - An answer that carries a certificate of a later term, held by another
   device and valid under the operator policy in this device's own state,
   demotes the device: it stores the certificate, proposes nothing more, and
   `EmbeddedNode::demoted` resolves with the certificate. The host then calls
-  `follow`. `resume` is refused with `TermRefusal::Superseded`.
-- With no such answer the device proposes. An idle deployment's heartbeat
-  keeps its newest block inside the window, so a device that stays awake
-  asks only once after it starts or wakes.
+  `follow`. `resume` and `hand_over` are refused with
+  `TermRefusal::Superseded`.
+- Any other answer is a contest: no certificate, one the device cannot
+  verify (the operators were rotated in blocks it does not have), one of a
+  term it already holds, or one it could not store. Nothing is stored and
+  nothing is demoted on unverified data. The proposal is dropped,
+  `EmbeddedNode::contested` resolves with the `Contest` (the device that
+  answered, its newest block and its unverified certificate), and the device
+  asks again at its next turn. It proposes again once nobody answers. This
+  covers two devices certified for the same term number and a device opened
+  as validator without a certificate. The answer does not carry the chain of
+  certificates since the asker's term: holding is enough to stop the fork,
+  and the host resolves it with a certificate the device can verify.
+- With no answer the device proposes. An idle deployment's heartbeat keeps
+  its newest block inside the window, so a device that stays awake asks only
+  once after it starts or wakes.
 
 ```rust
 let mut node = EmbeddedNode::start(active_config).await?;
@@ -279,7 +332,8 @@ tokio::select! {
 
 This bounds a fork; it does not prevent one. A device that wakes while no
 other device is reachable goes on as the active device, and so does one that
-restarts inside the window. If another device took over meanwhile, both
+restarts inside the window. A device that stays awake and is cut off from
+the others never asks. If another device took over meanwhile, both
 finalize blocks until the woken one next asks, or the host gives it the
 certificate with `follow`. Preventing that takes a lease and an always-on
 voter, which this version does not have.
@@ -316,7 +370,14 @@ A device whose block at the cut's height is another block than the cut left
 the deployment's history below the cut. It cannot follow, and the start fails
 with `TermRefusal::Diverged`; the device joins again as a backup in an empty
 directory. This needs two switches that each lost blocks, with this device
-absent for both.
+absent for both. A device whose newest block is below the cut cannot be
+judged from the certificate. It is found out when it connects: the holder's
+next block does not extend its newest block, or the history it imports does
+not connect to the records it kept. The node stops with
+`TermRefusal::Diverged` before the block reaches execution, on every start,
+until the directory is replaced.
+
+A rewind also drops an import of history that was interrupted above the cut.
 
 ### Discarded submissions
 
@@ -350,6 +411,29 @@ executed block by block, so the node also checks the term of the block a
 snapshot is taken at and refuses the same way.
 
 ## Limits
+
+These follow from sticky active without a lease and from one shared key:
+
+- An active device that stays awake and is cut off from the others never
+  asks, and an unanswered check permits proposing.
+- Nothing binds a certificate to a version of the operator policy. A
+  verifier reads the policy at its own newest state, so a certificate
+  approved before a rotation may not verify after it, and the reverse.
+- Two certificates for one term number, naming different devices or cuts,
+  are an operator error. A device does not detect it from the certificates;
+  the two devices contest each other when one asks.
+- A re-executing node accepts any term at or above its parent's without a
+  certificate.
+- `LightBlock` JSON and the C verifier's results do not expose a block's
+  term. A client reads it from the block it decodes or from
+  `GossipHeader::term`.
+- A device that was rewound serves no certificate below the cut from its
+  consensus archive, only from the finalized history it kept.
+- A backup that holds the certificate of the block above its newest one
+  without the block cannot take over while the device that built it is
+  away (`TermRefusal::CertificateAboveCut`).
+
+Also:
 
 - One validator key shared by every device. A device that holds it can
   finalize blocks in any term; the term and its certificate tell honest

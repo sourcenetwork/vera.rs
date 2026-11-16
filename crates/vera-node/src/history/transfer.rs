@@ -3,6 +3,9 @@ use commonware_codec::DecodeExt as _;
 use vera_domain::{ConsensusPublicKey, LightBlock, verify_finalized_block};
 
 pub(super) const IMPORT: &[u8] = b"import";
+/// The error of an import whose oldest block does not follow the records the store kept.
+pub(crate) const DISCONNECTED: &str = "history import does not connect to committed prefix";
+
 /// Maximum history bytes copied into one transfer response.
 pub const HISTORY_CHUNK_BYTES: usize = 64 * 1024;
 
@@ -161,10 +164,7 @@ impl FinalizedHistory {
         );
         import.next = (block.height - 1, block.parent.0.0);
         if import.next.0 == import.base.0 {
-            ensure!(
-                import.next == import.base,
-                "history import does not connect to committed prefix"
-            );
+            ensure!(import.next == import.base, DISCONNECTED);
         }
         let mut batch = WriteBatch::default();
         let anchor = Block::decode_cfg(

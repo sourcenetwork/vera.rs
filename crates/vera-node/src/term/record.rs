@@ -33,6 +33,9 @@ pub(crate) struct TermRecord {
     /// again from the device this one follows: they hold blocks a later term
     /// voided, which cannot be cut out of them.
     pub resync: bool,
+    /// Whether the device last ran as a backup. It validates again only
+    /// under a certificate that names it.
+    pub followed: bool,
 }
 
 impl TermRecord {
@@ -118,6 +121,7 @@ mod tests {
             taking_over: None,
             voted: true,
             resync: false,
+            followed: false,
         };
         record.store(directory.path()).unwrap();
         assert_eq!(TermRecord::load(directory.path()).unwrap(), record);

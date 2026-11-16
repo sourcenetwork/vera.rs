@@ -12,7 +12,7 @@ use vera_jsonrpc::NodeState;
 
 use super::{
     Accept, Switching, TermRecord, TermRefusal, TermSeat,
-    control::{Command, View},
+    control::{Asked, Command, View},
     device_id,
     probe::Probe,
     wire::{Message, Status},
@@ -23,10 +23,20 @@ use crate::ProposalHold;
 const SETTLE: Duration = Duration::from_secs(2);
 const POLL: Duration = Duration::from_millis(100);
 
-/// Whether the consensus archive holds a finalized block at a height.
-/// Execution may not have reached it yet.
+/// What the consensus archive holds as finalized at a height. Execution may
+/// not have reached it yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Archived {
+    Nothing,
+    /// The block, which execution is about to apply.
+    Block,
+    /// A finalization certificate whose block never arrived.
+    Certificate,
+}
+
+/// Reads what the consensus archive holds at a height.
 pub(crate) type Finalized =
-    Arc<dyn Fn(u64) -> futures::future::BoxFuture<'static, bool> + Send + Sync>;
+    Arc<dyn Fn(u64) -> futures::future::BoxFuture<'static, Archived> + Send + Sync>;
 
 /// What the term actor works with.
 pub(crate) struct Parts<S, R> {
@@ -189,7 +199,25 @@ where
         Ok(device_id(&self.switching()?.device_key.public_key()))
     }
 
+    /// Why this device may not act as the active device, if it may not:
+    /// another device holds a later term, or this one announced a handover.
+    fn displaced(&self, this: &B256) -> Option<TermRefusal> {
+        let later = self.view.demoted.borrow().clone().or_else(|| {
+            self.record
+                .certificate
+                .clone()
+                .filter(|certificate| certificate.change.holder != *this)
+        });
+        if let Some(certificate) = later {
+            return Some(TermRefusal::Superseded(Box::new(certificate)));
+        }
+        self.record
+            .handed_over
+            .map(|change| TermRefusal::HandedOver(Box::new(change)))
+    }
+
     async fn hand_over(&mut self, successor: PublicKey) -> Result<TermChange, TermRefusal> {
+        let this = self.this_device()?;
         let switching = self.switching()?;
         if self.backup {
             return Err(TermRefusal::Backup);
@@ -197,14 +225,30 @@ where
         if switching.device(&successor).is_none() {
             return Err(TermRefusal::UnknownDevice(Box::new(successor)));
         }
+        // A device that already gave the deployment up, or was replaced,
+        // has no term to hand over, and a failure below must not let it propose.
+        if let Some(refusal) = self.displaced(&this) {
+            return Err(refusal);
+        }
         let wait = switching.answer_timeout;
-        if !self.hold.settle(SETTLE).await {
+        let held = self.hold.is_held();
+        let change = self.announce(successor, wait).await;
+        if change.is_err() && !held {
             self.hold.release();
+        }
+        change
+    }
+
+    async fn announce(
+        &mut self,
+        successor: PublicKey,
+        wait: Duration,
+    ) -> Result<TermChange, TermRefusal> {
+        if !self.hold.settle(SETTLE).await {
             return Err(TermRefusal::Unsettled);
         }
         let cut = self.head();
         if !self.confirmed(&successor, &cut, wait).await {
-            self.hold.release();
             return Err(TermRefusal::SuccessorNotCurrent { height: cut.height });
         }
         let change = TermChange {
@@ -215,10 +259,7 @@ where
         };
         let mut record = self.record.clone();
         record.handed_over = Some(change);
-        if let Err(error) = record.store(&self.data_dir) {
-            self.hold.release();
-            return Err(error);
-        }
+        record.store(&self.data_dir)?;
         self.record = record;
         Ok(change)
     }
@@ -250,14 +291,12 @@ where
     }
 
     fn resume(&mut self) -> Result<(), TermRefusal> {
+        let this = self.this_device()?;
         if self.backup {
             return Err(TermRefusal::Backup);
         }
-        if self.view.demoted.borrow().is_some() {
-            let certificate = self.record.certificate.clone();
-            return Err(certificate.map_or(TermRefusal::Stopped, |certificate| {
-                TermRefusal::Superseded(Box::new(certificate))
-            }));
+        if let Some(refusal @ TermRefusal::Superseded(_)) = self.displaced(&this) {
+            return Err(refusal);
         }
         let mut record = self.record.clone();
         record.handed_over = None;
@@ -284,21 +323,16 @@ where
     /// The newest block, once execution has reached every finalized block
     /// the consensus archive holds. A cut chosen below such a block would
     /// void a block this device is about to apply.
-    ///
-    /// A finalization whose block never arrived does not count: the block is
-    /// lost with the device that built it.
     async fn executed(&self, wait: Duration) -> Result<TermCut, TermRefusal> {
         let deadline = tokio::time::Instant::now() + wait;
         loop {
             let head = self.head();
-            if !(self.finalized)(head.height + 1).await {
+            let above = (self.finalized)(head.height + 1).await;
+            if above == Archived::Nothing {
                 return Ok(head);
             }
             if tokio::time::Instant::now() >= deadline {
-                return Err(TermRefusal::NotAtCut {
-                    head: head.height + 1,
-                    cut: head.height,
-                });
+                return Err(not_at(&head, head.height, above));
             }
             tokio::time::sleep(POLL).await;
         }
@@ -330,7 +364,6 @@ where
     ) -> Result<(), TermRefusal> {
         let this = self.this_device()?;
         let wait = self.switching()?.answer_timeout;
-        self.verify(&certificate)?;
         let change = certificate.change;
         match role {
             Accept::TakeOver => {
@@ -348,27 +381,34 @@ where
                     });
                 }
                 self.reach(&change.cut, wait).await?;
+                // The policy is read at the cut: a block on the way to it may have rotated the operators.
+                self.verify(&certificate)?;
                 let mut record = self.record.clone();
                 record.taking_over = Some(certificate);
                 record.store(&self.data_dir)?;
                 self.record = record;
-                return Ok(());
+                Ok(())
             }
             Accept::Follow => {
+                self.verify(&certificate)?;
                 if change.holder == this {
                     return Err(TermRefusal::Holder);
                 }
-                let held = self.record.change().map_or(0, |held| held.term);
-                if change.term <= held {
+                // A term this device already holds a certificate of, or one
+                // below a block it has seen, is not news. A backup may be
+                // given the certificate of the term its newest blocks are in.
+                let stored = self.record.change().map_or(0, |held| held.term);
+                let seen = self.seen();
+                if change.term <= stored || change.term < seen {
                     return Err(TermRefusal::Stale {
                         offered: change.term,
-                        held,
+                        held: stored.max(seen),
                     });
                 }
                 self.hold.hold();
+                self.store(certificate)
             }
         }
-        self.store(certificate)
     }
 
     /// Wait until this node's newest block is `cut`. The final block of a
@@ -378,14 +418,12 @@ where
         loop {
             let head = self.head();
             let above = (self.finalized)(cut.height + 1).await;
-            if head == *cut && !above {
+            if head == *cut && above == Archived::Nothing {
                 return Ok(());
             }
-            if above || head.height >= cut.height || tokio::time::Instant::now() >= deadline {
-                return Err(TermRefusal::NotAtCut {
-                    head: head.height.max(cut.height + u64::from(above)),
-                    cut: cut.height,
-                });
+            let waiting = head.height < cut.height || above == Archived::Certificate;
+            if !waiting || tokio::time::Instant::now() >= deadline {
+                return Err(not_at(&head, cut.height, above));
             }
             tokio::time::sleep(POLL).await;
         }
@@ -400,6 +438,7 @@ where
             taking_over: None,
             voted: self.record.voted,
             resync: self.record.resync,
+            followed: self.record.followed,
         };
         record.store(&self.data_dir)?;
         self.record = record;
@@ -408,45 +447,82 @@ where
         Ok(())
     }
 
-    /// Ask every other device for a later term. Returns whether this device
-    /// may still propose.
-    async fn probe(&mut self) -> bool {
+    /// Ask every other device where it stands.
+    ///
+    /// Only a device that runs as the validator answers, so any answer means
+    /// this device must not propose. A certificate of a later term that
+    /// verifies and is stored replaces it for good; anything else is reported
+    /// to the host and asked again at the next proposal.
+    async fn probe(&mut self) -> Asked {
         let (Some(switching), Some(probe), false) = (&self.switching, &self.probe, self.backup)
         else {
-            return true;
+            return Asked::Clear;
         };
         let this = device_id(&switching.device_key.public_key());
-        let asked = switching
-            .devices
-            .iter()
-            .map(|device| probe.ask(self.context.child("term_probe"), device.address));
-        let held = self.seen();
-        let later = futures::future::join_all(asked)
+        let asked = switching.devices.iter().map(|device| async {
+            let answer = probe
+                .ask(self.context.child("term_probe"), device.address)
+                .await;
+            answer.map(|status| (device.key.clone(), status))
+        });
+        let answers: Vec<_> = futures::future::join_all(asked)
             .await
             .into_iter()
             .flatten()
-            .filter_map(|status| status.certificate)
+            .collect();
+        let Some((device, status)) = answers.first().cloned() else {
+            self.view.contested.send_replace(None);
+            return Asked::Clear;
+        };
+        let held = self.seen();
+        let later = answers
+            .iter()
+            .filter_map(|(_, status)| status.certificate.clone())
             .filter(|certificate| {
                 let change = &certificate.change;
                 change.term > held && change.holder != this && self.verify(certificate).is_ok()
             })
             .max_by_key(|certificate| certificate.change.term);
-        let Some(certificate) = later else {
-            return true;
-        };
-        tracing::warn!(
-            term = certificate.change.term,
-            cut = certificate.change.cut.height,
-            "another device holds a later term; this device stops proposing"
-        );
-        self.hold.hold();
-        self.view
-            .guard
-            .raise(certificate.change.term, certificate.change.cut.height);
-        if let Err(error) = self.store(certificate.clone()) {
-            tracing::error!(%error, "term certificate could not be stored");
+        if let Some(certificate) = later {
+            match self.store(certificate.clone()) {
+                Ok(()) => {
+                    tracing::warn!(
+                        term = certificate.change.term,
+                        cut = certificate.change.cut.height,
+                        "another device holds a later term; this device stops proposing"
+                    );
+                    self.hold.hold();
+                    self.view
+                        .guard
+                        .raise(certificate.change.term, certificate.change.cut.height);
+                    self.view.demoted.send_replace(Some(certificate));
+                    return Asked::Replaced;
+                }
+                Err(error) => tracing::error!(%error, "term certificate could not be stored"),
+            }
         }
-        self.view.demoted.send_replace(Some(certificate));
-        false
+        tracing::warn!(%device, height = status.height, "another device validates this deployment");
+        self.view.contested.send_replace(Some(crate::Contest {
+            device,
+            height: status.height,
+            block: status.block,
+            certificate: status.certificate,
+        }));
+        Asked::Contested
+    }
+}
+
+/// Why a device at `head` cannot start a term on the block at `cut`.
+fn not_at(head: &TermCut, cut: u64, above: Archived) -> TermRefusal {
+    match above {
+        Archived::Certificate => TermRefusal::CertificateAboveCut { height: cut + 1 },
+        Archived::Block => TermRefusal::NotAtCut {
+            head: head.height.max(cut + 1),
+            cut,
+        },
+        Archived::Nothing => TermRefusal::NotAtCut {
+            head: head.height,
+            cut,
+        },
     }
 }

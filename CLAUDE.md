@@ -486,20 +486,29 @@ certified state.
 proposals, confirms the successor holds the final block and returns the change
 to certify; `take_over` and `follow` restart the node in place in its new
 role. `term.json` keeps the newest certificate, an announced handover and a
-staged takeover; a device does not start as validator against them. A device
+staged takeover; a device does not start as validator against them.
+`EmbeddedNode::resume_stopped` undoes an announced handover on a stopped
+directory. A device
 that validated drops its vote journal when it becomes a backup. A lone
 validator signs an epoch whose ceremony it only observed with the share its
 host holds, once the epoch's sharing confirms it. Devices ask each other where
 they stand on channel 17. An active device whose newest block is older than
 `Switching::freshness` asks the others under its transport key before it
-proposes, and `EmbeddedNode::demoted` resolves if one holds a later term; a
-device that wakes alone proposes on. A backup holding a certificate stops with
+builds and again before a built block reaches consensus. Any answer stops the
+proposal: a verified later certificate demotes the device
+(`EmbeddedNode::demoted`), anything else is a `Contest`
+(`EmbeddedNode::contested`) asked again at the next turn. A device that
+reaches nobody proposes on. A directory that last ran as a backup starts as
+validator only under a certificate naming it (`TermRefusal::NotCertified`),
+and a backup holding the certificate of the next block without the block
+cannot take over (`TermRefusal::CertificateAboveCut`). A backup holding a certificate stops with
 `TermRefusal::LowerTerm` on a finalized block of a lower term above the cut.
 A device that follows a term whose cut is below blocks it finalized in a
 lower term reports their submissions (`EmbeddedNode::discarded`,
 `discarded-submissions.json`), drops those records from history and removes
 `commonware/`, then takes state from the holder and imports history from the
-cut. Blocks carry no certificate, so re-execution alone accepts any term at or
+cut. A device whose history left the holder's below the cut stops with
+`TermRefusal::Diverged`. Blocks carry no certificate, so re-execution alone accepts any term at or
 above the parent's. See `docs/active-term.md`.
 
 ## Crate Structure

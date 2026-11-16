@@ -5,6 +5,8 @@
 //! and raises the term its blocks carry. See `docs/active-term.md`.
 
 mod actor;
+mod archive;
+mod contest;
 mod control;
 mod gate;
 mod journal;
@@ -17,14 +19,18 @@ mod switching;
 mod wire;
 
 pub(crate) use actor::{Parts, run};
+pub(crate) use archive::{Archived, archived};
+pub use contest::Contest;
 pub use control::TermSeat;
 pub(crate) use control::{Accept, TermControl};
+#[cfg(test)]
+pub(crate) use control::{Asked, Command};
 pub(crate) use gate::WakeGate;
 pub(crate) use journal::settle_role;
 pub(crate) use probe::Probe;
 pub(crate) use record::TermRecord;
 pub use refusal::TermRefusal;
-pub(crate) use reporter::TermReporter;
+pub(crate) use reporter::{Applied, TermReporter};
 pub(crate) use rewind::{acknowledge, discarded, resync_after, rewind};
 pub use switching::{Device, Switching};
 

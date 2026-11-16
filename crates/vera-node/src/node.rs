@@ -763,6 +763,8 @@ async fn run_node_with_elector<
     let sync_term = term.clone();
     let (term_refused, mut term_refusals) = ::tokio::sync::mpsc::unbounded_channel();
     let sync_refused = term_refused.clone();
+    let applied = crate::term::Applied::default();
+    let sync_applied = applied.clone();
     let (stateful_actor, stateful_mailbox) = Stateful::new(
         context.child("stateful"),
         StatefulConfig {
@@ -807,10 +809,23 @@ async fn run_node_with_elector<
                     .filter(|peer| *peer != sync_local)
                     .collect();
                 let mut client = sync_history_peer.lock().await;
-                snapshot_history
+                if let Err(error) = snapshot_history
                     .recover(&mut client, &peers, selected)
                     .await
-                    .map_err(|e| e.to_string())?;
+                {
+                    let error = format!("{error:#}");
+                    // The history this device kept is not an ancestor of the
+                    // block it synchronized to: it left the deployment's
+                    // history below a cut it never learned of.
+                    if error.contains(crate::history::DISCONNECTED) {
+                        let _ = sync_refused.send(crate::TermRefusal::Diverged {
+                            height: selected.height,
+                        });
+                        return std::future::pending().await;
+                    }
+                    return Err(error);
+                }
+                sync_applied.seed(selected.height, selected.digest());
                 sync_status.set_snapshot_revision(anchor.height.get());
                 sync_term.observe(selected.height, selected.term);
                 sync_status.record_finalized(
@@ -889,6 +904,7 @@ async fn run_node_with_elector<
     let term_reporter = crate::term::TermReporter::new(
         crate::finalization_diagnostics::Reporter::new(stateful_mailbox.clone()),
         term.clone(),
+        applied.clone(),
         term_refused,
     );
     let reporters = Reporters::from((
@@ -933,6 +949,9 @@ async fn run_node_with_elector<
             recovered.inner().context.round.view().get(),
         );
         term.observe(recovered.inner().height, recovered.inner().term);
+        if recovered.inner().height == recovered_height.get() {
+            applied.seed(recovered_height.get(), recovered.digest());
+        }
         if !is_backup {
             // A device taking the deployment over starts on the cut. A block
             // above it came from the device being replaced after the cut was
@@ -940,20 +959,29 @@ async fn run_node_with_elector<
             // void a block this device already holds.
             if let Some(certificate) = term_record.taking_over.take() {
                 let cut = certificate.change.cut;
-                let above = marshal
-                    .get_block(Identifier::Height(Height::new(cut.height + 1)))
-                    .await
-                    .is_some();
-                if above || recovered.inner().height != cut.height {
+                let above = crate::term::archived(marshal.clone(), cut.height + 1).await;
+                if above != crate::term::Archived::Nothing || recovered.inner().height != cut.height
+                {
                     term_record.store(&config.data_dir)?;
-                    return Err(crate::TermRefusal::NotAtCut {
-                        head: recovered.inner().height + u64::from(above),
-                        cut: cut.height,
+                    return Err(match above {
+                        crate::term::Archived::Certificate => {
+                            crate::TermRefusal::CertificateAboveCut {
+                                height: cut.height + 1,
+                            }
+                        }
+                        _ => crate::TermRefusal::NotAtCut {
+                            head: recovered
+                                .inner()
+                                .height
+                                .max(cut.height + u64::from(above == crate::term::Archived::Block)),
+                            cut: cut.height,
+                        },
                     }
                     .into());
                 }
                 term_record.certificate = Some(certificate);
                 term_record.handed_over = None;
+                term_record.followed = false;
                 term_record.store(&config.data_dir)?;
             }
             if let Some(certificate) = &term_record.certificate {
@@ -1194,12 +1222,7 @@ async fn run_node_with_elector<
                 let marshal = marshal.clone();
                 Arc::new(move |height| {
                     let marshal = marshal.clone();
-                    Box::pin(async move {
-                        marshal
-                            .get_block(Identifier::Height(Height::new(height)))
-                            .await
-                            .is_some()
-                    })
+                    Box::pin(crate::term::archived(marshal, height))
                 })
             },
             modules: modules.clone(),

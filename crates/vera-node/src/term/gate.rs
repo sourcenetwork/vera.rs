@@ -10,7 +10,7 @@ use std::{
 
 use tokio::sync::{mpsc, oneshot};
 
-use super::control::Command;
+use super::control::{Asked, Command};
 
 /// Holds a proposal back until the other devices were asked for a later term.
 ///
@@ -47,14 +47,14 @@ impl WakeGate {
     /// Record the time of the newest block the device starts from.
     pub(crate) fn seed(&self, timestamp: u64) {
         if let Some(inner) = &self.0 {
-            inner.last.fetch_max(timestamp, Ordering::AcqRel);
+            inner.last.store(timestamp, Ordering::Release);
         }
     }
 
     /// Record a block this device proposed.
     pub(crate) fn proposed(&self) {
         if let Some(inner) = &self.0 {
-            inner.last.fetch_max(now(), Ordering::AcqRel);
+            inner.last.store(now(), Ordering::Release);
         }
     }
 
@@ -63,7 +63,11 @@ impl WakeGate {
     pub(crate) fn fresh(&self) -> bool {
         self.0.as_ref().is_none_or(|inner| {
             let last = inner.last.load(Ordering::Acquire);
-            last == 0 || now().saturating_sub(last) <= inner.freshness.as_secs()
+            // A device with no block of its own, a block dated after the
+            // local clock, or a clock set back cannot show it is fresh.
+            now()
+                .checked_sub(last)
+                .is_some_and(|gap| last != 0 && gap <= inner.freshness.as_secs())
         })
     }
 
@@ -81,8 +85,9 @@ impl WakeGate {
             return;
         }
         match answer.await {
-            Ok(true) | Err(_) => inner.last.store(now(), Ordering::Release),
-            Ok(false) => std::future::pending().await,
+            Ok(Asked::Clear) | Err(_) => inner.last.store(now(), Ordering::Release),
+            // The next proposal asks again.
+            Ok(Asked::Contested | Asked::Replaced) => std::future::pending().await,
         }
     }
 }
@@ -91,14 +96,14 @@ impl WakeGate {
 mod tests {
     use super::*;
 
-    fn answering(clear: bool) -> (WakeGate, tokio::task::JoinHandle<usize>) {
+    fn answering(answer: Asked) -> (WakeGate, tokio::task::JoinHandle<usize>) {
         let (sender, mut commands) = mpsc::unbounded_channel();
         let gate = WakeGate::new(Duration::from_secs(30), sender);
         let asked = tokio::spawn(async move {
             let mut asked = 0;
             while let Some(Command::Probe { reply }) = commands.recv().await {
                 asked += 1;
-                let _ = reply.send(clear);
+                let _ = reply.send(answer);
             }
             asked
         });
@@ -107,8 +112,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_device_asks_only_after_a_gap_longer_than_the_window() {
-        let (gate, asked) = answering(true);
-        gate.pass().await;
+        let (gate, asked) = answering(Asked::Clear);
         gate.seed(now() - 10);
         gate.pass().await;
         gate.seed(1);
@@ -117,8 +121,9 @@ mod tests {
         drop(gate);
         assert_eq!(asked.await.unwrap(), 0);
 
-        let (gate, asked) = answering(true);
+        let (gate, asked) = answering(Asked::Clear);
         gate.seed(now() - 31);
+        assert!(!gate.fresh());
         gate.pass().await;
         // The answer covers the proposals that follow it.
         gate.pass().await;
@@ -127,15 +132,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_device_that_learns_of_a_later_term_never_passes() {
-        let (gate, _asked) = answering(false);
-        gate.seed(now() - 31);
-        let passed = tokio::time::timeout(Duration::from_millis(100), gate.pass()).await;
-        assert!(passed.is_err());
+    async fn a_device_that_cannot_show_it_is_fresh_asks() {
+        // No block of its own, and a newest block dated after the local clock.
+        for seed in [None, Some(now() + 3_600)] {
+            let (gate, asked) = answering(Asked::Clear);
+            if let Some(timestamp) = seed {
+                gate.seed(timestamp);
+            }
+            assert!(!gate.fresh(), "{seed:?}");
+            gate.pass().await;
+            assert!(gate.fresh());
+            drop(gate);
+            assert_eq!(asked.await.unwrap(), 1, "{seed:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_device_told_another_one_validates_does_not_pass() {
+        for answer in [Asked::Replaced, Asked::Contested] {
+            let (gate, _asked) = answering(answer);
+            gate.seed(now() - 31);
+            let passed = tokio::time::timeout(Duration::from_millis(100), gate.pass()).await;
+            assert!(passed.is_err(), "{answer:?}");
+            assert!(!gate.fresh());
+        }
     }
 
     #[tokio::test]
     async fn a_node_without_switching_never_asks() {
         WakeGate::default().pass().await;
+        assert!(WakeGate::default().fresh());
     }
 }

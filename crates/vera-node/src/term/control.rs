@@ -37,7 +37,19 @@ pub(crate) enum Command {
         reply: Reply<()>,
     },
     /// Ask the other devices for a later term. Answers whether this device may still propose.
-    Probe { reply: oneshot::Sender<bool> },
+    Probe { reply: oneshot::Sender<Asked> },
+}
+
+/// What a device learned by asking the others where they stand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Asked {
+    /// Nobody answered as the deployment's validator.
+    Clear,
+    /// Another device validates, and this one holds no certificate that
+    /// names it. It does not propose and asks again at its next turn.
+    Contested,
+    /// Another device holds a later term, and its certificate is stored.
+    Replaced,
 }
 
 /// What the host reads without asking the node.
@@ -46,6 +58,7 @@ pub(crate) struct View {
     pub(crate) guard: TermGuard,
     pub(crate) certificate: RwLock<Option<TermCertificate>>,
     pub(crate) demoted: watch::Sender<Option<TermCertificate>>,
+    pub(crate) contested: watch::Sender<Option<crate::Contest>>,
 }
 
 /// The host's side: reads the term and asks the node to change it.
@@ -107,6 +120,16 @@ impl TermControl {
             Ok(certificate) => certificate
                 .clone()
                 .expect("a demotion carries its certificate"),
+            Err(_) => std::future::pending().await,
+        }
+    }
+
+    /// Resolves when another device answers as the validator without a
+    /// certificate this device could verify and store.
+    pub(crate) async fn contested(&self) -> crate::Contest {
+        let mut contested = self.view.contested.subscribe();
+        match contested.wait_for(Option::is_some).await {
+            Ok(contest) => contest.clone().expect("a contest carries its answer"),
             Err(_) => std::future::pending().await,
         }
     }

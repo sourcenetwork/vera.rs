@@ -14,10 +14,10 @@ use crate::node::PARTITION_PREFIX;
 /// blocks are kept elsewhere.
 pub(crate) fn settle_role(directory: &Path, backup: bool) -> Result<(), TermRefusal> {
     let mut record = TermRecord::load(directory)?;
-    if record.voted != backup {
+    if record.voted != backup && record.followed == backup {
         return Ok(());
     }
-    if backup {
+    if backup && record.voted {
         let storage = directory.join("commonware");
         remove_votes(&storage).map_err(|source| TermRefusal::Io {
             path: storage,
@@ -25,6 +25,8 @@ pub(crate) fn settle_role(directory: &Path, backup: bool) -> Result<(), TermRefu
         })?;
     }
     record.voted = !backup;
+    // A validator stops counting as a backup once it has started on its cut.
+    record.followed |= backup;
     record.store(directory)
 }
 
@@ -69,6 +71,7 @@ mod tests {
         settle_role(directory.path(), true).unwrap();
         assert!(!votes.exists());
         assert!(blocks.exists());
-        assert!(!TermRecord::load(directory.path()).unwrap().voted);
+        let record = TermRecord::load(directory.path()).unwrap();
+        assert!(!record.voted && record.followed);
     }
 }

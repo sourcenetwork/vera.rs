@@ -119,10 +119,6 @@ impl FinalizedHistory {
         if head.0 <= height {
             return Ok(());
         }
-        ensure!(
-            self.db.get(transfer::IMPORT)?.is_none(),
-            "finalized history holds an unfinished import"
-        );
         let id = if height == 0 {
             B256::from_slice(&self.db.get(GENESIS)?.context("missing history genesis")?)
         } else {
@@ -135,6 +131,9 @@ impl FinalizedHistory {
         }
         batch.delete_range([BLOCK_HASH], [SUBMISSION_HASH + 1]);
         batch.delete(QUERY_HEAD);
+        // An import interrupted above the cut staged records of the voided
+        // blocks; the next start selects a block of the term to import from.
+        batch.delete(transfer::IMPORT);
         batch.put(HEAD, borsh::to_vec(&(height, id.0))?);
         write(&self.db, batch)?;
         *head = (height, BlockId(id));
@@ -204,6 +203,8 @@ mod tests {
         // Records above the cut that are already in the term belong to it.
         assert_eq!(history.standing(1, &cut, 0).unwrap(), Standing::Within);
 
+        // An import that was interrupted does not keep the store from being cut back.
+        history.db.put(transfer::IMPORT, [0xff]).unwrap();
         let discarded = history.submissions_above(1).unwrap();
         assert_eq!(
             discarded,
@@ -216,6 +217,7 @@ mod tests {
         );
         history.rewind_to(1).unwrap();
         assert_eq!(history.head_height(), 1);
+        assert!(history.import_anchor().unwrap().is_none());
         assert_eq!(history.standing(1, &cut, 1).unwrap(), Standing::Within);
         assert!(history.submissions_above(1).unwrap().is_empty());
         history.rewind_to(1).unwrap();

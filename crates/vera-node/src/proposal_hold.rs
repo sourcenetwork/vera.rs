@@ -27,7 +27,19 @@ pub struct ProposalHold {
 struct Inner {
     held: watch::Sender<bool>,
     proposed: AtomicU64,
+    /// Proposals being built or handed to consensus.
+    building: AtomicU64,
     finalized: OnceLock<FinalizedHeight>,
+}
+
+/// Marks a proposal from the start of its build until its height is recorded
+/// or the build is abandoned.
+pub(crate) struct Building(Arc<Inner>);
+
+impl Drop for Building {
+    fn drop(&mut self) {
+        self.0.building.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 impl Default for ProposalHold {
@@ -36,6 +48,7 @@ impl Default for ProposalHold {
             inner: Arc::new(Inner {
                 held: watch::Sender::new(false),
                 proposed: AtomicU64::new(0),
+                building: AtomicU64::new(0),
                 finalized: OnceLock::new(),
             }),
         }
@@ -56,6 +69,13 @@ impl ProposalHold {
     /// Sets where the durably finalized height is read from.
     pub(crate) fn attach(&self, finalized: impl Fn() -> u64 + Send + Sync + 'static) {
         let _ = self.inner.finalized.set(Box::new(finalized));
+    }
+
+    /// Marks a proposal in progress. [`Self::settle`] waits for it to be
+    /// recorded or dropped, so the height it compares is the last one proposed.
+    pub(crate) fn building(&self) -> Building {
+        self.inner.building.fetch_add(1, Ordering::AcqRel);
+        Building(self.inner.clone())
     }
 
     /// Records a block handed to consensus.
@@ -96,9 +116,11 @@ impl ProposalHold {
         };
         let deadline = tokio::time::Instant::now() + limit;
         loop {
-            // A proposal answered just before the hold is recorded by now.
             tokio::time::sleep(POLL).await;
-            if finalized() >= self.inner.proposed.load(Ordering::Acquire) {
+            // A proposal answered just before the hold is recorded once its mark is gone.
+            if self.inner.building.load(Ordering::Acquire) == 0
+                && finalized() >= self.inner.proposed.load(Ordering::Acquire)
+            {
                 return true;
             }
             if tokio::time::Instant::now() >= deadline {
@@ -138,5 +160,30 @@ mod tests {
         let hold = ProposalHold::default();
         hold.record(9);
         assert!(hold.settle(Duration::from_secs(1)).await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn settling_waits_for_a_proposal_that_is_not_recorded_yet() {
+        let hold = ProposalHold::default();
+        let finalized = Arc::new(AtomicU64::new(3));
+        let reader = finalized.clone();
+        hold.attach(move || reader.load(Ordering::Acquire));
+        hold.record(3);
+        let building = hold.building();
+        let settling = tokio::spawn({
+            let hold = hold.clone();
+            async move { hold.settle(Duration::from_secs(1)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !settling.is_finished(),
+            "the cut was chosen under a proposal"
+        );
+        hold.record(4);
+        drop(building);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!settling.is_finished());
+        finalized.store(4, Ordering::Release);
+        assert!(settling.await.unwrap());
     }
 }

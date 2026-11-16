@@ -53,12 +53,26 @@ pub enum TermRefusal {
         /// Height of the certificate's cut.
         cut: u64,
     },
+    /// The consensus archive holds a finalization certificate for the block
+    /// above the cut, and the block itself never arrived. The archive keeps
+    /// the first certificate stored for a height and cannot be cut back, so
+    /// a term started here could not certify its first block. The device
+    /// takes over once it has that block, from the device that built it.
+    #[error("the certificate of block {height} is stored without its block")]
+    CertificateAboveCut {
+        /// Height of the block that is missing.
+        height: u64,
+    },
     /// This device announced a handover and has not resumed.
     #[error("this device handed the deployment over at block {}", .0.cut.height)]
     HandedOver(Box<TermChange>),
     /// Another device holds a later term than this device is active in.
     #[error("another device holds term {}", .0.change.term)]
     Superseded(Box<TermCertificate>),
+    /// This device followed the deployment as a backup and holds no
+    /// certificate that names it. It becomes active through a term certificate.
+    #[error("this device was a backup and holds no term certificate naming it")]
+    NotCertified,
     /// The deployment's blocks are in a later term than this device holds.
     #[error("the deployment is in term {seen}, and this device holds term {held}")]
     Behind {

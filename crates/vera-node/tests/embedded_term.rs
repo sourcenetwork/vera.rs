@@ -98,6 +98,11 @@ fn an_announced_handover_loses_no_block_and_the_successor_crosses_the_epoch() {
     let cut = change.cut.height;
     assert_eq!(change.term, 1);
     assert_eq!(height(&laptop), cut, "the final block is the cut");
+    // A second announcement is refused and does not let the device propose again.
+    assert!(matches!(
+        block_on(laptop.hand_over(&second.key.public_key())),
+        Err(EmbedError::Term(TermRefusal::HandedOver(announced))) if *announced == change
+    ));
     std::thread::sleep(Duration::from_millis(500));
     assert_eq!(
         height(&laptop),
@@ -166,7 +171,14 @@ fn a_backup_takes_over_on_confirmation_while_the_active_device_is_down() {
         WINDOW,
     );
     let laptop = block_on(EmbeddedNode::start(first.active)).unwrap();
-    let mut phone = block_on(EmbeddedNode::start(second.backup)).unwrap();
+    let mut phone = block_on(EmbeddedNode::start(second.backup.clone())).unwrap();
+    // A backup's directory does not open as the validator without a certificate.
+    assert!(matches!(
+        block_on(EmbeddedNode::start(
+            second.backup.activated(dealt.keys().clone()).unwrap()
+        )),
+        Err(EmbedError::Term(TermRefusal::NotCertified))
+    ));
     let signer = BlsSigner::new(75u64.into(), chain_id).unwrap();
     let before = finalize_a_write(&laptop, &signer);
     stop_followed(laptop, &phone);
@@ -249,14 +261,25 @@ fn a_handover_needs_a_current_successor_and_is_undone_by_resuming() {
         block_on(EmbeddedNode::start(first.active.clone())),
         Err(EmbedError::Term(TermRefusal::HandedOver(announced))) if *announced == change
     ));
-    // A device that announced a handover may follow the successor before the certificate reaches it.
-    let laptop = block_on(EmbeddedNode::start(
-        first.active.following(&second.key.public_key()).unwrap(),
-    ))
-    .unwrap();
+    // No certificate was issued. The stopped device takes the handover back and validates again.
+    EmbeddedNode::resume_stopped(&first.active).unwrap();
+    let laptop = block_on(EmbeddedNode::start(first.active.clone())).unwrap();
+    run_until(&laptop, |reached| reached > change.cut.height + 2);
+    assert_eq!(laptop.term(), 0);
+
+    // A device that announced a handover may follow the successor before
+    // the certificate reaches it. Once it has, it does not take the handover back.
+    let change = hand_over(&laptop, &second.key.public_key());
+    block_on(laptop.stop()).unwrap();
+    let following = first.active.following(&second.key.public_key()).unwrap();
+    let laptop = block_on(EmbeddedNode::start(following)).unwrap();
     assert_eq!(height(&laptop), change.cut.height);
     block_on(laptop.stop()).unwrap();
     assert_eq!(height(&phone), change.cut.height);
+    assert!(matches!(
+        EmbeddedNode::resume_stopped(&first.active),
+        Err(EmbedError::Term(TermRefusal::NotCertified))
+    ));
     block_on(phone.stop()).unwrap();
 }
 
@@ -313,6 +336,16 @@ fn a_device_that_wakes_asks_for_the_term_before_it_proposes() {
         block_on(laptop.resume()),
         Err(EmbedError::Term(TermRefusal::Superseded(_)))
     ));
+    // A handover by a device that was replaced is refused and leaves it held.
+    assert!(matches!(
+        block_on(laptop.hand_over(&second.key.public_key())),
+        Err(EmbedError::Term(TermRefusal::Superseded(_)))
+    ));
+    std::thread::sleep(Duration::from_secs(4));
+    let status: vera_jsonrpc::NodeStatus =
+        block_on(laptop.rpc().call_empty("vera_nodeStatus")).unwrap();
+    assert_eq!(status.proposed_count, 0);
+    assert_eq!(height(&laptop), certificate.change.cut.height);
 
     block_on(laptop.follow(certificate)).unwrap();
     for written in [before, after] {
@@ -350,7 +383,11 @@ fn a_device_replaced_while_it_was_down_rewinds_above_the_cut_and_follows() {
 
     // The backup is away while the active device finalizes a request, and
     // the active device goes down before the backup is back.
+    // The backup stops while the active device holds its proposals back, so
+    // no block is on its way to it.
+    hand_over(&laptop, &second.key.public_key());
     block_on(phone.stop()).unwrap();
+    block_on(laptop.resume()).unwrap();
     let lost = finalize_a_write(&laptop, &signer);
     let laptop_head = height(&laptop);
     block_on(laptop.stop()).unwrap();
@@ -470,5 +507,33 @@ fn a_backup_that_holds_a_term_refuses_a_block_of_a_lower_one() {
         }))
     ));
     assert!(height(&laptop) > certificate.change.cut.height);
+    block_on(laptop.stop()).unwrap();
+}
+
+#[test]
+fn a_second_device_that_validates_is_answered_and_does_not_propose() {
+    let directories = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+    let dealt = short_epochs::deployment(9_507, 97);
+    let [first, second] = pair(
+        [directories[0].path(), directories[1].path()],
+        &dealt,
+        WINDOW,
+    );
+    let laptop = block_on(EmbeddedNode::start(first.active)).unwrap();
+    run_until(&laptop, |reached| reached >= 3);
+
+    // The phone opens the deployment as its validator in an empty directory,
+    // with no certificate: the laptop answers it as the validator.
+    let phone = block_on(EmbeddedNode::start(second.active)).unwrap();
+    let contest = block_on(phone.contested());
+    assert_eq!(contest.device, first.key.public_key());
+    assert!(contest.height >= 3);
+    assert_eq!(contest.certificate, None);
+    std::thread::sleep(Duration::from_secs(5));
+    assert_eq!(height(&phone), 0, "a contested device finalized a block");
+    let status: vera_jsonrpc::NodeStatus =
+        block_on(phone.rpc().call_empty("vera_nodeStatus")).unwrap();
+    assert_eq!(status.proposed_count, 0);
+    block_on(phone.stop()).unwrap();
     block_on(laptop.stop()).unwrap();
 }
