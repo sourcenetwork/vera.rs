@@ -18,6 +18,7 @@ pub use committed_state::CommittedState;
 mod config;
 mod connectivity;
 mod consensus_timeouts;
+mod devices;
 pub use config::{NodeSettings, PeerSet, PeerSetError, load_peers};
 
 mod consts;
@@ -28,7 +29,9 @@ mod finalization_diagnostics;
 mod finalization_metrics;
 
 mod embedded;
-pub use embedded::{EmbedError, EmbeddedConfig, EmbeddedNode, ThreadBudget, ThreadSetup};
+pub use embedded::{
+    Backup, DeviceRole, EmbedError, EmbeddedConfig, EmbeddedNode, ThreadBudget, ThreadSetup,
+};
 
 mod finalize;
 pub use finalize::{index_finalized_block, subscription_data};
@@ -71,8 +74,8 @@ pub use secret_store::FileSecretStore;
 
 mod solo;
 pub use solo::{
-    SOLO_BLOCKS_PER_EPOCH, SOLO_STALL_TIMEOUT_MS, SoloDeployment, SoloError, SoloGenesis, SoloKeys,
-    prepare_solo,
+    DeviceKey, SOLO_BLOCKS_PER_EPOCH, SOLO_STALL_TIMEOUT_MS, SoloDeployment, SoloError,
+    SoloGenesis, SoloKeys, prepare_solo,
 };
 
 mod sink;

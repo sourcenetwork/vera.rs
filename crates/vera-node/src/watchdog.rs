@@ -2,9 +2,10 @@
 //!
 //! A stall counts only while this node is connected to enough peers to form a
 //! voting quorum with them; fewer, or unknown connectivity, leaves the watchdog
-//! unarmed. A lone validator is its own quorum and needs no peer. A stall is
-//! evidence of missing progress, not a diagnosis of its cause or a guarantee
-//! that restart helps.
+//! unarmed. A lone validator is its own quorum and needs no peer; a backup
+//! needs the one peer it follows, since without it there is nothing to
+//! finalize. A stall is evidence of missing progress, not a diagnosis of its
+//! cause or a guarantee that restart helps.
 
 use std::time::Duration;
 
@@ -218,6 +219,18 @@ mod tests {
         let outcome =
             tokio::time::timeout(budget * 10, run(peerless, budget, true, 2, report)).await;
         assert!(outcome.is_err(), "unknown connectivity armed the watchdog");
+    }
+
+    #[test]
+    fn a_backup_stalls_only_while_the_device_it_follows_is_connected() {
+        let budget = Duration::from_secs(600);
+        let start = tokio::time::Instant::now();
+        let mut progress = Progress::new(9, true, 1);
+        assert!(!progress.observe(9, Some(0), start, budget));
+        assert!(!progress.observe(9, Some(0), start + budget * 9, budget));
+        assert!(!progress.observe(9, Some(1), start + budget * 10, budget));
+        assert!(!progress.observe(10, Some(1), start + budget * 11, budget));
+        assert!(progress.observe(10, Some(1), start + budget * 12, budget));
     }
 
     #[test]

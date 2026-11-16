@@ -76,18 +76,10 @@ impl SoloDeployment {
 
     /// The identity the record describes.
     pub fn identity(&self) -> Result<SoloGenesis, SoloError> {
-        let genesis = self.genesis()?;
-        Ok(SoloGenesis {
-            chain_id: genesis.chain_id,
-            operators: genesis
-                .operators
-                .ok_or_else(|| SoloError::Genesis("missing operator policy".into()))?,
-            timestamp: genesis.timestamp,
-            policies: genesis.placed_policies,
-        })
+        super::record::identity(self.genesis()?)
     }
 
     pub(crate) fn genesis(&self) -> Result<VeraGenesis, SoloError> {
-        serde_json::from_slice(&self.record).map_err(|error| SoloError::Genesis(error.to_string()))
+        super::record::decode(&self.record)
     }
 }

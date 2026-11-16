@@ -7,6 +7,7 @@
 mod config;
 mod directory;
 mod error;
+mod role;
 mod thread_budget;
 mod thread_setup;
 
@@ -20,12 +21,13 @@ use std::{
 
 use commonware_runtime::Runner as _;
 use tokio::sync::oneshot;
-use vera_domain::ConsensusPublicKey;
+use vera_domain::{ConsensusPublicKey, PublicKey};
 use vera_genesis::VeraGenesis;
 use vera_jsonrpc::LocalRpc;
 
 pub use config::EmbeddedConfig;
 pub use error::EmbedError;
+pub use role::{Backup, DeviceRole};
 pub use thread_budget::ThreadBudget;
 pub use thread_setup::ThreadSetup;
 
@@ -46,6 +48,8 @@ pub struct EmbeddedNode {
     rpc: LocalRpc,
     genesis: VeraGenesis,
     consensus_key: ConsensusPublicKey,
+    identity: PublicKey,
+    backup: bool,
     data_dir: PathBuf,
     deployment: Option<SoloDeployment>,
     stop: Option<oneshot::Sender<()>>,
@@ -65,10 +69,38 @@ impl EmbeddedNode {
             return Err(EmbedError::Config(reason));
         }
         let node_config = config.node_config();
-        let (genesis, peers) = match &config.deployment {
-            Some(deployment) => crate::solo::adopt_solo(&node_config, &config.genesis, deployment)?,
-            None => crate::prepare_solo(&node_config, &config.genesis)?,
+        let (genesis, peers, backup) = match (&config.role, &config.deployment) {
+            (DeviceRole::Backup(_), Some(_)) => {
+                return Err(EmbedError::Config("a backup takes no key material"));
+            }
+            (DeviceRole::Backup(backup), None) => {
+                let (genesis, peers) = crate::solo::follow_solo(
+                    &node_config,
+                    &config.genesis,
+                    &backup.record,
+                    backup.active,
+                )?;
+                let key = match &backup.transport_key {
+                    Some(key) => key.clone(),
+                    None => crate::DeviceKey::load_or_create(&config.data_dir)?,
+                };
+                (genesis, peers, Some(key))
+            }
+            (DeviceRole::Active, Some(deployment)) => {
+                let (genesis, peers) =
+                    crate::solo::adopt_solo(&node_config, &config.genesis, deployment)?;
+                (genesis, peers, None)
+            }
+            (DeviceRole::Active, None) => {
+                let (genesis, peers) = crate::prepare_solo(&node_config, &config.genesis)?;
+                (genesis, peers, None)
+            }
         };
+        let is_backup = backup.is_some();
+        let identity = backup.as_ref().map_or_else(
+            || peers.participants[0].clone(),
+            crate::DeviceKey::public_key,
+        );
         let consensus_key = *genesis
             .decode_epoch_info()
             .map_err(|error| crate::SoloError::Genesis(error.to_string()))?
@@ -131,6 +163,14 @@ impl EmbeddedNode {
                 .deployment
                 .as_ref()
                 .map(|deployment| deployment.keys().clone()),
+            // Backups do not connect to each other, and a peer that never
+            // connects would still be asked for blocks and state.
+            devices: if is_backup {
+                Vec::new()
+            } else {
+                config.backups
+            },
+            backup,
         };
         let thread_setup = config.thread_setup;
         let data_dir = config.data_dir.clone();
@@ -213,6 +253,8 @@ impl EmbeddedNode {
             rpc,
             genesis,
             consensus_key,
+            identity,
+            backup: is_backup,
             data_dir,
             deployment,
             stop: Some(stop_tx),
@@ -239,13 +281,25 @@ impl EmbeddedNode {
         &self.consensus_key
     }
 
+    /// The key the account's other devices know this node by: the validator
+    /// key on the active device, the device's transport key on a backup.
+    #[must_use]
+    pub const fn identity(&self) -> &PublicKey {
+        &self.identity
+    }
+
     /// The deployment's genesis record and current key material, as
     /// [`EmbeddedConfig::adopt`] accepts them on another device.
     ///
     /// The result lets its holder finalize blocks for the deployment. It
     /// carries no state, and nothing prevents two devices from running it at
     /// once, which forks the deployment. See `docs/embedded-node.md`.
+    ///
+    /// A backup holds no key material and fails with [`SoloError::Incomplete`].
     pub fn export(&self) -> Result<SoloDeployment, SoloError> {
+        if self.backup {
+            return Err(SoloError::Incomplete("a backup holds no key material"));
+        }
         self.deployment.as_ref().map_or_else(
             || crate::solo::export_solo(&self.data_dir),
             |deployment| Ok(deployment.clone()),

@@ -14,11 +14,17 @@ use crate::{FileSecretStore, PeerSet};
 
 mod adopt;
 mod deployment;
+mod device_key;
+mod follow;
 mod keys;
+mod record;
 
 pub(crate) use adopt::{adopt_solo, export_solo};
 pub use deployment::SoloDeployment;
+pub use device_key::DeviceKey;
+pub(crate) use follow::follow_solo;
 pub use keys::SoloKeys;
+pub(crate) use record::record_identity;
 
 /// Epoch length that leaves dealing slots for eight validators with default pipelined terms.
 pub const SOLO_BLOCKS_PER_EPOCH: u64 = 256;

@@ -36,6 +36,13 @@ impl LocalRpcError {
     pub fn is_retryable(&self) -> bool {
         matches!(self, Self::Call { code: -32002, data: Some(data), .. } if data.contains("\"retryable\":true"))
     }
+
+    /// Whether a backup refused a submission, which belongs with the deployment's active device.
+    #[must_use]
+    pub fn is_backup_refusal(&self) -> bool {
+        self.is_retryable()
+            && matches!(self, Self::Call { data: Some(data), .. } if data.contains("\"role\":\"backup\""))
+    }
 }
 
 /// Calls node methods directly, without a socket.

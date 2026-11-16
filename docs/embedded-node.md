@@ -5,7 +5,9 @@ same node `verad` runs: the same consensus, execution, storage and recovery.
 The host calls its JSON-RPC methods in-process instead of over a socket.
 
 This first version hosts a single-validator deployment. Adding validators to an
-embedded deployment and changing its membership are not implemented yet.
+embedded deployment and changing its membership are not implemented yet. Other
+devices of the account can follow the deployment as
+[backups](#backup-devices), which validate nothing.
 
 ## Starting a node
 
@@ -127,13 +129,183 @@ opens it with `EmbeddedConfig::adopt`.
 
 - The export carries no state. A device that adopts it has the same chain
   identifier, consensus key and validator identity, and an empty chain at
-  height 0. Bringing its state up to date is not implemented yet.
+  height 0. Adopting runs the device as the deployment's validator; a device
+  that should hold the deployment's state without validating it runs as a
+  [backup](#backup-devices) instead, and needs only the genesis record.
 - Nothing stops two devices from running the deployment as validator at the
   same time. Each then finalizes its own blocks under the same key, the two
   histories diverge, and both verify against the deployment's consensus key.
   Run the deployment on one device at a time.
 - Every copy is a full signing capability. A copy cannot be revoked short of
   creating a new deployment.
+
+## Backup devices
+
+A backup is a second device of the account that keeps the deployment's state
+current without validating it. It connects to the active device, the one that
+runs as validator, catches up from an empty directory, then receives every
+finalized block, verifies its certificate against the deployment's consensus
+key, re-executes it and serves reads and proofs from the result. It builds no
+block, casts no vote and takes no part in resharing.
+
+```rust
+// On the backup. `record` is SoloDeployment::record() of the deployment.
+let key = DeviceKey::load_or_create(&data_dir)?;
+let backup = EmbeddedNode::start(
+    EmbeddedConfig::backup(data_dir, record, p2p_listen, active_address)?,
+).await?;
+
+// On the active device, with the backup's key.public_key().
+let mut config = EmbeddedConfig::new(data_dir, genesis, p2p_listen);
+config.backups = vec![backup_public_key];
+```
+
+`EmbeddedConfig::role` is `DeviceRole::Active` by default, which is the node
+described in the rest of this document. `EmbeddedConfig::backup` sets
+`DeviceRole::Backup` with the genesis record and the address of the active
+device's consensus listener.
+
+### What a backup holds
+
+A backup holds the genesis record and its own transport key. It holds neither
+the validator key nor the consensus share, in memory or on disk: a start that
+names a `deployment` together with the backup role fails with
+`EmbedError::Config`, and a directory that keeps `validator.key` or
+`secrets.json` fails with `SoloError::Mismatch`. Its consensus scheme can
+verify certificates and cannot sign, and `EmbeddedNode::export()` fails on it.
+
+The transport key (`DeviceKey`) authenticates the device to the active device
+and signs nothing else. With `Backup::transport_key` unset it is kept in
+`transport.key` in the directory, created on first use and readable only by
+its owner; `DeviceKey::load_or_create` returns it before the node starts so
+the host can read its public key. A host that keeps keys in a keystore
+supplies it instead (`DeviceKey::generate`, `encode`, `decode`), and no file
+is written. `EmbeddedNode::identity()` returns the key other devices know a
+node by: the transport key on a backup, the validator key on the active
+device.
+
+The active device has no separate transport key. Commonware identifies a
+validator on the network by its consensus key: a node blocks a peer that sends
+votes under a key outside the committee, and the catch-up probe asks the
+committee's keys and blocks any other peer that answers. The validator key is
+therefore the active device's network identity, and only a backup, which is
+in no committee, runs under a key of its own.
+
+### How devices are listed
+
+`EmbeddedConfig::backups` on the active device lists the transport public keys
+of its backups. The active device accepts a connection only from a listed
+key, after the authenticated handshake; it never dials a backup, so a backup
+needs no reachable address. A backup dials the active device at the address it
+was given and retries while that device is away. Backups do not connect to
+each other, and a backup ignores the list.
+
+The list is configuration. Nothing in the deployment's state records which
+devices are backups, no operator approval is involved, and changing the list
+takes a restart of the active device. A later version records the devices in
+state under operator approval.
+
+The active device's listener must be reachable by its backups, so it cannot
+stay on `127.0.0.1:0` unless the host tunnels the connection to it. The
+listener keeps the local discovery settings, which admit loopback and private
+addresses.
+
+A listed backup is a secondary peer of every epoch. It receives what the
+active device sends to all connected peers (votes, certificates, new blocks
+and gossiped requests, the last of which it drops) and the answers to its own
+requests for blocks, state ranges, history chunks and the epoch probe. Each
+channel keeps the per-peer rate limit it has for a validator. The active
+device's queues are not resized: a tracked set may hold up to 25 peers with
+256-block epochs, and the validator and its backups must fit in it, or the
+start fails. A backup's queues grow by one burst per channel for the active
+device it dials.
+
+### Catching up and staying current
+
+A backup started on an empty directory asks the active device for its newest
+finalized block, transfers the authenticated state at that revision, imports
+the finalized history behind it, and then follows. Receipts and proofs for
+requests finalized before the backup existed are served from the imported
+history. `start` returns once this has completed. It fails with
+`EmbedError::Stopped` if the active device does not answer within
+`EmbeddedConfig::catch_up_timeout` (5 minutes by default), or if the transfer
+and import then take longer than that again. The import takes longer the
+older the deployment is; see [the limits](#limits-of-this-version).
+
+A backup that restarts continues from its own directory. It first asks the
+active device how far the deployment has advanced, for up to 30 seconds, so a
+restart while the active device is away takes that long. If the deployment
+is so many epochs ahead that the active device may have pruned the backup's
+next block, the backup transfers the state again instead of asking for blocks
+that are gone, and imports the history it missed. With the default epochs of
+256 blocks and retention of 512 consensus revisions that is two epochs, which
+an idle deployment finalizes in 43 to 85 minutes. The backup judges this by
+its own `EmbeddedConfig::pruning`, so the devices of an account should share
+one retention setting.
+
+While the active device is away a backup keeps serving the state it has. It
+finalizes nothing, its height stays where the active device left it, and
+`vera_nodeStatus` reports `peerCount` 0. Clients that require fresh state
+refuse it after their freshness limit, as they would for a stopped
+deployment. The finality watchdog (`EmbeddedConfig::watchdog_stall`, 10
+minutes by default) stops a backup only when it is connected to the active
+device and still receives no finalized block for that long; the host restarts
+it, and the restart re-synchronizes if needed.
+
+A backup re-executes every block and compares the result with the state the
+block commits to. A certified block that does not reproduce its committed
+state is not applied: Commonware's stateful actor panics on it, which stops
+the node, and a restart meets the same block again. The backup's directory
+keeps the state of the block before it. This follows from the code and has
+not been exercised by a test, which would need a validator that certifies an
+invalid block.
+
+### What a backup refuses
+
+A submission (`vera_sendNativeTx`) fails on a backup with the
+retryable code `-32002` and the data `{"retryable": true, "role": "backup"}`;
+`LocalRpcError::is_backup_refusal` identifies the response. Nothing is
+admitted or forwarded: the host sends the request to the active device.
+`eth_call`, `eth_estimateGas` and `vera_simulateNativeCall` run on a backup as
+on any node, against its own state.
+
+### Limits of this version
+
+- A backup cannot become active. There is no handover, no activation and no
+  record of which device is active. Opening a backup's directory as the
+  validator with `EmbeddedConfig::adopt` is not supported: in one run it
+  continued when the backup had stopped before an epoch's midpoint and stalled
+  at the next epoch boundary when it had stopped after it.
+- Nothing enforces a single active device. Two devices started as active each
+  finalize their own blocks under the same key and fork the deployment, as
+  described under [A second device](#a-second-device). Both use the validator
+  key as their network identity, so they also cannot connect to each other.
+- A backup is as current as its connection. A request finalized on the active
+  device while a backup is disconnected is absent from that backup until it
+  reconnects, and a device lost before then takes the request with it.
+- The first start needs the active device. A backup cannot be created from
+  another backup.
+- The first start imports the deployment's whole finalized history, one block
+  at a time, and its cost grows with the deployment's age. On one
+  Apple-silicon laptop, with both nodes in one process on loopback and a
+  release build, a backup started on an empty directory was serving after
+  13.8 s behind a deployment of 401 blocks and after 118 s behind one of
+  1,601 blocks, one run each. An idle deployment adds 8,640 blocks a day, so
+  the default `catch_up_timeout` of 5 minutes covers only a young deployment
+  and has to be raised for an older one. Why the cost per block rises, and
+  whether a start that ran out of time resumes the import it began, are not
+  established.
+- In the same setting a backup following an idle deployment processed the
+  active device's 6 blocks a minute and added 1.9 MB an hour to its directory
+  over 5 minutes, against 1.8 MB for the active device, and the process's
+  resident memory was 46 MiB with the active device alone and 63 MiB with the
+  backup beside it. A backup's memory was not measured in a process of its
+  own.
+- A backup must be able to dial the address the active device listens on.
+  After the first connection Commonware redials the address the active device
+  announces, which is its `p2p_listen`, so a backup that reaches the active
+  device at another address, through a tunnel or address translation, has not
+  been shown to reconnect.
 
 ## Calling the node
 
@@ -283,7 +455,9 @@ blocks, so idleness is not a stall.
 Everything is under `EmbeddedConfig::data_dir`: `validator.key`, `secrets.json`,
 `solo-genesis.json`, `native-genesis.bin`, `commonware/` and
 `history/regolith/`. The first two are absent when
-[the host holds the key material](#key-material-held-by-the-host). The directory must not be shared with another store; a host
+[the host holds the key material](#key-material-held-by-the-host) and on a
+[backup](#backup-devices), which keeps `transport.key` instead unless the host
+holds that key too. The directory must not be shared with another store; a host
 that also embeds DefraDB gives each its own directory.
 
 A single validator dials no peers, but the consensus network still binds
@@ -298,7 +472,7 @@ listener then binds loopback on a port the operating system chooses, so the
 host reserves no port and nothing outside the machine can connect. A
 connection from the same machine is accepted only from a peer the node tracks,
 after the authenticated handshake. Use another address only when other
-validators must reach the node.
+validators or the account's backups must reach the node.
 
 The embedded listener states the local discovery settings, which admit
 loopback and private addresses, instead of the daemon's recommended profile
@@ -486,9 +660,10 @@ are not a capacity or multi-validator measurement.
 
 ## Limits
 
-- One validator. A stopped or lost device stops the deployment.
-- A second device can open the deployment but not follow it: it starts from
-  the genesis, and running both as validator forks the deployment; see
+- One validator. A stopped or lost device stops the deployment. Other devices
+  can follow it as backups and serve reads, but none can take over; see
+  [Backup devices](#backup-devices).
+- Running a second device as validator forks the deployment; see
   [A second device](#a-second-device).
 - An idle deployment still produces a heartbeat block about every 10 s, and
   finalized history has no retention, so the directory grows without bound;

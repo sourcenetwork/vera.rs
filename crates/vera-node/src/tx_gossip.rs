@@ -232,6 +232,17 @@ pub fn spawn_tx_receiver<E: Spawner, R: Receiver + Send + 'static>(
     })
 }
 
+/// Receive gossiped transactions from peers and drop them.
+pub(crate) fn spawn_tx_discard<E: Spawner, R: Receiver + Send + 'static>(
+    context: E,
+    mut receiver: R,
+) -> commonware_runtime::Handle<()> {
+    context.spawn(move |_| async move {
+        while receiver.recv().await.is_ok() {}
+        warn!("mempool channel closed");
+    })
+}
+
 #[cfg(test)]
 #[path = "tx_reannouncement_tests.rs"]
 mod reannouncement_tests;

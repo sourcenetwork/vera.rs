@@ -42,6 +42,14 @@ pub struct NodeOptions {
     /// Key material of a lone validator held by the host. `None` reads the
     /// validator key and the shares from files in the data directory.
     pub keys: Option<crate::SoloKeys>,
+    /// Network identity of a node that follows the deployment as a backup.
+    ///
+    /// Such a node is in no committee: it verifies and re-executes finalized
+    /// blocks, serves reads, and neither proposes, votes nor deals. `None`
+    /// runs a validator, whose network identity is its validator key.
+    pub backup: Option<crate::DeviceKey>,
+    /// Network identities of backups, accepted as peers of every epoch.
+    pub devices: Vec<vera_domain::PublicKey>,
 }
 
 /// Verification parallelism when the host does not choose one.
@@ -85,6 +93,8 @@ impl NodeOptions {
             sizing: crate::NodeSizing::DAEMON,
             hold: None,
             keys: None,
+            backup: None,
+            devices: Vec::new(),
         }
     }
 }

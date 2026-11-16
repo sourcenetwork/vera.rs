@@ -20,9 +20,11 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 mod held;
+mod observer;
 mod source;
 
 pub(crate) use held::HeldSecretStore;
+pub(crate) use observer::ObserverSecretStore;
 pub(crate) use source::NodeSecretStore;
 
 /// JSON-file-backed [`dkg::SecretStore`] holding shares, dealer seeds, and dealings.
