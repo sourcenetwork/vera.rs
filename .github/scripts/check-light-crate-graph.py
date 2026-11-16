@@ -11,9 +11,7 @@ import sys
 LIGHT_CRATES = [
     'vera-modules',
     'vera-crypto',
-    'vera-acp',
     'vera-identity',
-    'vera-zanzibar',
 ]
 
 FORBIDDEN = [

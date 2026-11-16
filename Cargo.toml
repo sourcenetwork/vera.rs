@@ -93,9 +93,7 @@ orbis-reporting = "=0.0.3"
 acp = { path = "../acp-rs/crates/acp", version = "=0.0.1" }
 
 # Shared Defra types and policy evaluation
-vera-acp = { path = "crates/vera-acp", version = "=0.2.0" }
 vera-identity = { path = "crates/vera-identity", version = "=0.2.0" }
-vera-zanzibar = { path = "crates/vera-zanzibar", version = "=0.2.0" }
 
 # Alloy
 alloy-primitives = "1.7"

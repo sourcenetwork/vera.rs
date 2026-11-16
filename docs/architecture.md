@@ -78,25 +78,23 @@ flowchart TB
     class QMDB,History,Views storage
 ```
 
-ACP is implemented in Rust through `vera-acp`, `vera-zanzibar`, and `vera-identity`
-crates. See [ACP v1 operations, authority and compatibility](acp-v1.md).
+ACP policy semantics and evaluation come from acp-rs's `acp` crate; Vera's ACP
+module implements the operations on top of it. See [ACP v1 operations, authority and compatibility](acp-v1.md).
 All members re-execute proposals against isolated state before accepting
 them. Durable finalization precedes publication of query results.
 
 ## Code boundaries
 
-Every package under `crates/` uses the `vera-` prefix. `vera-acp`,
-`vera-zanzibar` and `vera-identity` originated in DefraDB; their original licenses
-and provenance remain in the repository. Rust imports use `vera_acp`,
-`vera_zanzibar`, `vera_identity` and `vera_test_infra`. Vera has not been deployed
+Every package under `crates/` uses the `vera-` prefix. `vera-identity`
+originated in DefraDB; its original licenses and provenance remain in the
+repository. Rust imports use `vera_identity` and `vera_test_infra`. Vera has not been deployed
 live; the release starts with fresh state and uses these package names directly.
 
 | Location | Responsibility |
 | --- | --- |
-| [`vera-acp`](../crates/vera-acp/src/lib.rs) | Policy types, YAML compilation and document-authorization interfaces |
-| [`vera-zanzibar`](../crates/vera-zanzibar/src/lib.rs) | Relation-graph evaluation |
+| `acp` (acp-rs) | Policy language, processing and IDs, relationship form and evaluation |
 | [`vera-identity`](../crates/vera-identity/src/lib.rs) | DID types and validation |
-| [`vera-modules/src/acp`](../crates/vera-modules/src/acp/mod.rs) | ACP commands, ownership, relationships, decisions and stored records |
+| [`vera-modules/src/acp`](../crates/vera-modules/src/acp/mod.rs) | ACP commands, ownership, relationships, decisions, stored records, work accounting and the store acp evaluates over |
 | [`vera-permission`](../crates/vera-permission/src/lib.rs) | Authenticate read evidence and replay the shared ACP evaluator for consumers |
 | [`vera-executor/src/dispatch/acp`](../crates/vera-executor/src/dispatch/acp.rs) | Decode commands, charge execution work, call ACP methods and encode outcomes |
 | [`vera-test-infra`](../crates/vera-test-infra/src/lib.rs) | Process, port and log helpers for tests |
@@ -112,7 +110,7 @@ flowchart LR
     Request[Native signed request] --> Executor[vera-executor<br/>authentication and rollback]
     Executor --> Dispatch[dispatch/acp<br/>decode and work budget]
     Dispatch --> Module[vera-modules/acp<br/>business rules and records]
-    Module --> Engine[vera-zanzibar<br/>shared evaluator]
+    Module --> Engine[acp<br/>shared evaluator]
     Evidence[vera-permission<br/>authenticated client evidence] --> Engine
 ```
 

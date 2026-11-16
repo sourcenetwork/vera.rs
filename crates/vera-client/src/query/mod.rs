@@ -30,9 +30,8 @@
 //! | `get_jws_tokens_by_did`, `get_jws_tokens_by_account`, `get_delegations_by_submitter` | [`VeraClient::read_current_prefix`] on the vera module with [`VeraClient::read_token_record`] |
 //! | `administration` | [`VeraClient::read_administration`] |
 //!
-//! `evaluate_policy_theorem` and `validate_policy` have no verified RPC:
-//! evaluate a theorem locally over a verified `vera_getCurrentPolicySnapshot`
-//! capture, and parse a policy locally with `vera-acp`.
+//! `validate_policy` has no verified RPC: parse a policy locally with acp-rs's
+//! `acp::policy::compile_text`.
 
 use alloy_primitives::{Address, Bytes};
 use vera_domain::ViewCallResult;

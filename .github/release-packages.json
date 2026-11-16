@@ -4,13 +4,11 @@
     "vera-client"
   ],
   "packages": [
-    "vera-acp",
     "vera-client",
     "vera-crypto",
     "vera-domain",
     "vera-identity",
     "vera-modules",
-    "vera-permission",
-    "vera-zanzibar"
+    "vera-permission"
   ]
 }
