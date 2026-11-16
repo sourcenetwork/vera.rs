@@ -32,6 +32,7 @@ pub(super) fn fixture() -> (LightBlock, ConsensusPublicKey) {
         parent: BlockId(B256::ZERO),
         height: 1,
         timestamp: 1_700_000_000,
+        term: 0,
         prevrandao: B256::repeat_byte(1),
         randomness: None,
         state_root: StateRoot(B256::repeat_byte(2)),

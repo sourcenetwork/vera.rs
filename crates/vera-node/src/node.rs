@@ -676,6 +676,7 @@ async fn run_node_with_elector<
         move || index.head_block_number()
     });
     let participant_addresses = crate::beneficiaries::from_genesis(&genesis)?;
+    let term = vera_app::TermGuard::default();
     let application = StatefulVeraApp::<_, OrderedState>::new(
         executor.clone(),
         genesis_block.clone(),
@@ -698,7 +699,8 @@ async fn run_node_with_elector<
         genesis
             .timestamp_step_secs
             .unwrap_or(vera_app::MAX_TIMESTAMP_STEP_SECS),
-    );
+    )
+    .with_term(term.clone());
     let vrf_elector = make_elector(application.vrf_seed_cache());
 
     let snapshot_history = crate::history::SnapshotHistory {
@@ -721,6 +723,7 @@ async fn run_node_with_elector<
     let sync_local = local.clone();
     let sync_history_peer = history_peer.clone();
     let sync_status = node_state.clone();
+    let sync_term = term.clone();
     let (stateful_actor, stateful_mailbox) = Stateful::new(
         context.child("stateful"),
         StatefulConfig {
@@ -760,6 +763,7 @@ async fn run_node_with_elector<
                     .await
                     .map_err(|e| e.to_string())?;
                 sync_status.set_snapshot_revision(anchor.height.get());
+                sync_term.observe(selected.height, selected.term);
                 sync_status.record_finalized(
                     selected.height,
                     selected.context.round.epoch().get(),
@@ -873,6 +877,7 @@ async fn run_node_with_elector<
             recovered.inner().context.round.epoch().get(),
             recovered.inner().context.round.view().get(),
         );
+        term.observe(recovered.inner().height, recovered.inner().term);
     }
     // The stall clock starts after the history scan, which finalizes nothing
     // however long it runs, and before the stateful actor, whose state-sync

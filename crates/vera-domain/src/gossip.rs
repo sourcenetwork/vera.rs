@@ -27,6 +27,8 @@ pub struct GossipHeader {
     pub parent_hash: B256,
     /// Block timestamp (Unix seconds).
     pub timestamp: u64,
+    /// Term of the device that proposed the block.
+    pub term: u64,
     /// EVM state root (QMDB).
     pub state_root: B256,
     /// Combined current-QMDB root for ACP, bulletin, Vera and native sequences.
@@ -58,6 +60,7 @@ impl GossipHeader {
             block_hash,
             parent_hash: block.parent.0,
             timestamp: block.timestamp,
+            term: block.term,
             state_root: block.state_root.0,
             module_state_root: block.module_state_root,
             tx_count: block.txs.len() as u32,
@@ -85,6 +88,7 @@ mod tests {
             parent: BlockId(B256::repeat_byte(0x01)),
             height: 42,
             timestamp: 1_700_000_000,
+            term: 3,
             prevrandao: B256::repeat_byte(0xab),
             randomness: None,
             state_root: StateRoot(B256::repeat_byte(0xcd)),
@@ -107,6 +111,7 @@ mod tests {
         assert_eq!(header.block_hash, block.id().0);
         assert_eq!(header.parent_hash, B256::repeat_byte(0x01));
         assert_eq!(header.timestamp, 1_700_000_000);
+        assert_eq!(header.term, 3);
         assert_eq!(header.state_root, B256::repeat_byte(0xcd));
         assert_eq!(header.module_state_root, B256::repeat_byte(0xef));
         assert_eq!(header.tx_count, 1);

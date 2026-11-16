@@ -134,6 +134,7 @@ mod tests {
             parent: BlockId(B256::from([0xAAu8; 32])),
             height: 7,
             timestamp: 1_700_000_000,
+            term: 0,
             prevrandao: B256::from([0x55u8; 32]),
             randomness: None,
             state_root: StateRoot(B256::from([0xBBu8; 32])),

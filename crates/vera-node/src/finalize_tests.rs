@@ -45,6 +45,7 @@ fn fixture() -> Fixture {
         parent: BlockId(B256::ZERO),
         height: 1,
         timestamp: 1_800_000_000,
+        term: 0,
         prevrandao: B256::repeat_byte(3),
         randomness: None,
         state_root: StateRoot(B256::ZERO),
