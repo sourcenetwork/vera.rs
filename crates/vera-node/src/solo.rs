@@ -3,12 +3,22 @@
 use std::path::{Path, PathBuf};
 
 use commonware_consensus::types::Epoch;
-use commonware_cryptography::Signer as _;
+use commonware_cryptography::{
+    Signer as _, bls12381::primitives::group::Share, ed25519::PublicKey,
+};
 use vera_config::NodeConfig;
 use vera_genesis::{ValidatorConfig, VeraGenesis};
 use vera_modules::vera::administration::OperatorPolicy;
 
 use crate::{FileSecretStore, PeerSet};
+
+mod adopt;
+mod deployment;
+mod keys;
+
+pub(crate) use adopt::{adopt_solo, export_solo};
+pub use deployment::SoloDeployment;
+pub use keys::SoloKeys;
 
 /// Epoch length that leaves dealing slots for eight validators with default pipelined terms.
 pub const SOLO_BLOCKS_PER_EPOCH: u64 = 256;
@@ -69,6 +79,12 @@ pub enum SoloError {
     /// Key material could not be dealt or stored.
     #[error("consensus share: {0}")]
     Share(String),
+    /// Key material supplied by the host does not decode.
+    #[error("key material: {0}")]
+    KeyMaterial(&'static str),
+    /// The consensus share is not the one the deployment's genesis was dealt with.
+    #[error("consensus share does not match the deployment's genesis")]
+    ShareMismatch,
 }
 
 /// Create the deployment in `config.data_dir`, or reopen the one already there.
@@ -84,11 +100,7 @@ pub fn prepare_solo(
     std::fs::create_dir_all(directory).map_err(|source| io(directory, source))?;
     let key = config.validator_key()?;
     let local = key.public_key();
-    let listen: std::net::SocketAddr = config
-        .network
-        .listen_addr
-        .parse()
-        .map_err(|_| SoloError::ListenAddress(config.network.listen_addr.clone()))?;
+    let listen = listen_address(config)?;
     let store = FileSecretStore::load(directory.join("secrets.json"))
         .map_err(|error| SoloError::Share(format!("{error:#}")))?;
     let stored = directory.join(GENESIS_FILE);
@@ -108,6 +120,22 @@ pub fn prepare_solo(
     }
     let genesis =
         VeraGenesis::load(&stored).map_err(|error| SoloError::Genesis(error.to_string()))?;
+    check_identity(&genesis, identity, &local)?;
+    if !store.has_shares() {
+        return Err(SoloError::Incomplete("consensus share is missing"));
+    }
+    genesis
+        .validate_timestamp()
+        .map_err(|error| SoloError::Genesis(error.to_string()))?;
+    Ok((genesis, lone_peer(local, listen)))
+}
+
+/// Refuse a genesis that is not `identity`'s deployment validated by `local`.
+fn check_identity(
+    genesis: &VeraGenesis,
+    identity: &SoloGenesis,
+    local: &PublicKey,
+) -> Result<(), SoloError> {
     if genesis.chain_id != identity.chain_id {
         return Err(SoloError::Mismatch("chain identifier"));
     }
@@ -117,24 +145,28 @@ pub fn prepare_solo(
     if genesis.placed_policies != identity.policies {
         return Err(SoloError::Mismatch("seeded policies"));
     }
-    let expected = validator(&local, &config.network.listen_addr);
     let same_validator = matches!(genesis.validators.as_slice(), [only]
-        if only.consensus_pubkey == expected.consensus_pubkey
-            && only.evm_address == expected.evm_address);
+        if only.consensus_pubkey == consensus_pubkey(local)
+            && only.evm_address == evm_address(local));
     if !same_validator {
         return Err(SoloError::Mismatch("validator key"));
     }
-    if !store.has_shares() {
-        return Err(SoloError::Incomplete("consensus share is missing"));
-    }
-    genesis
-        .validate_timestamp()
-        .map_err(|error| SoloError::Genesis(error.to_string()))?;
-    let peers = PeerSet {
+    Ok(())
+}
+
+fn lone_peer(local: PublicKey, listen: std::net::SocketAddr) -> PeerSet {
+    PeerSet {
         participants: vec![local.clone()],
         bootstrappers: vec![(local, listen)],
-    };
-    Ok((genesis, peers))
+    }
+}
+
+fn listen_address(config: &NodeConfig) -> Result<std::net::SocketAddr, SoloError> {
+    config
+        .network
+        .listen_addr
+        .parse()
+        .map_err(|_| SoloError::ListenAddress(config.network.listen_addr.clone()))
 }
 
 /// Deal a share and record the genesis it belongs to under its pending name.
@@ -145,10 +177,23 @@ pub fn prepare_solo(
 fn create(
     config: &NodeConfig,
     identity: &SoloGenesis,
-    local: &commonware_cryptography::ed25519::PublicKey,
+    local: &PublicKey,
     store: &FileSecretStore,
     pending: &Path,
 ) -> Result<(), SoloError> {
+    let (genesis, share) = deal(identity, local, &config.network.listen_addr)?;
+    vera_cli::write_durable(pending, &encode(&genesis)?).map_err(|source| io(pending, source))?;
+    store
+        .put_initial_share(Epoch::zero(), share)
+        .map_err(|error| SoloError::Share(format!("{error:#}")))
+}
+
+/// The genesis of a new deployment validated by `local`, with its only share.
+fn deal(
+    identity: &SoloGenesis,
+    local: &PublicKey,
+    listen_addr: &str,
+) -> Result<(VeraGenesis, Share), SoloError> {
     identity
         .operators
         .validate()
@@ -170,7 +215,7 @@ fn create(
         operators: Some(identity.operators.clone()),
         timestamp: identity.timestamp,
         allocations: Vec::new(),
-        validators: vec![validator(local, &config.network.listen_addr)],
+        validators: vec![validator(local, listen_addr)],
         contracts: Vec::new(),
         extra_storage: Vec::new(),
         policies: Vec::new(),
@@ -186,25 +231,29 @@ fn create(
         // an idle or paused device must not fall behind it.
         timestamp_step_secs: Some(u64::MAX),
     };
-    let bytes = serde_json::to_vec_pretty(&genesis)
-        .map_err(|error| SoloError::Genesis(error.to_string()))?;
-    vera_cli::write_durable(pending, &bytes).map_err(|source| io(pending, source))?;
-    store
-        .put_initial_share(Epoch::zero(), share)
-        .map_err(|error| SoloError::Share(format!("{error:#}")))
+    Ok((genesis, share))
+}
+
+fn encode(genesis: &VeraGenesis) -> Result<Vec<u8>, SoloError> {
+    serde_json::to_vec_pretty(genesis).map_err(|error| SoloError::Genesis(error.to_string()))
 }
 
 /// The registry entry for a deployment's only validator.
 #[must_use]
-fn validator(
-    key: &commonware_cryptography::ed25519::PublicKey,
-    listen_addr: &str,
-) -> ValidatorConfig {
+fn validator(key: &PublicKey, listen_addr: &str) -> ValidatorConfig {
     ValidatorConfig {
-        evm_address: format!("{:?}", crate::validator_address(key)),
-        consensus_pubkey: hex::encode(commonware_codec::Encode::encode(key)),
+        evm_address: evm_address(key),
+        consensus_pubkey: consensus_pubkey(key),
         p2p_address: listen_addr.into(),
     }
+}
+
+fn evm_address(key: &PublicKey) -> String {
+    format!("{:?}", crate::validator_address(key))
+}
+
+fn consensus_pubkey(key: &PublicKey) -> String {
+    hex::encode(commonware_codec::Encode::encode(key))
 }
 
 fn io(path: &Path, source: std::io::Error) -> SoloError {

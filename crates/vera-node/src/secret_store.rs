@@ -19,6 +19,12 @@ use commonware_glue::dkg;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
+mod held;
+mod source;
+
+pub(crate) use held::HeldSecretStore;
+pub(crate) use source::NodeSecretStore;
+
 /// JSON-file-backed [`dkg::SecretStore`] holding shares, dealer seeds, and dealings.
 ///
 /// Updates replace the file atomically after syncing its contents. On Unix, new
@@ -95,6 +101,12 @@ impl FileSecretStore {
     #[must_use]
     pub fn has_shares(&self) -> bool {
         !self.inner.lock().shares.is_empty()
+    }
+
+    /// The share of the newest epoch stored.
+    pub(crate) fn latest_share(&self) -> Option<Share> {
+        let raw = self.inner.lock().shares.values().next_back().cloned()?;
+        Some(decode_secret(&raw).expect("validated stored DKG share"))
     }
 
     /// Seed the store with a trusted-setup share for `epoch`.

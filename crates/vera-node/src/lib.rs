@@ -71,7 +71,8 @@ pub use secret_store::FileSecretStore;
 
 mod solo;
 pub use solo::{
-    SOLO_BLOCKS_PER_EPOCH, SOLO_STALL_TIMEOUT_MS, SoloError, SoloGenesis, prepare_solo,
+    SOLO_BLOCKS_PER_EPOCH, SOLO_STALL_TIMEOUT_MS, SoloDeployment, SoloError, SoloGenesis, SoloKeys,
+    prepare_solo,
 };
 
 mod sink;

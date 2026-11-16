@@ -5,7 +5,7 @@ use std::{net::SocketAddr, path::PathBuf, time::Duration};
 use vera_config::{DiscoveryConfig, NetworkConfig, NodeConfig, PruningConfig};
 
 use super::{ThreadBudget, ThreadSetup};
-use crate::{HistoryMemory, NodeSizing, SoloGenesis, SoloPacing};
+use crate::{HistoryMemory, NodeSizing, SoloDeployment, SoloError, SoloGenesis, SoloPacing};
 
 /// Configuration of an embedded single-validator node.
 #[derive(Clone, Debug)]
@@ -14,6 +14,12 @@ pub struct EmbeddedConfig {
     pub data_dir: PathBuf,
     /// Deployment identity, fixed when the directory is first used.
     pub genesis: SoloGenesis,
+    /// An existing deployment whose key material the host holds.
+    ///
+    /// The node opens it instead of creating one, signs from memory and writes
+    /// neither the validator key nor the consensus share to the directory.
+    /// `None` creates the deployment on first use and keeps both in files there.
+    pub deployment: Option<SoloDeployment>,
     /// Consensus network listener. A single validator dials no peers but still binds it.
     pub p2p_listen: SocketAddr,
     /// Network JSON-RPC listener. `None` exposes methods in-process only.
@@ -71,6 +77,7 @@ impl EmbeddedConfig {
         Self {
             data_dir: data_dir.into(),
             genesis,
+            deployment: None,
             p2p_listen,
             rpc_listen: None,
             leader_timeout: Duration::from_secs(12),
@@ -88,6 +95,20 @@ impl EmbeddedConfig {
             history_memory: HistoryMemory::EMBEDDED,
             sizing: NodeSizing::EMBEDDED,
         }
+    }
+
+    /// Defaults for a node that opens `deployment`, in an empty directory or
+    /// in one that already holds it.
+    ///
+    /// The identity to check the directory against is read from the record.
+    pub fn adopt(
+        data_dir: impl Into<PathBuf>,
+        deployment: SoloDeployment,
+        p2p_listen: SocketAddr,
+    ) -> Result<Self, SoloError> {
+        let mut config = Self::new(data_dir, deployment.identity()?, p2p_listen);
+        config.deployment = Some(deployment);
+        Ok(config)
     }
 
     /// The daemon configuration of this node. Its listener may sit on
