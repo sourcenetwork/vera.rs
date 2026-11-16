@@ -55,8 +55,8 @@ stops:
 
 - **P2P:** `commonware_p2p::authenticated::discovery` network bootstrapped from
   `peers.json`, with registered channels for votes, certificates, the marshal
-  resolver, backfill, block broadcast, DKG, DKG probe, mempool, history, and
-  authenticated state transfer. Each channel permits 1,000 messages/second per
+  resolver, backfill, block broadcast, DKG, DKG probe, mempool, history,
+  authenticated state transfer, and the devices' term exchange. Each channel permits 1,000 messages/second per
   peer with a burst of 64. Commonware sizes queues from retained-peer count
   times burst size, so the burst also controls startup queue allocation.
   The listener and the genesis DKG run Commonware's recommended discovery
@@ -469,7 +469,31 @@ it follows the active device at a given address under its own `DeviceKey`,
 catches up by snapshot from an empty directory, re-executes blocks, serves
 reads and proofs, and holds no validator key or share. The active device lists
 its backups' keys in `EmbeddedConfig::backups`, which is configuration, not
-state. A backup cannot become active. See `docs/embedded-node.md`.
+state. See `docs/embedded-node.md`.
+
+### Terms and the active device
+
+A block carries a `term` that never decreases along a chain, and `GossipHeader`
+repeats it. A `TermCertificate` (deployment, term, holder device, cut) moves
+the active role between an account's devices; the operator policy approves it
+and it changes no key. The node signs none: the host collects approvals.
+`vera-domain` holds the type and digest,
+`vera_permission::verify_term_certificate` checks it against an
+`OperatorPolicy`, and `VeraClient` and the C verifier check it against
+certified state.
+
+`EmbeddedConfig::switching` names the account's devices. `hand_over` holds
+proposals, confirms the successor holds the final block and returns the change
+to certify; `take_over` and `follow` restart the node in place in its new
+role. `term.json` keeps the newest certificate, an announced handover and a
+staged takeover; a device does not start as validator against them. A device
+that validated drops its vote journal when it becomes a backup. A lone
+validator signs an epoch whose ceremony it only observed with the share its
+host holds, once the epoch's sharing confirms it. Devices ask each other where
+they stand on channel 17. A backup holding a certificate stops with
+`TermRefusal::LowerTerm` on a finalized block of a lower term above the cut.
+Blocks carry no certificate, so re-execution alone accepts any term at or
+above the parent's. See `docs/active-term.md`.
 
 ## Crate Structure
 

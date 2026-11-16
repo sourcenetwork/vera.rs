@@ -125,6 +125,8 @@ async fn run_node_with_elector<
         keys,
         backup,
         devices,
+        switching,
+        term: seat,
     } = options;
     let hold = hold.unwrap_or_default();
     if let RpcMode::Network(Some(listener)) = &rpc {
@@ -156,6 +158,7 @@ async fn run_node_with_elector<
             "{error}; check --leader-timeout-ms, --notarization-timeout-ms and --nullify-retry-ms"
         )
     })?;
+    let mut term_record = crate::term::TermRecord::load(&config.data_dir)?;
     let chain_id = config.chain_id;
     anyhow::ensure!(
         chain_id == genesis.chain_id,
@@ -284,6 +287,7 @@ async fn run_node_with_elector<
     let dkg_probe_network = p2p.register(DKG_PROBE_CHANNEL, channel_rate);
     let (mempool_sender, mempool_receiver) = p2p.register(MEMPOOL_CHANNEL, channel_rate);
     let history_network = p2p.register(crate::HISTORY_CHANNEL, channel_rate);
+    let term_network = p2p.register(crate::TERM_CHANNEL, channel_rate);
     let mut state_resolver_handles = Vec::new();
     macro_rules! state_channel {
         ($id:literal, $db:ty) => {{
@@ -321,6 +325,10 @@ async fn run_node_with_elector<
 
     // Epoch-0 certificate scheme.
     let provider = DynamicProvider::default();
+    let held_share = keys
+        .as_ref()
+        .filter(|_| !is_backup)
+        .map(crate::SoloKeys::consensus_share);
     let mut store = match keys {
         _ if is_backup => NodeSecretStore::Observer(ObserverSecretStore::default()),
         Some(keys) => NodeSecretStore::Held(HeldSecretStore::new(&local, keys.consensus_share())),
@@ -575,7 +583,7 @@ async fn run_node_with_elector<
             participants_provider: participants_provider.clone(),
             secret_store: store,
             strategy: Sequential,
-            registrar: Registrar::new(provider.clone(), local.clone()),
+            registrar: Registrar::new(provider.clone(), local.clone()).with_held_share(held_share),
             marshal: marshal.clone(),
             state_sync: state_sync.clone(),
             fence,
@@ -676,7 +684,18 @@ async fn run_node_with_elector<
         move || index.head_block_number()
     });
     let participant_addresses = crate::beneficiaries::from_genesis(&genesis)?;
-    let term = vera_app::TermGuard::default();
+    let term = seat
+        .as_ref()
+        .map(|seat| seat.view.guard.clone())
+        .unwrap_or_default();
+    // A device that announced a handover and now follows refuses the blocks
+    // it would itself have built above the final one.
+    if let (true, Some(change)) = (is_backup, &term_record.handed_over) {
+        term.raise(change.term, change.cut.height);
+    }
+    if is_backup && let Some(certificate) = &term_record.certificate {
+        term.raise(certificate.change.term, certificate.change.cut.height);
+    }
     let application = StatefulVeraApp::<_, OrderedState>::new(
         executor.clone(),
         genesis_block.clone(),
@@ -787,7 +806,7 @@ async fn run_node_with_elector<
             reshare_mailbox.clone(),
             blocks_per_epoch,
         ),
-        hold,
+        hold.clone(),
     );
     let deferred = Deferred::new(
         context.child("deferred"),
@@ -836,8 +855,12 @@ async fn run_node_with_elector<
     let orchestrator_handle =
         orchestrator_actor.start(vote_network, certificate_network, resolver_network);
 
-    let reporters = Reporters::from((
+    let (term_reporter, mut term_refusals) = crate::term::TermReporter::new(
         crate::finalization_diagnostics::Reporter::new(stateful_mailbox.clone()),
+        term.clone(),
+    );
+    let reporters = Reporters::from((
+        term_reporter,
         Reporters::from((orchestrator_mailbox, reshare_mailbox)),
     ));
     let marshal_handle = marshal_actor.start(reporters, buffer, resolver);
@@ -878,6 +901,48 @@ async fn run_node_with_elector<
             recovered.inner().context.round.view().get(),
         );
         term.observe(recovered.inner().height, recovered.inner().term);
+        if !is_backup {
+            // A device taking the deployment over starts on the cut. A block
+            // above it came from the device being replaced after the cut was
+            // chosen, and the takeover is abandoned: its certificate would
+            // void a block this device already holds.
+            if let Some(certificate) = term_record.taking_over.take() {
+                let cut = certificate.change.cut;
+                let above = marshal
+                    .get_block(Identifier::Height(Height::new(cut.height + 1)))
+                    .await
+                    .is_some();
+                if above || recovered.inner().height != cut.height {
+                    term_record.store(&config.data_dir)?;
+                    return Err(crate::TermRefusal::NotAtCut {
+                        head: recovered.inner().height + u64::from(above),
+                        cut: cut.height,
+                    }
+                    .into());
+                }
+                term_record.certificate = Some(certificate);
+                term_record.handed_over = None;
+                term_record.store(&config.data_dir)?;
+            }
+            if let Some(certificate) = &term_record.certificate {
+                term.raise(certificate.change.term, certificate.change.cut.height);
+            }
+            // A validator builds in the term it holds. Blocks of a later term
+            // mean another device was certified since, and this one must follow it.
+            if recovered.inner().term > term.term() {
+                return Err(crate::TermRefusal::Behind {
+                    seen: recovered.inner().term,
+                    held: term.term(),
+                }
+                .into());
+            }
+        }
+    }
+    if let Some(certificate) = &term_record.certificate {
+        node_state.set_term_certificate(certificate.clone());
+        if let Some(seat) = &seat {
+            *seat.view.certificate.write() = Some(certificate.clone());
+        }
     }
     // The stall clock starts after the history scan, which finalizes nothing
     // however long it runs, and before the stateful actor, whose state-sync
@@ -1067,6 +1132,27 @@ async fn run_node_with_elector<
         );
     }
 
+    if let Some(seat) = seat {
+        let parts = crate::term::Parts {
+            seat,
+            record: term_record,
+            data_dir: config.data_dir.clone(),
+            switching,
+            backup: is_backup,
+            genesis_id: genesis_block.id().0,
+            hold,
+            index: block_index.clone(),
+            modules: modules.clone(),
+            status: node_state.clone(),
+            network: term_network,
+        };
+        state_resolver_handles.push(
+            context
+                .child("term")
+                .spawn(move |_| crate::term::run(parts)),
+        );
+    }
+
     let rpc_server = RpcServer::with_state_provider(node_state, rpc_addr, chain_id, state_provider)
         .with_max_connections(config.rpc.max_connections.get())
         .with_tx_submit(tx_submit)
@@ -1120,6 +1206,7 @@ async fn run_node_with_elector<
     ::tokio::select! {
         result = &mut startup_actors => result,
         result = Handle::select(state_resolver_handles) => result,
+        Some(refusal) = term_refusals.recv() => return Err(refusal.into()),
     }
     .map_err(|e| anyhow::anyhow!("validator actor failed: {e:?}"))
 }

@@ -1,0 +1,205 @@
+//! Switching the account's active device between two devices.
+
+#[path = "support/devices.rs"]
+mod devices;
+#[path = "support/short_epochs.rs"]
+mod short_epochs;
+mod support;
+
+use std::time::Duration;
+
+use devices::{block, certify, pair};
+use short_epochs::{BLOCKS_PER_EPOCH, height, run_until, store_in_files};
+use support::{await_certified_receipt, block_on, finalize_a_write};
+use vera_client::BlsSigner;
+use vera_node::{EmbedError, EmbeddedNode, TermRefusal};
+
+#[test]
+fn an_announced_handover_loses_no_block_and_the_successor_crosses_the_epoch() {
+    let directories = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+    let chain_id = 9_501;
+    let dealt = short_epochs::deployment(chain_id, 91);
+    let [first, second] = pair([directories[0].path(), directories[1].path()], &dealt);
+    let mut laptop = block_on(EmbeddedNode::start(first.active.clone())).unwrap();
+    let mut phone = block_on(EmbeddedNode::start(second.backup.clone())).unwrap();
+    assert_eq!((laptop.term(), phone.term()), (0, 0));
+    assert!(laptop.term_certificate().is_none());
+    let signer = BlsSigner::new(74u64.into(), chain_id).unwrap();
+    let before = finalize_a_write(&laptop, &signer);
+
+    // Only a backup takes over, only the active device hands over, and only to a device it knows.
+    assert!(matches!(
+        block_on(phone.hand_over(&first.key.public_key())),
+        Err(EmbedError::Term(TermRefusal::Backup))
+    ));
+    assert!(matches!(
+        block_on(laptop.takeover_change()),
+        Err(EmbedError::Term(TermRefusal::Active))
+    ));
+    assert!(matches!(
+        block_on(laptop.hand_over(&dealt.keys().public_key())),
+        Err(EmbedError::Term(TermRefusal::UnknownDevice(_)))
+    ));
+
+    // After the epoch's midpoint the successor has no record of the dealing it is owed.
+    run_until(&laptop, |reached| {
+        reached > BLOCKS_PER_EPOCH && reached % BLOCKS_PER_EPOCH >= BLOCKS_PER_EPOCH - 8
+    });
+    let change = block_on(laptop.hand_over(&second.key.public_key())).unwrap();
+    let cut = change.cut.height;
+    assert_eq!(change.term, 1);
+    assert_eq!(height(&laptop), cut, "the final block is the cut");
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        height(&laptop),
+        cut,
+        "a device that handed over proposes nothing"
+    );
+    let certificate = certify(change);
+
+    // A certificate for another device, or one nobody approved, is refused and the backup keeps following.
+    let mut unsigned = certificate.clone();
+    unsigned.approvals.clear();
+    assert!(matches!(
+        block_on(phone.take_over(dealt.keys().clone(), unsigned)),
+        Err(EmbedError::Term(TermRefusal::Certificate(_)))
+    ));
+    block_on(phone.take_over(dealt.keys().clone(), certificate.clone())).unwrap();
+    assert_eq!(phone.term(), 1);
+    assert_eq!(phone.term_certificate(), Some(certificate.clone()));
+    assert_eq!(*phone.identity(), dealt.keys().public_key());
+    block_on(laptop.follow(certificate.clone())).unwrap();
+    assert_eq!(*laptop.identity(), first.key.public_key());
+    assert_eq!(laptop.term_certificate(), Some(certificate.clone()));
+
+    let after = finalize_a_write(&phone, &signer);
+    for written in [before, after] {
+        await_certified_receipt(&phone, written);
+        await_certified_receipt(&laptop, written);
+    }
+    let last = block(&phone, cut);
+    let next = block(&phone, cut + 1);
+    assert_eq!((last.term, next.term), (0, 1));
+    assert_eq!(last.id().0, certificate.change.cut.block);
+    assert_eq!(next.parent, last.id(), "the new term builds on the cut");
+    assert_eq!(block(&laptop, cut + 1), next);
+
+    let crossed = run_until(&phone, |reached| reached >= cut + 2 * BLOCKS_PER_EPOCH);
+    run_until(&laptop, |reached| reached >= crossed);
+    let served: Option<vera_domain::TermCertificate> =
+        block_on(laptop.rpc().call_empty("vera_getTermCertificate")).unwrap();
+    assert_eq!(served, Some(certificate));
+    block_on(laptop.stop()).unwrap();
+    block_on(phone.stop()).unwrap();
+
+    // The device that handed over may not validate again, and the successor may.
+    assert!(matches!(
+        block_on(EmbeddedNode::start(first.active)),
+        Err(EmbedError::Term(TermRefusal::Superseded(_)))
+    ));
+    let phone = block_on(EmbeddedNode::start(
+        second.backup.activated(dealt.keys().clone()).unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(phone.term(), 1);
+    assert!(height(&phone) >= crossed);
+    block_on(phone.stop()).unwrap();
+}
+
+#[test]
+fn a_backup_takes_over_on_confirmation_while_the_active_device_is_down() {
+    let directories = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+    let chain_id = 9_502;
+    let dealt = short_epochs::deployment(chain_id, 92);
+    let [first, second] = pair([directories[0].path(), directories[1].path()], &dealt);
+    let laptop = block_on(EmbeddedNode::start(first.active)).unwrap();
+    let mut phone = block_on(EmbeddedNode::start(second.backup)).unwrap();
+    let signer = BlsSigner::new(75u64.into(), chain_id).unwrap();
+    let before = finalize_a_write(&laptop, &signer);
+    let stopped_at = height(&laptop);
+    block_on(laptop.stop()).unwrap();
+    run_until(&phone, |reached| reached >= stopped_at);
+    std::thread::sleep(Duration::from_secs(1));
+
+    let change = block_on(phone.takeover_change()).unwrap();
+    assert_eq!(change.term, 1);
+    assert_eq!(change.cut.height, height(&phone));
+    assert_eq!(change.cut.block, block(&phone, change.cut.height).id().0);
+
+    // A certificate whose cut is not this device's newest block is refused.
+    let mut behind = change;
+    behind.cut.height -= 1;
+    behind.cut.block = block(&phone, behind.cut.height).id().0;
+    assert!(matches!(
+        block_on(phone.take_over(dealt.keys().clone(), certify(behind))),
+        Err(EmbedError::Term(TermRefusal::NotAtCut { .. }))
+    ));
+    let mut other = change;
+    other.holder = change.genesis_id;
+    assert!(matches!(
+        block_on(phone.take_over(dealt.keys().clone(), certify(other))),
+        Err(EmbedError::Term(TermRefusal::Holder))
+    ));
+
+    block_on(phone.take_over(dealt.keys().clone(), certify(change))).unwrap();
+    assert_eq!(phone.term(), 1);
+    let after = finalize_a_write(&phone, &signer);
+    await_certified_receipt(&phone, before);
+    await_certified_receipt(&phone, after);
+    assert_eq!(block(&phone, change.cut.height + 1).term, 1);
+    // A certificate that does not raise the term is refused by the device that holds it.
+    assert!(matches!(
+        block_on(phone.follow(certify(change))),
+        Err(EmbedError::Term(TermRefusal::Holder))
+    ));
+    block_on(phone.stop()).unwrap();
+}
+
+#[test]
+fn a_handover_needs_a_current_successor_and_is_undone_by_resuming() {
+    let directories = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+    let dealt = short_epochs::deployment(9_503, 93);
+    let [first, second] = pair([directories[0].path(), directories[1].path()], &dealt);
+    // A device that keeps its keys in files cannot become a backup, so it does not switch.
+    let filed = tempfile::tempdir().unwrap();
+    store_in_files(filed.path(), &dealt);
+    let mut in_files = first.active.clone();
+    in_files.data_dir = filed.path().into();
+    in_files.deployment = None;
+    assert!(matches!(
+        block_on(EmbeddedNode::start(in_files)),
+        Err(EmbedError::Term(TermRefusal::KeysInFiles))
+    ));
+
+    let laptop = block_on(EmbeddedNode::start(first.active.clone())).unwrap();
+    run_until(&laptop, |reached| reached >= 3);
+    assert!(matches!(
+        block_on(laptop.hand_over(&second.key.public_key())),
+        Err(EmbedError::Term(TermRefusal::SuccessorNotCurrent { .. }))
+    ));
+    let resumed = height(&laptop);
+    run_until(&laptop, |reached| reached > resumed + 2);
+
+    let phone = block_on(EmbeddedNode::start(second.backup)).unwrap();
+    let undone = block_on(laptop.hand_over(&second.key.public_key())).unwrap();
+    block_on(laptop.resume()).unwrap();
+    run_until(&laptop, |reached| reached > undone.cut.height + 2);
+    let change = block_on(laptop.hand_over(&second.key.public_key())).unwrap();
+    assert!(change.cut.height > undone.cut.height);
+    assert_eq!(change.term, undone.term);
+    block_on(laptop.stop()).unwrap();
+    // The announcement outlives the process: the device does not validate until it resumes.
+    assert!(matches!(
+        block_on(EmbeddedNode::start(first.active.clone())),
+        Err(EmbedError::Term(TermRefusal::HandedOver(announced))) if *announced == change
+    ));
+    // A device that announced a handover may follow the successor before the certificate reaches it.
+    let laptop = block_on(EmbeddedNode::start(
+        first.active.following(&second.key.public_key()).unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(height(&laptop), change.cut.height);
+    block_on(laptop.stop()).unwrap();
+    assert_eq!(height(&phone), change.cut.height);
+    block_on(phone.stop()).unwrap();
+}

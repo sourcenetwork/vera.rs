@@ -33,6 +33,7 @@ struct NodeStateInner {
     permission_reads: Arc<tokio::sync::Semaphore>,
     light_lookups: Arc<tokio::sync::Semaphore>,
     proof_progress: tokio::sync::watch::Sender<()>,
+    term_certificate: RwLock<Option<vera_domain::TermCertificate>>,
 }
 
 const PEERS_UNKNOWN: u64 = u64::MAX;
@@ -76,6 +77,7 @@ impl NodeState {
                 permission_reads: Arc::new(tokio::sync::Semaphore::new(8)),
                 light_lookups: Arc::new(tokio::sync::Semaphore::new(8)),
                 proof_progress: tokio::sync::watch::channel(()).0,
+                term_certificate: RwLock::new(None),
             }),
         }
     }
@@ -177,6 +179,18 @@ impl NodeState {
     pub fn peer_count(&self) -> Option<u64> {
         let count = self.inner.peer_count.load(Ordering::Relaxed);
         (count != PEERS_UNKNOWN).then_some(count)
+    }
+
+    /// Publish the certificate of the newest term this node holds.
+    pub fn set_term_certificate(&self, certificate: vera_domain::TermCertificate) {
+        *self.inner.term_certificate.write() = Some(certificate);
+    }
+
+    /// The certificate of the newest term this node holds, or `None` in a
+    /// deployment whose active device never changed.
+    #[must_use]
+    pub fn term_certificate(&self) -> Option<vera_domain::TermCertificate> {
+        self.inner.term_certificate.read().clone()
     }
 
     /// Get current node status.

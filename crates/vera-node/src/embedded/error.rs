@@ -6,6 +6,9 @@ pub enum EmbedError {
     /// The deployment could not be created or reopened.
     #[error(transparent)]
     Deployment(#[from] crate::SoloError),
+    /// The device does not switch, or may not start in the role configured.
+    #[error(transparent)]
+    Term(#[from] crate::TermRefusal),
     /// The configuration cannot run.
     #[error("invalid configuration: {0}")]
     Config(&'static str),

@@ -51,6 +51,12 @@ impl TermGuard {
 }
 
 impl TermGuard {
+    /// Height and term of the newest finalized block recorded.
+    #[must_use]
+    pub fn tip(&self) -> Option<(u64, u64)> {
+        self.0.read().expect("term lock poisoned").tip
+    }
+
     /// Record a finalized block. An older one than the newest seen is ignored.
     pub fn observe(&self, height: u64, term: u64) {
         let mut held = self.0.write().expect("term lock poisoned");

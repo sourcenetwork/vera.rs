@@ -33,6 +33,9 @@ pub use embedded::{
     Backup, DeviceRole, EmbedError, EmbeddedConfig, EmbeddedNode, ThreadBudget, ThreadSetup,
 };
 
+mod term;
+pub use term::{Device, Switching, TermRefusal, TermSeat};
+
 mod finalize;
 pub use finalize::{index_finalized_block, subscription_data};
 

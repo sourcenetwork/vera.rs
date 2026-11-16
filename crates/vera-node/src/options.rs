@@ -50,6 +50,11 @@ pub struct NodeOptions {
     pub backup: Option<crate::DeviceKey>,
     /// Network identities of backups, accepted as peers of every epoch.
     pub devices: Vec<vera_domain::PublicKey>,
+    /// The account's devices, for a node that may hand the deployment over
+    /// or take it over.
+    pub switching: Option<crate::Switching>,
+    /// Where the host reads the node's term and asks it to change.
+    pub term: Option<crate::term::TermSeat>,
 }
 
 /// Verification parallelism when the host does not choose one.
@@ -95,6 +100,8 @@ impl NodeOptions {
             keys: None,
             backup: None,
             devices: Vec::new(),
+            switching: None,
+            term: None,
         }
     }
 }

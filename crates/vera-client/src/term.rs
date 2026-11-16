@@ -78,6 +78,16 @@ fn checked(
 }
 
 impl VeraClient {
+    /// Fetch the certificate of the newest term the node holds, or `None`
+    /// when the deployment's active device never changed.
+    ///
+    /// The response is not authenticated. Check it with
+    /// [`Self::verify_term_certificate`] before acting on it.
+    pub async fn term_certificate(&self) -> Result<Option<TermCertificate>, ClientError> {
+        self.rpc_call_typed("vera_getTermCertificate", serde_json::json!([]))
+            .await
+    }
+
     /// Verify `certificate` against the operator policy in certified state
     /// and return the revision the policy was read at.
     ///

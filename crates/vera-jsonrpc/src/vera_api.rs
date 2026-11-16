@@ -49,6 +49,14 @@ pub trait VeraApi {
     #[method(name = "nodeStatus")]
     async fn node_status(&self) -> RpcResult<NodeStatus>;
 
+    /// Returns the certificate of the newest term this node holds, or null
+    /// when the deployment's active device never changed.
+    ///
+    /// The node verified it against its own state. A caller verifies it
+    /// against the operator policy in state it has authenticated itself.
+    #[method(name = "getTermCertificate")]
+    async fn term_certificate(&self) -> RpcResult<Option<vera_domain::TermCertificate>>;
+
     /// Submits a BLS-signed native transaction.
     ///
     /// Accepts wire-format bytes (`0x45 || RLP(NativeTx)`), validates the
@@ -267,6 +275,10 @@ impl VeraApiImpl {
 impl VeraApiServer for VeraApiImpl {
     async fn node_status(&self) -> RpcResult<NodeStatus> {
         Ok(self.state.status())
+    }
+
+    async fn term_certificate(&self) -> RpcResult<Option<vera_domain::TermCertificate>> {
+        Ok(self.state.term_certificate())
     }
 
     async fn send_native_tx(&self, data: Bytes) -> RpcResult<B256> {

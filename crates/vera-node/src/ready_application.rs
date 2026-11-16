@@ -35,7 +35,8 @@ where
         ancestry: impl Ancestry<Self::Block>,
         input: Self::Input,
     ) -> Handoff<Digested<Self::Block>> {
-        if !*self.ready.borrow() {
+        // A block built ahead of its turn would escape a hold.
+        if !*self.ready.borrow() || self.hold.is_held() {
             return Handoff::Wait;
         }
         self.inner.prepare(context, ancestry, input).await

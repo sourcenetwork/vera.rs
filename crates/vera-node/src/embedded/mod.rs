@@ -21,7 +21,7 @@ use std::{
 
 use commonware_runtime::Runner as _;
 use tokio::sync::oneshot;
-use vera_domain::{ConsensusPublicKey, PublicKey};
+use vera_domain::{ConsensusPublicKey, PublicKey, TermCertificate, TermChange};
 use vera_genesis::VeraGenesis;
 use vera_jsonrpc::LocalRpc;
 
@@ -31,7 +31,11 @@ pub use role::{Backup, DeviceRole};
 pub use thread_budget::ThreadBudget;
 pub use thread_setup::ThreadSetup;
 
-use crate::{NodeOptions, NodeSettings, RpcMode, SoloDeployment, SoloError, WatchdogMode};
+use crate::{
+    NodeOptions, NodeSettings, RpcMode, SoloDeployment, SoloError, SoloKeys, TermRefusal,
+    WatchdogMode,
+    term::{Accept, TermControl, TermRecord, device_id},
+};
 
 /// The node's root future is polled on this thread and needs more than a spawned thread's default stack.
 const NODE_STACK_BYTES: usize = 16 * 1024 * 1024;
@@ -52,6 +56,8 @@ pub struct EmbeddedNode {
     backup: bool,
     data_dir: PathBuf,
     deployment: Option<SoloDeployment>,
+    config: Box<EmbeddedConfig>,
+    term: TermControl,
     stop: Option<oneshot::Sender<()>>,
     exit: oneshot::Receiver<Result<(), EmbedError>>,
     thread: Option<JoinHandle<()>>,
@@ -69,6 +75,8 @@ impl EmbeddedNode {
             return Err(EmbedError::Config(reason));
         }
         let node_config = config.node_config();
+        let configured = Box::new(config.clone());
+        refuse_role(&config)?;
         let (genesis, peers, backup) = match (&config.role, &config.deployment) {
             (DeviceRole::Backup(_), Some(_)) => {
                 return Err(EmbedError::Config("a backup takes no key material"));
@@ -80,9 +88,10 @@ impl EmbeddedNode {
                     &backup.record,
                     backup.active,
                 )?;
-                let key = match &backup.transport_key {
-                    Some(key) => key.clone(),
-                    None => crate::DeviceKey::load_or_create(&config.data_dir)?,
+                let key = match (&backup.transport_key, &config.switching) {
+                    (Some(key), _) => key.clone(),
+                    (None, Some(switching)) => switching.device_key.clone(),
+                    (None, None) => crate::DeviceKey::load_or_create(&config.data_dir)?,
                 };
                 (genesis, peers, Some(key))
             }
@@ -97,6 +106,9 @@ impl EmbeddedNode {
             }
         };
         let is_backup = backup.is_some();
+        if config.switching.is_some() {
+            crate::term::settle_role(&config.data_dir, is_backup)?;
+        }
         let identity = backup.as_ref().map_or_else(
             || peers.participants[0].clone(),
             crate::DeviceKey::public_key,
@@ -147,6 +159,11 @@ impl EmbeddedNode {
         let (stop_tx, stop_rx) = oneshot::channel();
         let (exit_tx, mut exit_rx) = oneshot::channel();
         let hold = crate::ProposalHold::default();
+        let (term, seat) = TermControl::new();
+        let mut devices = config.backups;
+        if let Some(switching) = &config.switching {
+            devices.extend(switching.devices.iter().map(|device| device.key.clone()));
+        }
         let options = NodeOptions {
             rpc: match config.rpc_listen {
                 Some(_) => RpcMode::Network(None),
@@ -165,12 +182,10 @@ impl EmbeddedNode {
                 .map(|deployment| deployment.keys().clone()),
             // Backups do not connect to each other, and a peer that never
             // connects would still be asked for blocks and state.
-            devices: if is_backup {
-                Vec::new()
-            } else {
-                config.backups
-            },
+            devices: if is_backup { Vec::new() } else { devices },
             backup,
+            switching: config.switching,
+            term: Some(seat),
         };
         let thread_setup = config.thread_setup;
         let data_dir = config.data_dir.clone();
@@ -207,10 +222,13 @@ impl EmbeddedNode {
                             }
                         });
                         let stopped = |result: anyhow::Result<()>| {
-                            Err(EmbedError::Stopped(result.map_or_else(
-                                |error| format!("{error:#}"),
-                                |()| "node actors exited".into(),
-                            )))
+                            Err(match result {
+                                Ok(()) => EmbedError::Stopped("node actors exited".into()),
+                                Err(error) => match error.downcast::<TermRefusal>() {
+                                    Ok(refusal) => EmbedError::Term(refusal),
+                                    Err(error) => EmbedError::Stopped(format!("{error:#}")),
+                                },
+                            })
                         };
                         let mut node = std::pin::pin!(crate::run_node_with_options(
                             context, settings, options
@@ -257,6 +275,8 @@ impl EmbeddedNode {
             backup: is_backup,
             data_dir,
             deployment,
+            config: configured,
+            term,
             stop: Some(stop_tx),
             exit: exit_rx,
             thread: Some(thread),
@@ -306,6 +326,129 @@ impl EmbeddedNode {
         )
     }
 
+    /// The term this device holds: the term it proposes in while it is
+    /// active, and the lowest it accepts above that term's cut. A deployment
+    /// whose active device never changed is in term 0.
+    #[must_use]
+    pub fn term(&self) -> u64 {
+        self.term.term()
+    }
+
+    /// The certificate of the newest term this device holds, verified
+    /// against the operator policy in its own state. `None` in term 0.
+    #[must_use]
+    pub fn term_certificate(&self) -> Option<TermCertificate> {
+        self.term.certificate()
+    }
+
+    /// Announce that `successor`, one of [`crate::Switching::devices`],
+    /// takes the deployment over, and return the term change to certify.
+    ///
+    /// The node holds back new proposals, waits for the blocks it proposed
+    /// to finalize, and asks the successor to confirm it holds the last of
+    /// them. That block is the change's cut, so the switch loses nothing. The
+    /// host has the operator policy approve the change and gives the
+    /// certificate to the successor, which calls [`Self::take_over`], and to
+    /// this node, which follows with [`Self::follow`].
+    ///
+    /// From here on this device proposes nothing, also after a restart,
+    /// until it follows or [`Self::resume`] undoes the announcement. A
+    /// successor that is not connected, or does not hold the final block
+    /// within [`crate::Switching::answer_timeout`], fails the call with
+    /// [`TermRefusal::SuccessorNotCurrent`] and the device stays active.
+    pub async fn hand_over(&self, successor: &PublicKey) -> Result<TermChange, EmbedError> {
+        Ok(self.term.hand_over(successor.clone()).await?)
+    }
+
+    /// Undo [`Self::hand_over`] and propose again, for a handover whose
+    /// certificate was never issued.
+    ///
+    /// Resuming after the successor received a certificate forks the
+    /// deployment: only the host knows whether it did. The first block after
+    /// a resume can be late by the leader timeout.
+    pub async fn resume(&self) -> Result<(), EmbedError> {
+        Ok(self.term.resume().await?)
+    }
+
+    /// The term change a certificate must approve for this backup to take
+    /// the deployment over without a handover: the next term, this device as
+    /// holder, and its newest block as the cut.
+    ///
+    /// Blocks the active device finalized and this device never received are
+    /// above that cut and are lost to the switch. The host asks the user to
+    /// confirm before it has the change approved.
+    pub async fn takeover_change(&self) -> Result<TermChange, EmbedError> {
+        Ok(self.term.offer().await?)
+    }
+
+    /// Become the active device in the term `certificate` starts.
+    ///
+    /// The backup checks the certificate against the operator policy in its
+    /// own state, that it names this device, that its term is above every
+    /// term the device has seen, and that the device's newest block is the
+    /// cut. It then stops and starts again in place as the deployment's
+    /// validator with `keys`. A refusal leaves the backup running. Clones of
+    /// [`Self::rpc`] taken before the call end with it.
+    ///
+    /// An error after the certificate was accepted leaves the node stopped;
+    /// the certificate is stored, and a start with
+    /// [`EmbeddedConfig::activated`] completes the switch.
+    pub async fn take_over(
+        &mut self,
+        keys: SoloKeys,
+        certificate: TermCertificate,
+    ) -> Result<(), EmbedError> {
+        let config = self.config.activated(keys)?;
+        self.term.accept(certificate, Accept::TakeOver).await?;
+        self.restart(config).await
+    }
+
+    /// Follow the device that holds the term `certificate` starts.
+    ///
+    /// The node checks the certificate against the operator policy in its
+    /// own state and that it names another of the account's devices. It then
+    /// stops and starts again in place as a backup of that device. A refusal
+    /// leaves the node running.
+    ///
+    /// An error after the certificate was accepted leaves the node stopped;
+    /// a start with [`EmbeddedConfig::following`] completes the switch.
+    pub async fn follow(&mut self, certificate: TermCertificate) -> Result<(), EmbedError> {
+        let switching = self
+            .config
+            .switching
+            .as_ref()
+            .ok_or(TermRefusal::NotConfigured)?;
+        let holder = switching
+            .devices
+            .iter()
+            .find(|device| device_id(&device.key) == certificate.change.holder)
+            .ok_or(TermRefusal::Holder)?;
+        let config = self.config.following(&holder.key)?;
+        // A device told of a later term by its wake check already stored the certificate.
+        if self.term.certificate().as_ref() != Some(&certificate) {
+            self.term.accept(certificate, Accept::Follow).await?;
+        }
+        self.restart(config).await
+    }
+
+    /// Resolves when this active device learns that another device holds a
+    /// later term, with that term's certificate.
+    ///
+    /// The device asks the others after a gap in its own blocks longer than
+    /// [`crate::Switching::freshness`]: after it was stopped or the machine
+    /// slept. Once this resolves it proposes nothing more, and the host
+    /// calls [`Self::follow`] with the certificate.
+    pub async fn demoted(&self) -> TermCertificate {
+        self.term.demoted().await
+    }
+
+    /// Stop this node and start one with `config` in its place.
+    async fn restart(&mut self, config: EmbeddedConfig) -> Result<(), EmbedError> {
+        self.halt().await?;
+        *self = Self::start(config).await?;
+        Ok(())
+    }
+
     /// Wait until the node stops on its own, which is always an error.
     pub async fn failed(&mut self) -> EmbedError {
         match (&mut self.exit).await {
@@ -316,6 +459,10 @@ impl EmbeddedNode {
 
     /// Stop the node and wait for its thread to finish.
     pub async fn stop(mut self) -> Result<(), EmbedError> {
+        self.halt().await
+    }
+
+    async fn halt(&mut self) -> Result<(), EmbedError> {
         if let Some(stop) = self.stop.take() {
             // The node may already have stopped by itself.
             let _ = stop.send(());
@@ -332,6 +479,35 @@ impl Drop for EmbeddedNode {
             let _ = stop.send(());
         }
     }
+}
+
+/// Refuse a role the device's stored term rules out.
+///
+/// A device that announced a handover, or that knows another device holds
+/// the newest term, must not validate: it would finalize blocks beside the
+/// device that replaced it.
+fn refuse_role(config: &EmbeddedConfig) -> Result<(), EmbedError> {
+    if matches!(config.role, DeviceRole::Backup(_)) {
+        return Ok(());
+    }
+    if config.switching.is_some() && config.deployment.is_none() {
+        return Err(TermRefusal::KeysInFiles.into());
+    }
+    let record = TermRecord::load(&config.data_dir)?;
+    if let Some(change) = record.handed_over {
+        return Err(TermRefusal::HandedOver(Box::new(change)).into());
+    }
+    let Some(certificate) = record.deciding().cloned() else {
+        return Ok(());
+    };
+    let this = config
+        .switching
+        .as_ref()
+        .map(|switching| device_id(&switching.device_key.public_key()));
+    if this != Some(certificate.change.holder) {
+        return Err(TermRefusal::Superseded(Box::new(certificate)).into());
+    }
+    Ok(())
 }
 
 /// Builds the start future in this crate.

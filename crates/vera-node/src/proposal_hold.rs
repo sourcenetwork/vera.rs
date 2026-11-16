@@ -63,6 +63,22 @@ impl ProposalHold {
         self.inner.proposed.fetch_max(height, Ordering::AcqRel);
     }
 
+    /// Holds back new proposals without waiting for the ones already made.
+    pub(crate) fn hold(&self) {
+        self.inner.held.send_replace(true);
+    }
+
+    /// Lets proposals through again. A proposal that was already held back
+    /// stays unanswered, so the next block waits out that view.
+    pub(crate) fn release(&self) {
+        self.inner.held.send_replace(false);
+    }
+
+    /// Whether proposals are held back.
+    pub(crate) fn is_held(&self) -> bool {
+        *self.inner.held.borrow()
+    }
+
     /// Resolves once proposals are held back.
     pub(crate) async fn held(&self) {
         let mut held = self.inner.held.subscribe();
