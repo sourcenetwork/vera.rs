@@ -128,7 +128,7 @@ impl AcpModule {
         }
         let record: RelationshipRecord = serde_json::from_slice(value)
             .map_err(|error| AcpError::State(format!("invalid object owner record: {error}")))?;
-        let vera_acp::Subject::Entity(actor) = &record.relationship.subject else {
+        let ::acp::domain::Subject::Actor(actor) = &record.relationship.subject else {
             return Err(AcpError::State("object owner must be an actor".into()));
         };
         if record.generations
@@ -138,10 +138,10 @@ impl AcpModule {
             })
             || record.incarnation != 0
             || record.policy_id != policy
-            || record.relationship.resource != object.resource
-            || record.relationship.object_id != object.id
-            || record.relationship.relation != "owner"
-            || record.metadata.owner_did != actor.as_str()
+            || record.relationship.object.resource.as_str() != object.resource
+            || record.relationship.object.id.as_str() != object.id
+            || record.relationship.relation.as_str() != ::acp::domain::OWNER_RELATION
+            || record.metadata.owner_did != actor.id.as_str()
             || keys::relationship_storage_prefix(
                 policy,
                 &keys::relationship_storage_key(&record.relationship, record.incarnation),
@@ -171,7 +171,8 @@ mod tests {
             )
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         (
             module,
             actor,
@@ -229,12 +230,14 @@ mod tests {
         let reserved = module
             .create_policy(
                 &actor,
-                "name: reserved\nactor:\n  relations:\n    - name: member\n      types: [actor]\nresources:\n  - name: file\n",
-                PolicyMarshalingType::ShortYaml, Default::default(),
+                "name: reserved\nresources:\n  - name: file\n",
+                PolicyMarshalingType::ShortYaml,
+                Default::default(),
             )
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         let before = module.store.serialize();
         for (target, objects, expected) in [
             ("missing-policy", vec![object.clone()], "policy not found"),
@@ -316,12 +319,13 @@ mod tests {
                         .put(&key, serde_json::to_vec(&malformed).unwrap());
                 }
                 _ => {
-                    let other = Relationship::with_entity(
+                    let other = crate::acp::relationship_values::actor_relationship(
                         "file",
                         "report",
                         "owner",
-                        Did::new("did:key:other").unwrap(),
-                    );
+                        &Did::new("did:key:other").unwrap(),
+                    )
+                    .unwrap();
                     module.store.put(
                         &keys::relationship_key(
                             &policy,

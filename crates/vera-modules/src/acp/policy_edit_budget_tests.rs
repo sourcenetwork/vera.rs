@@ -1,3 +1,4 @@
+use crate::acp::Declares as _;
 use crate::acp::*;
 
 const ORIGINAL: &str =
@@ -23,7 +24,8 @@ fn fixture(grants: usize) -> (AcpModule, Did, String) {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     module
         .direct_policy_cmd(
             &owner,
@@ -39,12 +41,15 @@ fn fixture(grants: usize) -> (AcpModule, Did, String) {
             .direct_policy_cmd(
                 &owner,
                 &policy,
-                PolicyCmd::SetRelationship(Relationship::with_entity(
-                    "file",
-                    "report",
-                    "reader",
-                    Did::new(format!("did:key:reader{index}")).unwrap(),
-                )),
+                PolicyCmd::SetRelationship(
+                    crate::acp::relationship_values::actor_relationship(
+                        "file",
+                        "report",
+                        "reader",
+                        &Did::new(format!("did:key:reader{index}")).unwrap(),
+                    )
+                    .unwrap(),
+                ),
             )
             .unwrap();
     }
@@ -71,14 +76,10 @@ fn edit(
 fn assert_unchanged(module: &AcpModule, before: &AcpModule, policy: &str) {
     assert_eq!(module.store.serialize(), before.store.serialize());
     assert!(Arc::ptr_eq(
-        &module.zanzibar_policies[policy],
-        &before.zanzibar_policies[policy]
+        &module.policies[policy],
+        &before.policies[policy]
     ));
-    assert!(
-        module.zanzibar_policies[policy]
-            .get_relation("file", "reader")
-            .is_some()
-    );
+    assert!(module.policies[policy].declares("file", "reader"));
 }
 
 #[test]
@@ -104,11 +105,7 @@ fn exact_edit_budget_succeeds_and_one_less_preserves_state_and_cache() {
     assert_eq!(budget.consumed(), required);
     assert!(!budget.is_exhausted());
     assert_eq!(exact.store.serialize(), measured.store.serialize());
-    assert!(
-        exact.zanzibar_policies[&policy]
-            .get_relation("file", "reader")
-            .is_none()
-    );
+    assert!(!exact.policies[&policy].declares("file", "reader"));
     exact.validate_restored_state().unwrap();
 
     let mut short = original.clone();
@@ -170,7 +167,7 @@ fn edit_work_depends_on_pair_indexes_not_physical_grant_count() {
             .query_filter_relationships(&policy, &Default::default())
             .unwrap();
         assert_eq!(current.len(), 1);
-        assert_eq!(current[0].relationship.relation, "owner");
+        assert_eq!(current[0].relationship.relation.as_str(), "owner");
         module.validate_restored_state().unwrap();
         costs.push(budget.consumed());
     }
@@ -205,7 +202,7 @@ fn rejected_owner_and_revision_checks_charge_reads_without_mutation() {
 
 #[test]
 fn budgeted_edit_counts_target_and_userset_invalidation_once() {
-    let definition = "name: overlap\nresources:\n  - name: file\n    relations:\n      - name: reader\n      - name: writer\n  - name: group\n    relations:\n      - name: member\n";
+    let definition = "name: overlap\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor, group->member]\n      - name: writer\n        types: [actor, group->member]\n  - name: group\n    relations:\n      - name: member\n";
     let replacement = "name: overlap\nresources:\n  - name: file\n    relations:\n      - name: writer\n  - name: group\n";
     let owner = Did::new("did:key:owner").unwrap();
     let reader = Did::new("did:key:reader").unwrap();
@@ -219,7 +216,8 @@ fn budgeted_edit_counts_target_and_userset_invalidation_once() {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     for (resource, id) in [("file", "report"), ("group", "staff")] {
         module
             .direct_policy_cmd(
@@ -233,21 +231,34 @@ fn budgeted_edit_counts_target_and_userset_invalidation_once() {
             .unwrap();
     }
     for relationship in [
-        Relationship::with_entity("group", "staff", "member", reader.clone()),
-        Relationship::new(
+        crate::acp::relationship_values::actor_relationship(
+            "group",
+            "staff",
+            "member",
+            &reader.clone(),
+        )
+        .unwrap(),
+        crate::acp::relationship_values::relationship(
             "file",
             "report",
             "reader",
-            vera_acp::Subject::entity_set("group", "staff", "member"),
+            crate::acp::relationship_values::actor_set("group", "staff", "member"),
         ),
-        Relationship::new(
+        crate::acp::relationship_values::relationship(
             "file",
             "report",
             "writer",
-            vera_acp::Subject::entity_set("group", "staff", "member"),
+            crate::acp::relationship_values::actor_set("group", "staff", "member"),
         ),
-        Relationship::with_entity("file", "report", "reader", reader.clone()),
-        Relationship::with_entity("file", "report", "writer", reader),
+        crate::acp::relationship_values::actor_relationship(
+            "file",
+            "report",
+            "reader",
+            &reader.clone(),
+        )
+        .unwrap(),
+        crate::acp::relationship_values::actor_relationship("file", "report", "writer", &reader)
+            .unwrap(),
     ] {
         module
             .direct_policy_cmd(&owner, &policy, PolicyCmd::SetRelationship(relationship))
@@ -284,14 +295,14 @@ fn budgeted_edit_counts_target_and_userset_invalidation_once() {
     assert_eq!(
         current
             .iter()
-            .filter(|record| record.relationship.relation == "owner")
+            .filter(|record| record.relationship.relation.as_str() == "owner")
             .count(),
         2
     );
     assert_eq!(
         current
             .iter()
-            .filter(|record| record.relationship.relation == "writer")
+            .filter(|record| record.relationship.relation.as_str() == "writer")
             .count(),
         1
     );

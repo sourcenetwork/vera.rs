@@ -188,9 +188,8 @@ resources:
   - name: document
     permissions:
       - name: read
-        expr: owner
-      - name: write
-        expr: owner
+      - name: update
+      - name: delete
 ";
     const EDITED: &str = "\
 name: edited
@@ -198,9 +197,8 @@ resources:
   - name: document
     permissions:
       - name: read
-        expr: owner
-      - name: write
-        expr: owner
+      - name: update
+      - name: delete
 ";
     let directory = tempfile::tempdir().unwrap();
     let config = tokio::Config::new().with_storage_directory(directory.path());

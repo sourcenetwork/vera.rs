@@ -1,15 +1,17 @@
 # ACP v1 in Vera
 
-Vera executes ACP in Rust. Policy compilation lives in `crates/vera-acp`, graph
-evaluation in `crates/vera-zanzibar`, and authenticated lifecycle operations in
-`crates/vera-modules/src/acp`. Native requests dispatch to that module
-implementation. The Go engine is used only to generate test
-fixtures; it is not part of the node or its runtime dependencies.
+Vera executes ACP with acp-rs. Its `acp` crate defines what a policy means:
+the policy language, policy processing and IDs, relationship validation, the
+wire form of relationships, and evaluation through its `zanzi` engine. Vera's
+module in `crates/vera-modules/src/acp` defines the operations: records and
+storage keys, relation generations and object incarnations, cleanup, work
+accounting, proofs and actor DID spelling. Where they differ, acp-rs defines
+correct execution. Native requests dispatch to that module implementation.
 
 ## Engine surface
 
-The reference is Go `acp_core` v0.8.2, used by Go Vera at
-`205df1adcd27a350168b14fe49b9160387acba93`.
+Operation names follow Go `acp_core` v0.8.2, used by Go Vera at
+`205df1adcd27a350168b14fe49b9160387acba93`; their semantics are acp-rs's.
 
 | Go engine operation | Rust module entry point |
 | --- | --- |
@@ -19,15 +21,15 @@ The reference is Go `acp_core` v0.8.2, used by Go Vera at
 | GetPolicy / ListPolicies | `query_policy`, `query_policies`, `query_policies_page` |
 | ValidatePolicy | `query_validate_policy`, `validate_policy_definition` |
 | DeletePolicy | `delete_policy`; creator-authorized logical deletion and bounded record cleanup |
-| SetRelationship / DeleteRelationship | `execute_policy_cmd`; typed actor, wildcard, object and userset subjects |
+| SetRelationship / DeleteRelationship | `execute_policy_cmd`; actor, all-actors, object and actor-set subjects |
 | FilterRelationships | `query_filter_relationships`, `query_relationships_page` with structured selectors |
 | RegisterObject / ArchiveObject / UnarchiveObject | `execute_policy_cmd` |
 | TransferObject | `transfer_object` or `PolicyCmd::TransferObject` |
 | GetObjectRegistration | `query_object_registration`; includes archived ownership |
 | VerifyAccessRequest | `query_verify_access_request`; union, intersection, exclusion and traversal |
-| CheckManagementAuthority | `check_management_authority`; evaluates owner and declared manager relations |
+| CheckManagementAuthority | `check_management_authority`; one check of the owner and declared manager relations |
 | GetPolicyCatalogue | `query_policy_catalogue`; declared names, known live objects and actors |
-| EvaluateTheorem | `evaluate_theorem`; authorization and delegation assertions |
+| EvaluateTheorem | Not provided: assertions about a policy are a development check, not a module query |
 | AmendRegistration / RevealRegistration | authenticated commitment/reveal workflow; callers cannot choose a privileged principal or arbitrary earlier timestamp |
 | SetParams / GetParams | `getParams` reads the ACP parameters. There is no parameter-write call; operators set them through administration |
 | GetRuntimeManager | host plumbing, replaced by execution context and the module store |
@@ -37,42 +39,8 @@ Native calls are declared in `acp/abi.rs`. `VeraClient` exposes typed methods in
 accepts a `PolicyCommandRequest` containing the command and optional supplied
 metadata. Supplied metadata is supported when registering an object, creating a
 grant, or revealing a registration. A repeated grant returns its original metadata.
-Theorem, catalogue and relationship-page queries have `VeraClient` methods; their
+Catalogue and relationship-page queries have `VeraClient` methods; their
 convenience responses do not carry independent finality proofs.
-
-## Registering a child under a parent
-
-A child resource can declare a creation rule. For example, a session can
-require the actor to hold `start_session` on its agent.
-
-```yaml
-name: agents
-resources:
-  - name: agent
-    permissions: [{name: start_session, expr: owner}]
-  - name: session
-    relations: [{name: agent, types: [agent]}]
-    create: {parent: agent, requires: start_session}
-```
-
-Use `VeraClient::native_register_under_parent` with the child and parent
-objects. Vera evaluates the acting identity against the active parent before
-writing either the child's owner or its parent relationship. Both writes
-commit together. Registration fixes the child's parent. Subsequent relationship
-commands cannot add a second parent, replace the original, or remove it.
-Direct registration and commitment reveals cannot create a gated
-resource without naming the parent. Resources without a creation rule retain
-their existing registration semantics and policy hashes.
-
-To require individual delegation, declare a direct relation on the parent,
-such as `{name: publisher, types: [actor:individual]}`, and set the child's
-`requires` to `publisher`. Each acting DID needs its own grant. Vera rejects
-a wildcard grant to that relation. Use `[actor]` for relations that also
-accept an all-actors grant.
-
-A certified receipt attests the command outcome. A proof of a current
-relationship attests its state at the queried revision. Independently
-replaying the original authorization decision requires the pre-command state.
 
 ## Authority and ordering
 
@@ -119,22 +87,28 @@ between different execution rules.
 
 This is a feature port, not a claim of identical transport or parser behavior:
 
-- Existing Rust policies may explicitly declare/reference `owner`, omit subject
-  `types` to allow unrestricted subjects, and define actor roles managed by the
-  policy creator. Go rejects explicit owner syntax and grants to relations with
-  no allowed subject types. **Declare `types` explicitly when moving policies from
-  Go**; omitting them does not have the same authorization meaning.
+- Policies follow acp-rs (its ADR 0020). `owner` is implicit: a policy cannot
+  declare it, name it in a permission expression, or let another relation manage
+  it, and every permission already grants the owner. Omitted `types` means
+  `[actor]`; `"*"` admits any subject. The actor resource declares no relations.
+  A permission that subtracts something depending on itself is refused when the
+  policy is created. A Defra-specification policy declares `read`, `update` and
+  `delete`, and `read` includes `update + delete`. Policy IDs bind acp's hash
+  of the processed policy to the creator and a nonce ([policy-ids.md](policy-ids.md)).
+- Relationship subjects are an actor, all actors (`actor:*`), an object (followed
+  by `->` expressions) or an actor set (`object#relation`). Commands, records and
+  query results carry them in acp's JSON form, for example
+  `{"object":{"resource":"file","id":"readme"},"relation":"reader","subject":{"actor":"did:key:..."}}`.
+  A stored grant the relation's types no longer admit, after a narrowing edit,
+  does not count while they do not.
+- JSON definitions must be valid JSON; acp reads both formats with one YAML
+  reader.
 - Unknown specification names are rejected. They do not silently become policies
   with no specification. Omitted specification on edit retains the selected one.
-- Go's reachability-theorem evaluator returns success without evaluating the
-  assertion. Rust rejects nonempty `ImpliedRelations` blocks. Authorization and
-  delegation assertions are evaluated, with source byte ranges and individual
-  accepted/rejected/error results.
 - Read convenience methods report the endpoint's state and carry no finality
   proof. Use the existing certified permission/record/prefix APIs when independent
-  verification is required. A theorem report is not a permission grant.
-- Definitions and supplied metadata are limited to 64 KiB; theorem sources to
-  64 KiB and 64 assertions. Pages inspect at most 128 records / 1 MiB, including
+  verification is required.
+- Definitions and supplied metadata are limited to 64 KiB. Pages inspect at most 128 records / 1 MiB, including
   records rejected by a filter. An empty page can have a continuation cursor.
   Cursors are exclusive storage positions, not revision certificates; repeated
   live RPC calls can observe different revisions. Unpaged queries reject oversized
@@ -334,25 +308,16 @@ An empty query still succeeds for an existing policy; recorded decisions require
 at least one operation.
 
 Existing hard limits remain separate: 256 point/prefix reads, 4,096 returned
-records and 1 MiB of read bytes per request; evaluator depth 64 and 10,000 steps
-per operation. Each operation retains its own evaluator cache and hard step
-limit, while execution work accumulates across them. Native evaluations reuse
+records and 1 MiB of read bytes per request. Each check is bounded by
+`PERMISSION_LIMITS`: 10,000 search steps and distinct queries, and a search
+depth of 256; acp separately bounds expressions at depth 64. Each operation is
+its own check with its own limits, while execution work accumulates across them.
+Execution and proof replay use the same limits. Native evaluations reuse
 one validated policy within an immutable request snapshot. Generic mutable store
 adapters still read current policy records. Proof capture and verification retain
 their existing read limits; required incarnation points share those limits. Proof
 reads do not consume native execution gas.
 This is deterministic work accounting, not an instruction count or latency bound.
-
-`evaluateTheorem` charges its 1,000-unit dispatch base plus one allowance shared by
-the whole call: the policy identifier and source bytes before parsing, the policy
-read, and every assertion's reads and evaluator steps at the prices above.
-Authorization assertions use the permission accounting and delegation assertions
-the management accounting described below. An exhausted allowance returns
-out-of-gas for the call; it is never recorded as an assertion error. Rejected
-sources retain the work spent on them. The module exposes
-`evaluate_theorem_with_budget`; `evaluate_theorem` retains an unlimited allowance.
-A read-only call made through the client is limited by its call's gas, so a
-report over many assertions or wide relations can run out of gas there.
 
 ## Management authorization work
 
@@ -365,8 +330,8 @@ retains its existing 64 KiB encoded limit, checked without an owned validation c
 there is no additional restriction on raw JSON whitespace or escaping.
 
 The initial command policy read, management policy/owner reads, and all evaluator
-reads use the policy-edit read prices. Owner and declared manager checks share one
-allowance, charging 32 units per evaluator step. Management evaluation reuses one
+reads use the policy-edit read prices. The owner and declared managers are one
+check, charging 32 units per evaluator step. Management evaluation reuses one
 validated policy in an immutable snapshot. Existing read limits and per-check
 engine depth/step limits remain separate. Exhaustion is sticky and returns
 out-of-gas, never a grant or a successful partial result.
@@ -470,13 +435,11 @@ wrapper charges affect execution results, so validators must use matching rules.
 
 ## Validation
 
-`tools/acp-oracle` pins and executes the Go engine to produce the committed
-fixtures. `acp_go_parity` replays those operations, checks failed writes leave
-state unchanged, and validates restoration after every step. Additional lifecycle,
+acp-rs tests the policy and evaluation semantics. Vera's lifecycle, conformance,
 pagination and native-dispatch tests cover metadata, ownership, revocation,
-corruption, bounds, gas rejection and batch rollback. The canonical four-member
-integration test exercises the new native client calls and verifies their finality
-receipts. CI runs the fixture replay without requiring Go.
+corruption, bounds, gas rejection, batch rollback and restoration. The canonical
+four-member integration test exercises the native client calls and verifies their
+finality receipts.
 
 See [policy edits and relation generations](acp-policy-edits.md) for bounded
 definition editing, exact removal counts, current-query selection and cleanup.

@@ -5,9 +5,9 @@ use std::{collections::BTreeMap, sync::Mutex};
 use alloy_primitives::{B256, Bytes};
 use serde::{Deserialize, Serialize};
 use vera_modules::acp::{
+    evaluation::evaluate_access_request,
     record_error::{RecordError, Result as RecordResult},
     record_store::RecordStore,
-    zanzibar_store::evaluate_access_request,
 };
 
 pub use vera_domain::ModuleId;

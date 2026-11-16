@@ -59,7 +59,7 @@ fn committed() -> (ModuleState, B256) {
         &IAcp::createPolicyCall::abi_decode_returns(&created.output.bytes).unwrap(),
     )
     .unwrap();
-    (modules, record.policy.id.parse().unwrap())
+    (modules, record.policy.id.as_str().parse().unwrap())
 }
 
 fn view(modules: &ModuleState, calldata: Vec<u8>) -> ViewCallResult {
@@ -77,7 +77,7 @@ fn a_view_returns_the_output_of_the_committed_values() {
     assert_eq!(result.refusal, None);
     let bytes = IAcp::getPolicyCall::abi_decode_returns(&result.output).unwrap();
     let record: PolicyRecord = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(record.policy.id.parse::<B256>().unwrap(), policy);
+    assert_eq!(record.policy.id.as_str().parse::<B256>().unwrap(), policy);
 }
 
 #[test]

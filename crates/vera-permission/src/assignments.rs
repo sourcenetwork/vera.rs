@@ -1,7 +1,7 @@
 use alloy_primitives::B256;
 use vera_domain::{FinalityTrust, LIGHT_BLOCK_RESPONSE_BYTES};
+use vera_modules::acp::relationship_values;
 use vera_modules::acp::types::RelationshipRecord;
-use vera_zanzibar::Subject;
 
 use crate::{Actor, PermissionError, PolicyPrefixProof, PolicyPrefixResponse, encoded_size};
 
@@ -41,14 +41,18 @@ impl PolicyPrefixProof {
         )?;
         let subject = vera_modules::actor::canonical(&selector.subject.0);
         let issuer = vera_modules::actor::canonical(&selector.issuer.0);
+        let subject = vera_modules::acp::types::Subject::Actor(
+            relationship_values::actor(&subject)
+                .map_err(|_| PermissionError::Invalid("assignment subject is not an actor"))?,
+        );
         let mut records = Vec::new();
         for entry in evidence.entries {
             let record: RelationshipRecord = serde_json::from_slice(&entry.value)
                 .map_err(|_| PermissionError::Invalid("relationship record encoding"))?;
             if !record.archived
-                && record.relationship.resource == selector.resource
-                && record.relationship.relation == selector.relation
-                && record.relationship.subject == Subject::Entity(subject.clone())
+                && record.relationship.object.resource.as_str() == selector.resource
+                && record.relationship.relation.as_str() == selector.relation
+                && record.relationship.subject == subject
                 && record.metadata.owner_did == issuer.as_str()
             {
                 records.push(record);

@@ -41,17 +41,23 @@ impl AcpModule {
         let policy = self.query_policy_with_budget(policy_id, budget)?;
         let mut resources = BTreeMap::new();
         for resource in &policy.policy.resources {
-            let mut entry = ResourceCatalogue::default();
-            for relation in &resource.relations {
-                if relation.expression.is_this() {
-                    entry.relations.push(relation.name.clone());
-                } else {
-                    entry.permissions.push(relation.name.clone());
-                }
-            }
-            entry.relations.sort();
-            entry.permissions.sort();
-            resources.insert(resource.name.clone(), entry);
+            let mut relations: Vec<String> = std::iter::once(&resource.owner)
+                .chain(&resource.relations)
+                .map(|relation| relation.name.to_string())
+                .collect();
+            let mut permissions: Vec<String> = resource
+                .permissions
+                .iter()
+                .map(|permission| permission.name.to_string())
+                .collect();
+            relations.sort();
+            permissions.sort();
+            let entry = ResourceCatalogue {
+                permissions,
+                relations,
+                object_ids: BTreeSet::new(),
+            };
+            resources.insert(resource.name.to_string(), entry);
         }
         let mut actors = BTreeSet::new();
         for record in self.filter_relationships_for_policy(
@@ -64,19 +70,18 @@ impl AcpModule {
             budget,
         )? {
             let relationship = record.relationship;
-            let Some(resource) = resources.get_mut(&relationship.resource) else {
+            let Some(resource) = resources.get_mut(relationship.object.resource.as_str()) else {
                 continue;
             };
-            resource.object_ids.insert(relationship.object_id);
-            if let vera_acp::Subject::Entity(actor) = relationship.subject {
-                actors.insert(actor.to_string());
+            resource
+                .object_ids
+                .insert(relationship.object.id.to_string());
+            if let ::acp::domain::Subject::Actor(actor) = relationship.subject {
+                actors.insert(actor.id.to_string());
             }
         }
         Ok(PolicyCatalogue {
-            actor_resource_name: policy
-                .policy
-                .actor
-                .map_or_else(|| "actor".into(), |actor| actor.name),
+            actor_resource_name: ::acp::domain::ACTOR_RESOURCE.into(),
             actors: actors.into_iter().collect(),
             resources,
         })

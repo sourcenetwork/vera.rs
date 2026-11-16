@@ -11,16 +11,16 @@ Separators cannot occur inside an encoded field, so prefixes are exact even for
 path-like identifiers. Policy IDs are the canonical generated policy IDs. Relation
 generations and the target object's incarnation use fixed-width lowercase hex.
 
-The subject digest is lowercase hexadecimal SHA-256 over `vera/acp-subject/v1`
-followed by one zero byte and compact JSON for the typed subject. Its externally
-tagged variants are `Entity`, `Wildcard`, `TypedWildcard`, and `EntitySet`.
-Entity-set fields are ordered `resource`, `object_id`, `relation`; typed wildcards
-carry `resource`. Changes to this representation require a coordinated format
-upgrade.
+The subject digest is lowercase hexadecimal SHA-256 over `vera/acp-subject/v2`
+followed by one zero byte and acp's canonical bytes for the subject
+(`acp::encoding::canonical`): compact JSON `{"actor":"did:..."}`,
+`"all_actors"`, `{"object":{"resource":..,"id":..}}` or
+`{"actor_set":{"object":{..},"relation":..}}`. acp pins that form; a change to it
+is a breaking change and requires a coordinated format upgrade.
 
 Keys name each actor by its canonical DID. Commands and queries rewrite a
-secp256k1 `did:key` in an entity subject, and in an object identifier of the
-policy's `actor` resource, before deriving a key, so every accepted spelling
+secp256k1 `did:key` in an actor subject, and in an object identifier of the
+`actor` resource, before deriving a key, so every accepted spelling
 selects one relationship. Relationship writes refuse a record that names an
 actor in another spelling. The key builders encode the values they are given:
 callers that derive a key from a caller-supplied DID pass

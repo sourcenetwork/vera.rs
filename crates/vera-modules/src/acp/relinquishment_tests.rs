@@ -251,7 +251,8 @@ fn retirement_removes_a_policys_markers_and_restores_at_every_step() {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     for (policy, owner, next) in [(&policy, &first, &second), (&kept, &second, &first)] {
         execute(
             &mut module,

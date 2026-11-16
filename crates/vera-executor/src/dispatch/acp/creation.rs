@@ -61,7 +61,7 @@ pub(super) fn dispatch(
             event_log(
                 ACP_ADDRESS,
                 &IAcp::DelegatedPolicyCreated {
-                    policyId: record.policy.id.parse().map_err(|_| {
+                    policyId: record.policy.id.as_str().parse().map_err(|_| {
                         crate::dispatch::internal_fault("invalid created policy identifier")
                     })?,
                     creator: record.metadata.owner_did,
@@ -77,7 +77,7 @@ pub(super) fn dispatch(
             event_log(
                 ACP_ADDRESS,
                 &IAcp::PolicyCreated {
-                    policyId: alloy_primitives::keccak256(record.policy.id.as_bytes()),
+                    policyId: alloy_primitives::keccak256(record.policy.id.as_str().as_bytes()),
                     creator: tx.signer.clone(),
                 },
             ),

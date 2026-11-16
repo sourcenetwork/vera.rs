@@ -37,7 +37,7 @@ pub(super) fn without_member() -> String {
             "    relations:\n      - name: member\n        types: [actor, group->member]\n",
             "",
         )
-        .replace("expr: member", "expr: owner")
+        .replace("        expr: member\n", "")
         .replace("types: [group->member]", "types: [actor]")
 }
 

@@ -34,7 +34,8 @@ impl Fixture {
             )
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         let block = BlockExecCtx {
             timestamp: Timestamp {
                 seconds: 10,

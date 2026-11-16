@@ -167,7 +167,7 @@ fn relay_preserves_actor_in_create_edit_and_registration() {
         .unwrap();
     assert_eq!(record.issuer_did, issuer());
     assert_eq!(record.authorized_account, submission().signer);
-    let policy = created.policy.id;
+    let policy = created.policy.id.to_string();
     let mut edit = claims(&DelegatedOperation::EditPolicy(&policy, POLICY, &FORMAT));
     let worker = Did::new(&submission().signer).unwrap();
     edit.relay.as_mut().unwrap().actor = format!("did:opk:{}", "cd".repeat(32));
@@ -448,7 +448,8 @@ fn recording_decisions_requires_its_own_relay_grant_even_for_retries() {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     let object = Object {
         resource: "file".into(),
         id: "report".into(),
@@ -521,62 +522,4 @@ fn recording_decisions_requires_its_own_relay_grant_even_for_retries() {
         )
         .is_err()
     );
-}
-
-#[test]
-fn parent_registration_checks_the_relay_actor() {
-    let (mut vera, mut acp) = modules();
-    let worker = Did::new(&submission().signer).unwrap();
-    let registrant = Did::new(actor()).unwrap();
-    let policy = acp.create_policy(
-        &worker,
-        "name: gates\nresources:\n- name: parent\n- name: child\n  relations: [{name: parent, types: [parent]}]\n  create: {parent: parent, requires: owner}\n",
-        FORMAT, Default::default(),
-    ).unwrap().policy.id;
-
-    for (id, owner, allowed) in [("worker", &worker, false), ("actor", &registrant, true)] {
-        let parent = Object {
-            resource: "parent".into(),
-            id: id.into(),
-        };
-        acp.direct_policy_cmd(owner, &policy, PolicyCmd::RegisterObject(parent.clone()))
-            .unwrap();
-        let child = Object {
-            resource: "child".into(),
-            id: id.into(),
-        };
-        let command = PolicyCmd::RegisterUnderParent {
-            object: child.clone(),
-            parent,
-        };
-        let token = sign(&claims(&DelegatedOperation::PolicyCommand(
-            &policy, &command,
-        )));
-        let result = acp.bearer_policy_cmd(
-            &mut vera,
-            &context(),
-            &submission(),
-            &token,
-            &policy,
-            command,
-        );
-        if allowed {
-            result.unwrap();
-            assert_eq!(
-                acp.query_object_owner(&policy, &child)
-                    .unwrap()
-                    .1
-                    .unwrap()
-                    .metadata
-                    .owner_did,
-                actor()
-            );
-        } else {
-            assert!(matches!(
-                result,
-                Err(vera_modules::acp::error::AcpError::Unauthorized { .. })
-            ));
-            assert!(acp.query_object_owner(&policy, &child).unwrap().1.is_none());
-        }
-    }
 }

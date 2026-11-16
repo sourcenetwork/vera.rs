@@ -89,6 +89,9 @@ commonware-stream = { version = "=2026.10.0" }
 
 orbis-reporting = "=0.0.3"
 
+# Policy semantics and evaluation (acp-rs)
+acp = { path = "../acp-rs/crates/acp", version = "=0.0.1" }
+
 # Shared Defra types and policy evaluation
 vera-acp = { path = "crates/vera-acp", version = "=0.2.0" }
 vera-identity = { path = "crates/vera-identity", version = "=0.2.0" }
@@ -108,7 +111,7 @@ async-trait = "0.1"
 # Serialization
 borsh = { version = "1", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["unbounded_depth"] }
 serde_yaml = "0.9"
 toml = "0.8"
 

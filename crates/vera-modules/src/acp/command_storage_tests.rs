@@ -12,7 +12,7 @@ fn object() -> Object {
 }
 fn fixture() -> (AcpModule, String) {
     let mut module = AcpModule::new();
-    let policy = module.create_policy(&did("owner"), "name: storage\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n", PolicyMarshalingType::ShortYaml, Default::default()).unwrap().policy.id;
+    let policy = module.create_policy(&did("owner"), "name: storage\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n", PolicyMarshalingType::ShortYaml, Default::default()).unwrap().policy.id.to_string();
     module
         .direct_policy_cmd(&did("owner"), &policy, PolicyCmd::RegisterObject(object()))
         .unwrap();
@@ -20,7 +20,13 @@ fn fixture() -> (AcpModule, String) {
 }
 fn record(module: &AcpModule, policy: &str) -> RelationshipRecord {
     let policy_record = module.query_policy(policy).unwrap();
-    let relationship = Relationship::with_entity("file", "report", "reader", did("reader"));
+    let relationship = crate::acp::relationship_values::actor_relationship(
+        "file",
+        "report",
+        "reader",
+        &did("reader"),
+    )
+    .unwrap();
     RelationshipRecord {
         incarnation: 0,
         generations: policy_record.relations.pair(&relationship).unwrap(),
@@ -44,8 +50,8 @@ fn reads(record: &RelationshipRecord) -> Vec<Vec<u8>> {
         primary(record),
         object_state::key(
             &record.policy_id,
-            &record.relationship.resource,
-            &record.relationship.object_id,
+            record.relationship.object.resource.as_str(),
+            record.relationship.object.id.as_str(),
         ),
         relationship_index::outgoing_key(&record.policy_id, record.generations),
         relationship_index::incoming_key(&record.policy_id, record.generations),

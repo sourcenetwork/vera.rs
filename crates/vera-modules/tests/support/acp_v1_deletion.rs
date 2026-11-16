@@ -117,7 +117,8 @@ fn policy_deletion_indexes_survive_metadata_updates_expiry_and_restore() {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     let retained = registration(&mut module, &other, "retained", 64);
     let commitment = module.query_registrations_commitment(retained.0).unwrap();
     let event = module
@@ -207,7 +208,8 @@ fn indexed_policy_cleanup_rejects_corruption_without_partial_tick_mutation() {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     let foreign = registration(&mut module, &other, "foreign", 2);
     module.validate_restored_state().unwrap();
     let mut malformed = keys::commitment_policy_index_key(&policy, last.0);

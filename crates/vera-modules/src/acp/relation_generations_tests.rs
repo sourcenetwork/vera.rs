@@ -1,33 +1,39 @@
 use super::*;
-use vera_zanzibar::{Relation, RelationExpression, Resource};
+use crate::acp::relationship_values::{actor_set, object_subject, relationship};
 
-fn policy() -> Policy {
-    let mut policy = Policy::new("policy", "generations")
-        .with_resource(
-            Resource::new("file")
-                .with_relation(Relation::direct("owner"))
-                .with_relation(Relation::direct("reader")),
-        )
-        .with_resource(
-            Resource::new("group")
-                .with_relation(Relation::direct("owner"))
-                .with_relation(Relation::direct("member")),
-        );
-    policy.actor = Some(Resource::new("actor").with_relation(Relation::direct("admin")));
-    policy
+const POLICY: &str = "
+name: generations
+resources:
+  - name: file
+    relations:
+      - name: reader
+        types: [actor, group->member, group]
+    permissions:
+      - name: read
+        expr: reader
+  - name: group
+    relations:
+      - name: member
+";
+
+fn policy() -> ProcessedPolicy {
+    ::acp::policy::compile_text(POLICY, None, 1).unwrap().policy
 }
 
 fn edge(target: &str, subject: &str) -> Relationship {
-    Relationship::new(
+    relationship(
         "file",
         "report",
         target,
-        Subject::EntitySet {
-            resource: "group".into(),
-            object_id: "staff".into(),
-            relation: subject.into(),
-        },
+        actor_set("group", "staff", subject),
     )
+}
+
+fn renamed(relation: &::acp::domain::Relation, name: &str) -> ::acp::domain::Relation {
+    ::acp::domain::Relation {
+        name: name.into(),
+        ..relation.clone()
+    }
 }
 
 #[test]
@@ -35,12 +41,14 @@ fn removal_and_recreation_never_reuse_target_or_subject_generations() {
     let original = policy();
     let state = RelationGenerations::new(&original).unwrap();
     let old = state.pair(&edge("reader", "member")).unwrap();
+    let read = state.generation("file", "read").unwrap();
     let mut stripped = original.clone();
     for resource in &mut stripped.resources {
-        resource.relations.retain(|r| r.name == "owner");
+        resource.relations.clear();
+        resource.permissions.clear();
     }
     let (retired, removed) = state.updated(&original, &stripped).unwrap();
-    assert_eq!(removed, BTreeSet::from([old.target, old.subject]));
+    assert_eq!(removed, BTreeSet::from([old.target, old.subject, read]));
     assert!(!retired.contains(old.target));
     assert!(!retired.contains(old.subject));
     assert!(retired.pair(&edge("reader", "member")).is_err());
@@ -59,17 +67,11 @@ fn owner_generations_and_surviving_names_are_stable() {
     let state = RelationGenerations::new(&original).unwrap();
     let mut changed = original.clone();
     changed.resources.reverse();
-    let file = changed
-        .resources
-        .iter_mut()
-        .find(|r| r.name == "file")
-        .unwrap();
-    file.relations[1] = Relation::computed("reader", RelationExpression::computed_userset("owner"))
-        .with_manages(vec!["owner"])
-        .with_restriction(vera_zanzibar::SubjectRestriction::Actor);
-    changed
-        .resources
-        .push(Resource::new("extra").with_relation(Relation::direct("owner")));
+    let mut extra = changed.resources[0].clone();
+    extra.name = "extra".into();
+    extra.relations.clear();
+    extra.permissions.clear();
+    changed.resources.push(extra);
     let (updated, removed) = state.updated(&original, &changed).unwrap();
     assert!(removed.is_empty());
     assert_eq!(state.next, updated.next);
@@ -87,44 +89,36 @@ fn owner_generations_and_surviving_names_are_stable() {
             subject: 0
         }
     );
-    assert_eq!(updated.pair(&edge("reader", "")).unwrap().subject, 0);
+    let link = relationship("file", "report", "reader", object_subject("group", "staff"));
+    assert_eq!(updated.pair(&link).unwrap().subject, 0);
     assert!(updated.contains(0));
     updated.validate(&changed).unwrap();
 }
 
 #[test]
-fn actor_roles_get_distinct_retirable_ids_and_resource_identity_is_preserved() {
+fn permissions_get_retirable_ids_and_actors_need_none() {
     let original = policy();
     let state = RelationGenerations::new(&original).unwrap();
-    let admin = state.generation("actor", "admin").unwrap();
-    assert!(admin > 0);
-    let actor_target = Relationship::new("actor", "alice", "admin", Subject::wildcard());
-    let actor_subject = Relationship::new(
+    let read = state.generation("file", "read").unwrap();
+    assert!(read > 0);
+    let through_permission = relationship(
         "file",
         "report",
         "reader",
-        Subject::entity_set("actor", "alice", "admin"),
+        actor_set("file", "other", "read"),
     );
-    assert_eq!(
-        state.pair(&actor_target).unwrap(),
-        RelationPair {
-            target: admin,
-            subject: 0
-        }
-    );
-    assert_eq!(state.pair(&actor_subject).unwrap().subject, admin);
-    let mut without_role = original.clone();
-    without_role.actor.as_mut().unwrap().relations.clear();
-    let (updated, removed) = state.updated(&original, &without_role).unwrap();
-    assert_eq!(removed, BTreeSet::from([admin]));
-    assert!(updated.pair(&actor_target).is_err());
-    assert!(updated.pair(&actor_subject).is_err());
-    let (recreated, _) = updated.updated(&without_role, &original).unwrap();
-    assert!(recreated.generation("actor", "admin").unwrap() > admin);
+    assert_eq!(state.pair(&through_permission).unwrap().subject, read);
+    let actor = relationship("file", "report", "reader", Subject::AllActors);
+    assert_eq!(state.pair(&actor).unwrap().subject, 0);
+    assert!(state.generation("actor", "member").is_none());
+    let mut without = original.clone();
+    without.resources[0].permissions.clear();
+    let (updated, removed) = state.updated(&original, &without).unwrap();
+    assert_eq!(removed, BTreeSet::from([read]));
+    assert!(updated.pair(&through_permission).is_err());
+    let (recreated, _) = updated.updated(&without, &original).unwrap();
+    assert!(recreated.generation("file", "read").unwrap() > read);
     let mut invalid = original.clone();
-    invalid.actor.as_mut().unwrap().name = "person".into();
-    assert!(state.updated(&original, &invalid).is_err());
-    invalid = original.clone();
     invalid.resources.pop();
     assert!(state.updated(&original, &invalid).is_err());
 }
@@ -161,7 +155,7 @@ fn malformed_maps_counters_and_duplicate_policy_names_are_rejected() {
                     .insert("reader".into(), id);
             }
             5 => {
-                invalid.active.remove("actor");
+                invalid.active.remove("group");
             }
             _ => unreachable!(),
         }
@@ -172,23 +166,12 @@ fn malformed_maps_counters_and_duplicate_policy_names_are_rejected() {
     duplicate.resources.push(duplicate.resources[0].clone());
     assert!(RelationGenerations::new(&duplicate).is_err());
     duplicate = policy.clone();
-    duplicate.resources[0]
-        .relations
-        .push(Relation::direct("reader"));
+    let reader = duplicate.resources[0].relations[0].clone();
+    duplicate.resources[0].relations.push(reader);
     assert!(RelationGenerations::new(&duplicate).is_err());
-    let mut missing_owner = policy.clone();
-    missing_owner.resources[0]
-        .relations
-        .retain(|r| r.name != "owner");
+    let mut missing_owner = policy;
+    missing_owner.resources[0].owner.name = "boss".into();
     assert!(RelationGenerations::new(&missing_owner).is_err());
-    let mut actor_owner = policy;
-    actor_owner
-        .actor
-        .as_mut()
-        .unwrap()
-        .relations
-        .push(Relation::direct("owner"));
-    assert!(RelationGenerations::new(&actor_owner).is_err());
 }
 
 #[test]
@@ -197,9 +180,8 @@ fn overflow_leaves_original_metadata_unchanged_and_noop_edit_still_works() {
     let mut state = RelationGenerations::new(&original).unwrap();
     state.next = u64::MAX - 1;
     let mut final_allocation = original.clone();
-    final_allocation.resources[0]
-        .relations
-        .push(Relation::direct("last"));
+    let last = renamed(&final_allocation.resources[0].relations[0], "last");
+    final_allocation.resources[0].relations.push(last);
     let (exhausted, _) = state.updated(&original, &final_allocation).unwrap();
     assert_eq!(exhausted.generation("file", "last"), Some(u64::MAX - 1));
     assert_eq!(exhausted.next, u64::MAX);
@@ -209,9 +191,8 @@ fn overflow_leaves_original_metadata_unchanged_and_noop_edit_still_works() {
     let before = state.clone();
     assert_eq!(state.updated(&original, &original).unwrap().0, state);
     let mut changed = original.clone();
-    changed.resources[0]
-        .relations
-        .push(Relation::direct("writer"));
+    let writer = renamed(&changed.resources[0].relations[0], "writer");
+    changed.resources[0].relations.push(writer);
     assert!(state.updated(&original, &changed).is_err());
     assert_eq!(state, before);
 }
@@ -237,19 +218,19 @@ fn json_requires_metadata_and_rejects_duplicate_names() {
 
 #[test]
 fn permanent_zero_requires_existing_resources_when_used_as_an_owner() {
-    let state = RelationGenerations::new(&Policy::new("empty", "empty")).unwrap();
+    let mut empty = policy();
+    empty.resources.clear();
+    let state = RelationGenerations::new(&empty).unwrap();
     assert_eq!(state.next, 1);
     assert!(state.contains(0));
     assert_eq!(state.active_ids(), BTreeSet::from([0]));
     assert!(state.pair(&edge("owner", "owner")).is_err());
     let state = RelationGenerations::new(&policy()).unwrap();
-    for relation in ["owner", ""] {
-        let edge = Relationship::new(
-            "file",
-            "report",
-            "owner",
-            Subject::entity_set("missing", "object", relation),
-        );
+    for subject in [
+        actor_set("missing", "object", "owner"),
+        object_subject("missing", "object"),
+    ] {
+        let edge = relationship("file", "report", "owner", subject);
         assert!(state.pair(&edge).is_err());
     }
 }

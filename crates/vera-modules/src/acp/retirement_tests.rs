@@ -28,6 +28,7 @@ fn policy(module: &mut AcpModule) -> String {
         .unwrap()
         .policy
         .id
+        .to_string()
 }
 
 fn object(id: &str) -> Object {
@@ -185,7 +186,7 @@ fn retirement_hides_records_immediately_and_repeated_delete_does_not_enqueue_aga
     let count = remaining_relationships(&module, &id);
     assert!(module.delete_policy(&actor("creator"), &id).unwrap());
     assert!(!module.store.has(&keys::policy_key(&id)));
-    assert!(!module.zanzibar_policies.contains_key(&id));
+    assert!(!module.policies.contains_key(&id));
     assert_eq!(remaining_relationships(&module, &id), count);
     assert!(module.store.has(&keys::commitment_key(commitment.id)));
     assert!(module.store.has(&keys::amendment_event_key(amendment.id)));
@@ -467,7 +468,9 @@ fn malformed_counter_and_next_sequence_collision_reject_deletion_without_mutatio
 fn maximum_native_records_make_bounded_progress_across_cleanup_ticks() {
     let mut module = AcpModule::new();
     let id = policy(&mut module);
-    let empty = Relationship::with_entity("file", "", "owner", actor("owner"));
+    let empty =
+        crate::acp::relationship_values::actor_relationship("file", "", "owner", &actor("owner"))
+            .unwrap();
     let key_overhead =
         keys::relationship_key(&id, &keys::relationship_storage_key(&empty, 0)).len();
     let object_bytes = ((64 << 10) - key_overhead) / 2;
@@ -695,7 +698,7 @@ fn retired_snapshot_rejects_duplicate_or_unsorted_generation_names() {
         let mut entries = entries.clone();
         match case {
             0 => entries.push(entries[0].clone()),
-            1 => entries.reverse(),
+            1 => entries[0].1.reverse(),
             2 => {
                 let relations = &mut entries
                     .iter_mut()

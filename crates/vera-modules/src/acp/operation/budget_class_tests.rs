@@ -25,7 +25,8 @@ impl Fixture {
             )
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         acp.set_policy_operation_lead(2 * HOUR).unwrap();
         Self {
             acp,

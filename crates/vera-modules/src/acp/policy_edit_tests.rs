@@ -14,7 +14,8 @@ fn pruning_fixture() -> (AcpModule, Did, String, Relationship) {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     for id in ["before", "report"] {
         module
             .direct_policy_cmd(
@@ -30,16 +31,25 @@ fn pruning_fixture() -> (AcpModule, Did, String, Relationship) {
             .direct_policy_cmd(
                 &owner,
                 &policy,
-                PolicyCmd::SetRelationship(Relationship::with_entity(
-                    "file",
-                    id,
-                    "reader",
-                    owner.clone(),
-                )),
+                PolicyCmd::SetRelationship(
+                    crate::acp::relationship_values::actor_relationship(
+                        "file",
+                        id,
+                        "reader",
+                        &owner.clone(),
+                    )
+                    .unwrap(),
+                ),
             )
             .unwrap();
     }
-    let relationship = Relationship::with_entity("file", "report", "reader", owner.clone());
+    let relationship = crate::acp::relationship_values::actor_relationship(
+        "file",
+        "report",
+        "reader",
+        &owner.clone(),
+    )
+    .unwrap();
     (module, owner, policy, relationship)
 }
 
@@ -81,11 +91,7 @@ fn editing_rejects_corrupt_pair_indexes_without_partial_invalidation() {
             "corruption {corruption} accepted"
         );
         assert_eq!(module.store.serialize(), before);
-        assert!(
-            module.zanzibar_policies[&policy]
-                .get_relation("file", "reader")
-                .is_some()
-        );
+        assert!(module.policies[&policy].declares("file", "reader"));
     }
 }
 
@@ -113,7 +119,7 @@ fn primary_corruption_is_rejected_by_reads_restoration_and_atomic_cleanup() {
                 serde_json::to_vec(&record).unwrap()
             }
             _ => {
-                record.relationship.object_id = "other".into();
+                record.relationship.object.id = "other".into();
                 serde_json::to_vec(&record).unwrap()
             }
         };
@@ -187,6 +193,7 @@ fn policy_edits_isolate_forks_and_share_unchanged_definitions() {
                 .unwrap()
                 .policy
                 .id
+                .to_string()
         })
         .collect();
     let before = parent.store.serialize();
@@ -200,40 +207,22 @@ fn policy_edits_isolate_forks_and_share_unchanged_definitions() {
     )
     .unwrap();
     for (i, id) in ids.iter().enumerate() {
-        assert!(Arc::ptr_eq(
-            &parent.zanzibar_policies[id],
-            &sibling.zanzibar_policies[id]
-        ));
+        assert!(Arc::ptr_eq(&parent.policies[id], &sibling.policies[id]));
         assert_eq!(
-            Arc::ptr_eq(&parent.zanzibar_policies[id], &fork.zanzibar_policies[id]),
+            Arc::ptr_eq(&parent.policies[id], &fork.policies[id]),
             i != 64
         );
-        assert!(
-            parent.zanzibar_policies[id]
-                .get_relation("file", "reader")
-                .is_some()
-        );
+        assert!(parent.policies[id].declares("file", "reader"));
     }
-    assert!(
-        fork.zanzibar_policies[&ids[64]]
-            .get_relation("file", "reader")
-            .is_none()
-    );
-    assert!(
-        fork.zanzibar_policies[&ids[64]]
-            .get_relation("file", "writer")
-            .is_some()
-    );
+    assert!(!fork.policies[&ids[64]].declares("file", "reader"));
+    assert!(fork.policies[&ids[64]].declares("file", "writer"));
     assert_eq!(parent.store.serialize(), before);
     assert_eq!(sibling.store.serialize(), before);
     let restored =
         AcpModule::from_store(InMemoryKvStore::deserialize(&fork.store.serialize()).unwrap());
     assert_eq!(restored.store.serialize(), fork.store.serialize());
     for id in &ids {
-        assert_eq!(
-            serde_json::to_vec(restored.zanzibar_policies[id].as_ref()).unwrap(),
-            serde_json::to_vec(fork.zanzibar_policies[id].as_ref()).unwrap()
-        );
+        assert_eq!(restored.policies[id].policy, fork.policies[id].policy);
     }
 }
 

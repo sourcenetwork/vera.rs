@@ -24,7 +24,7 @@ impl Fixture {
     fn new() -> Self {
         let actor = Did::new(issuer()).unwrap();
         let mut acp = AcpModule::new();
-        let policy = acp.create_policy(&actor, "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n", PolicyMarshalingType::ShortYaml, Default::default()).unwrap().policy.id;
+        let policy = acp.create_policy(&actor, "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n", PolicyMarshalingType::ShortYaml, Default::default()).unwrap().policy.id.to_string();
         let block = BlockExecCtx {
             timestamp: Timestamp {
                 seconds: 10,
@@ -77,12 +77,15 @@ impl Fixture {
         (self.acp.store().serialize(), self.vera.store().serialize())
     }
     fn command(&self) -> PolicyCmd {
-        PolicyCmd::SetRelationship(vera_acp::Relationship::with_entity(
-            "file",
-            "report",
-            "reader",
-            Did::new("did:key:reader").unwrap(),
-        ))
+        PolicyCmd::SetRelationship(
+            vera_modules::acp::relationship_values::actor_relationship(
+                "file",
+                "report",
+                "reader",
+                &Did::new("did:key:reader").unwrap(),
+            )
+            .unwrap(),
+        )
     }
     fn generic(&self) -> Vec<u8> {
         IAcp::executePolicyCommandCall {

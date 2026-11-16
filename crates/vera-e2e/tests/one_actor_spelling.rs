@@ -8,7 +8,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use k256::ecdsa::SigningKey;
 use support::*;
-use vera_acp::{Relationship, Subject};
 use vera_client::{
     BULLETIN_ADDRESS, BlsSigner, ModuleId, PERMISSION_LIMITS, RECORD_PROOF_BYTES, UnsignedToken,
     VeraClient,
@@ -126,7 +125,7 @@ async fn workers_under_different_spellings_act_for_one_owner() {
         .remove(0);
     assert_eq!(policy.metadata.owner_did, OWNER[0]);
     assert_eq!(policy.metadata.tx_signer, uncompressed.0.did());
-    let policy = policy.policy.id;
+    let policy = policy.policy.id.to_string();
     let command = |token: String, command: &PolicyCmd| IAcp::bearerPolicyCmdCall {
         policyId: policy.parse().unwrap(),
         bearerToken: token,
@@ -165,7 +164,13 @@ async fn workers_under_different_spellings_act_for_one_owner() {
     assert_eq!(owner.0.as_str(), OWNER[0]);
 
     let reader = |spelling: &str| {
-        Relationship::with_entity("file", "report", "reader", Did::new(spelling).unwrap())
+        vera_modules::acp::relationship_values::actor_relationship(
+            "file",
+            "report",
+            "reader",
+            &Did::new(spelling).unwrap(),
+        )
+        .unwrap()
     };
     let granted = submit(
         &client,
@@ -214,7 +219,9 @@ async fn workers_under_different_spellings_act_for_one_owner() {
         .into_iter()
         .map(|record| (record.relationship.relation, record.relationship.subject))
         .collect();
-    let entity = |did: &str| Subject::Entity(Did::new(did).unwrap());
+    let entity = |did: &str| {
+        vera_modules::acp::relationship_values::actor_subject(&Did::new(did).unwrap()).unwrap()
+    };
     assert_eq!(subjects.len(), 2);
     assert!(subjects.contains(&("owner".into(), entity(OWNER[0]))));
     assert!(subjects.contains(&("reader".into(), entity(READER[0]))));

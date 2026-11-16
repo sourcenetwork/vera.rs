@@ -32,7 +32,7 @@ pub(super) async fn lifecycle(
     );
     assert_eq!(record.metadata.owner_did, owner.did());
     assert_eq!(record.supplied_metadata, metadata);
-    let policy: B256 = record.policy.id.parse().unwrap();
+    let policy: B256 = record.policy.id.as_str().parse().unwrap();
     receipts.push(
         client
             .native_policy_command(
@@ -146,7 +146,7 @@ pub(super) async fn lifecycle(
             .await
             .unwrap()
             .iter()
-            .all(|record| record.policy.id != hex::encode(policy))
+            .all(|record| record.policy.id.to_string() != hex::encode(policy))
     );
     assert!(receipts.iter().all(|receipt| receipt.success));
     receipts

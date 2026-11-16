@@ -70,7 +70,8 @@ async fn an_owed_list_runs_under_the_raised_lead_once_and_only_as_signed() {
         .records
         .remove(0)
         .policy
-        .id;
+        .id
+        .to_string();
 
     let key = SigningKey::from_bytes((&[42u8; 32]).into()).unwrap();
     let actor = vera_crypto::secp256k1::did_from_secp256k1_pubkey(

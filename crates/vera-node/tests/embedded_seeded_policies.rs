@@ -77,7 +77,7 @@ fn a_deployment_starts_with_its_policies_under_the_chosen_identifiers() {
         let id = AcpModule::predict_policy_id(definition, &yaml, &PolicyNonce::default(), OWNER)
             .unwrap();
         let record = stored_policy(&node, &id).expect("seeded policy");
-        assert_eq!(record.policy.id, id);
+        assert_eq!(record.policy.id.to_string(), id);
         assert_eq!(record.raw_policy, definition);
         assert_eq!(record.metadata.owner_did, OWNER);
     }

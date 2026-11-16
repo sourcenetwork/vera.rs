@@ -54,44 +54,30 @@ The supported scopes are separate:
 `DelegationScope::EditPolicy` for lifecycle operations. A creation token cannot
 edit policies, and an existing command token cannot create or edit them.
 
-Creation, editing and validation compile YAML and JSON through the same policy builder and
-check permission references before accepting a definition. Failed compilation
-leaves stored records and evaluation cache unchanged. The ID binds the
-definition, the actor and the caller's nonce ([policy-ids.md](policy-ids.md));
-an ID that is stored or awaiting cleanup rejects creation.
+Creation, editing and validation compile YAML and JSON definitions with acp
+(`acp::policy::compile_text` and `plan_edit_text`). Failed compilation leaves
+stored records and evaluation cache unchanged. The ID binds the definition, the
+actor and the caller's nonce ([policy-ids.md](policy-ids.md)); an ID that is
+stored or awaiting cleanup rejects creation.
 
-Policy definitions use strict YAML or JSON, bounded to 64 KiB. Unknown fields, duplicate
-names, invalid identifiers and unresolved references are rejected. `description`,
-resource descriptions, relation/permission `doc`, and `meta` entries are retained
-in compiled policy records. User metadata is separate from the policy description.
-A permission's compiled expression nests at most 16 set operators, counting the
-implicit union with `owner` and, for a Defra `read`, the union with `write`; a
-chain of one repeated `+` or `&` is a single level. It names at most 4,096
-operands, counting the implicit ones. Parentheses nest at most 32 deep. A tuple reference `relation->permission` is unresolved unless every
-resource the relation's `types` admit declares that permission; a relation
-without `types` needs one resource that declares it. A tuple that names
-an actor grants nothing through the reference unless `actor.relations` declares
-that permission.
+Policy definitions are bounded to 64 KiB; a JSON definition must be valid JSON.
+acp defines the language and its checks: unknown fields, duplicate names, invalid
+identifiers, unresolved references, expressions deeper than 64, a declared or
+referenced `owner`, relations on the actor resource, and exclusions that depend
+on themselves are refused. `description`, resource descriptions,
+relation/permission `doc`, and `meta` entries are retained in processed policy
+records. User metadata is separate from the policy description. Every permission
+grants the owner. See [ACP v1](acp-v1.md#deliberate-differences-and-boundaries).
 
 Permission evaluation resolves cycles among relationships, such as groups that
-are members of each other, to the membership that is actually reachable. A
-group is walked once per check however many paths lead back to it, so groups
-that are all members of each other cost their relationships, not their paths. An
-exclusion fails as indeterminate only when its excluded side leads back to a
-permission still being evaluated above it.
+are members of each other, to the membership that is actually reachable.
 
-The optional `actor.relations` namespace contains roles on DID-addressed actor
-records. Policy creators and declared managers control those roles. Actor records
-cannot be registered as ordinary objects, so registration cannot grant control
-of another identity's roles. Actor usersets participate in permission evaluation;
-an actor object subject without a relation denotes that identity directly.
-
-`spec: defra` requires `read` and `write` permissions on every resource and
-makes write access grant read access. Specification names are case-insensitive;
-unknown names are rejected. An omitted specification or `spec: none` selects
-ordinary permission evaluation when creating a policy. Edits retain the stored
-specification even when the replacement definition omits it or names another.
-Records without a stored specification retain ordinary permission evaluation.
+`spec: defra` requires `read`, `update` and `delete` permissions on every
+resource and makes update or delete access grant read access. Unknown
+specification names are rejected. An omitted specification or `spec: none`
+selects ordinary permission evaluation when creating a policy. Edits retain the
+stored specification even when the replacement definition omits it, and refuse
+one that names another.
 
 Edits preserve resource types, policy identity and original creation metadata.
 Removing a relation prunes its stored relationships. Malformed relationship
@@ -153,7 +139,7 @@ behaves as the same request in the canonical spelling:
 | Token issuer | Policy, object, ring and threshold-object owner or creator; operation outcome actor; token record issuer |
 | Token subject | The authenticated submitter, and the token record's authorized account |
 | Relationship subject, transfer target, bulletin collaborator | The stored relationship, its storage key and the collaborator record |
-| Object of the policy's `actor` resource, as an object or as an object-edge or userset subject | The stored relationship and its storage key |
+| Object of the `actor` resource, as an object or as an object or actor-set subject | The stored relationship and its storage key |
 | Actor and actor-resource objects of an access check or relationship query | The evaluated actor and the selected relationships |
 | Creator and actor of a recorded decision | The decision record and its identifier |
 | Revoking caller, token lookup by issuer or account | The issuer or account the token records |

@@ -1,7 +1,7 @@
 use super::*;
 use crate::acp::*;
 
-const POLICY: &str = "name: management\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: admin\n        types: [group->member]\n        manages: [reader, owner]\n      - name: backup\n        types: [actor]\n        manages: [reader]\n  - name: group\n    relations:\n      - name: member\n        types: [actor]\n";
+const POLICY: &str = "name: management\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: admin\n        types: [group->member]\n        manages: [reader]\n      - name: backup\n        types: [actor]\n        manages: [reader]\n  - name: group\n    relations:\n      - name: member\n        types: [actor]\n";
 fn did(name: &str) -> Did {
     Did::new(format!("did:key:{name}")).unwrap()
 }
@@ -12,12 +12,15 @@ fn object() -> Object {
     }
 }
 fn grant() -> PolicyCmd {
-    PolicyCmd::SetRelationship(Relationship::with_entity(
-        "file",
-        "report",
-        "reader",
-        did("reader"),
-    ))
+    PolicyCmd::SetRelationship(
+        crate::acp::relationship_values::actor_relationship(
+            "file",
+            "report",
+            "reader",
+            &did("reader"),
+        )
+        .unwrap(),
+    )
 }
 fn fixture() -> (AcpModule, String) {
     let mut module = AcpModule::new();
@@ -31,7 +34,8 @@ fn fixture() -> (AcpModule, String) {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     for object in [
         object(),
         Object {
@@ -44,14 +48,26 @@ fn fixture() -> (AcpModule, String) {
             .unwrap();
     }
     for rel in [
-        Relationship::with_entity("group", "admins", "member", did("manager")),
-        Relationship::new(
+        crate::acp::relationship_values::actor_relationship(
+            "group",
+            "admins",
+            "member",
+            &did("manager"),
+        )
+        .unwrap(),
+        crate::acp::relationship_values::relationship(
             "file",
             "report",
             "admin",
-            vera_acp::Subject::entity_set("group", "admins", "member"),
+            crate::acp::relationship_values::actor_set("group", "admins", "member"),
         ),
-        Relationship::with_entity("file", "report", "backup", did("backup")),
+        crate::acp::relationship_values::actor_relationship(
+            "file",
+            "report",
+            "backup",
+            &did("backup"),
+        )
+        .unwrap(),
     ] {
         module
             .direct_policy_cmd(&owner, &policy, PolicyCmd::SetRelationship(rel))
@@ -113,30 +129,8 @@ fn management_allowance_is_shared_across_userset_managers_and_preserves_denial()
         assert!(short.is_exhausted());
         assert_eq!(module.store.serialize(), before);
     }
-    // Reaching later managers must pay for the preceding denied checks too.
-    assert!(costs[1] > costs[0]);
-    assert!(costs[2] > costs[1]);
-    let first = CommandBudget::new(costs[0]);
-    assert!(matches!(
-        module.check_management_authority_with_budget(
-            &did("backup"),
-            &policy,
-            &object(),
-            "reader",
-            &first
-        ),
-        Err(AcpError::CommandBudgetExceeded)
-    ));
-    assert!(matches!(
-        module.check_management_authority_with_budget(
-            &did("owner"),
-            &policy,
-            &object(),
-            "reader",
-            &first
-        ),
-        Err(AcpError::CommandBudgetExceeded)
-    ));
+    // One union of every manager is checked: no manager is reached for free.
+    assert!(costs.iter().all(|cost| *cost > 0));
 }
 
 #[test]
@@ -202,8 +196,8 @@ fn command_budget_covers_metadata_and_preserves_atomic_context() {
     ));
     assert_eq!(low.store.serialize(), original.store.serialize());
     assert!(Arc::ptr_eq(
-        &low.zanzibar_policies[&policy],
-        &original.zanzibar_policies[&policy]
+        &low.policies[&policy],
+        &original.policies[&policy]
     ));
     let denied = CommandBudget::new(u64::MAX);
     assert!(matches!(
@@ -222,7 +216,7 @@ fn command_budget_covers_metadata_and_preserves_atomic_context() {
 }
 
 #[test]
-fn management_rejects_unpaid_corrupt_policy_before_decode_and_preserves_actor_roles() {
+fn management_rejects_unpaid_corrupt_policy_before_decode_and_actor_relations() {
     let (mut module, policy) = fixture();
     module
         .store
@@ -250,28 +244,21 @@ fn management_rejects_unpaid_corrupt_policy_before_decode_and_preserves_actor_ro
         Err(AcpError::State(_))
     ));
     assert_eq!(module.store.serialize(), before);
-    let mut module = AcpModule::new();
-    let policy = module.create_policy(&did("owner"), "name: roles\nactor:\n  relations:\n    - name: member\n      types: [actor]\nresources:\n  - name: file\n", PolicyMarshalingType::ShortYaml, Default::default()).unwrap().policy.id;
+    let (module, policy) = fixture();
     let role = Object {
         resource: "actor".into(),
         id: "role".into(),
     };
-    for (actor, allowed) in [("owner", true), ("stranger", false)] {
-        let budget = CommandBudget::new(u64::MAX);
-        assert_eq!(
-            module
-                .check_management_authority_with_budget(
-                    &did(actor),
-                    &policy,
-                    &role,
-                    "member",
-                    &budget
-                )
-                .unwrap(),
-            allowed
-        );
-        assert!(budget.consumed() > 0);
-    }
+    assert!(matches!(
+        module.check_management_authority_with_budget(
+            &did("owner"),
+            &policy,
+            &role,
+            "member",
+            &CommandBudget::new(u64::MAX)
+        ),
+        Err(AcpError::InvalidAccessRequest { .. })
+    ));
 }
 
 #[test]

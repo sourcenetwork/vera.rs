@@ -137,7 +137,8 @@ impl AcpModule {
         );
         let previous_owner =
             std::mem::replace(&mut record.metadata.owner_did, new_owner.to_string());
-        record.relationship.subject = vera_acp::Subject::Entity(new_owner.clone());
+        record.relationship.subject =
+            ::acp::domain::Subject::Actor(relationship_values::actor(new_owner)?);
         self.remove_relationship_key_with_budget(&old_key, budget)?;
         self.set_relationship_with_budget(&record, budget)?;
         if previous_owner != new_owner.as_str() {
@@ -182,7 +183,7 @@ impl AcpModule {
         }
         self.retire_policy(policy_id)?;
         self.store.delete(&keys::policy_key(policy_id));
-        self.zanzibar_policies.remove(policy_id);
+        self.policies.remove(policy_id);
         Ok(true)
     }
 }

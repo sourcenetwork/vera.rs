@@ -179,7 +179,7 @@ async fn ed25519_and_p256_actors_own_policies_and_objects() {
             relay: None,
             request: Some(OperationClaim {
                 id: OperationId(id),
-                digest: DelegatedOperation::PolicyCommand(&policy.policy.id, &command)
+                digest: DelegatedOperation::PolicyCommand(&policy.policy.id.to_string(), &command)
                     .digest()
                     .unwrap(),
                 genesis_id: genesis,
@@ -190,7 +190,7 @@ async fn ed25519_and_p256_actors_own_policies_and_objects() {
             &worker,
             &trusted,
             IAcp::bearerPolicyCmdCall {
-                policyId: policy.policy.id.parse().unwrap(),
+                policyId: policy.policy.id.as_str().parse().unwrap(),
                 bearerToken: actor.sign(UnsignedToken::operation(&claims).unwrap()),
                 cmd: serde_json::to_vec(&command).unwrap().into(),
             },
@@ -198,12 +198,13 @@ async fn ed25519_and_p256_actors_own_policies_and_objects() {
         )
         .await;
 
-        let prefix = vera_client::object_owner_prefix(&policy.policy.id, &object).unwrap();
+        let prefix =
+            vera_client::object_owner_prefix(&policy.policy.id.to_string(), &object).unwrap();
         let owner = tokio::time::timeout(Duration::from_secs(30), async {
             loop {
                 match replica
                     .read_current_policy_prefix(
-                        &policy.policy.id,
+                        &policy.policy.id.to_string(),
                         &prefix,
                         registered,
                         &trusted,
@@ -226,7 +227,7 @@ async fn ed25519_and_p256_actors_own_policies_and_objects() {
         .expect("the replica reaches the registration revision");
         assert_eq!(
             owner
-                .verify_object_owner(&policy.policy.id, &object, registered, &trusted)
+                .verify_object_owner(&policy.policy.id.to_string(), &object, registered, &trusted)
                 .unwrap()
                 .unwrap()
                 .0

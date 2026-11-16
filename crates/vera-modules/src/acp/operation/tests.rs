@@ -118,7 +118,7 @@ fn workers_recover_the_original_outcome_after_edit_and_reopen() {
     let edited = "name: changed\nresources:\n  - name: file\n";
     acp.edit_policy(
         &vera_identity::Did::new(issuer()).unwrap(),
-        &created.policy.id,
+        created.policy.id.as_str(),
         edited,
         FORMAT,
     )
@@ -214,7 +214,7 @@ fn workers_recover_the_original_outcome_after_edit_and_reopen() {
     };
     let command = PolicyCmd::RegisterObject(object.clone());
     let command_id = id(2, 200);
-    let call = DelegatedOperation::PolicyCommand(&created.policy.id, &command);
+    let call = DelegatedOperation::PolicyCommand(created.policy.id.as_str(), &command);
     let a = token(&first, command_id, &call);
     let b = token(&second, command_id, &call);
     let result = reopened
@@ -223,14 +223,14 @@ fn workers_recover_the_original_outcome_after_edit_and_reopen() {
             &context(102),
             &first,
             &a,
-            &created.policy.id,
+            created.policy.id.as_str(),
             command.clone(),
         )
         .unwrap();
     reopened
         .direct_policy_cmd(
             &vera_identity::Did::new(issuer()).unwrap(),
-            &created.policy.id,
+            created.policy.id.as_str(),
             PolicyCmd::ArchiveObject(object),
         )
         .unwrap();
@@ -241,7 +241,7 @@ fn workers_recover_the_original_outcome_after_edit_and_reopen() {
             &context(103),
             &second,
             &b,
-            &created.policy.id,
+            created.policy.id.as_str(),
             command,
         )
         .unwrap();
@@ -388,7 +388,10 @@ fn an_operation_identity_cannot_be_reused_for_different_arguments() {
         serde_json::to_value(acp.operation(&issuer(), operation_id).unwrap().unwrap()).unwrap(),
         serde_json::to_value(&retained).unwrap()
     );
-    assert_eq!(acp.query_policy_ids().unwrap(), vec![created.policy.id]);
+    assert_eq!(
+        acp.query_policy_ids().unwrap(),
+        vec![created.policy.id.to_string()]
+    );
 }
 
 #[test]
@@ -402,15 +405,21 @@ fn repeated_edit_returns_its_original_count_without_removing_new_relationships()
         .create_policy(&owner, original, FORMAT, Default::default())
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     let object = Object {
         resource: "file".into(),
         id: "first".into(),
     };
     acp.direct_policy_cmd(&owner, &policy, PolicyCmd::RegisterObject(object.clone()))
         .unwrap();
-    let relationship =
-        vera_acp::Relationship::with_entity("file", "first", "reader", owner.clone());
+    let relationship = crate::acp::relationship_values::actor_relationship(
+        "file",
+        "first",
+        "reader",
+        &owner.clone(),
+    )
+    .unwrap();
     acp.direct_policy_cmd(
         &owner,
         &policy,

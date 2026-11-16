@@ -16,9 +16,9 @@ fn object_retirement_is_proven_without_reviving_grants_or_losing_page_continuati
             let actor = Actor("did:key:reader".parse().unwrap());
             let mut state = ModuleState::default();
             let policy = state.acp.create_policy(&owner, POLICY, PolicyMarshalingType::ShortYaml, Default::default()).unwrap();
-            let id = &policy.policy.id;
+            let id = &policy.policy.id.to_string();
             let object = Object { resource: "document".into(), id: "report".into() };
-            let relation = Relationship::with_entity("document", "report", "reader", actor.0.clone());
+            let relation = vera_modules::acp::relationship_values::actor_relationship("document", "report", "reader", &actor.0.clone()).unwrap();
             for command in [PolicyCmd::RegisterObject(object.clone()), PolicyCmd::SetRelationship(relation.clone())] {
                 state.acp.direct_policy_cmd(&owner, id, command).unwrap();
             }

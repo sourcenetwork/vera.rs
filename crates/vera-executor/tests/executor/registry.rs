@@ -33,18 +33,18 @@ fn authorized() -> VeraExecutor {
     let policy = modules.acp.create_policy(&did,
         "name: membership\nresources:\n  - name: registry\n    relations:\n      - name: admin\n    permissions:\n      - name: manage\n        expr: admin\n",
         PolicyMarshalingType::ShortYaml, Default::default(),
-    ).unwrap().policy.id;
+    ).unwrap().policy.id.to_string();
     for command in [
         PolicyCmd::RegisterObject(Object {
             resource: "registry".into(),
             id: "registry".into(),
         }),
-        PolicyCmd::SetRelationship(vera_acp::Relationship::new(
-            "registry",
-            "registry",
-            "admin",
-            vera_acp::Subject::entity(did.clone()),
-        )),
+        PolicyCmd::SetRelationship(
+            vera_modules::acp::relationship_values::actor_relationship(
+                "registry", "registry", "admin", &did,
+            )
+            .unwrap(),
+        ),
     ] {
         modules
             .acp

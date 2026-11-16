@@ -24,7 +24,7 @@ fn a_policy_has_one_owner_whichever_spelling_issues_its_tokens() {
             )
             .unwrap();
         assert_eq!(created.metadata.owner_did, key.canonical());
-        let policy = created.policy.id;
+        let policy = created.policy.id.to_string();
 
         for (round, editor) in (1u64..).zip(key.spellings()) {
             let (_, edited) = acp
@@ -91,7 +91,9 @@ fn a_grant_under_one_spelling_is_checked_and_revoked_under_any_other() {
                     DelegationScope::PolicyCommands,
                 ),
                 &policy,
-                PolicyCmd::SetRelationship(reader(Subject::Entity(subject))),
+                PolicyCmd::SetRelationship(reader(
+                    vera_modules::acp::relationship_values::actor_subject(&subject).unwrap(),
+                )),
             )
             .unwrap();
         let PolicyCmdResult::SetRelationship {
@@ -103,7 +105,8 @@ fn a_grant_under_one_spelling_is_checked_and_revoked_under_any_other() {
         };
         assert_eq!(
             record.relationship.subject,
-            Subject::Entity(grantee.dids()[0].clone())
+            vera_modules::acp::relationship_values::actor_subject(&grantee.dids()[0].clone())
+                .unwrap()
         );
         assert_eq!(record.metadata.owner_did, owner.canonical());
         granted.push(acp.store().serialize());
@@ -117,7 +120,10 @@ fn a_grant_under_one_spelling_is_checked_and_revoked_under_any_other() {
                 .direct_policy_cmd(
                     &owner.dids()[0],
                     &policy,
-                    PolicyCmd::SetRelationship(reader(Subject::Entity(other.clone()))),
+                    PolicyCmd::SetRelationship(reader(
+                        vera_modules::acp::relationship_values::actor_subject(&other.clone())
+                            .unwrap(),
+                    )),
                 )
                 .unwrap();
             assert!(matches!(
@@ -133,7 +139,9 @@ fn a_grant_under_one_spelling_is_checked_and_revoked_under_any_other() {
                     &RelationshipSelector {
                         object_selector: Some(ObjectSelector::Exact(file("report"))),
                         relation_selector: None,
-                        subject_selector: Some(SubjectSelector::Exact(Subject::Entity(other))),
+                        subject_selector: Some(SubjectSelector::Exact(
+                            vera_modules::acp::relationship_values::actor_subject(&other).unwrap(),
+                        )),
                     },
                 )
                 .unwrap();
@@ -147,7 +155,10 @@ fn a_grant_under_one_spelling_is_checked_and_revoked_under_any_other() {
             acp.direct_policy_cmd(
                 &owner.dids()[(written + 2) % 4],
                 &policy,
-                PolicyCmd::DeleteRelationship(reader(Subject::Entity(revoking.clone()))),
+                PolicyCmd::DeleteRelationship(reader(
+                    vera_modules::acp::relationship_values::actor_subject(&revoking.clone())
+                        .unwrap(),
+                )),
             )
             .unwrap()
         };
@@ -209,7 +220,8 @@ fn an_object_has_one_owner_through_registration_archive_and_transfer() {
         assert_eq!(record.metadata.owner_did, owner.canonical());
         assert_eq!(
             record.relationship.subject,
-            Subject::Entity(owner.dids()[0].clone())
+            vera_modules::acp::relationship_values::actor_subject(&owner.dids()[0].clone())
+                .unwrap()
         );
         assert!(
             command(
@@ -261,7 +273,7 @@ fn an_object_has_one_owner_through_registration_archive_and_transfer() {
         assert!(registered);
         assert_eq!(
             current.unwrap().relationship.subject,
-            Subject::Entity(heir.dids()[0].clone())
+            vera_modules::acp::relationship_values::actor_subject(&heir.dids()[0].clone()).unwrap()
         );
         for (former, current) in owner.dids().into_iter().zip(heir.dids()) {
             assert!(
@@ -296,7 +308,7 @@ fn direct_calls_record_the_canonical_actor() {
             .create_policy(&owner.dids()[written], POLICY, FORMAT, Default::default())
             .unwrap();
         assert_eq!(created.metadata.owner_did, owner.canonical());
-        let policy = created.policy.id;
+        let policy = created.policy.id.to_string();
         let registered = acp
             .execute_policy_cmd(
                 &owner.dids()[(written + 1) % 4],
@@ -339,9 +351,12 @@ fn direct_calls_record_the_canonical_actor() {
                     selector: RelationshipSelector {
                         object_selector: None,
                         relation_selector: None,
-                        subject_selector: Some(SubjectSelector::Exact(Subject::Entity(
-                            heir.dids()[(written + 3) % 4].clone(),
-                        ))),
+                        subject_selector: Some(SubjectSelector::Exact(
+                            vera_modules::acp::relationship_values::actor_subject(
+                                &heir.dids()[(written + 3) % 4].clone(),
+                            )
+                            .unwrap(),
+                        )),
                     },
                     after: None,
                 },

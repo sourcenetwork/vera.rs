@@ -38,7 +38,8 @@ fn bearer_expiration_uses_execution_time_before_mutating_state() {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
 
     for (expiration, now, allowed) in [
         (Some(100), 99, true),
@@ -108,7 +109,8 @@ fn delegated_scopes_authorize_only_their_operations() {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     let context = BlockExecCtx {
         genesis_id: [0; 32],
         deployment_id: 9001,
@@ -265,7 +267,8 @@ fn delegation_binds_caller_deployment_and_revocation() {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     let object = Object {
         resource: "file".into(),
         id: "report".into(),
@@ -490,7 +493,7 @@ fn delegated_policy_lifecycle_preserves_ownership_and_revocation() {
                     &context,
                     &transaction(&worker),
                     lifecycle_token,
-                    &created.policy.id,
+                    &created.policy.id.to_string(),
                     PolicyCmd::RegisterObject(Object {
                         resource: "file".into(),
                         id: "report".into()
@@ -522,7 +525,7 @@ fn delegated_policy_lifecycle_preserves_ownership_and_revocation() {
             &context,
             &transaction(&worker),
             &intruder_token,
-            &created.policy.id,
+            &created.policy.id.to_string(),
             edited,
             PolicyMarshalingType::ShortYaml,
         ),
@@ -534,7 +537,7 @@ fn delegated_policy_lifecycle_preserves_ownership_and_revocation() {
         module
             .edit_policy(
                 &worker,
-                &created.policy.id,
+                &created.policy.id.to_string(),
                 edited,
                 PolicyMarshalingType::ShortYaml
             )
@@ -551,7 +554,7 @@ fn delegated_policy_lifecycle_preserves_ownership_and_revocation() {
             &context,
             &transaction(&other_worker),
             &other_token,
-            &created.policy.id,
+            &created.policy.id.to_string(),
             edited,
             PolicyMarshalingType::ShortYaml,
         )
@@ -567,7 +570,7 @@ fn delegated_policy_lifecycle_preserves_ownership_and_revocation() {
                 &context,
                 &transaction(&worker),
                 &edit_token,
-                &created.policy.id,
+                &created.policy.id.to_string(),
                 "name: removes-resource\nresources: []\n",
                 PolicyMarshalingType::ShortYaml,
             )
@@ -599,7 +602,7 @@ fn delegated_policy_lifecycle_preserves_ownership_and_revocation() {
                 &context,
                 &transaction(&worker),
                 &edit_token,
-                &created.policy.id,
+                &created.policy.id.to_string(),
                 policy,
                 PolicyMarshalingType::ShortYaml,
             )

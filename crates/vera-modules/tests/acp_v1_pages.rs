@@ -30,14 +30,14 @@ fn enumeration_resumes_without_duplicates_and_bounds_empty_filtered_pages() {
     let second = module.query_policies_page(first.next.as_deref()).unwrap();
     assert_eq!(second.records.len(), 2);
     assert!(second.next.is_none());
-    assert!(
-        first
+    assert!(first.records.iter().all(|a| {
+        second
             .records
             .iter()
-            .all(|a| second.records.iter().all(|b| a.policy.id != b.policy.id))
-    );
+            .all(|b| a.policy.id.to_string() != b.policy.id.to_string())
+    }));
     assert!(module.query_policies().is_err());
-    let policy = &first.records[0].policy.id;
+    let policy = &first.records[0].policy.id.to_string();
     for i in 0..260 {
         module
             .direct_policy_cmd(
@@ -62,7 +62,7 @@ fn enumeration_resumes_without_duplicates_and_bounds_empty_filtered_pages() {
     loop {
         let page = module.query_relationships_page(policy, &request).unwrap();
         for record in page.records {
-            assert!(ids.insert(record.relationship.object_id));
+            assert!(ids.insert(record.relationship.object.id));
         }
         request.after = page.next;
         if request.after.is_none() {
@@ -70,9 +70,10 @@ fn enumeration_resumes_without_duplicates_and_bounds_empty_filtered_pages() {
         }
     }
     assert_eq!(ids.len(), 260);
-    request.selector.subject_selector = Some(SubjectSelector::Exact(vera_acp::Subject::Entity(
-        Did::new("did:key:nobody").unwrap(),
-    )));
+    request.selector.subject_selector = Some(SubjectSelector::Exact(
+        vera_modules::acp::relationship_values::actor_subject(&Did::new("did:key:nobody").unwrap())
+            .unwrap(),
+    ));
     let page = module.query_relationships_page(policy, &request).unwrap();
     assert!(page.records.is_empty());
     assert!(page.next.is_some());

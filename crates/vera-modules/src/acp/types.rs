@@ -2,9 +2,10 @@
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
-pub use vera_acp::policy_yaml::{PolicyHash, PolicyNonce};
-use vera_acp::{Policy, Relationship, Subject};
+pub use super::policy_id::{PolicyHash, PolicyNonce};
 use vera_identity::Did;
+
+pub use ::acp::domain::{ActorSet, ProcessedPolicy, Relationship, Subject};
 
 pub use super::relation_generations::{RelationGenerations, RelationPair};
 use crate::types::{Duration, Timestamp};
@@ -33,6 +34,25 @@ pub struct Operation {
     pub permission: String,
 }
 
+/// A specification a policy may be required to meet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PolicySpecification {
+    /// No specification.
+    None,
+    /// DefraDB's document permissions: `read`, `update` and `delete`.
+    Defra,
+}
+
+impl From<PolicySpecification> for ::acp::domain::Specification {
+    fn from(specification: PolicySpecification) -> Self {
+        match specification {
+            PolicySpecification::None => Self::None,
+            PolicySpecification::Defra => Self::Defra,
+        }
+    }
+}
+
 /// Policy serialization format.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 pub enum PolicyMarshalingType {
@@ -46,6 +66,21 @@ pub enum PolicyMarshalingType {
 pub struct Object {
     pub resource: String,
     pub id: String,
+}
+
+impl From<&Object> for ::acp::domain::Object {
+    fn from(object: &Object) -> Self {
+        Self::new(object.resource.as_str(), object.id.as_str())
+    }
+}
+
+impl From<&::acp::domain::Object> for Object {
+    fn from(object: &::acp::domain::Object) -> Self {
+        Self {
+            resource: object.resource.to_string(),
+            id: object.id.to_string(),
+        }
+    }
 }
 
 /// An actor identity (wraps a DID).
@@ -100,10 +135,6 @@ pub enum PolicyCmd {
     },
     FlagHijackAttempt {
         event_id: u64,
-    },
-    RegisterUnderParent {
-        object: Object,
-        parent: Object,
     },
 }
 
@@ -163,7 +194,7 @@ pub struct PolicyCreation {
     /// The creator's nonce, part of the policy id.
     pub nonce: PolicyNonce,
     #[serde(default)]
-    pub required_specification: Option<vera_zanzibar::PolicySpecification>,
+    pub required_specification: Option<PolicySpecification>,
     #[serde(default)]
     pub metadata: SuppliedMetadata,
 }
@@ -202,7 +233,7 @@ pub struct PolicyRecord {
     pub supplied_metadata: SuppliedMetadata,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_modified: Option<Timestamp>,
-    pub policy: Policy,
+    pub policy: ProcessedPolicy,
     pub raw_policy: String,
     pub marshal_type: PolicyMarshalingType,
     pub metadata: RecordMetadata,
@@ -217,8 +248,56 @@ impl PolicyRecord {
     /// The id derived from the creation hash, the nonce and the owner; a
     /// well-formed record is stored under it.
     pub fn derived_id(&self) -> String {
-        vera_acp::policy_yaml::policy_id(&self.policy_hash, &self.nonce, &self.metadata.owner_did)
+        super::policy_id::policy_id(&self.policy_hash, &self.nonce, &self.metadata.owner_did)
     }
+}
+
+/// Deepest JSON nesting a policy record may have. acp bounds a permission
+/// expression's depth at 64 and its stored form nests about two levels per
+/// expression node, past serde_json's default limit of 128.
+pub const MAX_POLICY_RECORD_NESTING: usize = 256;
+
+impl PolicyRecord {
+    /// Decode a stored policy record. The nesting is bounded before decoding,
+    /// so the decoder's own recursion limit can be lifted safely.
+    pub fn from_json(bytes: &[u8]) -> serde_json::Result<Self> {
+        if json_nesting(bytes) > MAX_POLICY_RECORD_NESTING {
+            return Err(serde::de::Error::custom("policy record nests too deeply"));
+        }
+        let mut decoder = serde_json::Deserializer::from_slice(bytes);
+        decoder.disable_recursion_limit();
+        let record = Self::deserialize(&mut decoder)?;
+        decoder.end()?;
+        Ok(record)
+    }
+}
+
+/// The deepest array or object nesting in JSON text, ignoring brackets
+/// inside strings. Malformed text yields some depth; decoding rejects it.
+fn json_nesting(bytes: &[u8]) -> usize {
+    let (mut depth, mut deepest) = (0usize, 0usize);
+    let (mut in_string, mut escaped) = (false, false);
+    for &byte in bytes {
+        if in_string {
+            match byte {
+                _ if escaped => escaped = false,
+                b'\\' => escaped = true,
+                b'"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' | b'[' => {
+                depth += 1;
+                deepest = deepest.max(depth);
+            }
+            b'}' | b']' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    deepest
 }
 
 /// Proof that an object was included in a registration commitment.
@@ -337,7 +416,11 @@ mod incarnation_tests {
             },
             supplied_metadata: Default::default(),
             policy_id: "policy-1".into(),
-            relationship: Relationship::new("file", "report", "reader", Subject::Wildcard),
+            relationship: Relationship::new(
+                ::acp::domain::Object::new("file", "report"),
+                "reader",
+                Subject::AllActors,
+            ),
             archived: false,
             metadata: RecordMetadata {
                 creation_ts: Timestamp::default(),
@@ -353,5 +436,17 @@ mod incarnation_tests {
         assert!(serde_json::from_value::<RelationshipRecord>(value.clone()).is_err());
         value["incarnation"] = serde_json::Value::Null;
         assert!(serde_json::from_value::<RelationshipRecord>(value).is_err());
+    }
+
+    #[test]
+    fn nesting_ignores_brackets_in_strings_and_bounds_policy_records() {
+        assert_eq!(json_nesting(br#"{"a":[{"b":"[[{{"}]}"#), 3);
+        assert_eq!(json_nesting(br#"{"a":"\"[{"}"#), 1);
+        let deep = format!(
+            "{}{}",
+            "[".repeat(MAX_POLICY_RECORD_NESTING + 1),
+            "]".repeat(MAX_POLICY_RECORD_NESTING + 1)
+        );
+        assert!(PolicyRecord::from_json(deep.as_bytes()).is_err());
     }
 }

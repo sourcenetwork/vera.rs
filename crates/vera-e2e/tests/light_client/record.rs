@@ -16,12 +16,12 @@ pub(super) fn assert_policy(
         .verify(ModuleId::Acp, &key, minimum, trusted, RECORD_PROOF_BYTES)
         .expect("policy response should authenticate at its captured revision");
     let value = response.record.value.as_ref().expect("policy should exist");
-    let record: PolicyRecord = serde_json::from_slice(value).expect("policy record encoding");
-    assert_eq!(record.policy.id, policy);
+    let record: PolicyRecord = PolicyRecord::from_json(value).expect("policy record encoding");
+    assert_eq!(record.policy.id.to_string(), policy);
     assert_eq!(record.policy.name, "test-policy");
     assert_eq!(record.raw_policy, super::TEST_POLICY_YAML);
     assert_eq!(record.policy.resources.len(), 1);
-    assert_eq!(record.policy.resources[0].name, "document");
+    assert_eq!(record.policy.resources[0].name.as_str(), "document");
     record.relations.validate(&record.policy).unwrap();
 
     let root = verify_light_block(&response.revision, trusted).unwrap();

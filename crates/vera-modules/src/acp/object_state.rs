@@ -1,7 +1,7 @@
 //! Canonical target-object incarnation points, independent of registration.
 
 use super::record_error::{RecordError, Result};
-use vera_acp::Relationship;
+use ::acp::domain::{OWNER_RELATION, Relationship};
 
 use super::record_store::{RecordChange, RecordStore};
 use crate::kv_store::NATIVE_MAX_KEY_BYTES;
@@ -129,14 +129,14 @@ pub fn for_relationship<S: RecordStore>(
     policy: &str,
     relationship: &Relationship,
 ) -> Result<u64> {
-    if relationship.relation == "owner" {
+    if relationship.relation.as_str() == OWNER_RELATION {
         return Ok(0);
     }
     read(
         store,
         policy,
-        &relationship.resource,
-        &relationship.object_id,
+        relationship.object.resource.as_str(),
+        relationship.object.id.as_str(),
     )
 }
 

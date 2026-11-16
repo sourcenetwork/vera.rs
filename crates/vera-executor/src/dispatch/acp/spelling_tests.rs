@@ -9,9 +9,6 @@ use vera_modules::acp::types::{PolicyCmdResult, RelationshipRecord};
 use vera_modules::types::Timestamp;
 
 const POLICY: &str = "name: files
-actor:
-  relations:
-    - name: member
 resources:
   - name: file
     relations:
@@ -55,7 +52,8 @@ impl Fixture {
             )
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         acp.direct_policy_cmd(
             &owner,
             &policy,
@@ -115,7 +113,8 @@ fn relationship_events_and_results_name_the_canonical_actor() {
     let record: RelationshipRecord = serde_json::from_slice(&set.record).unwrap();
     assert_eq!(
         record.relationship.subject,
-        vera_acp::Subject::entity(did_from_actor(&canonical).unwrap())
+        vera_modules::acp::relationship_values::actor_subject(&did_from_actor(&canonical).unwrap())
+            .unwrap()
     );
 
     let (found, event): (_, IAcp::RelationshipDeleted) =
@@ -128,61 +127,6 @@ fn relationship_events_and_results_name_the_canonical_actor() {
         });
     assert!(found);
     assert_eq!(event.actor, canonical);
-}
-
-#[test]
-fn subject_events_name_canonical_actor_objects() {
-    let (member, written_member) = spellings(2);
-    let (group, written_group) = spellings(3);
-    let mut fixture = Fixture::new();
-    let policy = fixture.policy;
-    let membership = |object: &str, subject: &str| IAcp::setRelationshipSubjectCall {
-        policyId: policy,
-        resource: "actor".into(),
-        objectId: object.into(),
-        relation: "member".into(),
-        subjectKind: 0,
-        subjectResource: String::new(),
-        subjectObjectId: subject.into(),
-        subjectRelation: String::new(),
-    };
-    let (set, event): (_, IAcp::RelationshipSubjectSet) =
-        fixture.call(membership(&written_group, &written_member));
-    assert!(!set.recordExisted);
-    assert_eq!(event.objectId, group);
-    assert_eq!(event.subjectObjectId, member);
-    let (set, _): (_, IAcp::RelationshipSubjectSet) = fixture.call(membership(&group, &member));
-    assert!(set.recordExisted);
-
-    let edge = |object: &str| IAcp::setRelationshipSubjectCall {
-        policyId: policy,
-        resource: "file".into(),
-        objectId: "report".into(),
-        relation: "reader".into(),
-        subjectKind: 2,
-        subjectResource: "actor".into(),
-        subjectObjectId: object.into(),
-        subjectRelation: String::new(),
-    };
-    let (_, event): (_, IAcp::RelationshipSubjectSet) = fixture.call(edge(&written_group));
-    assert_eq!(event.objectId, "report");
-    assert_eq!(event.subjectObjectId, group);
-
-    let call = membership(&written_group, &written_member);
-    let (found, event): (_, IAcp::RelationshipSubjectDeleted) =
-        fixture.call(IAcp::deleteRelationshipSubjectCall {
-            policyId: call.policyId,
-            resource: call.resource,
-            objectId: call.objectId,
-            relation: call.relation,
-            subjectKind: call.subjectKind,
-            subjectResource: call.subjectResource,
-            subjectObjectId: call.subjectObjectId,
-            subjectRelation: call.subjectRelation,
-        });
-    assert!(found);
-    assert_eq!(event.objectId, group);
-    assert_eq!(event.subjectObjectId, member);
 }
 
 #[test]

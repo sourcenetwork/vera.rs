@@ -36,10 +36,8 @@ name: restart-test-policy
 resources:
   - name: file
     relations:
-      - name: owner
     permissions:
       - name: read
-        expr: owner
 ";
 
 async fn wait_light_block(

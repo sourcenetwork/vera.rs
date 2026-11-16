@@ -185,7 +185,7 @@ impl AcpModule {
     }
 
     pub(super) fn retained_policy_allows(&self, policy: &str, phase: Phase) -> Result<bool> {
-        if self.zanzibar_policies.contains_key(policy) {
+        if self.policies.contains_key(policy) {
             return Ok(true);
         }
         Ok(self

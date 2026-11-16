@@ -1,6 +1,5 @@
 use super::*;
 use vera_modules::{acp::types::RecordMetadata, types::Timestamp};
-use vera_zanzibar::Relationship;
 
 fn object() -> Object {
     Object {
@@ -17,14 +16,15 @@ fn record() -> RelationshipRecord {
         },
         supplied_metadata: Default::default(),
         policy_id: "policy".into(),
-        relationship: Relationship::with_entity(
+        relationship: vera_modules::acp::relationship_values::actor_relationship(
             "document",
             "report",
             "owner",
-            "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH"
+            &"did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH"
                 .parse()
                 .unwrap(),
-        ),
+        )
+        .unwrap(),
         archived: false,
         metadata: RecordMetadata {
             creation_ts: Timestamp {
@@ -63,21 +63,21 @@ fn read(records: &[RelationshipRecord]) -> Result<Option<Actor>, PermissionError
 fn live_owner_is_distinct_from_archived_or_absent_registration() {
     assert!(read(&[]).unwrap().is_none());
     let record = record();
-    let expected = if let Subject::Entity(did) = &record.relationship.subject {
-        did.clone()
-    } else {
+    let Subject::Actor(actor) = &record.relationship.subject else {
         unreachable!()
     };
+    let expected = vera_modules::acp::relationship_values::did(actor).unwrap();
     assert_eq!(
         read(std::slice::from_ref(&record)).unwrap(),
         Some(Actor(expected))
     );
     let mut other = record.clone();
-    other.relationship.subject = Subject::Entity(
-        "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+    other.relationship.subject = vera_modules::acp::relationship_values::actor_subject(
+        &"did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
             .parse()
             .unwrap(),
-    );
+    )
+    .unwrap();
     assert!(read(&[record.clone(), other.clone()]).is_err());
     let mut archived = record;
     archived.archived = true;
@@ -91,10 +91,10 @@ fn owner_records_and_queries_cannot_change_the_selected_object() {
         let mut record = record();
         match field {
             0 => record.policy_id = "other".into(),
-            1 => record.relationship.resource = "other".into(),
-            2 => record.relationship.object_id = "other".into(),
+            1 => record.relationship.object.resource = "other".into(),
+            2 => record.relationship.object.id = "other".into(),
             3 => record.relationship.relation = "reader".into(),
-            4 => record.relationship.subject = Subject::Wildcard,
+            4 => record.relationship.subject = Subject::AllActors,
             5 => record.generations.target = 1,
             _ => record.generations.subject = 1,
         }
@@ -148,7 +148,7 @@ fn path_like_object_identifiers_have_an_owner() {
             id: id.into(),
         };
         let mut record = record();
-        record.relationship.object_id = id.into();
+        record.relationship.object.id = id.into();
         let key = keys::relationship_key(
             "policy",
             &keys::relationship_storage_key(&record.relationship, 0),

@@ -23,8 +23,8 @@ pub(super) fn prefix(policy: &str, resource: &str, object: &str) -> Vec<u8> {
 pub(super) fn key(record: &RelationshipRecord) -> Vec<u8> {
     pair_key(
         &record.policy_id,
-        &record.relationship.resource,
-        &record.relationship.object_id,
+        record.relationship.object.resource.as_str(),
+        record.relationship.object.id.as_str(),
         record.incarnation,
         record.generations,
     )

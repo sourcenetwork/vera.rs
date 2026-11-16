@@ -40,9 +40,9 @@ fn required_specification_and_creation_metadata_survive_restore() {
     use vera_modules::acp::types::PolicyCreation;
     let mut module = AcpModule::new();
     let mut request = PolicyCreation {
-        policy: "name: files\nresources:\n  - name: file\n    permissions:\n      - name: read\n      - name: write\n".into(),
+        policy: "name: files\nresources:\n  - name: file\n    permissions:\n      - name: read\n      - name: update\n      - name: delete\n".into(),
         marshal_type: PolicyMarshalingType::ShortYaml,
-        required_specification: Some(vera_zanzibar::PolicySpecification::Defra),
+        required_specification: Some(vera_modules::acp::types::PolicySpecification::Defra),
         metadata: SuppliedMetadata { attributes: Default::default(), blob: vec![42] },
         nonce: Default::default(),
     };
@@ -61,15 +61,12 @@ fn required_specification_and_creation_metadata_survive_restore() {
     let record = module
         .execute_create_policy(&did("creator"), &request, &block, &tx)
         .unwrap();
-    assert_eq!(
-        record.policy.specification,
-        vera_zanzibar::PolicySpecification::Defra
-    );
+    assert_eq!(record.policy.spec, acp::domain::Specification::Defra);
     assert_eq!(record.supplied_metadata, request.metadata);
     assert_eq!(record.metadata.creation_ts, block.timestamp);
     restored(&module).validate_restored_state().unwrap();
     request.policy = format!("spec: defra\n{}", request.policy);
-    request.required_specification = Some(vera_zanzibar::PolicySpecification::None);
+    request.required_specification = Some(vera_modules::acp::types::PolicySpecification::None);
     let before = module.store().serialize();
     assert!(
         module
@@ -115,7 +112,13 @@ fn relationship_metadata_is_stable_on_retries_transfer_and_unarchive() {
             &tx,
         )
         .unwrap();
-    let relationship = Relationship::with_entity("file", "metadata", "reader", did("reader"));
+    let relationship = vera_modules::acp::relationship_values::actor_relationship(
+        "file",
+        "metadata",
+        "reader",
+        &did("reader"),
+    )
+    .unwrap();
     for supplied in [metadata.clone(), SuppliedMetadata::default()] {
         let result = module
             .execute_policy_cmd_with_metadata(
@@ -192,23 +195,26 @@ fn definition_edit_prunes_incoming_usersets_before_relation_can_be_recreated() {
         .direct_policy_cmd(
             &did("owner"),
             &policy,
-            PolicyCmd::SetRelationship(Relationship::with_entity(
-                "group",
-                "admins",
-                "member",
-                did("manager"),
-            )),
+            PolicyCmd::SetRelationship(
+                vera_modules::acp::relationship_values::actor_relationship(
+                    "group",
+                    "admins",
+                    "member",
+                    &did("manager"),
+                )
+                .unwrap(),
+            ),
         )
         .unwrap();
     module
         .direct_policy_cmd(
             &did("owner"),
             &policy,
-            PolicyCmd::SetRelationship(Relationship::new(
+            PolicyCmd::SetRelationship(vera_modules::acp::relationship_values::relationship(
                 "file",
                 "report",
                 "admin",
-                Subject::entity_set("group", "admins", "member"),
+                vera_modules::acp::relationship_values::actor_set("group", "admins", "member"),
             )),
         )
         .unwrap();

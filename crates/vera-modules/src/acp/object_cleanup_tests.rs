@@ -15,7 +15,8 @@ fn fixture(count: usize) -> (AcpModule, Did, String, Object, Vec<RelationshipRec
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     let object = Object {
         resource: "file".into(),
         id: "report".into(),
@@ -26,12 +27,13 @@ fn fixture(count: usize) -> (AcpModule, Did, String, Object, Vec<RelationshipRec
     let definition = module.query_policy(&policy).unwrap();
     let mut records = Vec::new();
     for index in 0..count {
-        let relationship = Relationship::with_entity(
+        let relationship = crate::acp::relationship_values::actor_relationship(
             "file",
             "report",
             "reader",
-            Did::new(format!("did:key:reader-{index:04}")).unwrap(),
-        );
+            &Did::new(format!("did:key:reader-{index:04}")).unwrap(),
+        )
+        .unwrap();
         let row = RelationshipRecord {
             incarnation: 0,
             generations: definition.relations.pair(&relationship).unwrap(),
@@ -471,7 +473,7 @@ fn maximum_records_progress_and_byte_exhaustion_does_not_starve_the_next_object(
     let mut all = rows.clone();
     for row in &rows {
         let mut other = row.clone();
-        other.relationship.object_id = second.id.clone();
+        other.relationship.object.id = second.id.clone().into();
         relationship_mutations::put(&mut module.store, &other).unwrap();
         all.push(other);
     }

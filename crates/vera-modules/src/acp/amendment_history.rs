@@ -175,7 +175,8 @@ mod tests {
             )
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         let event = insert(&mut module, &policy, false);
         for restored in [false, true] {
             if restored {

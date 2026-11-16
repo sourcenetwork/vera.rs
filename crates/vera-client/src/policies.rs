@@ -89,8 +89,8 @@ impl VeraClient {
 }
 
 fn decode(key: &[u8], value: &[u8]) -> Result<PolicyRecord, ClientError> {
-    let record: PolicyRecord = serde_json::from_slice(value)?;
-    let id = &record.policy.id;
+    let record: PolicyRecord = PolicyRecord::from_json(value)?;
+    let id = record.policy.id.as_str();
     if id.len() != 64
         || !id
             .bytes()
@@ -128,9 +128,12 @@ mod tests {
                 Default::default(),
             )
             .unwrap();
-        let key = keys::policy_key(&record.policy.id);
+        let key = keys::policy_key(&record.policy.id.to_string());
         let bytes = serde_json::to_vec(&record).unwrap();
-        assert_eq!(decode(&key, &bytes).unwrap().policy.id, record.policy.id);
+        assert_eq!(
+            decode(&key, &bytes).unwrap().policy.id.to_string(),
+            record.policy.id.to_string()
+        );
         assert!(decode(&keys::policy_key(&"0".repeat(64)), &bytes).is_err());
         assert!(decode(&key, &bytes[..bytes.len() - 1]).is_err());
         let mut trailing = bytes;
@@ -148,10 +151,10 @@ mod tests {
         let mut renonced = record.clone();
         renonced.nonce.0[0] = 1;
         assert!(decode(&key, &serde_json::to_vec(&renonced).unwrap()).is_err());
-        record.policy.id = "A".repeat(64);
+        record.policy.id = ::acp::domain::PolicyId::new("A".repeat(64));
         assert!(
             decode(
-                &keys::policy_key(&record.policy.id),
+                &keys::policy_key(&record.policy.id.to_string()),
                 &serde_json::to_vec(&record).unwrap()
             )
             .is_err()

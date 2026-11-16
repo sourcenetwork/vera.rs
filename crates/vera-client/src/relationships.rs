@@ -70,7 +70,7 @@ fn current_relationships(
 
 fn decode(policy: &str, key: &[u8], value: &[u8]) -> Result<RelationshipRecord, ClientError> {
     let record: RelationshipRecord = serde_json::from_slice(value)?;
-    if (record.relationship.relation == "owner" && record.incarnation != 0)
+    if (record.relationship.relation.as_str() == "owner" && record.incarnation != 0)
         || record.policy_id != policy
         || keys::relationship_generation_key(
             policy,
@@ -128,7 +128,8 @@ mod tests {
             )
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         let object = Object {
             resource: "file".into(),
             id: "report".into(),

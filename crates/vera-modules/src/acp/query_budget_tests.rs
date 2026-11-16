@@ -21,24 +21,25 @@ fn fixture(rows: usize, metadata_bytes: usize) -> (AcpModule, String) {
         module
             .set_relationship(&RelationshipRecord {
                 incarnation: 0,
-                policy_id: policy.policy.id.clone(),
+                policy_id: policy.policy.id.to_string(),
                 generations: RelationPair {
                     target: 0,
                     subject: 0,
                 },
-                relationship: Relationship::with_entity(
+                relationship: crate::acp::relationship_values::actor_relationship(
                     "file",
                     format!("{index:04}"),
                     "owner",
-                    owner.clone(),
-                ),
+                    &owner.clone(),
+                )
+                .unwrap(),
                 archived: false,
                 supplied_metadata: metadata,
                 metadata: policy.metadata.clone(),
             })
             .unwrap();
     }
-    (module, policy.policy.id)
+    (module, policy.policy.id.to_string())
 }
 
 fn selector() -> RelationshipSelector {
@@ -104,9 +105,10 @@ fn every_collection_query_accepts_exact_work_and_rejects_one_less_without_mutati
 fn empty_filtered_results_charge_all_inspected_metadata_and_preserve_page_continuation() {
     let (module, policy) = fixture(16, 60 << 10);
     let mut excluded = selector();
-    excluded.subject_selector = Some(SubjectSelector::Exact(vera_acp::Subject::entity(
-        Did::new("did:key:absent").unwrap(),
-    )));
+    excluded.subject_selector = Some(SubjectSelector::Exact(
+        crate::acp::relationship_values::actor_subject(&Did::new("did:key:absent").unwrap())
+            .unwrap(),
+    ));
     let budget = QueryBudget::new(u64::MAX);
     assert!(
         module

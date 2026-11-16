@@ -17,6 +17,7 @@ fn policy(acp: &mut AcpModule) -> String {
     .unwrap()
     .policy
     .id
+    .to_string()
 }
 
 fn register(name: &str) -> PolicyCmd {

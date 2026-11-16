@@ -41,9 +41,9 @@ pub(super) fn verify_policy(
     let Some(value) = &proof.value else {
         return Ok(None);
     };
-    let record: PolicyRecord = serde_json::from_slice(value)
+    let record: PolicyRecord = PolicyRecord::from_json(value)
         .map_err(|_| PermissionError::Invalid("policy record encoding"))?;
-    if record.policy.id != policy || record.derived_id() != policy {
+    if record.policy.id.as_str() != policy || record.derived_id() != policy {
         return Err(PermissionError::Invalid(
             "policy record differs from its key",
         ));
@@ -61,7 +61,7 @@ pub(super) fn relationship_record(
     let record: RelationshipRecord = serde_json::from_slice(value)
         .map_err(|_| PermissionError::Invalid("relationship record encoding"))?;
     if record.policy_id != policy
-        || (record.relationship.relation == "owner" && record.incarnation != 0)
+        || (record.relationship.relation.as_str() == "owner" && record.incarnation != 0)
         || keys::relationship_generation_key(
             &record.policy_id,
             record.generations,

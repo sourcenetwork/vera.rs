@@ -285,7 +285,7 @@ fn nested_batch_preserves_result_order_and_charges_every_wrapper() {
         assert_eq!(
             fixture
                 .acp
-                .query_policy(&record.policy.id)
+                .query_policy(&record.policy.id.to_string())
                 .unwrap()
                 .policy
                 .name,
@@ -363,7 +363,7 @@ fn large_policy_read(fixture: &mut Fixture) -> (Vec<u8>, usize, u64) {
     assert!(!result.output.status.is_revert());
     let record = created(&result.output.bytes);
     let read = IAcp::getPolicyCall {
-        policyId: record.policy.id.parse().unwrap(),
+        policyId: record.policy.id.as_str().parse().unwrap(),
     }
     .abi_encode();
     let result = fixture.dispatch(&read, 1_000_000).unwrap();

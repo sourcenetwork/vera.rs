@@ -1,6 +1,6 @@
 use crate::acp::*;
 
-const ORIGINAL: &str = "name: object_restore\nresources:\n  - name: file\n    relations:\n      - name: reader\n  - name: group\n    relations:\n      - name: member\n";
+const ORIGINAL: &str = "name: object_restore\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor, group->member]\n  - name: group\n    relations:\n      - name: member\n";
 const WITHOUT_MEMBER: &str = "name: object_restore\nresources:\n  - name: file\n    relations:\n      - name: reader\n  - name: group\n";
 
 fn owner() -> Did {
@@ -18,7 +18,8 @@ fn fixture() -> (AcpModule, String, RelationshipRecord) {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     for (resource, id) in [("file", "report"), ("group", "staff")] {
         module
             .direct_policy_cmd(
@@ -31,11 +32,11 @@ fn fixture() -> (AcpModule, String, RelationshipRecord) {
             )
             .unwrap();
     }
-    let relationship = Relationship::new(
+    let relationship = crate::acp::relationship_values::relationship(
         "file",
         "report",
         "reader",
-        vera_acp::Subject::entity_set("group", "staff", "member"),
+        crate::acp::relationship_values::actor_set("group", "staff", "member"),
     );
     let PolicyCmdResult::SetRelationship { record, .. } = module
         .direct_policy_cmd(&owner(), &policy, PolicyCmd::SetRelationship(relationship))
@@ -82,7 +83,7 @@ fn restoration_requires_complete_object_counts_for_live_and_retired_rows() {
                 3 => broken.store.put(&key, 2u64.to_be_bytes().to_vec()),
                 4 => {
                     let mut extra = record.clone();
-                    extra.relationship.object_id = "orphan".into();
+                    extra.relationship.object.id = "orphan".into();
                     broken
                         .store
                         .put(&object_pairs::key(&extra), 1u64.to_be_bytes().to_vec());

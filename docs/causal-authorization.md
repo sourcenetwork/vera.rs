@@ -134,7 +134,7 @@ use last-writer-wins or union permissions.
 Relevant implementations:
 [policy handlers](../crates/vera-modules/src/acp/mod.rs),
 [delegation](../crates/vera-modules/src/acp/delegation.rs),
-[evaluator](../crates/vera-modules/src/acp/zanzibar_store.rs),
+[evaluator](../crates/vera-modules/src/acp/evaluation.rs),
 [proof verification](../crates/vera-permission/src/lib.rs),
 [finality-bound response](../crates/vera-permission/src/response.rs), and
 [client methods](../crates/vera-client/src/permission.rs).

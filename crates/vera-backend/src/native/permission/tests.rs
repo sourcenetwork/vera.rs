@@ -7,15 +7,14 @@ use commonware_utils::{NZU16, NZUsize};
 use vera_modules::{
     ModuleState,
     acp::{
+        evaluation::evaluate_access_request,
         keys,
         types::{PolicyCmd, PolicyMarshalingType},
-        zanzibar_store::evaluate_access_request,
     },
     module_state::ModuleChanges,
 };
 use vera_permission::current::{MAX_KEY_BYTES, MAX_VALUE_BYTES, exclusion, membership};
 use vera_permission::{Actor, Object, Operation, PERMISSION_LIMITS, ReadCapture};
-use vera_zanzibar::{Relationship, Subject};
 
 const POLICY: &str = "\
 name: documents
@@ -25,9 +24,13 @@ resources:
       - name: reader
         types: [actor]
       - name: blocked
+        types: [group->member]
     permissions:
       - name: read
         expr: reader - blocked
+  - name: group
+    relations:
+      - name: member
 ";
 
 #[test]
@@ -143,7 +146,8 @@ fn permission_evidence_replays_deny_and_revocation_at_one_revision() {
             )
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         state
             .acp
             .direct_policy_cmd(
@@ -155,14 +159,38 @@ fn permission_evidence_replays_deny_and_revocation_at_one_revision() {
                 }),
             )
             .unwrap();
-        let blocked = Relationship::new(
+        state
+            .acp
+            .direct_policy_cmd(
+                &owner,
+                &policy,
+                PolicyCmd::RegisterObject(Object {
+                    resource: "group".into(),
+                    id: "staff".into(),
+                }),
+            )
+            .unwrap();
+        let blocked = vera_modules::acp::relationship_values::relationship(
             "document",
             "report",
             "blocked",
-            Subject::typed_wildcard("document"),
+            vera_modules::acp::relationship_values::actor_set("group", "staff", "member"),
         );
-        let reader = Relationship::with_entity("document", "report", "reader", actor.0.clone());
-        for relationship in [reader.clone(), blocked.clone()] {
+        let reader = vera_modules::acp::relationship_values::actor_relationship(
+            "document",
+            "report",
+            "reader",
+            &actor.0.clone(),
+        )
+        .unwrap();
+        let member = vera_modules::acp::relationship_values::actor_relationship(
+            "group",
+            "staff",
+            "member",
+            &actor.0.clone(),
+        )
+        .unwrap();
+        for relationship in [reader.clone(), member, blocked.clone()] {
             state
                 .acp
                 .direct_policy_cmd(&owner, &policy, PolicyCmd::SetRelationship(relationship))

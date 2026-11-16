@@ -5,7 +5,6 @@ resources:
   - name: document
     permissions:
       - name: read
-        expr: owner
 ";
 
 pub(super) async fn exercise(

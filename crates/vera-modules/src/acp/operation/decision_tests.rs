@@ -8,7 +8,7 @@ fn fixture() -> (AcpModule, VeraModule, String, AccessRequest) {
     let mut acp = AcpModule::new();
     let owner = vera_identity::Did::new(issuer()).unwrap();
     let policy = acp.create_policy(&owner,
-        "name: decisions\nresources:\n  - name: file\n    relations:\n      - name: reader\n    permissions:\n      - name: read\n        expr: reader\n", FORMAT, Default::default()).unwrap().policy.id;
+        "name: decisions\nresources:\n  - name: file\n    relations:\n      - name: reader\n    permissions:\n      - name: read\n        expr: reader\n", FORMAT, Default::default()).unwrap().policy.id.to_string();
     let object = Object {
         resource: "file".into(),
         id: "report".into(),
@@ -19,12 +19,15 @@ fn fixture() -> (AcpModule, VeraModule, String, AccessRequest) {
     acp.direct_policy_cmd(
         &owner,
         &policy,
-        PolicyCmd::SetRelationship(vera_acp::Relationship::with_entity(
-            "file",
-            "report",
-            "reader",
-            target.clone(),
-        )),
+        PolicyCmd::SetRelationship(
+            crate::acp::relationship_values::actor_relationship(
+                "file",
+                "report",
+                "reader",
+                &target.clone(),
+            )
+            .unwrap(),
+        ),
     )
     .unwrap();
     (

@@ -32,7 +32,8 @@ fn validation_and_execution_reject_undeclared_references() {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     let before = module.store.serialize();
     assert!(
         module
@@ -77,8 +78,9 @@ fn failed_policy_construction_does_not_consume_a_counter() {
             )
             .unwrap()
             .policy
-            .id,
-        expected.policy.id
+            .id
+            .to_string(),
+        expected.policy.id.to_string()
     );
 }
 
@@ -100,10 +102,7 @@ fn json_policy_uses_shared_semantics_for_creation_and_editing() {
         AcpModule::validate_policy_definition(VALID, PolicyMarshalingType::ShortYaml).unwrap();
     let json_policy =
         AcpModule::validate_policy_definition(json, PolicyMarshalingType::ShortJson).unwrap();
-    assert_eq!(
-        serde_json::to_value(yaml_policy).unwrap(),
-        serde_json::to_value(json_policy).unwrap()
-    );
+    assert_eq!(yaml_policy.policy, json_policy.policy);
     let owner = Did::new("did:key:owner").unwrap();
     let mut module = AcpModule::new();
     let record = module
@@ -115,7 +114,7 @@ fn json_policy_uses_shared_semantics_for_creation_and_editing() {
         )
         .unwrap();
     assert_eq!(record.marshal_type, PolicyMarshalingType::ShortJson);
-    let id = record.policy.id;
+    let id = record.policy.id.to_string();
     module
         .edit_policy(
             &owner,
@@ -160,10 +159,12 @@ fn policy_id_listing_is_bounded_and_rejects_invalid_keys() {
             Default::default(),
         )
         .unwrap();
-    module.store.delete(&keys::policy_key(&record.policy.id));
+    module
+        .store
+        .delete(&keys::policy_key(record.policy.id.as_str()));
     for n in 0..128u64 {
-        record.policy.id = format!("{n:064x}");
-        module.set_policy_record(&record.policy.id, &record);
+        record.policy.id = ::acp::domain::PolicyId::new(format!("{n:064x}"));
+        module.set_policy_record(record.policy.id.as_str(), &record);
     }
     let ids = module.query_policy_ids().unwrap();
     assert_eq!(ids.len(), 128);
@@ -196,10 +197,10 @@ fn policy_id_listing_rejects_corrupt_records_after_restore() {
             Default::default(),
         )
         .unwrap();
-    let id = record.policy.id.clone();
+    let id = record.policy.id.to_string();
     let valid = serde_json::to_vec(&record).unwrap();
     let mut foreign = record;
-    foreign.policy.id = "ab".repeat(32);
+    foreign.policy.id = ::acp::domain::PolicyId::new("ab".repeat(32));
     for invalid in [
         valid[..valid.len() - 1].to_vec(),
         serde_json::to_vec(&foreign).unwrap(),
@@ -235,10 +236,12 @@ fn exact_byte_listing() -> AcpModule {
             Default::default(),
         )
         .unwrap();
-    module.store.delete(&keys::policy_key(&record.policy.id));
+    module
+        .store
+        .delete(&keys::policy_key(record.policy.id.as_str()));
     for n in 0..2 {
-        record.policy.id = format!("{n:064x}");
-        let key = keys::policy_key(&record.policy.id);
+        record.policy.id = ::acp::domain::PolicyId::new(format!("{n:064x}"));
+        let key = keys::policy_key(record.policy.id.as_str());
         let mut value = serde_json::to_vec(&record).unwrap();
         // Valid JSON whitespace makes the exact stored-byte boundary independent of schema size.
         value.resize((1 << 19) - key.len(), b' ');
@@ -341,11 +344,9 @@ fn policy_id_listing_preflights_all_bytes_before_decoding_and_preserves_corrupti
 
 #[test]
 fn the_deepest_accepted_expression_survives_restoration() {
-    use vera_zanzibar::expression::MAX_EXPRESSION_DEPTH;
-
-    const DEFINITION: &str = "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n      - name: blocked\n    permissions:\n      - name: read\n        expr: EXPRESSION\n      - name: write\n        expr: reader\n";
+    const DEFINITION: &str = "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n      - name: blocked\n    permissions:\n      - name: read\n        expr: EXPRESSION\n      - name: update\n        expr: reader\n      - name: delete\n";
     let owner = Did::new("did:key:owner").unwrap();
-    for (specification, wrappers) in [("", 1), ("spec: defra\n", 2)] {
+    for specification in ["", "spec: defra\n"] {
         let with = |subtractions: usize| {
             let expression = format!("reader{}", " - blocked".repeat(subtractions));
             format!(
@@ -353,7 +354,15 @@ fn the_deepest_accepted_expression_survives_restoration() {
                 DEFINITION.replace("EXPRESSION", &expression)
             )
         };
-        let deepest = MAX_EXPRESSION_DEPTH - wrappers;
+        let accepted = |subtractions: usize| {
+            AcpModule::validate_policy_definition(
+                &with(subtractions),
+                PolicyMarshalingType::ShortYaml,
+            )
+            .is_ok()
+        };
+        let deepest = (1..256).take_while(|n| accepted(*n)).last().unwrap();
+        assert!(deepest > 32);
         let mut module = AcpModule::new();
         let policy = module
             .create_policy(
@@ -364,9 +373,10 @@ fn the_deepest_accepted_expression_survives_restoration() {
             )
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         let before = module.store.serialize();
-        for subtractions in [deepest + 1, 59, 127] {
+        for subtractions in [deepest + 1, deepest + 2, 255] {
             let rejected = with(subtractions);
             assert!(
                 module
@@ -387,6 +397,14 @@ fn the_deepest_accepted_expression_survives_restoration() {
         }
         let restored = AcpModule::from_store(InMemoryKvStore::deserialize(&before).unwrap());
         restored.validate_restored_state().unwrap();
-        assert_eq!(restored.query_policy(&policy).unwrap().policy.id, policy);
+        assert_eq!(
+            restored
+                .query_policy(&policy)
+                .unwrap()
+                .policy
+                .id
+                .to_string(),
+            policy
+        );
     }
 }

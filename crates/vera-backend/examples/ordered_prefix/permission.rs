@@ -6,18 +6,19 @@ use commonware_storage::{
     mmr,
     qmdb::{any::value::VariableEncoding, current::ordered::proof::constant::ExclusionProof},
 };
+use vera_modules::acp::types::{Relationship, Subject};
 use vera_modules::{
     acp::{
-        AcpModule, keys,
+        AcpModule,
+        evaluation::evaluate_access_request,
+        keys,
         read_capture::{ReadCapture, ReadLimits, RecordRead},
         record_error::{RecordError, Result},
         record_store::RecordStore,
         types::{AccessRequest, Actor, Object, Operation, PolicyCmd, PolicyMarshalingType},
-        zanzibar_store::evaluate_access_request,
     },
     kv_store::ModuleKvStore,
 };
-use vera_zanzibar::{Relationship, Subject};
 
 type Absent = ExclusionProof<mmr::Family, Vec<u8>, VariableEncoding<Bytes>, Digest, 32>;
 type Entries = Vec<(Vec<u8>, Vec<u8>)>;
@@ -146,7 +147,8 @@ fn permission_evaluation_requires_complete_proofs_at_one_root() {
             )
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         module
             .direct_policy_cmd(
                 &owner,
@@ -157,14 +159,17 @@ fn permission_evaluation_requires_complete_proofs_at_one_root() {
                 }),
             )
             .unwrap();
-        let blocked = Relationship::new(
+        let blocked = vera_modules::acp::relationship_values::relationship(
             "document",
             "report",
             "blocked",
-            Subject::typed_wildcard("document"),
+            Subject::AllActors,
         );
         for relationship in [
-            Relationship::with_entity("document", "report", "reader", actor),
+            vera_modules::acp::relationship_values::actor_relationship(
+                "document", "report", "reader", &actor,
+            )
+            .unwrap(),
             blocked.clone(),
         ] {
             module

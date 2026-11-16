@@ -1,10 +1,10 @@
-use super::super::types::{PolicyMarshalingType, RecordMetadata, RelationGenerations};
+use super::super::types::{
+    PolicyMarshalingType, ProcessedPolicy, RecordMetadata, RelationGenerations,
+};
 use super::*;
 use crate::kv_store::{InMemoryKvStore, ModuleKvStore};
 use crate::types::Timestamp;
-use vera_acp::{Policy, Relationship, Subject};
 use vera_identity::Did;
-use vera_zanzibar::{Relation, Resource};
 
 const POLICY: &str = "policy-index-test";
 
@@ -17,18 +17,23 @@ fn metadata() -> RecordMetadata {
     }
 }
 
-fn policy(reader: bool, member: bool) -> Policy {
-    let mut file = Resource::new("file").with_relation(Relation::direct("owner"));
-    if reader {
-        file = file.with_relation(Relation::direct("reader"));
-    }
-    let mut group = Resource::new("group").with_relation(Relation::direct("owner"));
-    if member {
-        group = group.with_relation(Relation::direct("member"));
-    }
-    Policy::new(POLICY, "indexes")
-        .with_resource(file)
-        .with_resource(group)
+fn policy(reader: bool, member: bool) -> ProcessedPolicy {
+    let file = match (reader, member) {
+        (true, true) => {
+            "    relations:\n      - name: reader\n        types: [actor, group->member]\n"
+        }
+        (true, false) => "    relations:\n      - name: reader\n",
+        (false, _) => "",
+    };
+    let group = if member {
+        "    relations:\n      - name: member\n"
+    } else {
+        ""
+    };
+    crate::acp::test_policy(
+        POLICY,
+        &format!("name: indexes\nresources:\n  - name: file\n{file}  - name: group\n{group}"),
+    )
 }
 
 struct Fixture {
@@ -48,7 +53,7 @@ impl Fixture {
             marshal_type: PolicyMarshalingType::ShortYaml,
             metadata: metadata(),
             nonce: Default::default(),
-            policy_hash: vera_acp::policy_yaml::PolicyHash([0; 32]),
+            policy_hash: crate::acp::types::PolicyHash([0; 32]),
         };
         let mut fixture = Self {
             store: InMemoryKvStore::default(),
@@ -67,18 +72,20 @@ impl Fixture {
 
     fn record(&self, object: &str, userset: bool) -> RelationshipRecord {
         let relationship = if userset {
-            Relationship::new(
+            crate::acp::relationship_values::relationship(
                 "file",
                 object,
                 "reader",
-                Subject::EntitySet {
-                    resource: "group".into(),
-                    object_id: "staff".into(),
-                    relation: "member".into(),
-                },
+                crate::acp::relationship_values::actor_set("group", "staff", "member"),
             )
         } else {
-            Relationship::with_entity("file", object, "reader", Did::new("did:key:owner").unwrap())
+            crate::acp::relationship_values::actor_relationship(
+                "file",
+                object,
+                "reader",
+                &Did::new("did:key:owner").unwrap(),
+            )
+            .unwrap()
         };
         RelationshipRecord {
             incarnation: 0,
@@ -385,12 +392,13 @@ fn permanent_owner_pair_counts_both_resources_without_key_collisions() {
     let mut f = Fixture::new();
     let mut rows = Vec::new();
     for resource in ["file", "group"] {
-        let relationship = Relationship::with_entity(
+        let relationship = crate::acp::relationship_values::actor_relationship(
             resource,
             "same",
             "owner",
-            Did::new("did:key:owner").unwrap(),
-        );
+            &Did::new("did:key:owner").unwrap(),
+        )
+        .unwrap();
         let mut row = f.record("same", false);
         row.generations = f.policy.relations.pair(&relationship).unwrap();
         row.relationship = relationship;

@@ -7,7 +7,7 @@
 
 use std::borrow::Cow;
 
-use vera_acp::{Policy, Relationship, Subject};
+use ::acp::domain::{ACTOR_RESOURCE, Actor as AcpActor, Did as AcpDid, Relationship, Subject};
 
 use super::types::{
     AccessRequest, Actor, Object, ObjectSelector, PolicyCmd, RelationshipSelector, SubjectSelector,
@@ -23,100 +23,97 @@ impl AcpModule {
         policy_id: &str,
         mut relationship: Relationship,
     ) -> Result<Relationship> {
-        let policy =
-            self.zanzibar_policies
-                .get(policy_id)
-                .ok_or_else(|| AcpError::PolicyNotFound {
-                    id: policy_id.into(),
-                })?;
-        self::relationship(policy, &mut relationship);
+        if !self.policies.contains_key(policy_id) {
+            return Err(AcpError::PolicyNotFound {
+                id: policy_id.into(),
+            });
+        }
+        self::relationship(&mut relationship);
         Ok(relationship)
     }
 }
 
-/// An object identifier, canonical when `resource` is the policy's actor resource.
-pub(super) fn object_id<'a>(policy: &Policy, resource: &str, id: &'a str) -> Cow<'a, str> {
-    if policy
-        .actor
-        .as_ref()
-        .is_some_and(|actor| actor.name == resource)
-    {
+/// An object identifier, canonical when `resource` is the actor resource.
+pub(super) fn object_id<'a>(resource: &str, id: &'a str) -> Cow<'a, str> {
+    if resource == ACTOR_RESOURCE {
         crate::actor::canonical_str(id)
     } else {
         Cow::Borrowed(id)
     }
 }
 
-fn rewrite_object_id(policy: &Policy, resource: &str, id: &mut String) {
-    if let Cow::Owned(canonical) = object_id(policy, resource, id) {
-        *id = canonical;
+/// An actor under its canonical DID.
+pub(super) fn actor(actor: &AcpActor) -> AcpActor {
+    match crate::actor::canonical_str(actor.id.as_str()) {
+        Cow::Owned(canonical) => {
+            AcpDid::parse(&canonical).map_or_else(|_| actor.clone(), AcpActor::new)
+        }
+        Cow::Borrowed(_) => actor.clone(),
     }
 }
 
-fn object(policy: &Policy, object: &mut Object) {
-    rewrite_object_id(policy, &object.resource, &mut object.id);
+fn acp_object(object: &mut ::acp::domain::Object) {
+    if let Cow::Owned(canonical) = object_id(object.resource.as_str(), object.id.as_str()) {
+        object.id = canonical.into();
+    }
 }
 
-fn subject(policy: &Policy, subject: &mut Subject) {
+fn object(object: &mut Object) {
+    if let Cow::Owned(canonical) = object_id(&object.resource, &object.id) {
+        object.id = canonical;
+    }
+}
+
+fn subject(subject: &mut Subject) {
     match subject {
-        Subject::Entity(actor) => *actor = crate::actor::canonical(actor),
-        Subject::EntitySet {
-            resource,
-            object_id,
-            ..
-        } => rewrite_object_id(policy, resource, object_id),
-        _ => {}
+        Subject::Actor(named) => *named = actor(named),
+        Subject::ActorSet(set) => acp_object(&mut set.object),
+        Subject::Object(named) => acp_object(named),
+        Subject::AllActors => {}
     }
 }
 
 /// Record a relationship's object and subject under their canonical actors.
-pub(super) fn relationship(policy: &Policy, relationship: &mut Relationship) {
-    rewrite_object_id(policy, &relationship.resource, &mut relationship.object_id);
-    subject(policy, &mut relationship.subject);
+pub(super) fn relationship(relationship: &mut Relationship) {
+    acp_object(&mut relationship.object);
+    subject(&mut relationship.subject);
 }
 
 /// Whether a relationship already names every actor canonically.
-pub(super) fn is_canonical(policy: &Policy, relationship: &Relationship) -> bool {
+pub(super) fn is_canonical(relationship: &Relationship) -> bool {
     let mut canonical = relationship.clone();
-    self::relationship(policy, &mut canonical);
+    self::relationship(&mut canonical);
     canonical == *relationship
 }
 
 /// Rewrite every actor a command names before it reads or changes state.
-pub(super) fn command(policy: &Policy, command: &mut PolicyCmd) {
+pub(super) fn command(command: &mut PolicyCmd) {
     match command {
-        PolicyCmd::SetRelationship(relationship) | PolicyCmd::DeleteRelationship(relationship) => {
-            self::relationship(policy, relationship);
+        PolicyCmd::SetRelationship(named) | PolicyCmd::DeleteRelationship(named) => {
+            self::relationship(named);
         }
         PolicyCmd::TransferObject {
             object: transferred,
             new_owner,
         } => {
-            object(policy, transferred);
+            object(transferred);
             new_owner.0 = crate::actor::canonical(&new_owner.0);
         }
         PolicyCmd::RegisterObject(named)
         | PolicyCmd::ArchiveObject(named)
-        | PolicyCmd::UnarchiveObject(named) => object(policy, named),
-        PolicyCmd::RegisterUnderParent {
-            object: child,
-            parent,
-        } => {
-            object(policy, child);
-            object(policy, parent);
-        }
-        PolicyCmd::RevealRegistration { proof, .. } => object(policy, &mut proof.object),
+        | PolicyCmd::UnarchiveObject(named) => object(named),
+        PolicyCmd::RevealRegistration { proof, .. } => object(&mut proof.object),
         PolicyCmd::CommitRegistrations { .. } | PolicyCmd::FlagHijackAttempt { .. } => {}
     }
 }
 
 /// Rewrite the actors a relationship query selects.
-pub(super) fn selector(policy: &Policy, selector: &mut RelationshipSelector) {
+pub(super) fn selector(selector: &mut RelationshipSelector) {
     if let Some(ObjectSelector::Exact(selected)) = &mut selector.object_selector {
-        object(policy, selected);
+        object(selected);
     }
     if let Some(SubjectSelector::Exact(selected)) = &mut selector.subject_selector {
-        subject(policy, selected);
+        subject(selected);
     }
 }
 

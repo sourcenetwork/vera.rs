@@ -5,8 +5,12 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use vera_modules::acp::{keys, record_store::RecordStore, zanzibar_store::evaluate_access_request};
-use vera_zanzibar::error::{Error as EvaluationError, Result as EvaluationResult};
+use vera_modules::acp::{
+    evaluation::evaluate_access_request,
+    keys,
+    record_error::{RecordError, Result as RecordResult},
+    record_store::RecordStore,
+};
 
 use crate::{AccessRequest, PERMISSION_LIMITS, PermissionError, validate_request};
 
@@ -68,14 +72,14 @@ struct Reader<'a> {
 }
 
 impl Reader<'_> {
-    fn charge(&self) -> EvaluationResult<()> {
+    fn charge(&self) -> RecordResult<()> {
         self.reads
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
             .map(|_| ())
             .map_err(|_| unavailable())
     }
 
-    fn covering(&self, key: &[u8]) -> EvaluationResult<&Entries> {
+    fn covering(&self, key: &[u8]) -> RecordResult<&Entries> {
         self.state
             .prefixes
             .iter()
@@ -86,7 +90,7 @@ impl Reader<'_> {
 }
 
 impl RecordStore for Reader<'_> {
-    fn read_record(&self, key: &[u8]) -> EvaluationResult<Option<Vec<u8>>> {
+    fn read_record(&self, key: &[u8]) -> RecordResult<Option<Vec<u8>>> {
         self.charge()?;
         if key == keys::policy_key(&self.state.policy) {
             return Ok(self.state.record.clone());
@@ -94,7 +98,7 @@ impl RecordStore for Reader<'_> {
         Ok(self.covering(key)?.get(key).cloned())
     }
 
-    fn scan_records(&self, prefix: &[u8]) -> EvaluationResult<Vec<(Vec<u8>, Vec<u8>)>> {
+    fn scan_records(&self, prefix: &[u8]) -> RecordResult<Vec<(Vec<u8>, Vec<u8>)>> {
         self.charge()?;
         Ok(self
             .covering(prefix)?
@@ -105,8 +109,6 @@ impl RecordStore for Reader<'_> {
     }
 }
 
-fn unavailable() -> EvaluationError {
-    EvaluationError::Serialization(
-        "record outside the policy snapshot or read budget exhausted".into(),
-    )
+fn unavailable() -> RecordError {
+    RecordError::unavailable("record outside the policy snapshot or read budget exhausted")
 }

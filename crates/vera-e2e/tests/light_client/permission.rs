@@ -9,7 +9,7 @@ use vera_domain::{ConsensusPublicKey, verify_light_block};
 use vera_e2e::cluster::TestCluster;
 use vera_modules::acp::{
     abi::IAcp,
-    keys, relationship_index,
+    keys,
     types::{PolicyRecord, RelationPair},
 };
 
@@ -205,18 +205,31 @@ pub(super) fn relation_prefix(
     .unwrap()
 }
 
-pub(super) fn assert_absent_relation_directory(
-    proof: &PermissionProof,
+/// The evidence proves `relation` holds no grant for the request: an absent
+/// point read under the relation's storage prefix.
+pub(super) fn assert_absent_relation_grant(proof: &PermissionProof, policy: &str, relation: &str) {
+    let expected = relation_prefix(proof, policy, relation, None);
+    assert!(proof.reads.iter().any(|read| matches!(
+        read,
+        PermissionRead::CurrentPoint { key, value: None, .. }
+            if key.as_ref().starts_with(expected.as_bytes())
+    )));
+}
+
+/// Drop the absent point reads proving `relation` holds no grant.
+pub(super) fn remove_absent_relation_grants(
+    proof: &mut PermissionProof,
     policy: &str,
     relation: &str,
 ) {
-    let record = policy_record(proof, policy);
-    let generation = record.relations.generation("document", relation).unwrap();
-    let expected = relationship_index::active_key(policy, generation);
-    assert!(proof.reads.iter().any(|read| matches!(
-        read,
-        PermissionRead::CurrentPoint { key, value: None, .. } if key.as_ref() == expected
-    )));
+    let expected = relation_prefix(proof, policy, relation, None);
+    proof.reads.retain(|read| {
+        !matches!(
+            read,
+            PermissionRead::CurrentPoint { key, value: None, .. }
+                if key.as_ref().starts_with(expected.as_bytes())
+        )
+    });
 }
 
 pub(super) fn prefix(

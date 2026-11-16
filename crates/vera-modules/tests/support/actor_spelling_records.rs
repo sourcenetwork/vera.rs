@@ -65,7 +65,12 @@ fn an_operation_binds_its_arguments_as_the_caller_wrote_them() {
     let (mut acp, policy) = fixture(&owner);
     let mut vera = VeraModule::new();
     let grant = |spelling: usize| {
-        PolicyCmd::SetRelationship(reader(Subject::Entity(grantee.dids()[spelling].clone())))
+        PolicyCmd::SetRelationship(reader(
+            vera_modules::acp::relationship_values::actor_subject(
+                &grantee.dids()[spelling].clone(),
+            )
+            .unwrap(),
+        ))
     };
     let (written, canonical) = (grant(1), grant(0));
     let token = owner.operation_token(
@@ -97,7 +102,7 @@ fn an_operation_binds_its_arguments_as_the_caller_wrote_them() {
     };
     assert_eq!(
         record.relationship.subject,
-        Subject::Entity(grantee.dids()[0].clone())
+        vera_modules::acp::relationship_values::actor_subject(&grantee.dids()[0].clone()).unwrap()
     );
 
     let after = acp.store().serialize();
@@ -129,7 +134,10 @@ fn a_decision_names_its_actor_canonically_and_verifies_for_any_spelling() {
     base.direct_policy_cmd(
         &owner.dids()[0],
         &policy,
-        PolicyCmd::SetRelationship(reader(Subject::Entity(grantee.dids()[0].clone()))),
+        PolicyCmd::SetRelationship(reader(
+            vera_modules::acp::relationship_values::actor_subject(&grantee.dids()[0].clone())
+                .unwrap(),
+        )),
     )
     .unwrap();
     let at = context(101).timestamp;

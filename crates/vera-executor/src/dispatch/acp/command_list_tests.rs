@@ -50,7 +50,7 @@ impl Fixture {
                 tx_hash: vec![1; 32],
                 sequence: 0,
             },
-            policy,
+            policy: policy.to_string(),
         }
     }
 
@@ -65,12 +65,15 @@ impl Fixture {
             ),
             (
                 self.policy.clone(),
-                PolicyCmd::SetRelationship(vera_acp::Relationship::with_entity(
-                    "file",
-                    "report",
-                    "reader",
-                    Did::new("did:key:reader").unwrap(),
-                )),
+                PolicyCmd::SetRelationship(
+                    vera_modules::acp::relationship_values::actor_relationship(
+                        "file",
+                        "report",
+                        "reader",
+                        &Did::new("did:key:reader").unwrap(),
+                    )
+                    .unwrap(),
+                ),
             ),
         ]
     }

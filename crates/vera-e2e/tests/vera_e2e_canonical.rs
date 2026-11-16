@@ -49,15 +49,12 @@ meta:
 resources:
   - name: document
     relations:
-      - name: owner
       - name: reader
     permissions:
       - name: read
-        expr: owner + reader
+        expr: reader
       - name: update
-        expr: owner
       - name: delete
-        expr: owner
 ";
 
 fn parse_policy_id(hex_str: &str) -> FixedBytes<32> {
@@ -574,11 +571,14 @@ async fn canonical_module_test() {
     );
 
     // D5.3. Set relationship via bearer token — grant bls_did "reader" on doc-bearer
-    let d5_rel = vera_acp::Relationship::new(
+    let d5_rel = vera_modules::acp::relationship_values::relationship(
         "document",
         "doc-bearer",
         "reader",
-        vera_acp::Subject::entity(vera_identity::Did::new(&bls_did).expect("valid DID")),
+        vera_modules::acp::relationship_values::actor_subject(
+            &vera_identity::Did::new(&bls_did).expect("valid DID"),
+        )
+        .unwrap(),
     );
     let d5_set_cmd = vera_modules::acp::types::PolicyCmd::SetRelationship(d5_rel);
     let d5_set_bytes = serde_json::to_vec(&d5_set_cmd).expect("serialize PolicyCmd");

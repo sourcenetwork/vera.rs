@@ -24,26 +24,6 @@ impl VeraClient {
             .await
     }
 
-    /// Register a child and attach it to the parent that authorizes its creation.
-    pub async fn native_register_under_parent(
-        &self,
-        signer: &BlsSigner,
-        policy_id: FixedBytes<32>,
-        object: vera_modules::acp::types::Object,
-        parent: vera_modules::acp::types::Object,
-    ) -> Result<TransactionReceipt, ClientError> {
-        use vera_modules::acp::types::{PolicyCmd, PolicyCommandRequest};
-        self.native_policy_command(
-            signer,
-            policy_id,
-            &PolicyCommandRequest {
-                command: PolicyCmd::RegisterUnderParent { object, parent },
-                metadata: Default::default(),
-            },
-        )
-        .await
-    }
-
     /// Create a policy with supplied metadata and an optional required specification.
     pub async fn native_create_policy_with_options(
         &self,

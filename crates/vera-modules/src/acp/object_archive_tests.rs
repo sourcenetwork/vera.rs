@@ -15,7 +15,8 @@ fn fixture() -> (AcpModule, Did, String, Object) {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     let object = Object {
         resource: "file".into(),
         id: "report".into(),
@@ -73,37 +74,44 @@ fn archive_removes_only_outgoing_grants_and_retains_ownership() {
     let grant = put(
         &mut module,
         &policy,
-        Relationship::with_entity(
+        crate::acp::relationship_values::actor_relationship(
             "file",
             "report",
             "reader",
-            Did::new("did:key:reader").unwrap(),
-        ),
+            &Did::new("did:key:reader").unwrap(),
+        )
+        .unwrap(),
     );
     let userset = put(
         &mut module,
         &policy,
-        Relationship::new(
+        crate::acp::relationship_values::relationship(
             "file",
             "report",
             "reader",
-            vera_acp::Subject::entity_set("group", "staff", "member"),
+            crate::acp::relationship_values::actor_set("group", "staff", "member"),
         ),
     );
     let incoming = put(
         &mut module,
         &policy,
-        Relationship::new(
+        crate::acp::relationship_values::relationship(
             "file",
             "other",
             "reader",
-            vera_acp::Subject::entity_set("file", "report", "reader"),
+            crate::acp::relationship_values::actor_set("file", "report", "reader"),
         ),
     );
     let unrelated = put(
         &mut module,
         &policy,
-        Relationship::with_entity("file", "report-extra", "reader", owner.clone()),
+        crate::acp::relationship_values::actor_relationship(
+            "file",
+            "report-extra",
+            "reader",
+            &owner.clone(),
+        )
+        .unwrap(),
     );
     assert_eq!(archive(&mut module, &owner, &policy, &object), 3);
     for record in [&grant, &userset] {
@@ -158,20 +166,21 @@ fn archive_excludes_retired_pairs_without_reviving_them_on_unarchive() {
     let without_member = "name: archive\nresources:\n  - name: file\n    relations:\n      - name: reader\n  - name: group\n";
     for (relationship, replacement) in [
         (
-            Relationship::with_entity(
+            crate::acp::relationship_values::actor_relationship(
                 "file",
                 "report",
                 "reader",
-                Did::new("did:key:reader").unwrap(),
-            ),
+                &Did::new("did:key:reader").unwrap(),
+            )
+            .unwrap(),
             WITHOUT_READER,
         ),
         (
-            Relationship::new(
+            crate::acp::relationship_values::relationship(
                 "file",
                 "report",
                 "reader",
-                vera_acp::Subject::entity_set("group", "staff", "member"),
+                crate::acp::relationship_values::actor_set("group", "staff", "member"),
             ),
             without_member,
         ),
@@ -218,12 +227,13 @@ fn invalid_accessed_archive_indexes_cannot_publish_partial_archive() {
     let grant = put(
         &mut module,
         &policy,
-        Relationship::with_entity(
+        crate::acp::relationship_values::actor_relationship(
             "file",
             "report",
             "reader",
-            Did::new("did:key:reader").unwrap(),
-        ),
+            &Did::new("did:key:reader").unwrap(),
+        )
+        .unwrap(),
     );
     let counter = object_pairs::key(&grant);
     let owner_record = module
@@ -239,7 +249,7 @@ fn invalid_accessed_archive_indexes_cannot_publish_partial_archive() {
             3 => candidate.store.delete(&object_pairs::key(&owner_record)),
             4 => {
                 let mut row = grant.clone();
-                row.relationship.object_id = "elsewhere".into();
+                row.relationship.object.id = "elsewhere".into();
                 candidate
                     .store
                     .put(&row_key(&grant), serde_json::to_vec(&row).unwrap());

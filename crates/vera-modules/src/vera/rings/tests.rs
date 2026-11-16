@@ -20,7 +20,6 @@ use k256::ecdsa::{
     Signature, SigningKey,
     signature::{Signer as _, hazmat::PrehashSigner as _},
 };
-use vera_acp::Relationship;
 use vera_crypto::{
     jwt::JwtClaims,
     operation::{OperationClaim, OperationId},
@@ -127,7 +126,8 @@ fn fixture_nodes(policy: &str, nodes: &[u8]) -> (VeraModule, AcpModule, RingConf
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     acp.direct_policy_cmd(
         &actor(),
         &policy_id,
@@ -140,12 +140,15 @@ fn fixture_nodes(policy: &str, nodes: &[u8]) -> (VeraModule, AcpModule, RingConf
     acp.direct_policy_cmd(
         &actor(),
         &policy_id,
-        PolicyCmd::SetRelationship(Relationship::with_entity(
-            "ring_policy",
-            &policy_id,
-            "creator",
-            actor(),
-        )),
+        PolicyCmd::SetRelationship(
+            crate::acp::relationship_values::actor_relationship(
+                "ring_policy",
+                &policy_id,
+                "creator",
+                &actor(),
+            )
+            .unwrap(),
+        ),
     )
     .unwrap();
     let mut peers = Vec::new();
@@ -518,12 +521,15 @@ fn ring_updates_require_acp_authority_and_reject_stale_commands_within_one_revis
     acp.direct_policy_cmd(
         &actor(),
         &initial.config.policy_id,
-        PolicyCmd::SetRelationship(Relationship::with_entity(
-            "ring",
-            &initial.id,
-            "operator",
-            actor(),
-        )),
+        PolicyCmd::SetRelationship(
+            crate::acp::relationship_values::actor_relationship(
+                "ring",
+                &initial.id,
+                "operator",
+                &actor(),
+            )
+            .unwrap(),
+        ),
     )
     .unwrap();
     let changed = apply(&mut vera, &mut acp, &refresh, 3).unwrap();
@@ -598,12 +604,15 @@ fn ring_pre_share_endpoints_are_mutable_via_acp_update() {
     acp.direct_policy_cmd(
         &actor(),
         &initial.config.policy_id,
-        PolicyCmd::SetRelationship(Relationship::with_entity(
-            "ring",
-            &initial.id,
-            "operator",
-            actor(),
-        )),
+        PolicyCmd::SetRelationship(
+            crate::acp::relationship_values::actor_relationship(
+                "ring",
+                &initial.id,
+                "operator",
+                &actor(),
+            )
+            .unwrap(),
+        ),
     )
     .unwrap();
     let update = |sequence, update| RingCommand::Update {
@@ -671,12 +680,15 @@ fn ring_reporting_relays_and_reshare_targets_preserve_controller_constraints() {
     acp.direct_policy_cmd(
         &actor(),
         &initial.config.policy_id,
-        PolicyCmd::SetRelationship(Relationship::with_entity(
-            "ring",
-            &initial.id,
-            "operator",
-            actor(),
-        )),
+        PolicyCmd::SetRelationship(
+            crate::acp::relationship_values::actor_relationship(
+                "ring",
+                &initial.id,
+                "operator",
+                &actor(),
+            )
+            .unwrap(),
+        ),
     )
     .unwrap();
     let update = |sequence, update| RingCommand::Update {

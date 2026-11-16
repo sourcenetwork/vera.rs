@@ -13,7 +13,8 @@ fn fixture() -> (AcpModule, Did, String, AccessRequest) {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     let object = Object {
         resource: "file".into(),
         id: "report".into(),
@@ -119,8 +120,8 @@ fn final_decision_write_reservation_is_atomic_and_borsh_compatible() {
     assert!(short_budget.is_exhausted());
     assert_eq!(short.store.serialize(), original.store.serialize());
     assert!(Arc::ptr_eq(
-        &short.zanzibar_policies[&policy],
-        &original.zanzibar_policies[&policy]
+        &short.policies[&policy],
+        &original.policies[&policy]
     ));
 }
 
@@ -229,7 +230,8 @@ fn expression_work_is_charged_when_record_reads_are_identical() {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     let object = Object {
         resource: "file".into(),
         id: "report".into(),
@@ -241,12 +243,15 @@ fn expression_work_is_charged_when_record_reads_are_identical() {
         .direct_policy_cmd(
             &owner,
             &policy,
-            PolicyCmd::SetRelationship(Relationship::with_entity(
-                "file",
-                "report",
-                "reader",
-                actor.clone(),
-            )),
+            PolicyCmd::SetRelationship(
+                crate::acp::relationship_values::actor_relationship(
+                    "file",
+                    "report",
+                    "reader",
+                    &actor.clone(),
+                )
+                .unwrap(),
+            ),
         )
         .unwrap();
     let request = |permission: &str| AccessRequest {
@@ -264,9 +269,7 @@ fn expression_work_is_charged_when_record_reads_are_identical() {
     let mut read_usage = Vec::new();
     for request in [&simple, &repeated] {
         let capture = ReadCapture::new(module.store.clone(), PERMISSION_READ_LIMITS);
-        assert!(
-            zanzibar_store::evaluate_access_request(capture.clone(), &policy, request).unwrap()
-        );
+        assert!(evaluation::evaluate_access_request(capture.clone(), &policy, request).unwrap());
         let remaining = capture.remaining_limits().unwrap();
         read_usage.push((
             capture.requests().unwrap(),

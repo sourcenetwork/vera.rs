@@ -7,7 +7,8 @@ use super::{
 };
 
 /// Caller-owned permission allowance retained outside rollback snapshots.
-/// Clones share read/write accounting and 32 units per evaluation step. Request
+/// Clones share read/write accounting and 32 units per evaluation step (one
+/// node of acp's search). Request
 /// processing costs eight units per 16 bytes; reads and writes use the same
 /// encoded-byte prices as policy edits. Hard permission limits remain separate.
 #[derive(Clone, Debug)]
@@ -85,11 +86,11 @@ impl PermissionBudget {
     }
 }
 
-impl vera_zanzibar::engine::EvaluationMeter for PermissionBudget {
-    fn charge_step(&self) -> vera_zanzibar::error::Result<()> {
+impl ::acp::eval::Meter<super::record_error::RecordError> for PermissionBudget {
+    fn charge(&self) -> std::result::Result<(), super::record_error::RecordError> {
         self.records
             .pair()
-            .map_err(|error| vera_zanzibar::error::Error::Serialization(error.to_string()))
+            .map_err(|error| super::record_error::RecordError::unavailable(error.to_string()))
     }
 }
 

@@ -54,8 +54,9 @@ fn creation_exact_allowance_and_last_write_failure_preserve_id_allocation() {
             .execute_create_policy_with_budget(&owner, &request, &block, &tx, &exact_budget)
             .unwrap()
             .policy
-            .id,
-        record.policy.id
+            .id
+            .to_string(),
+        record.policy.id.to_string()
     );
     assert_eq!(exact.store.serialize(), measured.store.serialize());
     assert_eq!(exact_budget.consumed(), required);
@@ -67,14 +68,15 @@ fn creation_exact_allowance_and_last_write_failure_preserve_id_allocation() {
     ));
     assert!(short_budget.is_exhausted());
     assert_eq!(short.store.serialize(), original.store.serialize());
-    assert!(short.zanzibar_policies.is_empty());
+    assert!(short.policies.is_empty());
     assert_eq!(
         short
             .execute_create_policy(&owner, &request, &block, &tx)
             .unwrap()
             .policy
-            .id,
-        record.policy.id
+            .id
+            .to_string(),
+        record.policy.id.to_string()
     );
 }
 
@@ -133,7 +135,7 @@ fn creation_charges_invalid_definition_work() {
     ));
     assert!(budget.consumed() > 0);
     assert_eq!(module.store.serialize(), before);
-    assert!(module.zanzibar_policies.is_empty());
+    assert!(module.policies.is_empty());
 }
 
 fn nonce(byte: u8) -> PolicyNonce {
@@ -159,8 +161,8 @@ fn genesis_seeded_policies_match_predicted_ids() {
     let records = module
         .initialize_policies(&owner, &[seed(POLICY, 1), seed(other_policy, 2)])
         .unwrap();
-    assert_eq!(records[0].policy.id, predicted_first);
-    assert_eq!(records[1].policy.id, predicted_second);
+    assert_eq!(records[0].policy.id.as_str(), predicted_first);
+    assert_eq!(records[1].policy.id.as_str(), predicted_second);
     assert_eq!(records[0].nonce, nonce(1));
     module.validate_restored_state().unwrap();
 
@@ -180,7 +182,7 @@ fn genesis_seeded_policies_match_predicted_ids() {
     let live = module
         .create_policy(&owner, POLICY, yaml.clone(), nonce(9))
         .unwrap();
-    assert_ne!(live.policy.id, predicted_first);
+    assert_ne!(live.policy.id.as_str(), predicted_first);
 }
 
 #[test]
@@ -208,7 +210,7 @@ fn placed_policies_take_the_chosen_nonces_and_owners() {
         (other, "did:key:second"),
     ]) {
         assert_eq!(
-            record.policy.id,
+            record.policy.id.to_string(),
             AcpModule::predict_policy_id(definition, &yaml, &nonce(0), owner).unwrap()
         );
         assert_eq!(record.metadata.owner_did, owner);
@@ -223,7 +225,7 @@ fn placed_policies_take_the_chosen_nonces_and_owners() {
         .create_policy(&owner, POLICY, yaml.clone(), nonce(3))
         .unwrap();
     assert_eq!(
-        live.policy.id,
+        live.policy.id.to_string(),
         AcpModule::predict_policy_id(POLICY, &yaml, &nonce(3), owner.as_str()).unwrap()
     );
     module.validate_restored_state().unwrap();
@@ -268,7 +270,7 @@ fn every_spelling_of_a_key_gives_one_id() {
             nonce(0),
         )
         .unwrap();
-    assert!(ids.contains(&created.policy.id));
+    assert!(ids.contains(created.policy.id.as_str()));
     assert!(matches!(
         module.create_policy(&Did::new(&spellings[1]).unwrap(), POLICY, yaml, nonce(0)),
         Err(AcpError::PolicyAlreadyExists { .. })

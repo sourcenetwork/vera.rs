@@ -220,7 +220,7 @@ async fn native_workers_preserve_policy_ownership_results_and_revocation() {
         (&second_id, &second_receipt, &second),
     ] {
         let record = policy(&client, id, minimum, &trusted).await;
-        assert_eq!(record.policy.id, *id);
+        assert_eq!(record.policy.id.to_string(), *id);
         assert_eq!(record.raw_policy, POLICY);
         assert_eq!(record.metadata.owner_did, owner);
         assert_eq!(record.metadata.tx_signer, worker.did());

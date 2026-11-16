@@ -35,15 +35,12 @@ impl AcpModule {
         budget: &QueryBudget,
     ) -> Result<RecordPage<PolicyRecord>> {
         self.record_page(keys::POLICY_PREFIX, after, budget, |key, value| {
-            let record: PolicyRecord = serde_json::from_slice(value)
+            let record: PolicyRecord = PolicyRecord::from_json(value)
                 .map_err(|error| AcpError::State(format!("invalid policy: {error}")))?;
-            if record.policy.id.len() != 64
-                || !record
-                    .policy
-                    .id
-                    .bytes()
-                    .all(|byte| byte.is_ascii_hexdigit())
-                || keys::policy_key(&record.policy.id) != key
+            let id = record.policy.id.as_str();
+            if id.len() != 64
+                || !id.bytes().all(|byte| byte.is_ascii_hexdigit())
+                || keys::policy_key(id) != key
             {
                 return Err(AcpError::State("policy key mismatch".into()));
             }
@@ -72,7 +69,7 @@ impl AcpModule {
     ) -> Result<RecordPage<RelationshipRecord>> {
         let policy = self.query_policy_with_budget(policy_id, budget)?;
         let mut selector = request.selector.clone();
-        spelling::selector(&policy.policy, &mut selector);
+        spelling::selector(&mut selector);
         let after = request.after.as_deref();
         if after.is_some_and(|key| {
             key.len() > 64 << 10 || !key.starts_with(&keys::relationship_policy_prefix(policy_id))

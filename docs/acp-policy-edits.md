@@ -1,30 +1,26 @@
 # Policy edits, object archive and cleanup
 
-A policy edit changes the definition at one finalized revision. Existing resource
-names and the actor resource name remain fixed. Surviving relation names keep
-their grants, including when an expression, type restriction or manager changes.
-Removing a relation also removes grants that refer to it as a userset. Recreating
-the name does not restore those grants.
-
-An existing resource keeps its registration parent relation and that relation's
-target resource type. Vera rejects edits that add, remove, rename or retarget
-the registration parent on an existing resource. A new resource can declare
-its parent when it is introduced.
+A policy edit changes the definition at one finalized revision; acp plans it
+(`acp::policy::plan_edit`). Existing resource names remain fixed. Surviving
+relation and permission names keep their grants, including when an expression,
+type restriction or manager changes; a grant a narrowed type no longer admits
+does not count until the type admits it again. Removing a relation or permission
+also removes grants that refer to it as an actor set. Recreating the name does
+not restore those grants.
 
 ## Stored identities
 
-`PolicyRecord.relations` maps compiled resource/relation names to immutable numeric
-identities and retains the next unused identity. Positive identities are allocated
-monotonically. Every object resource's implicit `owner` relation uses zero because
-resources and their ownership relation cannot be removed. Actor roles use positive
-identities.
+`PolicyRecord.relations` maps each resource's relation and permission names to
+immutable numeric identities and retains the next unused identity. Positive
+identities are allocated monotonically. Every resource's implicit `owner` relation
+uses zero because resources and their ownership relation cannot be removed. The
+actor resource has no relations and no identities.
 
 `RelationshipRecord.generations` binds two identities:
 
 - `target`: the relationship's own relation.
-- `subject`: the referenced relation for a nonempty userset subject. Actors,
-  wildcards, object references without a relation, and references to a permanent
-  owner relation use zero.
+- `subject`: the relation an actor-set subject names. Actors, all actors, object
+  subjects, and actor sets naming the permanent owner relation use zero.
 
 The two relation identities and mandatory `RelationshipRecord.incarnation` bind
 each physical grant to its target object state:

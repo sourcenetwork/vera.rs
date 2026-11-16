@@ -1,5 +1,6 @@
 use super::*;
 use crate::native::{policy_prefix_page_at, policy_prefix_proof_at, prefix_proof_at};
+use vera_modules::acp::{relationship_values::actor_relationship, types::Relationship};
 use vera_permission::{
     ModuleId, PAGE_PROOF_BYTES, PrefixPageRequest, RECORD_PROOF_BYTES, encoded_size,
 };
@@ -22,7 +23,8 @@ fn policy_evidence_revokes_retained_relationships_at_the_deletion_root() {
                 )
                 .unwrap()
                 .policy
-                .id;
+                .id
+                .to_string();
             state
                 .acp
                 .direct_policy_cmd(
@@ -212,6 +214,7 @@ resources:
   - name: document
     relations:
       - name: reader
+        types: [actor, group->member]
   - name: group
     relations:
       - name: member
@@ -231,7 +234,7 @@ resources:
                     Default::default(),
                 )
                 .unwrap();
-            let id = &policy.policy.id;
+            let id = &policy.policy.id.to_string();
             state
                 .acp
                 .direct_policy_cmd(
@@ -243,12 +246,18 @@ resources:
                     }),
                 )
                 .unwrap();
-            let direct = Relationship::with_entity("document", "report", "reader", actor.clone());
-            let userset = Relationship::new(
+            let direct = vera_modules::acp::relationship_values::actor_relationship(
                 "document",
                 "report",
                 "reader",
-                Subject::entity_set("group", "staff", "member"),
+                &actor.clone(),
+            )
+            .unwrap();
+            let userset = vera_modules::acp::relationship_values::relationship(
+                "document",
+                "report",
+                "reader",
+                vera_modules::acp::relationship_values::actor_set("group", "staff", "member"),
             );
             for relationship in [&direct, &userset] {
                 state
@@ -278,7 +287,10 @@ resources:
                     .policy
             };
             let before = state.clone();
-            let removed_schema = SCHEMA.replace("    relations:\n      - name: reader\n", "");
+            let removed_schema = SCHEMA.replace(
+                "    relations:\n      - name: reader\n        types: [actor, group->member]\n",
+                "",
+            );
             assert_eq!(
                 state
                     .acp
@@ -394,18 +406,14 @@ resources:
                 Default::default(),
             )
             .unwrap();
-        let id = &policy.policy.id;
-        let assigned =
-            Relationship::with_entity("host_specs", "revision-1", "assigned", host.clone());
+        let id = &policy.policy.id.to_string();
+        let assigned = actor_relationship("host_specs", "revision-1", "assigned", &host).unwrap();
         let generation = policy.relations.pair(&assigned).unwrap().target;
         let all = keys::relationship_policy_prefix(id);
         let scoped = keys::relationship_target_prefix(id, generation);
 
         let grant = |state: &mut ModuleState, row: &Relationship| {
-            let object = Object {
-                resource: row.resource.clone(),
-                id: row.object_id.clone(),
-            };
+            let object = Object::from(&row.object);
             state
                 .acp
                 .direct_policy_cmd(&issuer, id, PolicyCmd::RegisterObject(object))
@@ -427,12 +435,13 @@ resources:
             (10_000, false),
         ] {
             for i in reports..count {
-                let report = Relationship::with_entity(
+                let report = actor_relationship(
                     "host_observations",
                     format!("report-{i:05}"),
                     "reader",
-                    host.clone(),
-                );
+                    &host,
+                )
+                .unwrap();
                 grant(&mut state, &report);
             }
             reports = count;

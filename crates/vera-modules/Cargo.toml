@@ -11,15 +11,13 @@ repository.workspace = true
 readme = "README.md"
 
 [dependencies]
-vera-acp.workspace = true
+acp.workspace = true
 vera-crypto.workspace = true
 vera-identity.workspace = true
 orbis-reporting.workspace = true
-vera-zanzibar.workspace = true
 
 alloy-sol-types.workspace = true
 alloy-primitives = { workspace = true, features = ["serde"] }
-async-trait.workspace = true
 borsh.workspace = true
 bytes.workspace = true
 bs58 = "0.5"

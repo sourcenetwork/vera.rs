@@ -174,17 +174,17 @@ fn generation_fixture() -> (
             Default::default(),
         )
         .unwrap();
-    let relationship = vera_zanzibar::Relationship::new(
+    let relationship = vera_modules::acp::relationship_values::relationship(
         "file",
         "report",
         "reader",
-        vera_zanzibar::Subject::entity_set("group", "staff", "member"),
+        vera_modules::acp::relationship_values::actor_set("group", "staff", "member"),
     );
     let record = RelationshipRecord {
         incarnation: 0,
         generations: policy.relations.pair(&relationship).unwrap(),
         supplied_metadata: Default::default(),
-        policy_id: policy.policy.id.clone(),
+        policy_id: policy.policy.id.to_string(),
         relationship,
         archived: false,
         metadata: policy.metadata.clone(),
@@ -215,7 +215,7 @@ fn typed_relationships_reject_retired_source_and_userset_generations_after_readd
         let (_, retired) = module
             .edit_policy(
                 &"did:key:owner".parse().unwrap(),
-                &policy.policy.id,
+                &policy.policy.id.to_string(),
                 &removed,
                 PolicyMarshalingType::ShortYaml,
             )
@@ -224,7 +224,7 @@ fn typed_relationships_reject_retired_source_and_userset_generations_after_readd
         let (_, restored) = module
             .edit_policy(
                 &"did:key:owner".parse().unwrap(),
-                &policy.policy.id,
+                &policy.policy.id.to_string(),
                 GENERATION_POLICY,
                 PolicyMarshalingType::ShortYaml,
             )
@@ -257,7 +257,7 @@ fn current_relationship(
     key: &[u8],
     value: &[u8],
 ) -> Result<bool, PermissionError> {
-    let record = relationship_record(&policy.policy.id, key, value)?;
+    let record = relationship_record(&policy.policy.id.to_string(), key, value)?;
     super::current_relationship(policy, &record, 0)
 }
 
@@ -269,16 +269,16 @@ fn relationship_incarnations_bind_keys_and_never_reactivate_retired_grants() {
     record.incarnation = 1;
     let (key, value) = relationship_bytes(&record);
     assert_ne!(key, old_key);
-    assert!(relationship_record(&policy.policy.id, &old_key, &value).is_err());
-    assert!(relationship_record(&policy.policy.id, &key, &old_value).is_err());
-    let decoded = relationship_record(&policy.policy.id, &key, &value).unwrap();
+    assert!(relationship_record(&policy.policy.id.to_string(), &old_key, &value).is_err());
+    assert!(relationship_record(&policy.policy.id.to_string(), &key, &old_value).is_err());
+    let decoded = relationship_record(&policy.policy.id.to_string(), &key, &value).unwrap();
     assert!(super::current_relationship(&policy, &decoded, 1).unwrap());
     assert!(super::current_relationship(&policy, &decoded, 0).is_err());
     let mut missing = serde_json::to_value(record).unwrap();
     missing.as_object_mut().unwrap().remove("incarnation");
     assert!(
         relationship_record(
-            &policy.policy.id,
+            &policy.policy.id.to_string(),
             &key,
             &serde_json::to_vec(&missing).unwrap()
         )

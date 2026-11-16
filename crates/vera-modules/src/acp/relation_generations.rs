@@ -6,11 +6,11 @@ use std::{
 };
 
 use super::record_error::{RecordError, Result};
+use ::acp::domain::{OWNER_RELATION, ProcessedPolicy, Relationship, Subject};
 use serde::{
     Deserialize, Deserializer, Serialize,
     de::{MapAccess, Visitor},
 };
-use vera_acp::{Policy, Relationship, Subject};
 
 /// The target and optional userset dependency of a stored relationship.
 #[derive(
@@ -55,8 +55,8 @@ pub struct RelationGenerations {
 }
 
 impl RelationGenerations {
-    /// Assign identities to a policy's compiled relations, including actor roles.
-    pub fn new(policy: &Policy) -> Result<Self> {
+    /// Assign identities to a policy's relations and permissions.
+    pub fn new(policy: &ProcessedPolicy) -> Result<Self> {
         let mut state = Self {
             next: 1,
             active: BTreeMap::new(),
@@ -72,16 +72,15 @@ impl RelationGenerations {
     }
 
     /// Preserve surviving names and retire removed identities atomically.
-    pub fn updated(&self, old: &Policy, new: &Policy) -> Result<(Self, BTreeSet<u64>)> {
+    pub fn updated(
+        &self,
+        old: &ProcessedPolicy,
+        new: &ProcessedPolicy,
+    ) -> Result<(Self, BTreeSet<u64>)> {
         self.validate(old)?;
         let new_names = names(new)?;
-        if old.actor.as_ref().map(|actor| &actor.name)
-            != new.actor.as_ref().map(|actor| &actor.name)
-        {
-            return Err(invalid("actor resource cannot be renamed"));
-        }
         for resource in &old.resources {
-            if !new_names.contains_key(&resource.name) {
+            if !new_names.contains_key(resource.name.as_str()) {
                 return Err(invalid("existing resources cannot be removed"));
             }
         }
@@ -110,7 +109,7 @@ impl RelationGenerations {
     }
 
     /// Reject metadata that differs from the compiled policy or reuses an identity.
-    pub fn validate(&self, policy: &Policy) -> Result<()> {
+    pub fn validate(&self, policy: &ProcessedPolicy) -> Result<()> {
         if self.next == 0 {
             return Err(invalid("zero next relation generation"));
         }
@@ -157,15 +156,16 @@ impl RelationGenerations {
                     relation: relation.into(),
                 })
         };
-        let target = lookup(&relationship.resource, &relationship.relation)?;
+        let target = lookup(
+            relationship.object.resource.as_str(),
+            relationship.relation.as_str(),
+        )?;
         let subject = match &relationship.subject {
-            Subject::EntitySet {
-                resource, relation, ..
-            } if !relation.is_empty() => lookup(resource, relation)?,
-            Subject::EntitySet { resource, .. } if !self.active.contains_key(resource) => {
-                return Err(RecordError::UnknownResource(resource.clone()));
+            Subject::ActorSet(set) => lookup(set.object.resource.as_str(), set.relation.as_str())?,
+            Subject::Object(object) if !self.active.contains_key(object.resource.as_str()) => {
+                return Err(RecordError::UnknownResource(object.resource.to_string()));
             }
-            _ => 0,
+            Subject::Actor(_) | Subject::AllActors | Subject::Object(_) => 0,
         };
         Ok(RelationPair { target, subject })
     }
@@ -201,34 +201,38 @@ fn invalid(message: &str) -> RecordError {
     RecordError::invalid(message)
 }
 
-fn names(policy: &Policy) -> Result<BTreeMap<String, BTreeMap<String, bool>>> {
+/// Every relation and permission name of each resource; `true` marks the
+/// permanent owner relation.
+fn names(policy: &ProcessedPolicy) -> Result<BTreeMap<String, BTreeMap<String, bool>>> {
     let mut names = BTreeMap::new();
-    for (resource, object) in policy
-        .resources
-        .iter()
-        .map(|r| (r, true))
-        .chain(policy.actor.iter().map(|r| (r, false)))
-    {
-        if resource.name.is_empty() || names.contains_key(&resource.name) {
+    for resource in &policy.resources {
+        let name = resource.name.as_str();
+        if name.is_empty() || names.contains_key(name) {
             return Err(invalid("empty or duplicate generation resource"));
         }
         let mut relations = BTreeMap::new();
-        for relation in &resource.relations {
-            if relation.name.is_empty()
+        let declared = std::iter::once(&resource.owner.name)
+            .chain(resource.relations.iter().map(|relation| &relation.name))
+            .chain(
+                resource
+                    .permissions
+                    .iter()
+                    .map(|permission| &permission.name),
+            );
+        for relation in declared {
+            let relation = relation.as_str();
+            if relation.is_empty()
                 || relations
-                    .insert(relation.name.clone(), object && relation.name == "owner")
+                    .insert(relation.to_owned(), relation == OWNER_RELATION)
                     .is_some()
             {
                 return Err(invalid("empty or duplicate generation relation"));
             }
-            if !object && relation.name == "owner" {
-                return Err(invalid("actor roles cannot declare owner"));
-            }
         }
-        if object && !relations.contains_key("owner") {
+        if !relations.contains_key(OWNER_RELATION) {
             return Err(invalid("object resource is missing owner"));
         }
-        names.insert(resource.name.clone(), relations);
+        names.insert(name.to_owned(), relations);
     }
     Ok(names)
 }

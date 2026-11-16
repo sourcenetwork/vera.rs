@@ -13,9 +13,9 @@ fn definition(remove_even_readers: bool, reverse: bool) -> String {
         };
         let reader = !remove_even_readers || index % 2 != 0;
         result.push_str(&format!(
-            "  - name: resource_{index:03}\n    relations:\n{}      - name: writer\n    permissions:\n      - name: read\n        expr: {}\n",
+            "  - name: resource_{index:03}\n    relations:\n{}      - name: writer\n    permissions:\n      - name: read\n{}",
             if reader { "      - name: reader\n" } else { "" },
-            if reader { "reader" } else { "owner" },
+            if reader { "        expr: reader\n" } else { "" },
         ));
     }
     result
@@ -32,7 +32,7 @@ fn reader_resources(module: &AcpModule, policy: &str) -> BTreeSet<String> {
         )
         .unwrap()
         .into_iter()
-        .map(|record| record.relationship.resource)
+        .map(|record| record.relationship.object.resource.to_string())
         .collect()
 }
 
@@ -57,7 +57,8 @@ fn reordered_schema_keeps_resource_identities_and_recreated_relations_revoked() 
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     for index in 0..RESOURCES {
         let resource = format!("resource_{index:03}");
         module
@@ -74,12 +75,15 @@ fn reordered_schema_keeps_resource_identities_and_recreated_relations_revoked() 
             .direct_policy_cmd(
                 &owner,
                 &policy,
-                PolicyCmd::SetRelationship(Relationship::with_entity(
-                    resource,
-                    "report",
-                    "reader",
-                    reader.clone(),
-                )),
+                PolicyCmd::SetRelationship(
+                    crate::acp::relationship_values::actor_relationship(
+                        resource,
+                        "report",
+                        "reader",
+                        &reader.clone(),
+                    )
+                    .unwrap(),
+                ),
             )
             .unwrap();
     }
@@ -191,12 +195,15 @@ fn reordered_schema_keeps_resource_identities_and_recreated_relations_revoked() 
         .direct_policy_cmd(
             &owner,
             &policy,
-            PolicyCmd::SetRelationship(Relationship::with_entity(
-                "resource_000",
-                "report",
-                "reader",
-                reader,
-            )),
+            PolicyCmd::SetRelationship(
+                crate::acp::relationship_values::actor_relationship(
+                    "resource_000",
+                    "report",
+                    "reader",
+                    &reader,
+                )
+                .unwrap(),
+            ),
         )
         .unwrap();
     module = restore(&module);

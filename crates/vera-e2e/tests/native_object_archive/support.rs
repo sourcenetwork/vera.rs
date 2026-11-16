@@ -288,7 +288,8 @@ pub(super) async fn check_members(
             "node {index}: incoming userset changed"
         );
         for row in page.records.iter().filter(|row| {
-            row.relationship.object_id == "report" && row.relationship.relation != "owner"
+            row.relationship.object.id.as_str() == "report"
+                && row.relationship.relation.as_str() != "owner"
         }) {
             assert_eq!(row.incarnation, expected.incarnation);
         }

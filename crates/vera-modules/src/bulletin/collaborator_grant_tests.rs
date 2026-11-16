@@ -16,12 +16,13 @@ fn tx() -> TxExecCtx {
 }
 
 fn grant(namespace_id: &str, writer: &Did) -> Relationship {
-    Relationship {
-        resource: "namespace".into(),
-        object_id: namespace_id.into(),
-        relation: "collaborator".into(),
-        subject: Subject::Entity(writer.clone()),
-    }
+    crate::acp::relationship_values::actor_relationship(
+        "namespace",
+        namespace_id,
+        "collaborator",
+        writer,
+    )
+    .unwrap()
 }
 
 fn registered() -> (BulletinModule, AcpModule, Namespace, String) {

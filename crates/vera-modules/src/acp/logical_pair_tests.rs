@@ -19,15 +19,16 @@ fn fixture(count: usize) -> (AcpModule, String, RelationshipRecord) {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     let definition = module.query_policy(&policy).unwrap();
     let mut last = None;
     for index in 0..count {
-        let relationship = Relationship::new(
+        let relationship = crate::acp::relationship_values::relationship(
             "file",
             format!("item-{index:03}"),
             "reader",
-            vera_acp::Subject::entity_set("group", "staff", "member"),
+            crate::acp::relationship_values::actor_set("group", "staff", "member"),
         );
         let record = RelationshipRecord {
             incarnation: 0,

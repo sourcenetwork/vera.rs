@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, sync::Mutex};
 
 use alloy_primitives::B256;
 use bytes::Bytes;
-use vera_modules::acp::zanzibar_store::evaluate_access_request;
+use vera_modules::acp::evaluation::evaluate_access_request;
 
 use super::{
     AccessRequest, PermissionError, PermissionLimits, PermissionProof, PermissionRead,

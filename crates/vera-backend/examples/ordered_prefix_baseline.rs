@@ -42,7 +42,6 @@ use vera_modules::acp::{
     AcpModule, keys,
     types::{PolicyMarshalingType, PolicyRecord},
 };
-use vera_zanzibar::{Relationship, Subject};
 
 type LogCodec = ((RangeCfg<usize>, ()), RangeCfg<usize>);
 
@@ -91,14 +90,14 @@ fn prefix(object: usize, layout: &str, policy: &PolicyRecord) -> Vec<u8> {
     match layout {
         "grouped" => Sha256::hash(&[text.as_bytes()]).to_vec(),
         "native" => keys::relationship_generation_prefix(
-            &policy.policy.id,
+            &policy.policy.id.to_string(),
             policy
                 .relations
-                .pair(&Relationship::new(
+                .pair(&vera_modules::acp::relationship_values::relationship(
                     "document",
                     "",
                     "blocked",
-                    Subject::entity_set("group", "", "member"),
+                    vera_modules::acp::relationship_values::actor_set("group", "", "member"),
                 ))
                 .unwrap(),
             &keys::relation_prefix("document", &format!("{object:08}"), "blocked", 0),
@@ -109,14 +108,18 @@ fn prefix(object: usize, layout: &str, policy: &PolicyRecord) -> Vec<u8> {
 
 fn key(object: usize, subject: usize, layout: &str, policy: &PolicyRecord) -> Vec<u8> {
     if layout == "native" {
-        let relation = Relationship::new(
+        let relation = vera_modules::acp::relationship_values::relationship(
             "document",
             format!("{object:08}"),
             "blocked",
-            Subject::entity_set("group", format!("{subject:08}"), "member"),
+            vera_modules::acp::relationship_values::actor_set(
+                "group",
+                format!("{subject:08}"),
+                "member",
+            ),
         );
         return keys::relationship_generation_key(
-            &policy.policy.id,
+            &policy.policy.id.to_string(),
             policy.relations.pair(&relation).unwrap(),
             &keys::relationship_storage_key(&relation, 0),
         );
