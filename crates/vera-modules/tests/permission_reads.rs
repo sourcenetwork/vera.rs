@@ -11,6 +11,7 @@ use vera_modules::{
     acp::{
         AcpModule, keys,
         read_capture::{ReadCapture, ReadLimits, RecordRead},
+        record_error::{RecordError, Result},
         record_store::{RecordChange, RecordStore},
         types::{AccessRequest, Actor, Object, Operation, PolicyRecord, RelationshipRecord},
         zanzibar_store::{QmdbZanzibarStore, evaluate_access_request},
@@ -19,7 +20,6 @@ use vera_modules::{
 };
 use vera_zanzibar::{
     Policy, Relation, RelationExpression, Relationship, Resource, Subject, ZanzibarStore,
-    error::{Error, Result},
 };
 
 const POLICY: &str = "policy";
@@ -163,13 +163,13 @@ impl RecordStore for CoveredRecords {
         self.points
             .get(key)
             .cloned()
-            .ok_or_else(|| Error::Serialization("missing point coverage".into()))
+            .ok_or_else(|| RecordError::unavailable("missing point coverage"))
     }
     fn scan_records(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         self.prefixes
             .get(prefix)
             .cloned()
-            .ok_or_else(|| Error::Serialization("missing prefix coverage".into()))
+            .ok_or_else(|| RecordError::unavailable("missing prefix coverage"))
     }
 }
 

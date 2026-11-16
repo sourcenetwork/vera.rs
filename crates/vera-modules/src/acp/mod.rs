@@ -73,6 +73,7 @@ mod operation_budget;
 mod operation_lead;
 pub use operation_lead::POLICY_OPERATION_LEAD_KEY;
 pub mod read_capture;
+pub mod record_error;
 pub mod record_store;
 /// ACP domain types.
 pub mod types;
@@ -143,7 +144,7 @@ pub struct AcpModule {
     zanzibar_policies: OrdMap<String, Arc<Policy>>,
 }
 
-fn relation_state_error(error: vera_zanzibar::error::Error) -> AcpError {
+fn relation_state_error(error: record_error::RecordError) -> AcpError {
     AcpError::State(error.to_string())
 }
 

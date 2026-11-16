@@ -76,7 +76,7 @@ impl PermissionBudget {
         )
     }
 
-    pub(super) fn evaluation_error(&self, error: vera_zanzibar::error::Error) -> AcpError {
+    pub(super) fn evaluation_error(&self, error: super::record_error::RecordError) -> AcpError {
         if self.is_exhausted() {
             AcpError::PermissionBudgetExceeded
         } else {

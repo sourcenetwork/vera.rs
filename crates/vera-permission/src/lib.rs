@@ -4,8 +4,11 @@ use std::{collections::BTreeMap, sync::Mutex};
 
 use alloy_primitives::{B256, Bytes};
 use serde::{Deserialize, Serialize};
-use vera_modules::acp::{record_store::RecordStore, zanzibar_store::evaluate_access_request};
-use vera_zanzibar::error::{Error as EvaluationError, Result as EvaluationResult};
+use vera_modules::acp::{
+    record_error::{RecordError, Result as RecordResult},
+    record_store::RecordStore,
+    zanzibar_store::evaluate_access_request,
+};
 
 pub use vera_domain::ModuleId;
 
@@ -123,7 +126,7 @@ pub enum PermissionError {
     Invalid(&'static str),
     /// Policy evaluation failed, including missing read coverage.
     #[error(transparent)]
-    Evaluation(#[from] EvaluationError),
+    Evaluation(#[from] RecordError),
 }
 
 /// Validate a native request before evaluation or proof generation.
@@ -177,7 +180,7 @@ impl VerifiedRecords {
         &self,
         key: &[u8],
         entries: impl Iterator<Item = (usize, usize)>,
-    ) -> EvaluationResult<()> {
+    ) -> RecordResult<()> {
         let mut budget = self.remaining.lock().map_err(|_| unavailable())?;
         let result = (|| {
             budget.reads = budget.reads.checked_sub(1).ok_or_else(unavailable)?;
@@ -203,12 +206,12 @@ impl VerifiedRecords {
 }
 
 impl RecordStore for VerifiedRecords {
-    fn read_record(&self, key: &[u8]) -> EvaluationResult<Option<Vec<u8>>> {
+    fn read_record(&self, key: &[u8]) -> RecordResult<Option<Vec<u8>>> {
         let value = self.points.get(key).ok_or_else(unavailable)?;
         self.charge(key, value.iter().map(|value| (0, value.len())))?;
         Ok(value.clone())
     }
-    fn scan_records(&self, prefix: &[u8]) -> EvaluationResult<Entries> {
+    fn scan_records(&self, prefix: &[u8]) -> RecordResult<Entries> {
         let entries = self.prefixes.get(prefix).ok_or_else(unavailable)?;
         self.charge(
             prefix,
@@ -218,8 +221,8 @@ impl RecordStore for VerifiedRecords {
     }
 }
 
-fn unavailable() -> EvaluationError {
-    EvaluationError::Serialization("permission read unavailable or budget exhausted".into())
+fn unavailable() -> RecordError {
+    RecordError::unavailable("permission read unavailable or budget exhausted")
 }
 
 /// Capture required reads from one immutable module snapshot.

@@ -1,12 +1,12 @@
 //! Exact physical relationship counts for one target object and generation pair.
 
+use super::record_error::Result;
 use super::{
     keys,
     record_store::{RecordChange, RecordStore},
     relationship_index::{self, invalid},
     types::{RelationPair, RelationshipRecord},
 };
-use vera_zanzibar::error::Result;
 
 pub(super) fn policy_prefix(policy: &str) -> Vec<u8> {
     let mut prefix = relationship_index::policy_prefix(policy);

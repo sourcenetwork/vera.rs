@@ -1,7 +1,7 @@
 //! Canonical target-object incarnation points, independent of registration.
 
+use super::record_error::{RecordError, Result};
 use vera_acp::Relationship;
-use vera_zanzibar::error::{Error, Result};
 
 use super::record_store::{RecordChange, RecordStore};
 use crate::kv_store::NATIVE_MAX_KEY_BYTES;
@@ -24,8 +24,8 @@ pub fn key(policy: &str, resource: &str, object: &str) -> Vec<u8> {
     key
 }
 
-fn invalid(reason: &str) -> Error {
-    Error::Serialization(reason.into())
+fn invalid(reason: &str) -> RecordError {
+    RecordError::invalid(reason)
 }
 
 /// Validate identifiers and the encoded native key bound before allocating a key.

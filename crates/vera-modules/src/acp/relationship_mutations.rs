@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::record_error::{RecordError, Result};
 use super::{
     keys, object_pairs, object_state,
     record_store::{RecordChange, RecordStore},
@@ -9,7 +10,6 @@ use super::{
     spelling,
     types::{PolicyRecord, RelationPair, RelationshipRecord},
 };
-use vera_zanzibar::error::{Error, Result};
 
 pub(super) fn put<S: RecordStore>(store: &mut S, record: &RelationshipRecord) -> Result<()> {
     let changes = prepare_put(store, record)?;
@@ -21,7 +21,7 @@ pub(super) fn prepare_put<S: RecordStore>(
     record: &RelationshipRecord,
 ) -> Result<Vec<RecordChange>> {
     let policy = current_policy(store, &record.policy_id)?
-        .ok_or_else(|| Error::PolicyNotFound(record.policy_id.clone()))?;
+        .ok_or_else(|| RecordError::invalid(format!("policy not found: {}", record.policy_id)))?;
     // Commands rewrite actors before they reach storage; a spelling that slipped
     // through would become a second identity for the same key.
     if !spelling::is_canonical(&policy.policy, &record.relationship)

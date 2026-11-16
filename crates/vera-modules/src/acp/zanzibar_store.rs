@@ -4,9 +4,9 @@ use std::{borrow::Cow, sync::RwLock};
 
 use async_trait::async_trait;
 use vera_identity::Did;
-use vera_zanzibar::error::Result;
 use vera_zanzibar::{Policy, Relationship, Subject, ZanzibarStore};
 
+use super::record_error::{RecordError, Result};
 use super::record_store::RecordStore;
 use super::types::{
     AccessRequest, Object, PolicyMarshalingType, PolicyRecord, RecordMetadata, RelationGenerations,
@@ -15,6 +15,7 @@ use super::types::{
 use super::{keys, object_state, relationship_index, relationship_mutations, spelling};
 use crate::kv_store::InMemoryKvStore;
 use crate::types::Timestamp;
+use vera_zanzibar::error::Result as EngineResult;
 
 /// Evaluate an access request from fallible policy and relationship records.
 /// Missing data and incomplete proof coverage remain errors, including on the
@@ -50,13 +51,13 @@ impl<S: RecordStore> Evaluation<S> {
     /// of the actor or of an actor the object names.
     pub(super) fn check(&self, object: &Object, relation: &str, actor: &Did) -> Result<bool> {
         let policy = self.adapter.installed_policy();
-        self.engine.check_blocking(
+        Ok(self.engine.check_blocking(
             &policy.id,
             &object.resource,
             &spelling::object_id(policy, &object.resource, &object.id),
             relation,
             &crate::actor::canonical(actor),
-        )
+        )?)
     }
 }
 
@@ -257,8 +258,20 @@ fn deleted_policy_key(policy: &str) -> Vec<u8> {
     [b"policy/adapter_deleted/".as_slice(), policy.as_bytes()].concat()
 }
 
-fn invalid(message: &str) -> vera_zanzibar::error::Error {
-    vera_zanzibar::error::Error::Serialization(message.into())
+fn invalid(message: &str) -> RecordError {
+    RecordError::invalid(message)
+}
+
+impl From<RecordError> for vera_zanzibar::error::Error {
+    fn from(error: RecordError) -> Self {
+        Self::Serialization(error.to_string())
+    }
+}
+
+impl From<vera_zanzibar::error::Error> for RecordError {
+    fn from(error: vera_zanzibar::error::Error) -> Self {
+        Self::Evaluation(error.to_string())
+    }
 }
 
 fn default_metadata() -> RecordMetadata {
@@ -272,21 +285,20 @@ fn default_metadata() -> RecordMetadata {
 
 #[async_trait]
 impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
-    async fn store_policy(&self, policy: &Policy) -> Result<()> {
+    async fn store_policy(&self, policy: &Policy) -> EngineResult<()> {
         let mut store = self.store.write().unwrap();
         if store
             .read_record(&deleted_policy_key(&policy.id))?
             .is_some()
         {
-            return Err(invalid(
-                "deleted adapter policy identifiers cannot be reused",
-            ));
+            return Err(invalid("deleted adapter policy identifiers cannot be reused").into());
         }
         if let Some(existing) = read_policy(&*store, &policy.id)? {
             if serde_json::to_vec(&existing.policy)? != serde_json::to_vec(policy)? {
                 return Err(invalid(
                     "policy edits require generation retirement through AcpModule",
-                ));
+                )
+                .into());
             }
             return Ok(());
         }
@@ -301,15 +313,16 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
             nonce: Default::default(),
             policy_hash: vera_acp::policy_yaml::PolicyHash([0; vera_acp::policy_yaml::HASH_LEN]),
         };
-        store.write_record(&keys::policy_key(&policy.id), serde_json::to_vec(&record)?)
+        Ok(store.write_record(&keys::policy_key(&policy.id), serde_json::to_vec(&record)?)?)
     }
 
-    async fn get_policy(&self, policy_id: &str) -> Result<Option<Policy>> {
+    async fn get_policy(&self, policy_id: &str) -> EngineResult<Option<Policy>> {
         Ok(read_policy(&*self.store.read().unwrap(), policy_id)?.map(|record| record.policy))
     }
 
-    async fn list_policies(&self) -> Result<Vec<Policy>> {
-        self.store
+    async fn list_policies(&self) -> EngineResult<Vec<Policy>> {
+        Ok(self
+            .store
             .read()
             .unwrap()
             .scan_records(keys::POLICY_PREFIX)?
@@ -322,10 +335,10 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
                 record.relations.validate(&record.policy)?;
                 Ok(record.policy)
             })
-            .collect()
+            .collect::<Result<_>>()?)
     }
 
-    async fn delete_policy(&self, policy_id: &str) -> Result<bool> {
+    async fn delete_policy(&self, policy_id: &str) -> EngineResult<bool> {
         let mut store = self.store.write().unwrap();
         if read_policy(&*store, policy_id)?.is_none() {
             return Ok(false);
@@ -347,15 +360,17 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
             if key.starts_with(&super::relation_edits::retired_relation_prefix(policy_id)) {
                 return Err(invalid(
                     "adapter policy deletion cannot remove scheduled ACP relation retirement",
-                ));
+                )
+                .into());
             }
             if key.starts_with(&super::object_cleanup::marker_prefix(policy_id)) {
                 return Err(invalid(
                     "adapter policy deletion cannot remove scheduled ACP object retirement",
-                ));
+                )
+                .into());
             }
             if !removed.contains(key.as_slice()) {
-                return Err(invalid("policy deletion would retain relationship indexes"));
+                return Err(invalid("policy deletion would retain relationship indexes").into());
             }
         }
         for (key, value) in store.scan_records(&object_state::policy_prefix(policy_id))? {
@@ -369,7 +384,7 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
         Ok(true)
     }
 
-    async fn store_relationship(&self, policy_id: &str, rel: &Relationship) -> Result<()> {
+    async fn store_relationship(&self, policy_id: &str, rel: &Relationship) -> EngineResult<()> {
         let mut store = self.store.write().unwrap();
         let policy = read_policy(&*store, policy_id)?
             .ok_or_else(|| invalid("relationship policy does not exist"))?;
@@ -393,13 +408,13 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
         if let Some(bytes) = store.read_record(&key)? {
             let existing = decode_relationship(policy_id, pair, &key, &bytes)?;
             if existing.relationship != *rel {
-                return Err(invalid("relationship key collision"));
+                return Err(invalid("relationship key collision").into());
             }
         }
-        relationship_mutations::put(&mut *store, &record)
+        Ok(relationship_mutations::put(&mut *store, &record)?)
     }
 
-    async fn delete_relationship(&self, policy_id: &str, rel: &Relationship) -> Result<bool> {
+    async fn delete_relationship(&self, policy_id: &str, rel: &Relationship) -> EngineResult<bool> {
         let mut store = self.store.write().unwrap();
         let Some(policy) = read_policy(&*store, policy_id)? else {
             return Ok(false);
@@ -417,7 +432,7 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
         if let Some(bytes) = store.read_record(&key)? {
             let record = decode_relationship(policy_id, pair, &key, &bytes)?;
             if record.relationship != *rel {
-                return Err(invalid("relationship key collision"));
+                return Err(invalid("relationship key collision").into());
             }
             relationship_mutations::remove(&mut *store, &key)?;
             Ok(true)
@@ -433,11 +448,11 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
         object_id: &str,
         relation: &str,
         subject: &Subject,
-    ) -> Result<bool> {
+    ) -> EngineResult<bool> {
         let rel = Relationship::new(resource, object_id, relation, subject.clone());
         let policy = self.policy_record(&*self.store.read().unwrap(), policy_id)?;
         match policy {
-            Some(policy) => self.is_live(policy_id, &canonical(&policy.policy, &rel)),
+            Some(policy) => Ok(self.is_live(policy_id, &canonical(&policy.policy, &rel))?),
             None => Ok(false),
         }
     }
@@ -449,13 +464,13 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
         object_id: &str,
         relation: &str,
         subject: &Did,
-    ) -> Result<bool> {
+    ) -> EngineResult<bool> {
         let direct = Relationship::with_entity(resource, object_id, relation, subject.clone());
         if self.is_live(policy_id, &direct)? {
             return Ok(true);
         }
         let wildcard = Relationship::new(resource, object_id, relation, Subject::Wildcard);
-        self.is_live(policy_id, &wildcard)
+        Ok(self.is_live(policy_id, &wildcard)?)
     }
 
     async fn get_relation_subjects(
@@ -464,7 +479,7 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
         resource: &str,
         object_id: &str,
         relation: &str,
-    ) -> Result<Vec<Subject>> {
+    ) -> EngineResult<Vec<Subject>> {
         Ok(self
             .live_records(policy_id, resource, object_id, relation)?
             .into_iter()
@@ -477,7 +492,7 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
         policy_id: &str,
         resource: &str,
         object_id: &str,
-    ) -> Result<()> {
+    ) -> EngineResult<()> {
         let mut store = self.store.write().unwrap();
         let Some(policy) = read_policy(&*store, policy_id)? else {
             return Ok(());
@@ -501,9 +516,9 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
                 for (key, bytes) in store.scan_records(&prefix)? {
                     let record = decode_relationship(policy_id, pair, &key, &bytes)?;
                     if policy.relations.pair(&record.relationship)? != pair {
-                        return Err(invalid(
-                            "relationship generations differ from current policy",
-                        ));
+                        return Err(
+                            invalid("relationship generations differ from current policy").into(),
+                        );
                     }
                     keys_to_delete.push(key);
                 }
@@ -513,7 +528,7 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
         if changes.is_empty() {
             return Ok(());
         }
-        store.apply_records(changes)
+        Ok(store.apply_records(changes)?)
     }
 }
 

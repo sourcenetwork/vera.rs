@@ -162,20 +162,17 @@ impl EditRecords<'_> {
 }
 
 impl RecordStore for EditRecords<'_> {
-    fn read_record(&self, key: &[u8]) -> vera_zanzibar::error::Result<Option<Vec<u8>>> {
+    fn read_record(&self, key: &[u8]) -> super::record_error::Result<Option<Vec<u8>>> {
         let value = self.store.get_ref(key);
         self.budget
             .read(key, value)
-            .map_err(|error| vera_zanzibar::error::Error::Serialization(error.to_string()))?;
+            .map_err(|error| super::record_error::RecordError::unavailable(error.to_string()))?;
         Ok(value.map(<[u8]>::to_vec))
     }
 
-    fn scan_records(
-        &self,
-        _prefix: &[u8],
-    ) -> vera_zanzibar::error::Result<Vec<(Vec<u8>, Vec<u8>)>> {
-        Err(vera_zanzibar::error::Error::Serialization(
-            "policy edits require indexed point reads".into(),
+    fn scan_records(&self, _prefix: &[u8]) -> super::record_error::Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        Err(super::record_error::RecordError::unavailable(
+            "policy edits require indexed point reads",
         ))
     }
 }

@@ -10,16 +10,14 @@ use vera_modules::{
     acp::{
         AcpModule, keys,
         read_capture::{ReadCapture, ReadLimits, RecordRead},
+        record_error::{RecordError, Result},
         record_store::RecordStore,
         types::{AccessRequest, Actor, Object, Operation, PolicyCmd, PolicyMarshalingType},
         zanzibar_store::evaluate_access_request,
     },
     kv_store::ModuleKvStore,
 };
-use vera_zanzibar::{
-    Relationship, Subject,
-    error::{Error, Result},
-};
+use vera_zanzibar::{Relationship, Subject};
 
 type Absent = ExclusionProof<mmr::Family, Vec<u8>, VariableEncoding<Bytes>, Digest, 32>;
 type Entries = Vec<(Vec<u8>, Vec<u8>)>;
@@ -106,13 +104,13 @@ impl RecordStore for VerifiedReads {
         self.points
             .get(key)
             .cloned()
-            .ok_or_else(|| Error::Serialization("missing point coverage".into()))
+            .ok_or_else(|| RecordError::unavailable("missing point coverage"))
     }
     fn scan_records(&self, prefix: &[u8]) -> Result<Entries> {
         self.prefixes
             .get(prefix)
             .cloned()
-            .ok_or_else(|| Error::Serialization("missing prefix coverage".into()))
+            .ok_or_else(|| RecordError::unavailable("missing prefix coverage"))
     }
 }
 

@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use vera_zanzibar::error::{Error, Result};
+use super::record_error::{RecordError, Result};
 
 use super::{PermissionBudget, record_store::RecordStore};
 use crate::kv_store::InMemoryKvStore;
@@ -129,7 +129,7 @@ impl RecordStore for ReadCapture {
                 budget
                     .records
                     .read(key, value)
-                    .map_err(|error| Error::Serialization(error.to_string()))?;
+                    .map_err(|error| RecordError::unavailable(error.to_string()))?;
             }
             value
                 .map(|value| {
@@ -146,7 +146,7 @@ impl RecordStore for ReadCapture {
             budget
                 .records
                 .read(prefix, None)
-                .map_err(|error| Error::Serialization(error.to_string()))?;
+                .map_err(|error| RecordError::unavailable(error.to_string()))?;
         }
         self.read(prefix, RecordRead::Prefix, |remaining| {
             let mut entries = Vec::new();
@@ -155,7 +155,7 @@ impl RecordStore for ReadCapture {
                     budget
                         .records
                         .read(key, Some(value))
-                        .map_err(|error| Error::Serialization(error.to_string()))?;
+                        .map_err(|error| RecordError::unavailable(error.to_string()))?;
                 }
                 consume(&mut remaining.records, 1)?;
                 consume(&mut remaining.bytes, key.len())?;
@@ -172,6 +172,6 @@ fn consume(remaining: &mut usize, amount: usize) -> Result<()> {
     Ok(())
 }
 
-fn limit_error() -> Error {
-    Error::Serialization("permission read budget exceeded".into())
+fn limit_error() -> RecordError {
+    RecordError::unavailable("permission read budget exceeded")
 }

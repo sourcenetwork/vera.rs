@@ -5,12 +5,12 @@ use std::{
     marker::PhantomData,
 };
 
+use super::record_error::{RecordError, Result};
 use serde::{
     Deserialize, Deserializer, Serialize,
     de::{MapAccess, Visitor},
 };
 use vera_acp::{Policy, Relationship, Subject};
-use vera_zanzibar::error::{Error, Result};
 
 /// The target and optional userset dependency of a stored relationship.
 #[derive(
@@ -152,7 +152,7 @@ impl RelationGenerations {
     pub fn pair(&self, relationship: &Relationship) -> Result<RelationPair> {
         let lookup = |resource: &str, relation: &str| {
             self.generation(resource, relation)
-                .ok_or_else(|| Error::RelationNotFound {
+                .ok_or_else(|| RecordError::UnknownRelation {
                     resource: resource.into(),
                     relation: relation.into(),
                 })
@@ -163,7 +163,7 @@ impl RelationGenerations {
                 resource, relation, ..
             } if !relation.is_empty() => lookup(resource, relation)?,
             Subject::EntitySet { resource, .. } if !self.active.contains_key(resource) => {
-                return Err(Error::ResourceNotFound(resource.clone()));
+                return Err(RecordError::UnknownResource(resource.clone()));
             }
             _ => 0,
         };
@@ -197,8 +197,8 @@ impl RelationGenerations {
     }
 }
 
-fn invalid(message: &str) -> Error {
-    Error::Serialization(message.into())
+fn invalid(message: &str) -> RecordError {
+    RecordError::invalid(message)
 }
 
 fn names(policy: &Policy) -> Result<BTreeMap<String, BTreeMap<String, bool>>> {
