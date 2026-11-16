@@ -2,9 +2,10 @@
 
 use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
-use vera_config::{DiscoveryConfig, NetworkConfig, NodeConfig, PruningConfig};
+use vera_config::{DiscoveryConfig, NetworkConfig, NodeConfig, PruningConfig, SnapshotConfig};
+use vera_domain::PublicKey;
 
-use super::{ThreadBudget, ThreadSetup};
+use super::{Backup, DeviceRole, ThreadBudget, ThreadSetup};
 use crate::{HistoryMemory, NodeSizing, SoloDeployment, SoloError, SoloGenesis, SoloPacing};
 
 /// Configuration of an embedded single-validator node.
@@ -20,6 +21,23 @@ pub struct EmbeddedConfig {
     /// neither the validator key nor the consensus share to the directory.
     /// `None` creates the deployment on first use and keeps both in files there.
     pub deployment: Option<SoloDeployment>,
+    /// Whether this device validates the deployment or follows the device that does.
+    pub role: DeviceRole,
+    /// Transport keys of the account's backup devices.
+    ///
+    /// The active device accepts a connection only from a backup listed here.
+    /// A backup connects to the active device alone and ignores the list. It
+    /// is configuration: nothing in the deployment's state records it.
+    pub backups: Vec<PublicKey>,
+    /// Finality stall, in whole seconds, after which the node stops with an error.
+    /// Less than a second never stops it.
+    ///
+    /// A validator counts a stall whenever it could finalize; a backup only
+    /// while it is connected to the active device.
+    pub watchdog_stall: Duration,
+    /// Longest a backup started on an empty directory waits for the active
+    /// device to answer, and then for its state to arrive, before the start fails.
+    pub catch_up_timeout: Duration,
     /// Consensus network listener. A single validator dials no peers but still binds it.
     pub p2p_listen: SocketAddr,
     /// Network JSON-RPC listener. `None` exposes methods in-process only.
@@ -78,6 +96,12 @@ impl EmbeddedConfig {
             data_dir: data_dir.into(),
             genesis,
             deployment: None,
+            role: DeviceRole::Active,
+            backups: Vec::new(),
+            watchdog_stall: Duration::from_secs(NodeConfig::default().watchdog_stall_seconds),
+            catch_up_timeout: Duration::from_millis(
+                SnapshotConfig::default().initialization_timeout_ms,
+            ),
             p2p_listen,
             rpc_listen: None,
             leader_timeout: Duration::from_secs(12),
@@ -111,6 +135,28 @@ impl EmbeddedConfig {
         Ok(config)
     }
 
+    /// Defaults for a backup of the deployment `record` describes, following
+    /// the active device that listens at `active`.
+    ///
+    /// The directory may be empty, or hold this deployment from an earlier run
+    /// as a backup. The device's transport key is kept in the directory unless
+    /// [`Backup::transport_key`] supplies it.
+    pub fn backup(
+        data_dir: impl Into<PathBuf>,
+        record: impl Into<Vec<u8>>,
+        p2p_listen: SocketAddr,
+        active: SocketAddr,
+    ) -> Result<Self, SoloError> {
+        let record = record.into();
+        let mut config = Self::new(data_dir, crate::solo::record_identity(&record)?, p2p_listen);
+        config.role = DeviceRole::Backup(Box::new(Backup {
+            record,
+            active,
+            transport_key: None,
+        }));
+        Ok(config)
+    }
+
     /// The daemon configuration of this node. Its listener may sit on
     /// loopback, so it states the local discovery settings.
     pub(super) fn node_config(&self) -> NodeConfig {
@@ -123,6 +169,16 @@ impl EmbeddedConfig {
                 ..NetworkConfig::default()
             },
             pruning: self.pruning.clone(),
+            // A backup starts from the active device's state, not from genesis.
+            snapshot: matches!(self.role, DeviceRole::Backup(_)).then(|| SnapshotConfig {
+                initialization_timeout_ms: self
+                    .catch_up_timeout
+                    .as_millis()
+                    .try_into()
+                    .unwrap_or(u64::MAX),
+                ..SnapshotConfig::default()
+            }),
+            watchdog_stall_seconds: self.watchdog_stall.as_secs(),
             ..NodeConfig::default()
         }
     }

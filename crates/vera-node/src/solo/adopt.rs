@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use commonware_cryptography::ed25519::PublicKey;
 use vera_config::NodeConfig;
 use vera_genesis::VeraGenesis;
 
@@ -39,12 +40,24 @@ pub(crate) fn adopt_solo(
     genesis
         .validate_timestamp()
         .map_err(|error| SoloError::Genesis(error.to_string()))?;
+    store_record(directory, identity, &local, &genesis, deployment.record())?;
+    Ok((genesis, lone_peer(local, listen)))
+}
+
+/// Store `record` in an empty `directory`, or accept the same record already there.
+pub(super) fn store_record(
+    directory: &Path,
+    identity: &SoloGenesis,
+    local: &PublicKey,
+    genesis: &VeraGenesis,
+    record: &[u8],
+) -> Result<(), SoloError> {
     let stored = directory.join(GENESIS_FILE);
     if stored.exists() {
         let held =
             VeraGenesis::load(&stored).map_err(|error| SoloError::Genesis(error.to_string()))?;
-        check_identity(&held, identity, &local)?;
-        if json(&held)? != json(&genesis)? {
+        check_identity(&held, identity, local)?;
+        if json(&held)? != json(genesis)? {
             return Err(SoloError::Mismatch("genesis record"));
         }
     } else {
@@ -58,12 +71,11 @@ pub(crate) fn adopt_solo(
         }
         std::fs::create_dir_all(directory).map_err(|source| io(directory, source))?;
         let pending = directory.join(PENDING_FILE);
-        vera_cli::write_durable(&pending, deployment.record())
-            .map_err(|source| io(&pending, source))?;
+        vera_cli::write_durable(&pending, record).map_err(|source| io(&pending, source))?;
         std::fs::rename(&pending, &stored).map_err(|source| io(&stored, source))?;
         vera_cli::sync_parent(&stored).map_err(|source| io(directory, source))?;
     }
-    Ok((genesis, lone_peer(local, listen)))
+    Ok(())
 }
 
 /// The deployment stored in `directory` with the key material kept in its files.

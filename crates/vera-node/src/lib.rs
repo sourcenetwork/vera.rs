@@ -29,7 +29,9 @@ mod finalization_diagnostics;
 mod finalization_metrics;
 
 mod embedded;
-pub use embedded::{EmbedError, EmbeddedConfig, EmbeddedNode, ThreadBudget, ThreadSetup};
+pub use embedded::{
+    Backup, DeviceRole, EmbedError, EmbeddedConfig, EmbeddedNode, ThreadBudget, ThreadSetup,
+};
 
 mod finalize;
 pub use finalize::{index_finalized_block, subscription_data};
