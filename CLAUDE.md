@@ -449,7 +449,12 @@ its `LocalRpc` survive, and starting on a directory in use fails with
 start. The consensus listener always binds; `127.0.0.1:0` keeps
 it on loopback with a system-chosen port. An embedded node prunes consensus
 archives and state journals by default (`EmbeddedConfig::RETENTION`); finalized
-history is not pruned. See `docs/embedded-node.md`.
+history is not pruned. A host may hold the key material itself:
+`SoloDeployment` pairs the genesis record with the validator key and share,
+`EmbeddedConfig::adopt` opens it in an empty directory or the one that already
+holds it without writing either secret, and `EmbeddedNode::export` returns it
+for another device. The export carries no state, and nothing yet prevents two
+devices from both validating, which forks the deployment. See `docs/embedded-node.md`.
 
 ## Crate Structure
 

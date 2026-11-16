@@ -53,6 +53,88 @@ up with the rest of the directory.
 
 Finality proofs verify against `EmbeddedNode::consensus_key()`.
 
+## Key material held by the host
+
+By default the validator key and the consensus share are plaintext files in the
+directory, protected only by their permissions. A host that keeps secrets in
+the operating system's keystore holds them itself instead:
+
+```rust
+let deployment = SoloDeployment::create(&genesis, p2p_listen)?;
+// Store deployment.record(), deployment.keys().validator_key() and
+// deployment.keys().share() in the keystore before the first start.
+let node = EmbeddedNode::start(EmbeddedConfig::adopt(data_dir, deployment, p2p_listen)?).await?;
+```
+
+`SoloDeployment` is an existing deployment as its host holds it: the genesis
+record, which is the content of `solo-genesis.json`, and `SoloKeys`, the
+validator key and consensus share. `SoloGenesis` still describes the identity;
+`SoloDeployment::create` deals a deployment for one in memory and writes
+nothing, and `EmbeddedConfig::adopt` reads the identity back from the record.
+On later starts the host rebuilds the value from its keystore with
+`SoloDeployment::new(record, SoloKeys::decode(validator_key, share)?)`.
+
+A node started this way signs from memory. It writes the genesis record to the
+directory and never the validator key or the share: there is no `validator.key`
+and no `secrets.json`. `SoloKeys` prints only the validator's public key, its
+byte accessors return buffers that are erased when dropped, and no error
+carries key material. The node does not lock or protect its own memory.
+
+The share is checked against the record before anything is stored. Everything
+else is checked as for a deployment kept in files: the chain identifier,
+operator policy, seeded policies and the validator derived from the supplied
+key.
+
+- An empty directory receives the genesis record, written under
+  `solo-genesis.pending`, synchronized and renamed, and the node starts that
+  deployment from its genesis.
+- A directory that already holds the same deployment is opened unchanged.
+  Key files left there by an earlier start that kept them in files are not
+  removed; the host removes them once the keystore holds the material.
+- A directory that holds another deployment fails with `SoloError::Mismatch`,
+  and one that holds node state without a genesis with `SoloError::Incomplete`.
+- A share that the record's genesis was not dealt with fails with
+  `SoloError::ShareMismatch`, and nothing is written.
+
+### The share after the first epoch
+
+Each epoch ends with a resharing ceremony, and the node looks its share up by
+epoch. With one validator the ceremony's polynomial is constant, so the dealing
+the validator sends itself and the share of the next epoch both equal the share
+it started with. A node that keeps its keys in files stores that same value
+under each new epoch. The host therefore holds one share for the life of the
+deployment, and the node serves it for every epoch.
+
+Two parts of the ceremony are not kept across a restart when the host holds the
+keys. The dealer's random seed is drawn again, which changes nothing because a
+constant polynomial has no random coefficient. The dealing the validator
+received from itself is rebuilt from the share; without it a node restarted
+after its dealing was finalized would finish the epoch as an observer and hold
+no signing scheme for the next one.
+
+This holds for one validator only. A ceremony that yields a different share,
+as one with a second validator does, stops the node: a share that exists only
+in the node's memory would be lost with it.
+
+### A second device
+
+`EmbeddedNode::export()` returns the running deployment as a `SoloDeployment`:
+the genesis record with the validator key and the newest share, read from the
+files or from the material the host supplied. It can be called only in the
+host process, is not an RPC method and logs nothing. The host carries the
+result to another device over its own protected channel, and that device
+opens it with `EmbeddedConfig::adopt`.
+
+- The export carries no state. A device that adopts it has the same chain
+  identifier, consensus key and validator identity, and an empty chain at
+  height 0. Bringing its state up to date is not implemented yet.
+- Nothing stops two devices from running the deployment as validator at the
+  same time. Each then finalizes its own blocks under the same key, the two
+  histories diverge, and both verify against the deployment's consensus key.
+  Run the deployment on one device at a time.
+- Every copy is a full signing capability. A copy cannot be revoked short of
+  creating a new deployment.
+
 ## Calling the node
 
 `EmbeddedNode::rpc()` returns a `vera_jsonrpc::LocalRpc`. It dispatches into the
@@ -200,7 +282,8 @@ blocks, so idleness is not a stall.
 
 Everything is under `EmbeddedConfig::data_dir`: `validator.key`, `secrets.json`,
 `solo-genesis.json`, `native-genesis.bin`, `commonware/` and
-`history/regolith/`. The directory must not be shared with another store; a host
+`history/regolith/`. The first two are absent when
+[the host holds the key material](#key-material-held-by-the-host). The directory must not be shared with another store; a host
 that also embeds DefraDB gives each its own directory.
 
 A single validator dials no peers, but the consensus network still binds
@@ -404,6 +487,9 @@ are not a capacity or multi-validator measurement.
 ## Limits
 
 - One validator. A stopped or lost device stops the deployment.
+- A second device can open the deployment but not follow it: it starts from
+  the genesis, and running both as validator forks the deployment; see
+  [A second device](#a-second-device).
 - An idle deployment still produces a heartbeat block about every 10 s, and
   finalized history has no retention, so the directory grows without bound;
   see [Disk](#disk).

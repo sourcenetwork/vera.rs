@@ -64,6 +64,7 @@ use crate::{
     RegistryParticipants, RpcMode, SHARING_MODE, TxGossip, VOTE_CHANNEL, VrfElectorConfig,
     peer_capacity::PeerCapacity,
     rejoin,
+    secret_store::{HeldSecretStore, NodeSecretStore},
     sink::{FinalizationArtifacts, FinalizationLookup, NodeSink, SinkParts},
     spawn_tx_receiver,
     tx_admission::Admission,
@@ -121,6 +122,7 @@ async fn run_node_with_elector<
         history_memory,
         sizing,
         hold,
+        keys,
     } = options;
     let hold = hold.unwrap_or_default();
     if let RpcMode::Network(Some(listener)) = &rpc {
@@ -190,7 +192,10 @@ async fn run_node_with_elector<
             })
         })
         .transpose()?;
-    let signing_key = config.validator_key()?;
+    let signing_key = match &keys {
+        Some(keys) => keys.signer(),
+        None => config.validator_key()?,
+    };
     let local = signing_key.public_key();
     let validator_index = peers
         .participants
@@ -290,7 +295,10 @@ async fn run_node_with_elector<
 
     // Epoch-0 certificate scheme.
     let provider = DynamicProvider::default();
-    let mut store = FileSecretStore::load(&secrets_path)?;
+    let mut store = match keys {
+        Some(keys) => NodeSecretStore::Held(HeldSecretStore::new(&local, keys.consensus_share())),
+        None => NodeSecretStore::File(FileSecretStore::load(&secrets_path)?),
+    };
     let sharing = epoch_info.output.public().clone();
     match store.get_share(Epoch::zero()).await {
         Some(share) => provider.register(

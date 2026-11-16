@@ -39,6 +39,9 @@ pub struct NodeOptions {
     pub sizing: crate::NodeSizing,
     /// Lets the host stop the node between views.
     pub hold: Option<crate::ProposalHold>,
+    /// Key material of a lone validator held by the host. `None` reads the
+    /// validator key and the shares from files in the data directory.
+    pub keys: Option<crate::SoloKeys>,
 }
 
 /// Verification parallelism when the host does not choose one.
@@ -81,6 +84,7 @@ impl NodeOptions {
             history_memory: None,
             sizing: crate::NodeSizing::DAEMON,
             hold: None,
+            keys: None,
         }
     }
 }

@@ -7382,6 +7382,7 @@ dependencies = [
  "libc",
  "p256 0.13.2",
  "parking_lot",
+ "rand 0.8.8",
  "regolith",
  "serde",
  "serde_json",
@@ -7406,6 +7407,7 @@ dependencies = [
  "vera-modules",
  "vera-qmdb",
  "vera-traits",
+ "zeroize",
 ]
 
 [[package]]

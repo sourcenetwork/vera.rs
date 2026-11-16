@@ -12,6 +12,7 @@ mod thread_setup;
 
 use std::{
     net::SocketAddr,
+    path::PathBuf,
     pin::Pin,
     sync::{Arc, OnceLock},
     thread::JoinHandle,
@@ -28,7 +29,7 @@ pub use error::EmbedError;
 pub use thread_budget::ThreadBudget;
 pub use thread_setup::ThreadSetup;
 
-use crate::{NodeOptions, NodeSettings, RpcMode, WatchdogMode};
+use crate::{NodeOptions, NodeSettings, RpcMode, SoloDeployment, SoloError, WatchdogMode};
 
 /// The node's root future is polled on this thread and needs more than a spawned thread's default stack.
 const NODE_STACK_BYTES: usize = 16 * 1024 * 1024;
@@ -45,6 +46,8 @@ pub struct EmbeddedNode {
     rpc: LocalRpc,
     genesis: VeraGenesis,
     consensus_key: ConsensusPublicKey,
+    data_dir: PathBuf,
+    deployment: Option<SoloDeployment>,
     stop: Option<oneshot::Sender<()>>,
     exit: oneshot::Receiver<Result<(), EmbedError>>,
     thread: Option<JoinHandle<()>>,
@@ -62,7 +65,10 @@ impl EmbeddedNode {
             return Err(EmbedError::Config(reason));
         }
         let node_config = config.node_config();
-        let (genesis, peers) = crate::prepare_solo(&node_config, &config.genesis)?;
+        let (genesis, peers) = match &config.deployment {
+            Some(deployment) => crate::solo::adopt_solo(&node_config, &config.genesis, deployment)?,
+            None => crate::prepare_solo(&node_config, &config.genesis)?,
+        };
         let consensus_key = *genesis
             .decode_epoch_info()
             .map_err(|error| crate::SoloError::Genesis(error.to_string()))?
@@ -121,8 +127,14 @@ impl EmbeddedNode {
             history_memory: Some(config.history_memory),
             sizing: config.sizing,
             hold: Some(hold.clone()),
+            keys: config
+                .deployment
+                .as_ref()
+                .map(|deployment| deployment.keys().clone()),
         };
         let thread_setup = config.thread_setup;
+        let data_dir = config.data_dir.clone();
+        let deployment = config.deployment;
         let storage = config.data_dir.join("commonware");
         std::fs::create_dir_all(&storage).map_err(|source| crate::SoloError::Io {
             path: storage.clone(),
@@ -201,6 +213,8 @@ impl EmbeddedNode {
             rpc,
             genesis,
             consensus_key,
+            data_dir,
+            deployment,
             stop: Some(stop_tx),
             exit: exit_rx,
             thread: Some(thread),
@@ -223,6 +237,19 @@ impl EmbeddedNode {
     #[must_use]
     pub const fn consensus_key(&self) -> &ConsensusPublicKey {
         &self.consensus_key
+    }
+
+    /// The deployment's genesis record and current key material, as
+    /// [`EmbeddedConfig::adopt`] accepts them on another device.
+    ///
+    /// The result lets its holder finalize blocks for the deployment. It
+    /// carries no state, and nothing prevents two devices from running it at
+    /// once, which forks the deployment. See `docs/embedded-node.md`.
+    pub fn export(&self) -> Result<SoloDeployment, SoloError> {
+        self.deployment.as_ref().map_or_else(
+            || crate::solo::export_solo(&self.data_dir),
+            |deployment| Ok(deployment.clone()),
+        )
     }
 
     /// Wait until the node stops on its own, which is always an error.
