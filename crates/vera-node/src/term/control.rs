@@ -36,6 +36,8 @@ pub(crate) enum Command {
         role: Accept,
         reply: Reply<()>,
     },
+    /// Ask the other devices for a later term. Answers whether this device may still propose.
+    Probe { reply: oneshot::Sender<bool> },
 }
 
 /// What the host reads without asking the node.
@@ -57,6 +59,7 @@ pub(crate) struct TermControl {
 #[derive(Debug)]
 pub struct TermSeat {
     pub(crate) commands: mpsc::UnboundedReceiver<Command>,
+    pub(crate) sender: mpsc::UnboundedSender<Command>,
     pub(crate) view: Arc<View>,
 }
 
@@ -67,6 +70,7 @@ impl std::fmt::Debug for Command {
             Self::Resume { .. } => "Resume",
             Self::Offer { .. } => "Offer",
             Self::Accept { .. } => "Accept",
+            Self::Probe { .. } => "Probe",
         })
     }
 }
@@ -77,10 +81,14 @@ impl TermControl {
         let view = Arc::new(View::default());
         (
             Self {
-                commands: sender,
+                commands: sender.clone(),
                 view: view.clone(),
             },
-            TermSeat { commands, view },
+            TermSeat {
+                commands,
+                sender,
+                view,
+            },
         )
     }
 

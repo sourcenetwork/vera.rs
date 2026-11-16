@@ -4,6 +4,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use alloy_primitives::B256;
 use commonware_p2p::{Receiver, Recipients, Sender};
+use commonware_runtime::{Supervisor as _, tokio::Context};
 use vera_domain::{PublicKey, TermCertificate, TermChange, TermCut};
 use vera_executor::SharedModuleState;
 use vera_indexer::BlockIndex;
@@ -13,6 +14,7 @@ use super::{
     Accept, Switching, TermRecord, TermRefusal, TermSeat,
     control::{Command, View},
     device_id,
+    probe::Probe,
     wire::{Message, Status},
 };
 use crate::ProposalHold;
@@ -35,9 +37,12 @@ pub(crate) struct Parts<S, R> {
     pub modules: SharedModuleState,
     pub status: NodeState,
     pub network: (S, R),
+    /// What a wake check dials the other devices with.
+    pub probe: Option<Probe>,
 }
 
 struct Actor<S, R> {
+    context: Context,
     view: Arc<View>,
     record: TermRecord,
     data_dir: PathBuf,
@@ -50,12 +55,13 @@ struct Actor<S, R> {
     status: NodeState,
     sender: S,
     receiver: R,
+    probe: Option<Probe>,
     /// The newest answer of each device.
     heard: HashMap<PublicKey, Status>,
 }
 
 /// Answer the host and the other devices until the node stops.
-pub(crate) async fn run<S, R>(parts: Parts<S, R>)
+pub(crate) async fn run<S, R>(context: Context, parts: Parts<S, R>)
 where
     S: Sender<PublicKey = PublicKey>,
     R: Receiver<PublicKey = PublicKey>,
@@ -64,6 +70,7 @@ where
         mut commands, view, ..
     } = parts.seat;
     let mut actor = Actor {
+        context,
         view,
         record: parts.record,
         data_dir: parts.data_dir,
@@ -76,6 +83,7 @@ where
         status: parts.status,
         sender: parts.network.0,
         receiver: parts.network.1,
+        probe: parts.probe,
         heard: HashMap::new(),
     };
     loop {
@@ -114,6 +122,9 @@ where
                 reply,
             } => {
                 let _ = reply.send(self.accept(*certificate, role).await);
+            }
+            Command::Probe { reply } => {
+                let _ = reply.send(self.probe().await);
             }
         }
     }
@@ -361,5 +372,47 @@ where
         *self.view.certificate.write() = Some(certificate.clone());
         self.status.set_term_certificate(certificate);
         Ok(())
+    }
+
+    /// Ask every other device for a later term. Returns whether this device
+    /// may still propose.
+    async fn probe(&mut self) -> bool {
+        let (Some(switching), Some(probe), false) = (&self.switching, &self.probe, self.backup)
+        else {
+            return true;
+        };
+        let this = device_id(&switching.device_key.public_key());
+        let asked = switching
+            .devices
+            .iter()
+            .map(|device| probe.ask(self.context.child("term_probe"), device.address));
+        let held = self.seen();
+        let later = futures::future::join_all(asked)
+            .await
+            .into_iter()
+            .flatten()
+            .filter_map(|status| status.certificate)
+            .filter(|certificate| {
+                let change = &certificate.change;
+                change.term > held && change.holder != this && self.verify(certificate).is_ok()
+            })
+            .max_by_key(|certificate| certificate.change.term);
+        let Some(certificate) = later else {
+            return true;
+        };
+        tracing::warn!(
+            term = certificate.change.term,
+            cut = certificate.change.cut.height,
+            "another device holds a later term; this device stops proposing"
+        );
+        self.hold.hold();
+        self.view
+            .guard
+            .raise(certificate.change.term, certificate.change.cut.height);
+        if let Err(error) = self.store(certificate.clone()) {
+            tracing::error!(%error, "term certificate could not be stored");
+        }
+        self.view.demoted.send_replace(Some(certificate));
+        false
     }
 }

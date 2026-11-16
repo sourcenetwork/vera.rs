@@ -1,6 +1,6 @@
 //! Two devices of one account that can each be the deployment's active device.
 
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 use vera_client::{
     Secp256k1SigningKey,
@@ -18,20 +18,26 @@ pub(crate) struct Paired {
     pub backup: EmbeddedConfig,
 }
 
-/// Settings for two devices of `deployment` that list each other.
-pub(crate) fn pair(directories: [&Path; 2], deployment: &SoloDeployment) -> [Paired; 2] {
+/// Settings for two devices of `deployment` that list each other. Each
+/// asks the other for the term after `freshness` without a block of its own.
+pub(crate) fn pair(
+    directories: [&Path; 2],
+    deployment: &SoloDeployment,
+    freshness: Duration,
+) -> [Paired; 2] {
     let keys = [(); 2].map(|()| DeviceKey::generate().unwrap());
     let addresses =
         directories.map(|directory| short_epochs::settings(directory, deployment, true).p2p_listen);
     [0, 1].map(|this| {
         let other = 1 - this;
-        let switching = Switching::new(
+        let mut switching = Switching::new(
             keys[this].clone(),
             vec![Device {
                 key: keys[other].public_key(),
                 address: addresses[other],
             }],
         );
+        switching.freshness = freshness;
         let mut active = short_epochs::settings(directories[this], deployment, true);
         active.p2p_listen = addresses[this];
         active.switching = Some(switching);

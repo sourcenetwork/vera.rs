@@ -14,12 +14,18 @@ use support::{await_certified_receipt, block_on, finalize_a_write};
 use vera_client::BlsSigner;
 use vera_node::{EmbedError, EmbeddedNode, TermRefusal};
 
+const WINDOW: Duration = Duration::from_secs(30);
+
 #[test]
 fn an_announced_handover_loses_no_block_and_the_successor_crosses_the_epoch() {
     let directories = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
     let chain_id = 9_501;
     let dealt = short_epochs::deployment(chain_id, 91);
-    let [first, second] = pair([directories[0].path(), directories[1].path()], &dealt);
+    let [first, second] = pair(
+        [directories[0].path(), directories[1].path()],
+        &dealt,
+        WINDOW,
+    );
     let mut laptop = block_on(EmbeddedNode::start(first.active.clone())).unwrap();
     let mut phone = block_on(EmbeddedNode::start(second.backup.clone())).unwrap();
     assert_eq!((laptop.term(), phone.term()), (0, 0));
@@ -111,7 +117,11 @@ fn a_backup_takes_over_on_confirmation_while_the_active_device_is_down() {
     let directories = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
     let chain_id = 9_502;
     let dealt = short_epochs::deployment(chain_id, 92);
-    let [first, second] = pair([directories[0].path(), directories[1].path()], &dealt);
+    let [first, second] = pair(
+        [directories[0].path(), directories[1].path()],
+        &dealt,
+        WINDOW,
+    );
     let laptop = block_on(EmbeddedNode::start(first.active)).unwrap();
     let mut phone = block_on(EmbeddedNode::start(second.backup)).unwrap();
     let signer = BlsSigner::new(75u64.into(), chain_id).unwrap();
@@ -159,7 +169,11 @@ fn a_backup_takes_over_on_confirmation_while_the_active_device_is_down() {
 fn a_handover_needs_a_current_successor_and_is_undone_by_resuming() {
     let directories = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
     let dealt = short_epochs::deployment(9_503, 93);
-    let [first, second] = pair([directories[0].path(), directories[1].path()], &dealt);
+    let [first, second] = pair(
+        [directories[0].path(), directories[1].path()],
+        &dealt,
+        WINDOW,
+    );
     // A device that keeps its keys in files cannot become a backup, so it does not switch.
     let filed = tempfile::tempdir().unwrap();
     store_in_files(filed.path(), &dealt);
@@ -201,5 +215,72 @@ fn a_handover_needs_a_current_successor_and_is_undone_by_resuming() {
     assert_eq!(height(&laptop), change.cut.height);
     block_on(laptop.stop()).unwrap();
     assert_eq!(height(&phone), change.cut.height);
+    block_on(phone.stop()).unwrap();
+}
+
+/// Wait until `node` reports that another device holds a later term.
+fn await_demotion(node: &EmbeddedNode, term: u64) -> vera_domain::TermCertificate {
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    while node.term() < term {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the device did not learn of term {term}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    block_on(node.demoted())
+}
+
+#[test]
+fn a_device_that_wakes_asks_for_the_term_before_it_proposes() {
+    let directories = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+    let chain_id = 9_504;
+    let dealt = short_epochs::deployment(chain_id, 94);
+    let [first, second] = pair(
+        [directories[0].path(), directories[1].path()],
+        &dealt,
+        Duration::from_secs(2),
+    );
+    let laptop = block_on(EmbeddedNode::start(first.active.clone())).unwrap();
+    let mut phone = block_on(EmbeddedNode::start(second.backup)).unwrap();
+    let signer = BlsSigner::new(76u64.into(), chain_id).unwrap();
+    let before = finalize_a_write(&laptop, &signer);
+    let slept_at = height(&laptop);
+    block_on(laptop.stop()).unwrap();
+    run_until(&phone, |reached| reached >= slept_at);
+
+    // Nobody answers a device that wakes alone, and it goes on as the active device.
+    std::thread::sleep(Duration::from_secs(3));
+    let laptop = block_on(EmbeddedNode::start(first.active.clone())).unwrap();
+    let woke_at = run_until(&laptop, |reached| reached > slept_at + 2);
+    block_on(laptop.stop()).unwrap();
+    run_until(&phone, |reached| reached >= woke_at);
+    // A stop finalizes the views in flight, and those blocks are still arriving.
+    std::thread::sleep(Duration::from_secs(1));
+
+    let certificate = certify(block_on(phone.takeover_change()).unwrap());
+    block_on(phone.take_over(dealt.keys().clone(), certificate.clone())).unwrap();
+    let after = finalize_a_write(&phone, &signer);
+
+    // The device that was replaced wakes with nothing above the cut. It
+    // learns of the term before it proposes, and proposes nothing.
+    std::thread::sleep(Duration::from_secs(3));
+    let mut laptop = block_on(EmbeddedNode::start(first.active)).unwrap();
+    assert_eq!(await_demotion(&laptop, 1), certificate);
+    assert_eq!(height(&laptop), certificate.change.cut.height);
+    let status: vera_jsonrpc::NodeStatus =
+        block_on(laptop.rpc().call_empty("vera_nodeStatus")).unwrap();
+    assert_eq!(status.proposed_count, 0);
+    assert!(matches!(
+        block_on(laptop.resume()),
+        Err(EmbedError::Term(TermRefusal::Superseded(_)))
+    ));
+
+    block_on(laptop.follow(certificate)).unwrap();
+    for written in [before, after] {
+        await_certified_receipt(&laptop, written);
+    }
+    run_until(&laptop, |reached| reached >= height(&phone));
+    block_on(laptop.stop()).unwrap();
     block_on(phone.stop()).unwrap();
 }

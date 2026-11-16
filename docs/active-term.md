@@ -232,3 +232,44 @@ accepts any term at or above its parent's; it requires a certificate only to
 change its own role and to refuse lower terms. A client that must not follow
 a device holding the validator key without the operators' approval checks the
 certificate itself, as [Verifying one](#verifying-one) describes.
+
+## The wake check
+
+An active device that slept, or was stopped, cannot tell whether another
+device took the deployment over meanwhile. Nothing expires in this design:
+the active device never stops on its own. So before it proposes after a gap in
+its own blocks longer than `Switching::freshness` (30 seconds by default, the
+age a verifying client still accepts a state at), it asks every device in
+`Switching::devices` where it stands.
+
+- The gap is measured on the wall clock, from the timestamp of the device's
+  newest block at start and from each block it proposes afterwards. The wall
+  clock keeps running while a machine sleeps.
+- Two devices that both run as the validator share one network key and cannot
+  connect. The device therefore asks over a separate connection under its
+  transport key, which the device that replaced it admits as a backup's. It
+  dials each listed address and waits up to `Switching::answer_timeout` for
+  an answer.
+- An answer that carries a certificate of a later term, held by another
+  device and valid under the operator policy in this device's own state,
+  demotes the device: it stores the certificate, proposes nothing more, and
+  `EmbeddedNode::demoted` resolves with the certificate. The host then calls
+  `follow`. `resume` is refused with `TermRefusal::Superseded`.
+- With no such answer the device proposes. An idle deployment's heartbeat
+  keeps its newest block inside the window, so a device that stays awake
+  asks only once after it starts or wakes.
+
+```rust
+let mut node = EmbeddedNode::start(active_config).await?;
+tokio::select! {
+    certificate = node.demoted() => node.follow(certificate).await?,
+    // ... the host's other work
+}
+```
+
+This bounds a fork; it does not prevent one. A device that wakes while no
+other device is reachable goes on as the active device, and so does one that
+restarts inside the window. If another device took over meanwhile, both
+finalize blocks until the woken one next asks, or the host gives it the
+certificate with `follow`. Preventing that takes a lease and an always-on
+voter, which this version does not have.

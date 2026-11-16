@@ -10,12 +10,25 @@ pub(crate) struct ReadyApplication<A> {
     inner: A,
     ready: watch::Receiver<bool>,
     hold: crate::ProposalHold,
+    gate: crate::term::WakeGate,
 }
 
 impl<A> ReadyApplication<A> {
-    pub(crate) fn new(inner: A, hold: crate::ProposalHold) -> (Self, watch::Sender<bool>) {
+    pub(crate) fn new(
+        inner: A,
+        hold: crate::ProposalHold,
+        gate: crate::term::WakeGate,
+    ) -> (Self, watch::Sender<bool>) {
         let (sender, ready) = watch::channel(false);
-        (Self { inner, ready, hold }, sender)
+        (
+            Self {
+                inner,
+                ready,
+                hold,
+                gate,
+            },
+            sender,
+        )
     }
 }
 
@@ -35,8 +48,8 @@ where
         ancestry: impl Ancestry<Self::Block>,
         input: Self::Input,
     ) -> Handoff<Digested<Self::Block>> {
-        // A block built ahead of its turn would escape a hold.
-        if !*self.ready.borrow() || self.hold.is_held() {
+        // A block built ahead of its turn would escape a hold and the wake check.
+        if !*self.ready.borrow() || self.hold.is_held() || !self.gate.fresh() {
             return Handoff::Wait;
         }
         self.inner.prepare(context, ancestry, input).await
@@ -59,10 +72,15 @@ where
         let proposal = tokio::select! {
             biased;
             () = self.hold.held() => return std::future::pending().await,
-            proposal = self.inner.propose(context, ancestry, input) => proposal,
+            proposal = async {
+                // A device that may have been replaced asks before it builds.
+                self.gate.pass().await;
+                self.inner.propose(context, ancestry, input).await
+            } => proposal,
         };
         if let Some(block) = &proposal {
             self.hold.record(block.height().get());
+            self.gate.proposed();
         }
         proposal
     }
@@ -134,7 +152,11 @@ mod tests {
         tokio::Runner::default().start(|context| async move {
             let inner = RecordingApp::default();
             let calls = inner.0.clone();
-            let (mut app, ready) = ReadyApplication::new(inner, crate::ProposalHold::default());
+            let (mut app, ready) = ReadyApplication::new(
+                inner,
+                crate::ProposalHold::default(),
+                crate::term::WakeGate::default(),
+            );
             let _ = app
                 .prepare(
                     (context.child("prepare"), Block::genesis_context()),
@@ -181,7 +203,11 @@ mod tests {
         tokio::Runner::default().start(|context| async move {
             let inner = RecordingApp::default();
             let calls = inner.0.clone();
-            let (mut app, ready) = ReadyApplication::new(inner, crate::ProposalHold::default());
+            let (mut app, ready) = ReadyApplication::new(
+                inner,
+                crate::ProposalHold::default(),
+                crate::term::WakeGate::default(),
+            );
             drop(ready);
             assert!(
                 app.propose(

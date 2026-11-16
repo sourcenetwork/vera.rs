@@ -490,7 +490,10 @@ staged takeover; a device does not start as validator against them. A device
 that validated drops its vote journal when it becomes a backup. A lone
 validator signs an epoch whose ceremony it only observed with the share its
 host holds, once the epoch's sharing confirms it. Devices ask each other where
-they stand on channel 17. A backup holding a certificate stops with
+they stand on channel 17. An active device whose newest block is older than
+`Switching::freshness` asks the others under its transport key before it
+proposes, and `EmbeddedNode::demoted` resolves if one holds a later term; a
+device that wakes alone proposes on. A backup holding a certificate stops with
 `TermRefusal::LowerTerm` on a finalized block of a lower term above the cut.
 Blocks carry no certificate, so re-execution alone accepts any term at or
 above the parent's. See `docs/active-term.md`.

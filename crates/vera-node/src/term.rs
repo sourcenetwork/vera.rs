@@ -6,7 +6,9 @@
 
 mod actor;
 mod control;
+mod gate;
 mod journal;
+mod probe;
 mod record;
 mod refusal;
 mod reporter;
@@ -16,7 +18,9 @@ mod wire;
 pub(crate) use actor::{Parts, run};
 pub use control::TermSeat;
 pub(crate) use control::{Accept, TermControl};
+pub(crate) use gate::WakeGate;
 pub(crate) use journal::settle_role;
+pub(crate) use probe::Probe;
 pub(crate) use record::TermRecord;
 pub use refusal::TermRefusal;
 pub(crate) use reporter::TermReporter;

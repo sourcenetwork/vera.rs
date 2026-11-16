@@ -696,6 +696,12 @@ async fn run_node_with_elector<
     if is_backup && let Some(certificate) = &term_record.certificate {
         term.raise(certificate.change.term, certificate.change.cut.height);
     }
+    let wake = match (&switching, &seat) {
+        (Some(switching), Some(seat)) if !is_backup => {
+            crate::term::WakeGate::new(switching.freshness, seat.sender.clone())
+        }
+        _ => crate::term::WakeGate::default(),
+    };
     let application = StatefulVeraApp::<_, OrderedState>::new(
         executor.clone(),
         genesis_block.clone(),
@@ -807,6 +813,7 @@ async fn run_node_with_elector<
             blocks_per_epoch,
         ),
         hold.clone(),
+        wake.clone(),
     );
     let deferred = Deferred::new(
         context.child("deferred"),
@@ -935,6 +942,9 @@ async fn run_node_with_elector<
                     held: term.term(),
                 }
                 .into());
+            }
+            if recovered.inner().height > 0 {
+                wake.seed(recovered.inner().timestamp);
             }
         }
     }
@@ -1133,6 +1143,13 @@ async fn run_node_with_elector<
     }
 
     if let Some(seat) = seat {
+        let probe = switching.as_ref().map(|switching| crate::term::Probe {
+            signer: switching.device_key.signer(),
+            validator: peers.participants[0].clone(),
+            max_peers: max_peers_per_set,
+            rate: channel_rate,
+            timeout: switching.answer_timeout,
+        });
         let parts = crate::term::Parts {
             seat,
             record: term_record,
@@ -1145,11 +1162,12 @@ async fn run_node_with_elector<
             modules: modules.clone(),
             status: node_state.clone(),
             network: term_network,
+            probe,
         };
         state_resolver_handles.push(
             context
                 .child("term")
-                .spawn(move |_| crate::term::run(parts)),
+                .spawn(move |context| crate::term::run(context, parts)),
         );
     }
 

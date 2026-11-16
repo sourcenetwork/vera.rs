@@ -26,12 +26,17 @@ pub struct Switching {
     pub device_key: DeviceKey,
     /// The account's other devices. The active device admits each as a backup.
     pub devices: Vec<Device>,
-    /// Longest the active device waits for a successor to confirm it holds
-    /// the final block of a handover, and a backup for the cut of a takeover.
+    /// Longest gap in this device's own blocks after which it asks the other
+    /// devices for the current term before it proposes again.
+    pub freshness: Duration,
+    /// Longest the active device waits for an answer to that question, and
+    /// for a successor to confirm it holds the final block of a handover.
     pub answer_timeout: Duration,
 }
 
 impl Switching {
+    /// The gap a verifying client accepts a finalized state for.
+    pub const FRESHNESS: Duration = Duration::from_secs(30);
     /// Default wait for another device's answer.
     pub const ANSWER_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -41,6 +46,7 @@ impl Switching {
         Self {
             device_key,
             devices,
+            freshness: Self::FRESHNESS,
             answer_timeout: Self::ANSWER_TIMEOUT,
         }
     }
