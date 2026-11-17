@@ -274,6 +274,7 @@ impl IndexedRevision {
                 .map(|receipt| {
                     logs_bytes(&receipt.logs)
                         + receipt.signer_did.as_ref().map_or(0, String::capacity)
+                        + receipt.refusal.as_ref().map_or(0, |r| r.message().len())
                 })
                 .sum::<usize>()
     }
@@ -359,6 +360,7 @@ mod tests {
             logs: vec![],
             status: true,
             signer_did: None,
+            refusal: None,
         }
     }
 
@@ -396,6 +398,7 @@ mod tests {
             logs: vec![],
             status: true,
             signer_did: Some("owner".into()),
+            refusal: None,
         };
         index.insert_block(block, vec![tx], vec![receipt]);
         let retained = index.receipt_revision(&tx_hash).unwrap();
@@ -525,6 +528,7 @@ mod tests {
             logs: vec![log],
             status: true,
             signer_did: None,
+            refusal: None,
         };
 
         index.insert_block(create_test_block(1, block_hash), vec![], vec![receipt]);

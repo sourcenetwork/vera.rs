@@ -108,6 +108,32 @@ fn indexing_returns_the_hashes_it_stored_and_names_each_signer() {
 }
 
 #[test]
+fn indexing_keeps_why_a_native_request_was_refused() {
+    let mut fixture = fixture();
+    let refusal = vera_domain::Refusal::new(
+        vera_domain::RefusingModule::Acp,
+        vera_domain::RefusalKind::InvalidPolicy,
+        "invalid policy",
+    );
+    fixture.receipts[0] =
+        ExecutionReceipt::new(fixture.hashes[1], false, 5_000, 5_000, vec![], None)
+            .with_refusal(Some(refusal.clone()));
+    let index = BlockIndex::new();
+    index_finalized_block(
+        &index,
+        &fixture.block,
+        fixture.block.id().0,
+        GAS_LIMIT,
+        &fixture.receipts,
+        5_001,
+    );
+    let refused = index.get_receipt(&fixture.hashes[1]).unwrap();
+    assert!(!refused.status);
+    assert_eq!(refused.refusal, Some(refusal));
+    assert_eq!(index.get_receipt(&fixture.hashes[0]).unwrap().refusal, None);
+}
+
+#[test]
 fn subscription_data_orders_logs_by_block_position_from_the_given_hashes() {
     let fixture = fixture();
 

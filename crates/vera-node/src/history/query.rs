@@ -204,7 +204,13 @@ mod tests {
         let genesis = block(0, BlockId(B256::ZERO));
         let mut first = block(1, genesis.id());
         first.txs.push(vera_domain::Tx::new(vec![1].into()));
-        let receipt = ExecutionReceipt::new(B256::repeat_byte(7), false, 3, 3, vec![], None);
+        let receipt =
+            ExecutionReceipt::new(B256::repeat_byte(7), false, 5_000, 5_000, vec![], None)
+                .with_refusal(Some(vera_domain::Refusal::new(
+                    vera_domain::RefusingModule::Vera,
+                    vera_domain::RefusalKind::NotFound,
+                    "JWS token not found: missing",
+                )));
         first.native_targets = Some([vera_domain::DbTarget::default(); 4]);
         first.receipt_commitment = Some(vera_executor::receipt_commitment(
             100,
@@ -281,6 +287,7 @@ mod tests {
         assert_eq!(restored.gas_limit, 100);
         assert!(!restored.receipts[0].success());
         assert_eq!(restored.receipts[0].tx_hash, receipt.tx_hash);
+        assert_eq!(restored.receipts[0].refusal, receipt.refusal);
         assert_eq!(
             history
                 .execution_by_hash(second.id().0)

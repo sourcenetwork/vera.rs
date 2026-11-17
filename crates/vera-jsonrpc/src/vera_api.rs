@@ -16,6 +16,8 @@ mod permission;
 mod policy;
 mod prefix;
 mod receipt;
+#[cfg(test)]
+mod receipt_tests;
 mod record;
 use vera_executor::SharedModuleState;
 use vera_indexer::{BlockIndex, LightBlockIndex};
@@ -358,6 +360,7 @@ impl VeraApiServer for VeraApiImpl {
                 U64::ZERO
             },
             effective_gas_price: alloy_primitives::U256::ZERO,
+            refusal: receipt.refusal,
             signer_did: receipt.signer_did,
             native_nonce,
         }))

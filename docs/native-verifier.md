@@ -20,9 +20,14 @@ Receipt request:
 ```
 
 `proof` is the unmodified `vera_getReceiptProof` result. Success returns
-`{"result":{"height":0,"timestamp":0,"submission":"0x...","success":true,"logs":[]}}`
+`{"result":{"height":0,"timestamp":0,"submission":"0x...","success":true,"gas_used":0,"refusal":null,"logs":[]}}`
 with actual verified values. A successful verification can report an unsuccessful
-operation. A missing RPC receipt is not proof of rejection.
+operation. A refused native operation reports
+`"refusal":{"module":"acp","kind":"invalid_policy","message":"..."}`: the module
+and kind are verified by the receipt commitment, while the message is the
+serving node's text and is not. Kinds are listed in
+[receipt commitments](receipt-commitments.md#refusals). A missing RPC receipt
+is not proof of rejection.
 
 Current-record request:
 

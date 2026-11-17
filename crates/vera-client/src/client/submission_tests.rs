@@ -257,3 +257,41 @@ async fn receipt_polling_stops_once_an_outage_outlasts_its_budget() {
             if matches!(*source, ClientError::Transport(_))
     ));
 }
+
+#[tokio::test]
+async fn a_refused_native_request_names_its_refusal_and_an_evm_revert_does_not() {
+    let refusal = vera_domain::Refusal::new(
+        vera_domain::RefusingModule::Acp,
+        vera_domain::RefusalKind::InvalidPolicy,
+        "invalid policy: unknown relation",
+    );
+    let failed = |refusal: Option<vera_domain::Refusal>| {
+        serde_json::to_value(TransactionReceipt {
+            transaction_hash: B256::repeat_byte(3),
+            status: 0,
+            gas_used: 5_000,
+            refusal,
+            ..TransactionReceipt::default()
+        })
+        .unwrap()
+    };
+    let stub = Stub::serve(vec![
+        Reply::Result(failed(Some(refusal.clone()))),
+        Reply::Result(failed(None)),
+    ]);
+    let client = VeraClient::new(stub.url.clone());
+    match client.executed(B256::repeat_byte(3)).await {
+        Err(ClientError::Refused {
+            refusal: reported,
+            receipt,
+        }) => {
+            assert_eq!(reported, refusal);
+            assert_eq!(receipt.gas_used, 5_000);
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    assert!(matches!(
+        client.executed(B256::repeat_byte(3)).await,
+        Err(ClientError::TxReverted { status: 0, .. })
+    ));
+}

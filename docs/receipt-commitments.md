@@ -10,7 +10,7 @@ an intermediate receipt buffer. Its input encoding is:
 
 | Field | Encoding |
 |---|---|
-| Domain | Literal bytes `vera/receipts/v1` |
+| Domain | Literal bytes `vera/receipts/v2` |
 | Execution gas limit | Big-endian u64 |
 | Receipt count | Big-endian u64 |
 | Each receipt | Fields below, in execution order |
@@ -23,17 +23,75 @@ Each receipt contributes:
 | Gas used | Big-endian u64 |
 | Cumulative gas used | Big-endian u64 |
 | Success | One byte, 0 or 1 |
+| Refusal presence | One byte, 0 or 1 |
+| Refusal | Module code (one byte) and kind code (one byte), only when present |
 | Contract address presence | One byte, 0 or 1 |
 | Contract address | 20 bytes, only when present |
 | Log count | Big-endian u64 |
 | Each log | Address (20 bytes), topic count (big-endian u64), ordered topics (32 bytes each), data length (big-endian u64), data bytes |
 
 The commitment binds ordering, collection boundaries and every field retained by
-the finalized execution history. The canonical revision digest binds it to the
+the finalized execution history except a refusal's message. The canonical revision digest binds it to the
 operations, parent and resulting state. A certificate authenticating that digest
 therefore also authenticates the receipt commitment. Verifying downloaded
 receipts requires recomputing the commitment against an independently verified
 revision; existing receipt RPC responses do not perform that verification.
+
+## Refusals
+
+A native request a module refuses has a failed receipt naming why: the module it
+was addressed to, a refusal kind and the module's message. A successful receipt
+and every EVM receipt carry no refusal; verification rejects a successful
+receipt that names one.
+
+The module and kind are committed. The message is not: it is the module's
+error text, which embeds parser and library wording (for example a YAML
+parser's position report) that can change between releases without changing
+what was refused. Committing it would make validators running two releases
+disagree on receipts. The message is at most 1,024 bytes, cut at a character
+boundary; decoders reject a longer one. It is reported by the node that
+executed or imported the receipt, so a light client can rely on the kind and
+show the message as that node's explanation.
+
+| Module | Code |
+|---|---|
+| `acp` | 1 |
+| `bulletin` | 2 |
+| `vera` | 3 |
+| `validator_registry` | 4 |
+
+| Kind | Code | Raised for |
+|---|---|---|
+| `unknown_selector` | 1 | Calldata naming no method, or shorter than a selector |
+| `undecodable_input` | 2 | ABI, UTF-8, JSON or DID decoding of the calldata or an argument |
+| `argument_out_of_bounds` | 3 | Size and count limits on arguments, including Bulletin field sizes |
+| `invalid_argument` | 4 | A decoded argument the module cannot accept, such as an invalid access request, subject, namespace or membership address |
+| `invalid_policy` | 5 | A policy definition the parser or validator refuses |
+| `unauthenticated` | 6 | A method needing a signer called without one |
+| `unauthorized` | 7 | `Unauthorized` errors of every module and Bulletin's non-collaborator |
+| `invalid_token` | 8 | Invalid bearer tokens and JWS, or a token already invalidated |
+| `invalid_proof` | 9 | An ACP proof that does not verify |
+| `not_found` | 10 | A missing policy, commitment, namespace, post, collaborator, token or validator |
+| `object_not_registered` | 11 | An ACP object that is not registered |
+| `already_exists` | 12 | An existing object, namespace, post, collaborator, validator or consensus key |
+| `expired` | 13 | An expired registrations commitment |
+| `membership_constraint` | 14 | A membership change leaving no active member or exceeding the limit or epoch capacity |
+| `work_limit_exceeded` | 15 | Module limits not drawn from the gas allowance: Bulletin's query limit and the ACP batch result budget |
+| `storage_bounds` | 16 | A successful call whose records exceed the native storage bounds |
+| `out_of_gas` | 17 | A call that exhausted its allowance, including ACP work allowances carved from it |
+| `state_error` | 18 | Module state the call needed could not be used (`State` errors) |
+| `module_failed` | 19 | A module panic |
+
+The kind follows from the module error's variant, so every node classifies a
+refusal the same way. Codes outside these tables do not decode. Faults of the
+node's own state still fail the block instead of producing a receipt.
+
+A refusal is charged the gas the call reported, and at least 5,000, the base
+charge of a module write; methods with fixed charges report no usage of their
+own when they refuse. `out_of_gas` and `module_failed` are charged the whole
+1,000,000 allowance. See [execution limits](execution-limits.md).
+
+## History
 
 History checks the commitment before appending a record and again before
 publishing that record to query indexes during recovery. A changed receipt or

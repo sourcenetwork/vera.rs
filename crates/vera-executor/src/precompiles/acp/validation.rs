@@ -14,15 +14,23 @@ pub(super) fn dispatch(module: &AcpModule, input: &[u8], gas_limit: u64) -> Disp
         return Ok(oog_dispatch());
     }
     let body = &input[4..];
-    body.get(..64)
-        .ok_or_else(|| PrecompileError::Fatal("invalid policy validation ABI".to_string()))?;
+    body.get(..64).ok_or_else(|| {
+        crate::precompiles::refusal::refused(
+            vera_domain::RefusalKind::UndecodableInput,
+            "invalid policy validation ABI",
+        )
+    })?;
     let policy = leaf::bytes(body, 0)?;
     if budget.input(policy.len()).is_err() {
         return Ok(oog_dispatch());
     }
     let marshal_type = Uint::<8>::abi_decode(&body[32..64]).map_err(decode_error)?;
-    let policy = std::str::from_utf8(policy)
-        .map_err(|_| PrecompileError::Fatal("invalid UTF-8 in policy".to_string()))?;
+    let policy = std::str::from_utf8(policy).map_err(|_| {
+        crate::precompiles::refusal::refused(
+            vera_domain::RefusalKind::UndecodableInput,
+            "invalid UTF-8 in policy",
+        )
+    })?;
     let result = module.query_validate_policy(policy, marshal_type_from_u8(marshal_type));
     let Some(gas) = READ_GAS.checked_add(budget.consumed()) else {
         return Ok(oog_dispatch());

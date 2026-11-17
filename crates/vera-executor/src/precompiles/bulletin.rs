@@ -2,7 +2,6 @@
 
 use alloy_primitives::B256;
 use alloy_sol_types::SolCall;
-use revm::precompile::PrecompileError;
 use vera_modules::acp::AcpModule;
 use vera_modules::bulletin::BulletinModule;
 use vera_modules::bulletin::abi::IBulletin;
@@ -28,7 +27,7 @@ pub(super) fn dispatch(
     gas_limit: u64,
 ) -> DispatchReturn {
     if input.len() < 4 {
-        return Ok(err_dispatch("input too short for selector"));
+        return Ok(super::short_input());
     }
     let selector: [u8; 4] = input[..4].try_into().expect("checked length above");
 
@@ -85,7 +84,12 @@ pub(super) fn dispatch(
             };
             let post_id = match post_id.parse::<B256>() {
                 Ok(id) => id,
-                Err(e) => return Ok(err_dispatch(e)),
+                Err(e) => {
+                    return Ok(err_dispatch(super::Stated(
+                        vera_domain::RefusalKind::StateError,
+                        e,
+                    )));
+                }
             };
 
             let event = IBulletin::PostCreated {
@@ -269,10 +273,7 @@ pub(super) fn dispatch(
             Ok(ok_dispatch(READ_GAS, ret, vec![]))
         }
 
-        _ => Err(PrecompileError::Fatal(format!(
-            "unknown Bulletin selector: 0x{}",
-            hex::encode(selector)
-        ))),
+        _ => Err(super::unknown_selector("Bulletin", selector)),
     }
 }
 

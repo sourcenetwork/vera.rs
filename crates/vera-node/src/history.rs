@@ -9,7 +9,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use commonware_codec::{Decode as _, Encode as _};
 use commonware_glue::dkg::types::Payload;
 use parking_lot::Mutex;
-use vera_domain::{Block, BlockId, EpochMaterial};
+use vera_domain::{Block, BlockId, EpochMaterial, Refusal, RefusalKind, RefusingModule};
 use vera_executor::ExecutionReceipt;
 use vera_indexer::{
     BlockIndex, LightBlockIndex, MAX_CACHED_FINALIZATIONS, MAX_CACHED_REVISIONS,
@@ -57,6 +57,31 @@ struct StoredReceipt {
     success: bool,
     cumulative_gas_used: u64,
     logs: Vec<Vec<u8>>,
+    refusal: Option<StoredRefusal>,
+}
+
+/// A refusal as history stores it: committed codes and the uncommitted message.
+#[derive(BorshSerialize, BorshDeserialize)]
+struct StoredRefusal {
+    module: u8,
+    kind: u8,
+    message: String,
+}
+
+impl StoredRefusal {
+    fn new(refusal: &Refusal) -> Self {
+        Self {
+            module: refusal.module.code(),
+            kind: refusal.kind.code(),
+            message: refusal.message().to_owned(),
+        }
+    }
+
+    fn decode(&self) -> Result<Refusal> {
+        let module = RefusingModule::from_code(self.module).context("unknown refusing module")?;
+        let kind = RefusalKind::from_code(self.kind).context("unknown refusal kind")?;
+        Ok(Refusal::with_message(module, kind, self.message.clone())?)
+    }
 }
 
 #[derive(BorshSerialize, BorshDeserialize)]
@@ -86,6 +111,7 @@ impl Record {
                         Ok(log)
                     })
                     .collect::<Result<Vec<_>>>()?;
+                let refusal = r.refusal.as_ref().map(StoredRefusal::decode).transpose()?;
                 Ok(ExecutionReceipt::new(
                     B256::from(r.hash),
                     r.success,
@@ -93,7 +119,8 @@ impl Record {
                     r.cumulative_gas_used,
                     logs,
                     r.contract.map(Address::from),
-                ))
+                )
+                .with_refusal(refusal))
             })
             .collect::<Result<Vec<_>>>()?;
         ensure!(
@@ -260,6 +287,7 @@ impl FinalizedHistory {
                     success: r.success(),
                     cumulative_gas_used: r.cumulative_gas_used(),
                     logs: r.logs().iter().map(alloy_rlp::encode).collect(),
+                    refusal: r.refusal.as_ref().map(StoredRefusal::new),
                 })
                 .collect(),
         };
@@ -471,6 +499,10 @@ pub(crate) fn restore_epoch(index: &LightBlockIndex, block: &Block) {
 }
 
 fn check_receipts(block: &Block, receipts: &[ExecutionReceipt], gas_limit: u64) -> Result<()> {
+    ensure!(
+        !receipts.iter().any(|r| r.success() && r.refusal.is_some()),
+        "refusal on a successful receipt"
+    );
     match block.receipt_commitment {
         Some(expected) => ensure!(
             vera_executor::receipt_commitment(gas_limit, receipts) == expected,

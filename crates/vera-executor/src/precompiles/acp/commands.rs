@@ -75,7 +75,7 @@ pub(super) fn dispatch(
         }
         Err(error) => {
             (*module, *vera) = snapshot;
-            let mut result = err_dispatch(super::recoverable_message(&error));
+            let mut result = super::refusal_dispatch(&error);
             result.precompile.gas_used = gas;
             Ok(result)
         }
@@ -493,8 +493,12 @@ fn run(
             let call = IAcp::revealRegistrationCall::abi_decode(input).map_err(decode_error)?;
             let creator = did_from_signer(&tx_ctx.signer)?;
             let proof: vera_modules::acp::types::RegistrationProof =
-                serde_json::from_slice(&call.proof)
-                    .map_err(|e| PrecompileError::Fatal(format!("proof JSON decode: {e}")))?;
+                serde_json::from_slice(&call.proof).map_err(|e| {
+                    crate::precompiles::refusal::refused(
+                        vera_domain::RefusalKind::UndecodableInput,
+                        format!("proof JSON decode: {e}"),
+                    )
+                })?;
             let cmd = PolicyCmd::RevealRegistration {
                 registrations_commitment_id: call.commitmentId,
                 proof,
@@ -559,8 +563,12 @@ fn run(
         IAcp::bearerPolicyCmdCall::SELECTOR => {
             let call = IAcp::bearerPolicyCmdCall::abi_decode(input).map_err(decode_error)?;
             let policy_id = policy_id_to_string(&call.policyId);
-            let cmd: PolicyCmd = serde_json::from_slice(&call.cmd)
-                .map_err(|e| PrecompileError::Fatal(format!("cmd JSON decode: {e}")))?;
+            let cmd: PolicyCmd = serde_json::from_slice(&call.cmd).map_err(|e| {
+                crate::precompiles::refusal::refused(
+                    vera_domain::RefusalKind::UndecodableInput,
+                    format!("cmd JSON decode: {e}"),
+                )
+            })?;
 
             let result = match module.bearer_policy_cmd_with_budget(
                 vera,

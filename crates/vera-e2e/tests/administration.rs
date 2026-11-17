@@ -52,7 +52,7 @@ async fn operator_rotation_and_sequence_survive_replica_restart() {
         client
             .native_apply_administration(&submitter, &insufficient)
             .await,
-        Err(ClientError::TxReverted { .. })
+        Err(ClientError::Refused { .. })
     ));
     assert_eq!(
         client
@@ -131,7 +131,7 @@ async fn operator_rotation_and_sequence_survive_replica_restart() {
         replica
             .native_apply_administration(&submitter, &approved)
             .await,
-        Err(ClientError::TxReverted { .. })
+        Err(ClientError::Refused { .. })
     ));
 
     let mut change = support::approve(
@@ -145,7 +145,7 @@ async fn operator_rotation_and_sequence_survive_replica_restart() {
         replica
             .native_apply_administration(&submitter, &change)
             .await,
-        Err(ClientError::TxReverted { .. })
+        Err(ClientError::Refused { .. })
     ));
     change.approvals = vec![approve_administration(&change.request, 0, &next).unwrap()];
     let mut foreign = change.clone();
@@ -155,7 +155,7 @@ async fn operator_rotation_and_sequence_survive_replica_restart() {
         replica
             .native_apply_administration(&submitter, &foreign)
             .await,
-        Err(ClientError::TxReverted { .. })
+        Err(ClientError::Refused { .. })
     ));
     assert_eq!(
         replica

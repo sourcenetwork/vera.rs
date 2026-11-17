@@ -213,6 +213,7 @@ fn record_decoder_rejects_forged_counts_and_unconnected_prefixes() {
                 success: r.success(),
                 cumulative_gas_used: r.cumulative_gas_used(),
                 logs: r.logs().iter().map(alloy_rlp::encode).collect(),
+                refusal: r.refusal.as_ref().map(StoredRefusal::new),
             })
             .collect(),
     };
@@ -429,4 +430,70 @@ async fn resumed_snapshot_can_advance_an_unpublished_history_selection() {
             .unwrap();
         assert_eq!(index.head_block_number(), 3);
     }
+}
+
+#[test]
+fn record_decoder_keeps_a_refusal_and_its_kind_is_committed() {
+    use vera_domain::{Refusal, RefusalKind, RefusingModule};
+
+    let mut block = super::super::tests::block(1, BlockId(B256::repeat_byte(9)));
+    block.txs.push(Tx::new(vec![1].into()));
+    let receipts = vec![
+        ExecutionReceipt::new(block.txs[0].id().0, false, 5_000, 5_000, vec![], None).with_refusal(
+            Some(Refusal::new(
+                RefusingModule::Bulletin,
+                RefusalKind::NotFound,
+                "namespace not found: news",
+            )),
+        ),
+    ];
+    block.native_targets = Some([DbTarget::default(); 4]);
+    block.receipt_commitment = Some(vera_executor::receipt_commitment(100, &receipts));
+    let encode = |refusal: StoredRefusal| {
+        borsh::to_vec(&Record {
+            block: block.encode().to_vec(),
+            gas_limit: 100,
+            receipts: vec![StoredReceipt {
+                hash: receipts[0].tx_hash.0,
+                gas_used: 5_000,
+                contract: None,
+                success: false,
+                cumulative_gas_used: 5_000,
+                logs: vec![],
+                refusal: Some(refusal),
+            }],
+        })
+        .unwrap()
+    };
+    let stored = || StoredRefusal::new(receipts[0].refusal.as_ref().unwrap());
+    let limits = HistoryLimits {
+        record_bytes: 1 << 20,
+        logs: 1,
+    };
+    assert_eq!(decode_record(&encode(stored()), limits).unwrap(), block);
+    let reworded = StoredRefusal {
+        message: "reworded".into(),
+        ..stored()
+    };
+    assert!(decode_record(&encode(reworded), limits).is_ok());
+    let reclassified = StoredRefusal {
+        kind: RefusalKind::Unauthorized.code(),
+        ..stored()
+    };
+    assert!(
+        decode_record(&encode(reclassified), limits)
+            .unwrap_err()
+            .to_string()
+            .contains("commitment")
+    );
+    let unknown = StoredRefusal {
+        kind: 0,
+        ..stored()
+    };
+    assert!(decode_record(&encode(unknown), limits).is_err());
+    let long = StoredRefusal {
+        message: "x".repeat(vera_domain::MAX_REFUSAL_MESSAGE_BYTES + 1),
+        ..stored()
+    };
+    assert!(decode_record(&encode(long), limits).is_err());
 }

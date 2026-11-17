@@ -9,6 +9,8 @@ use vera_traits::StateDbError;
 
 use super::*;
 use crate::ExecutionConfig;
+use crate::executor::native_dispatch::NATIVE_TX_GAS_LIMIT;
+use crate::executor::native_outcome::NATIVE_REFUSAL_GAS;
 use crate::precompiles::{ACP_ADDRESS, dispatch_to_module};
 
 const POLICY: &str = "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n    permissions:\n      - name: read\n        expr: reader\n";
@@ -139,15 +141,18 @@ fn a_write_succeeds_for_the_owner_is_refused_for_another_did_and_changes_nothing
     };
 
     let allowed = simulate(&modules, OWNER, transfer());
-    assert!(allowed.success, "{:?}", allowed.reason);
-    assert_eq!(allowed.reason, None);
+    assert!(allowed.success, "{:?}", allowed.refusal);
+    assert_eq!(allowed.refusal, None);
     assert!(allowed.gas_used > 0 && allowed.gas_used < NATIVE_TX_GAS_LIMIT);
     assert!(!allowed.logs.is_empty());
 
     let refused = simulate(&modules, "did:key:other", transfer());
     assert!(!refused.success);
-    assert!(!refused.reason.unwrap().is_empty());
-    assert_eq!(refused.gas_used, NATIVE_TX_GAS_LIMIT);
+    let refusal = refused.refusal.unwrap();
+    assert_eq!(refusal.module, vera_domain::RefusingModule::Acp);
+    assert_eq!(refusal.kind, vera_domain::RefusalKind::Unauthorized);
+    assert!(!refusal.message().is_empty());
+    assert!(refused.gas_used >= NATIVE_REFUSAL_GAS && refused.gas_used < NATIVE_TX_GAS_LIMIT);
     assert!(refused.logs.is_empty() && refused.output.is_empty());
 
     assert_eq!(modules.state_root(), root);
@@ -161,7 +166,7 @@ fn a_call_is_evaluated_at_the_height_and_time_of_its_context() {
     let (modules, policy) = committed();
     let register = command(policy, PolicyCmd::RegisterObject(object("draft")));
     let result = simulate(&modules, OWNER, register.clone());
-    assert!(result.success, "{:?}", result.reason);
+    assert!(result.success, "{:?}", result.refusal);
     let bytes = IAcp::executePolicyCommandCall::abi_decode_returns(&result.output).unwrap();
     let PolicyCmdResult::RegisterObject { record } = serde_json::from_slice(&bytes).unwrap() else {
         panic!("a registration returns its record");
@@ -182,7 +187,9 @@ fn a_call_is_evaluated_at_the_height_and_time_of_its_context() {
 fn calldata_no_module_can_read_is_a_refusal_with_its_reason() {
     let refused = simulate(&ModuleState::default(), OWNER, vec![1, 2, 3, 4]);
     assert!(!refused.success);
-    assert!(refused.reason.is_some());
+    let refusal = refused.refusal.unwrap();
+    assert_eq!(refusal.kind, vera_domain::RefusalKind::UnknownSelector);
+    assert_eq!(refused.gas_used, NATIVE_REFUSAL_GAS);
 }
 
 #[test]

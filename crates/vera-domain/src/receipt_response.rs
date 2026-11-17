@@ -67,6 +67,7 @@ pub enum ReceiptResponseError {
 impl ReceiptResponse {
     /// Verify finality, the complete commitment and the requested submission ID.
     /// An absent response is not proof that a submission was rejected or never accepted.
+    /// A refusal's module and kind are verified; its message is the serving node's text.
     pub fn verify(
         &self,
         submission: B256,
@@ -83,6 +84,15 @@ impl ReceiptResponse {
             .any(|r| !matches!(r.receipt.status, alloy_consensus::Eip658Value::Eip658(_)))
         {
             return Err(ReceiptResponseError::Invalid("receipt status"));
+        }
+        if self
+            .receipts
+            .iter()
+            .any(|r| r.success() && r.refusal.is_some())
+        {
+            return Err(ReceiptResponseError::Invalid(
+                "refusal on a successful receipt",
+            ));
         }
         if block.receipt_commitment
             != Some(crate::receipt_commitment(self.gas_limit, &self.receipts))

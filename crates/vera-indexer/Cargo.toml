@@ -16,5 +16,6 @@ alloy-primitives.workspace = true
 parking_lot.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+vera-domain.workspace = true
 
 [dev-dependencies]
