@@ -307,8 +307,9 @@ A stale target whose floor has aged out of peer retention can stop marshal's
 finalized dispatches; startup watches that progress and, after a configured
 stall, re-floors marshal from the newest stored gossiped finalization so
 dispatches resume from a retained anchor. It does not re-floor while marshal
-holds the next block: that pause is the sync working, and a higher floor would
-skip heights the reshare actor has not applied. The sync completes at its reached
+holds the next block, while it repairs a gap from the top down, or while the
+handoff imports history: those pauses are the sync working, and a higher floor
+would skip heights the reshare actor has not applied. The sync completes at its reached
 target and settles on the newest one at the first update lull, converging
 without requiring network quiescence.
 See [snapshot recovery](snapshot-recovery.md) and [history storage](history-storage.md).

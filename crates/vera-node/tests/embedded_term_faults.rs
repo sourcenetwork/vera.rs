@@ -89,6 +89,36 @@ fn leave_behind(
 }
 
 #[test]
+fn a_block_built_ahead_of_its_turn_does_not_finalize_above_the_cut_of_a_handover() {
+    let directories = [(); 2].map(|()| tempfile::tempdir().unwrap());
+    let dealt = short_epochs::deployment(9_514, 104);
+    let [first, second] = pair(
+        [directories[0].path(), directories[1].path()],
+        &dealt,
+        WINDOW,
+    );
+    let laptop = block_on(EmbeddedNode::start(first.active)).unwrap();
+    let phone = block_on(EmbeddedNode::start(second.backup)).unwrap();
+    run_until(&laptop, |reached| reached >= 3);
+    // The next block built ahead of its turn waits for the announcement
+    // before it reaches consensus.
+    let stall = directories[0].path().join("stall-staged-block");
+    std::fs::write(&stall, []).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    while stall.exists() {
+        assert!(std::time::Instant::now() < deadline, "no block was staged");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let cut = hand_over(&laptop, &second.key.public_key()).cut.height;
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(height(&laptop), cut, "a block finalized above the cut");
+    assert_eq!(height(&phone), cut);
+    block_on(laptop.stop()).unwrap();
+    block_on(phone.stop()).unwrap();
+}
+
+#[test]
 fn a_backup_takes_over_past_the_certificate_of_a_block_it_never_received() {
     let directories = [(); 3].map(|()| tempfile::tempdir().unwrap());
     let chain_id = 9_511;
@@ -213,18 +243,9 @@ fn a_holder_stopped_between_marshals_writes_keeps_its_first_block_across_a_spell
     let mut laptop = block_on(EmbeddedNode::start(first.active)).unwrap();
     let phone = block_on(EmbeddedNode::start(second.backup.clone())).unwrap();
     run_until(&laptop, |reached| reached >= 3);
-    // A block in flight when the laptop held its proposals can finalize
-    // above the cut it named; it then hands over again.
-    let change = loop {
-        let change = hand_over(&laptop, &second.key.public_key());
-        run_until(&phone, |reached| reached >= change.cut.height);
-        std::thread::sleep(Duration::from_secs(1));
-        if height(&laptop) == change.cut.height && height(&phone) == change.cut.height {
-            break change;
-        }
-        block_on(laptop.resume()).unwrap();
-    };
+    let change = hand_over(&laptop, &second.key.public_key());
     let cut = change.cut.height;
+    assert_eq!(run_until(&phone, |reached| reached >= cut), cut);
     block_on(phone.stop()).unwrap();
     // The copy is the phone at the cut, before it takes over.
     let copy = directories[2].path();

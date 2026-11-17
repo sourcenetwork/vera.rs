@@ -18,8 +18,9 @@ let status: NodeStatus = node.rpc().call_empty("vera_nodeStatus").await?;
 node.stop().await?;
 ```
 
-`start` returns after startup recovery has completed and the node serves
-requests. It can be awaited from any async runtime. A host crate needs no
+`start` returns after startup recovery has completed, the node has applied
+the finalized blocks its consensus archive holds (for up to 30 seconds), and
+it serves requests. It can be awaited from any async runtime. A host crate needs no
 `recursion_limit` attribute: the node's actor graph is built inside `vera-node`
 and the host holds it behind a pointer.
 
@@ -248,6 +249,20 @@ that are gone, and imports the history it missed. With the default epochs of
 an idle deployment finalizes in 43 to 85 minutes. The backup judges this by
 its own `EmbeddedConfig::pruning`, so the devices of an account should share
 one retention setting.
+
+A backup that is behind when the active device crosses an epoch boundary
+receives certificates of an epoch it has not entered. Commonware's
+orchestrator drops such messages and only fetches the epoch's last block, so
+the backup keeps the newest 256 of them on the certificate channel and hands
+them to consensus again once it has entered their epoch. It finalizes the
+blocks they certify from its own buffer of recent blocks, also when the
+active device has stopped meanwhile.
+
+The channel a catching-up device fetches finalized blocks and certificates
+on keeps at least the daemon's burst on every node with a peer, whatever
+`channel_burst` says: with a burst of one, all but one of the answers to its
+parallel requests are dropped and it advances by one fetch timeout per
+block.
 
 While the active device is away a backup keeps serving the state it has. It
 finalizes nothing, its height stays where the active device left it, and
@@ -533,7 +548,9 @@ Commonware allocates each of the 16 peer channels an inbound queue of tracked
 peers times the burst, and the router the sum of those, whether or not a peer
 connects. A solo deployment tracks 100 peers, so a burst of 64 reserves about
 56 MiB for a validator that has none. The embedded sizes assume no peers; a
-deployment that gains validators needs the daemon's.
+deployment that gains validators needs the daemon's. A node with a backup or
+an active device to follow keeps the daemon's burst on the block-fetch
+channel, about 3.5 MiB of it, so a backup can catch up.
 
 Measured with
 `PROFILE_WRITES=1000 cargo test --release -p vera-node --test embedded_solo_profile -- --ignored --nocapture`

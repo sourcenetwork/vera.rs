@@ -64,9 +64,11 @@ mod peer_discovery;
 
 mod proposal_hold;
 pub use proposal_hold::ProposalHold;
+mod epoch_replay;
 mod provider;
 mod ready_application;
 mod rejoin;
+mod replay;
 mod snapshot_refresh;
 mod watchdog;
 pub use provider::{DynamicProvider, Registrar};

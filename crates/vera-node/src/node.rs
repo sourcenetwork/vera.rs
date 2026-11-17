@@ -285,7 +285,14 @@ async fn run_node_with_elector<
     let vote_network = p2p.register(VOTE_CHANNEL, channel_rate);
     let certificate_network = p2p.register(CERTIFICATE_CHANNEL, channel_rate);
     let resolver_network = p2p.register(RESOLVER_CHANNEL, channel_rate);
-    let backfill_network = p2p.register(BACKFILL_CHANNEL, channel_rate);
+    let backfill_network = p2p.register(
+        BACKFILL_CHANNEL,
+        if has_peers {
+            sizing.backfill_rate()
+        } else {
+            channel_rate
+        },
+    );
     let broadcast_network = p2p.register(BROADCAST_CHANNEL, channel_rate);
     let dkg_network = p2p.register(DKG_CHANNEL, channel_rate);
     let dkg_probe_network = p2p.register(DKG_PROBE_CHANNEL, channel_rate);
@@ -825,6 +832,8 @@ async fn run_node_with_elector<
     let sync_history_peer = history_peer.clone();
     let sync_status = node_state.clone();
     let sync_term = term.clone();
+    let handing_off = crate::snapshot_refresh::HandingOff::default();
+    let sync_handing_off = handing_off.clone();
     let (term_refused, mut term_refusals) = ::tokio::sync::mpsc::unbounded_channel();
     let sync_refused = term_refused.clone();
     let applied = crate::term::Applied::default();
@@ -840,64 +849,68 @@ async fn run_node_with_elector<
                 executor.clone(),
             )
             .recover_from_marshal()
-            .with_sync_handoff(move |anchor| async move {
-                let selected = sync_marshal
-                    .get_block(Identifier::Height(anchor.height))
-                    .await
-                    .ok_or_else(|| "missing synchronized history anchor".to_string())?;
-                if selected.digest() != anchor.digest
-                    || selected.inner().context.round != anchor.round
-                {
-                    return Err("synchronized history anchor mismatch".into());
-                }
-                let selected = selected.inner();
-                // A snapshot does not pass through execution, so the term of
-                // the block it is taken at is checked here.
-                if !sync_term.admits(selected.height, selected.term) {
-                    let _ = sync_refused.send(crate::TermRefusal::LowerTerm {
-                        height: selected.height,
-                        term: selected.term,
-                        held: sync_term.term(),
-                    });
-                    return std::future::pending().await;
-                }
-                let mut updates = sync_peers.subscribe().await;
-                let peers = updates
-                    .recv()
-                    .await
-                    .ok_or_else(|| "history peer subscription closed".to_string())?;
-                let peers: Vec<_> = peers
-                    .all
-                    .primary
-                    .into_iter()
-                    .filter(|peer| *peer != sync_local)
-                    .collect();
-                let mut client = sync_history_peer.lock().await;
-                if let Err(error) = snapshot_history
-                    .recover(&mut client, &peers, selected)
-                    .await
-                {
-                    let error = format!("{error:#}");
-                    // The history this device kept is not an ancestor of the
-                    // block it synchronized to: it left the deployment's
-                    // history below a cut it never learned of.
-                    if error.contains(crate::history::DISCONNECTED) {
-                        let _ = sync_refused.send(crate::TermRefusal::Diverged {
+            .with_sync_handoff(move |anchor| {
+                let running = sync_handing_off.enter();
+                async move {
+                    let _running = running;
+                    let selected = sync_marshal
+                        .get_block(Identifier::Height(anchor.height))
+                        .await
+                        .ok_or_else(|| "missing synchronized history anchor".to_string())?;
+                    if selected.digest() != anchor.digest
+                        || selected.inner().context.round != anchor.round
+                    {
+                        return Err("synchronized history anchor mismatch".into());
+                    }
+                    let selected = selected.inner();
+                    // A snapshot does not pass through execution, so the term of
+                    // the block it is taken at is checked here.
+                    if !sync_term.admits(selected.height, selected.term) {
+                        let _ = sync_refused.send(crate::TermRefusal::LowerTerm {
                             height: selected.height,
+                            term: selected.term,
+                            held: sync_term.term(),
                         });
                         return std::future::pending().await;
                     }
-                    return Err(error);
+                    let mut updates = sync_peers.subscribe().await;
+                    let peers = updates
+                        .recv()
+                        .await
+                        .ok_or_else(|| "history peer subscription closed".to_string())?;
+                    let peers: Vec<_> = peers
+                        .all
+                        .primary
+                        .into_iter()
+                        .filter(|peer| *peer != sync_local)
+                        .collect();
+                    let mut client = sync_history_peer.lock().await;
+                    if let Err(error) = snapshot_history
+                        .recover(&mut client, &peers, selected)
+                        .await
+                    {
+                        let error = format!("{error:#}");
+                        // The history this device kept is not an ancestor of the
+                        // block it synchronized to: it left the deployment's
+                        // history below a cut it never learned of.
+                        if error.contains(crate::history::DISCONNECTED) {
+                            let _ = sync_refused.send(crate::TermRefusal::Diverged {
+                                height: selected.height,
+                            });
+                            return std::future::pending().await;
+                        }
+                        return Err(error);
+                    }
+                    sync_applied.seed(selected.height, selected.digest());
+                    sync_status.set_snapshot_revision(anchor.height.get());
+                    sync_term.observe(selected.height, selected.term);
+                    sync_status.record_finalized(
+                        selected.height,
+                        selected.context.round.epoch().get(),
+                        selected.context.round.view().get(),
+                    );
+                    Ok(())
                 }
-                sync_applied.seed(selected.height, selected.digest());
-                sync_status.set_snapshot_revision(anchor.height.get());
-                sync_term.observe(selected.height, selected.term);
-                sync_status.record_finalized(
-                    selected.height,
-                    selected.context.round.epoch().get(),
-                    selected.context.round.view().get(),
-                );
-                Ok(())
             }),
             provider: mempool.clone(),
             marshal: (marshal.clone(), floor),
@@ -918,6 +931,8 @@ async fn run_node_with_elector<
         hold.clone(),
         wake.clone(),
     );
+    #[cfg(feature = "fault-injection")]
+    let application = application.with_stall(config.data_dir.clone());
     let deferred = Deferred::new(
         context.child("deferred"),
         application,
@@ -966,6 +981,35 @@ async fn run_node_with_elector<
                 crate::term::Role::of(is_backup).journals()
             ),
         },
+    );
+    let certificate_network = (
+        certificate_network.0,
+        if is_backup {
+            let marshal = marshal.clone();
+            crate::epoch_replay::EpochReplay::keeping(
+                certificate_network.1,
+                FixedEpocher::new(blocks_per_epoch),
+                Arc::new(move || {
+                    let marshal = marshal.clone();
+                    Box::pin(async move {
+                        marshal
+                            .get_processed()
+                            .await
+                            .map(|processed| processed.height().get())
+                    })
+                }),
+            )
+        } else {
+            crate::epoch_replay::EpochReplay::passing(certificate_network.1)
+        },
+    );
+    let vote_network = (
+        vote_network.0,
+        crate::epoch_replay::EpochReplay::passing(vote_network.1),
+    );
+    let resolver_network = (
+        resolver_network.0,
+        crate::epoch_replay::EpochReplay::passing(resolver_network.1),
     );
     let orchestrator_handle =
         orchestrator_actor.start(vote_network, certificate_network, resolver_network);
@@ -1113,9 +1157,10 @@ async fn run_node_with_elector<
     let subscribe_databases = stateful_mailbox.subscribe_databases();
     ::tokio::pin!(subscribe_databases);
     let databases = if snapshot_sync {
-        let mut refresh = crate::snapshot_refresh::FloorRefresh::new(Duration::from_secs(
-            snapshot.floor_stall_seconds,
-        ));
+        let mut refresh = crate::snapshot_refresh::FloorRefresh::new(
+            Duration::from_secs(snapshot.floor_stall_seconds),
+            handing_off,
+        );
         let deadline = ::tokio::time::Instant::now()
             + Duration::from_millis(snapshot.initialization_timeout_ms);
         loop {
@@ -1298,6 +1343,18 @@ async fn run_node_with_elector<
                 .child("term")
                 .spawn(move |context| crate::term::run(context, parts)),
         );
+    }
+
+    let stored = crate::replay::stored_tip(marshal.clone()).await;
+    ::tokio::select! {
+        biased;
+        result = &mut startup_actors => {
+            anyhow::bail!("validator actor stopped during startup: {result:?}");
+        }
+        Some(refusal) = term_refusals.recv() => {
+            return Err(crate::term::resync_after(&data_dir, refusal));
+        }
+        () = crate::replay::replayed(&block_index, stored, crate::replay::LIMIT) => {}
     }
 
     let rpc_server = RpcServer::with_state_provider(node_state, rpc_addr, chain_id, state_provider)

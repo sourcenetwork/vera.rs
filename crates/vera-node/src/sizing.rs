@@ -36,4 +36,14 @@ impl NodeSizing {
     pub(crate) const fn channel_rate(self) -> Quota {
         MESSAGE_RATE.allow_burst(self.channel_burst)
     }
+
+    /// The rate of the channel marshal fetches finalized blocks and
+    /// certificates on, for a node with peers.
+    ///
+    /// A device catching up asks for many heights at once, and a burst of one
+    /// drops all but one of the answers, so it advances by one fetch timeout
+    /// per block. This channel keeps the daemon's burst at least.
+    pub(crate) fn backfill_rate(self) -> Quota {
+        MESSAGE_RATE.allow_burst(self.channel_burst.max(MESSAGE_RATE.burst_size()))
+    }
 }

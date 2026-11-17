@@ -136,9 +136,12 @@ active.follow(certificate).await?;                       // on the device that h
 already proposed to finalize, and asks the successor where it stands until it
 reports that block as its newest, for up to `Switching::answer_timeout`
 (3 seconds by default, and below the leader timeout). A proposal is counted
-from the start of its build until its height is recorded, so the block the
-handover names is the last one this device handed to consensus. That block
-is the change's cut, so the new term loses nothing. A successor that is not
+from the start of its build until its height is recorded, and so is a block
+built ahead of its turn, which Commonware's pipelined consensus takes without
+asking again once its parent is certified; a build the hold interrupts is
+dropped. The block the handover names is therefore the last one this device
+handed to consensus, and no block above it finalizes. That block is the
+change's cut, so the new term loses nothing. A successor that is not
 connected or not current fails the call with
 `TermRefusal::SuccessorNotCurrent`, blocks that do not finalize in time with
 `TermRefusal::Unsettled`, and the device goes on as it was before the call:

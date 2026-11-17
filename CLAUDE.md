@@ -94,7 +94,12 @@ stops:
   every tracked peer set as secondary peers, so a validator accepts them and
   never dials them. A backup's watchdog counts a stall only while a peer is
   connected, and its restart re-arms state sync once the deployment may have
-  moved past the retained consensus revisions.
+  moved past the retained consensus revisions. A backup keeps certificates of
+  an epoch it has not entered (Commonware's orchestrator drops them) and
+  replays them once marshal has processed the epoch's last block. Nodes with
+  a peer keep the daemon's burst on the block-fetch channel. A start returns
+  once the node has applied the finalized blocks its archive holds, and the
+  snapshot floor refresh waits while the synchronization handoff runs.
 
 The finalization callback persists execution and certificate history together
 in one durable batch before returning to Commonware's acknowledgement path. Disk writes run
@@ -495,8 +500,9 @@ and it changes no key. The node signs none: the host collects approvals.
 certified state.
 
 `EmbeddedConfig::switching` names the account's devices. `hand_over` holds
-proposals, confirms the successor holds the final block and returns the change
-to certify; `take_over` and `follow` restart the node in place in its new
+proposals, including blocks built ahead of their turn, so nothing finalizes
+above the cut, confirms the successor holds the final block and returns the
+change to certify; `take_over` and `follow` restart the node in place in its new
 role. `term.json` keeps the newest certificate, an announced handover and a
 staged takeover; a device does not start as validator against them.
 `EmbeddedNode::resume_stopped` undoes an announced handover on a stopped
