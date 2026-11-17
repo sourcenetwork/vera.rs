@@ -242,7 +242,8 @@ rejected. Restore a complete compatible backup or use authenticated recovery.
   Initialization defaults to a five-minute deadline. Exceeding it stops the
   process; restart is not a guarantee of convergence. `floor_stall_seconds`
   (default 15, zero disables) bounds the quiet period before startup re-floors
-  a stalled initialization from the newest stored gossiped finalization.
+  a stalled initialization from the newest stored gossiped finalization; a
+  pause while marshal holds the next block is not a stall.
 - **Finality watchdog** (`watchdog_stall_seconds`, default 600, `0` disables):
   a node that has finalized before exits with code 83 when it finalizes nothing
   for this long while it holds authenticated connections to enough peers to form
