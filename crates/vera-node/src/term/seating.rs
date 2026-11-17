@@ -1,11 +1,13 @@
 //! Consensus storage across a change of role.
 //!
 //! Simplex journals an epoch's votes and certificates, and marshal caches
-//! the blocks and certificates of recent views. Both are written in the role
-//! a device ran in: a validator's journal holds votes a backup cannot replay,
-//! and a backup's may hold certificates of blocks a term voided. A device
-//! that changes role removes them and starts consensus on its newest
-//! finalized block, which [`super::floor`] selects.
+//! the blocks and certificates of recent views. A validator's journal holds
+//! the votes its key cast, which a backup cannot replay and the validator
+//! must not cast again, so each role journals in partitions of its own and a
+//! backup leaves the validator's alone. A backup's journal may hold
+//! certificates of blocks a term voided, and a term voids what either
+//! journal and the cache hold above its cut. Consensus starts on the
+//! device's newest finalized block, which [`super::floor`] selects.
 
 use std::path::Path;
 
@@ -23,8 +25,12 @@ use vera_domain::ConsensusDigest;
 use super::{TermRecord, TermRefusal, kept};
 use crate::node::PARTITION_PREFIX;
 
-/// The partitions Simplex journals an epoch's votes and certificates in.
-const JOURNAL: &str = "-orchestrator_consensus_";
+/// The orchestrator's partition prefix for a validator's journals.
+const VALIDATOR: &str = "-orchestrator";
+/// The orchestrator's partition prefix for a backup's journals.
+const BACKUP: &str = "-observer";
+/// What the orchestrator appends to its prefix for an epoch's journal.
+const JOURNAL: &str = "_consensus_";
 /// The partitions marshal caches the blocks and certificates of recent views in.
 const CACHE: &str = "-cache-";
 
@@ -40,19 +46,44 @@ pub(crate) enum Role {
     Backup,
 }
 
+impl Role {
+    pub(crate) const fn of(backup: bool) -> Self {
+        if backup {
+            Self::Backup
+        } else {
+            Self::Validator
+        }
+    }
+
+    /// The orchestrator's partition prefix for the journals of this role,
+    /// after the node's own prefix.
+    pub(crate) const fn journals(self) -> &'static str {
+        match self {
+            Self::Validator => VALIDATOR,
+            Self::Backup => BACKUP,
+        }
+    }
+}
+
 /// Consensus storage a start decided to clear and has not finished clearing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Seating {
-    /// Height of the cut of a term this device takes over under. Marshal's
-    /// cache and its certificates above the cut are void in that term.
+    /// The role of the start that decided it.
+    pub role: Role,
+    /// Height of the cut of a term this device takes over under, or follows
+    /// past a certificate above it. Both roles' journals, marshal's cache and
+    /// its certificates above the cut are void in that term.
     pub cut: Option<u64>,
 }
 
 /// Clear what the role before left in consensus storage, before marshal and
 /// Simplex open it.
 ///
-/// - A change of role removes the vote journals.
+/// - A start as a backup after a start as the validator removes the
+///   backup's journals: they predate the blocks the device built since. The
+///   validator's journals are kept, so the votes they hold are not cast
+///   again when the device validates once more without a new term.
 /// - A term voids every block above its cut in a lower term, and a device
 ///   may hold the finalization certificate of such a block without the
 ///   block: marshal stores the two separately, and the device that built it
@@ -87,11 +118,7 @@ pub(crate) async fn settle(
         )
         .await?;
     }
-    let role = if backup {
-        Role::Backup
-    } else {
-        Role::Validator
-    };
+    let role = Role::of(backup);
     let deciding = if backup {
         record
             .certificate
@@ -104,8 +131,8 @@ pub(crate) async fn settle(
         .map(|certificate| certificate.change.cut.height)
         .filter(|cut| newest_block.is_none_or(|newest| newest <= *cut));
     let changed = record.ran.map_or(backup, |ran| ran != role);
-    if changed || cut.is_some() {
-        let seating = Seating { cut };
+    if (changed && backup) || cut.is_some() {
+        let seating = Seating { role, cut };
         record.seating = Some(seating);
         record.store(directory)?;
         finalizations = clear(
@@ -137,10 +164,13 @@ async fn clear(
         path: storage.clone(),
         source,
     };
-    remove(&storage, JOURNAL).map_err(removed)?;
     let Some(cut) = seating.cut else {
+        remove(&storage, &journals(seating.role)).map_err(removed)?;
         return Ok(finalizations);
     };
+    for role in [Role::Validator, Role::Backup] {
+        remove(&storage, &journals(role)).map_err(removed)?;
+    }
     remove(&storage, CACHE).map_err(removed)?;
     cut_back(context, directory, finalizations, cut, config).await
 }
@@ -198,6 +228,10 @@ async fn cut_back(
     let archive = archive.sync().await.map_err(archive_failed)?;
     kept::remove(directory)?;
     Ok(archive)
+}
+
+fn journals(role: Role) -> String {
+    format!("{}{JOURNAL}", role.journals())
 }
 
 fn archive_failed(error: commonware_storage::archive::Error) -> TermRefusal {

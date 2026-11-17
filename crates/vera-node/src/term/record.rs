@@ -29,8 +29,8 @@ pub(crate) struct TermRecord {
     /// under. It becomes `certificate` once the device has started as the
     /// validator with no block above the cut.
     pub taking_over: Option<TermCertificate>,
-    /// The role consensus last opened its storage in. A start in the other
-    /// role removes the vote journals.
+    /// The role consensus last opened its storage in. A start as a backup
+    /// after one as the validator removes the backup's journals.
     pub ran: Option<Role>,
     /// Consensus storage a start decided to clear. A start that finds it
     /// finishes the clearing before anything opens that storage.
@@ -126,7 +126,10 @@ mod tests {
             handed_over: Some(change(3)),
             taking_over: None,
             ran: Some(Role::Validator),
-            seating: Some(Seating { cut: Some(7) }),
+            seating: Some(Seating {
+                role: Role::Validator,
+                cut: Some(7),
+            }),
             resync: false,
             followed: false,
         };

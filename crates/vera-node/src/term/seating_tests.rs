@@ -63,12 +63,16 @@ fn taking_over(cut: u64) -> TermCertificate {
     }
 }
 
+const VOTES: &str = "vera-orchestrator_consensus_0";
+const OBSERVED: &str = "vera-observer_consensus_0";
+
 /// A backup's directory whose archive holds the certificates of blocks 1 to
-/// 5, with a vote journal, a marshal cache and partitions of other kinds.
+/// 5, with each role's journal, a marshal cache and partitions of other kinds.
 fn backup(directory: &Path) -> std::path::PathBuf {
     let storage = directory.join("commonware");
     for partition in [
-        "vera-orchestrator_consensus_0",
+        VOTES,
+        OBSERVED,
         "vera-cache-0-finalizations-key",
         "vera-reshare_events",
     ] {
@@ -132,7 +136,7 @@ fn settled(
 }
 
 #[test]
-fn a_takeover_removes_the_certificates_above_its_cut_with_the_journal_and_the_cache() {
+fn a_takeover_removes_the_certificates_above_its_cut_with_the_journals_and_the_cache() {
     let directory = tempfile::tempdir().unwrap();
     let storage = backup(directory.path());
     let mut record = TermRecord::load(directory.path()).unwrap();
@@ -141,7 +145,7 @@ fn a_takeover_removes_the_certificates_above_its_cut_with_the_journal_and_the_ca
 
     let held = settled(directory.path(), certificates(1..=5), false, Some(3)).unwrap();
     assert_eq!(held, [1, 2, 3]);
-    assert!(!storage.join("vera-orchestrator_consensus_0").exists());
+    assert!(!storage.join(VOTES).exists() && !storage.join(OBSERVED).exists());
     assert!(!storage.join("vera-cache-0-finalizations-key").exists());
     assert!(storage.join("vera-reshare_events").exists());
     assert!(!kept::stored(directory.path()));
@@ -165,8 +169,8 @@ fn a_block_above_the_cut_keeps_every_certificate() {
 
     let held = settled(directory.path(), certificates(1..=5), false, Some(4)).unwrap();
     assert_eq!(held, [1, 2, 3, 4, 5]);
-    // The role changed, so the journal goes; the cache is not the term's to clear.
-    assert!(!storage.join("vera-orchestrator_consensus_0").exists());
+    // Nothing is the term's to clear, and the validator's votes are kept.
+    assert!(storage.join(VOTES).exists() && storage.join(OBSERVED).exists());
     assert!(storage.join("vera-cache-0-finalizations-key").exists());
 }
 
@@ -192,7 +196,10 @@ fn an_interrupted_clearing_is_finished_from_the_kept_certificates_in_either_role
     let directory = tempfile::tempdir().unwrap();
     let storage = backup(directory.path());
     let mut record = TermRecord::load(directory.path()).unwrap();
-    record.seating = Some(Seating { cut: Some(2) });
+    record.seating = Some(Seating {
+        role: Role::Validator,
+        cut: Some(2),
+    });
     record.store(directory.path()).unwrap();
     // The interruption came after the file was complete: the archive may be
     // whole, destroyed or half filled, and the file decides.
@@ -205,7 +212,7 @@ fn an_interrupted_clearing_is_finished_from_the_kept_certificates_in_either_role
     let held = settled(directory.path(), certificates(1..=5), true, Some(2)).unwrap();
     assert_eq!(held, [1, 2]);
     assert!(!kept::stored(directory.path()));
-    assert!(!storage.join("vera-orchestrator_consensus_0").exists());
+    assert!(!storage.join(VOTES).exists() && !storage.join(OBSERVED).exists());
     let record = TermRecord::load(directory.path()).unwrap();
     assert_eq!((record.ran, record.seating), (Some(Role::Backup), None));
 }
@@ -216,8 +223,24 @@ fn a_start_in_the_same_role_clears_nothing() {
     let storage = backup(directory.path());
     let held = settled(directory.path(), certificates(1..=5), true, Some(4)).unwrap();
     assert_eq!(held, [1, 2, 3, 4, 5]);
-    assert!(storage.join("vera-orchestrator_consensus_0").exists());
+    assert!(storage.join(VOTES).exists() && storage.join(OBSERVED).exists());
     assert!(storage.join("vera-cache-0-finalizations-key").exists());
+}
+
+#[test]
+fn a_backup_after_the_validator_removes_only_its_own_journal() {
+    let directory = tempfile::tempdir().unwrap();
+    let storage = backup(directory.path());
+    let mut record = TermRecord::load(directory.path()).unwrap();
+    record.ran = Some(Role::Validator);
+    record.store(directory.path()).unwrap();
+
+    let held = settled(directory.path(), certificates(1..=5), true, Some(5)).unwrap();
+    assert_eq!(held, [1, 2, 3, 4, 5]);
+    assert!(storage.join(VOTES).exists() && !storage.join(OBSERVED).exists());
+    assert!(storage.join("vera-cache-0-finalizations-key").exists());
+    let record = TermRecord::load(directory.path()).unwrap();
+    assert_eq!((record.ran, record.seating), (Some(Role::Backup), None));
 }
 
 #[test]
@@ -227,6 +250,7 @@ fn only_the_partitions_of_one_kind_are_removed() {
     for partition in [
         "vera-orchestrator_consensus_0",
         "vera-orchestrator_consensus_12",
+        "vera-observer_consensus_0",
         "vera-cache-metadata",
         "vera-cache-3-notarized-key",
         "vera-blocks-value",
@@ -234,10 +258,11 @@ fn only_the_partitions_of_one_kind_are_removed() {
     ] {
         std::fs::create_dir_all(storage.join(partition)).unwrap();
     }
-    remove(&storage, JOURNAL).unwrap();
+    remove(&storage, &journals(Role::Validator)).unwrap();
     let left = |name: &str| storage.join(name).exists();
     assert!(!left("vera-orchestrator_consensus_0"));
     assert!(!left("vera-orchestrator_consensus_12"));
+    assert!(left("vera-observer_consensus_0"));
     assert!(left("vera-cache-metadata") && left("vera-blocks-value"));
     remove(&storage, CACHE).unwrap();
     assert!(!left("vera-cache-metadata") && !left("vera-cache-3-notarized-key"));

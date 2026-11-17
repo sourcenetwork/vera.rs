@@ -953,7 +953,12 @@ async fn run_node_with_elector<
             state_sync: consensus_start,
             blocks_per_epoch,
             mailbox_size: MAILBOX_SIZE,
-            partition_prefix: format!("{PARTITION_PREFIX}-orchestrator"),
+            // A backup journals apart, so it leaves the votes of the
+            // validator this device may have been untouched.
+            partition_prefix: format!(
+                "{PARTITION_PREFIX}{}",
+                crate::term::Role::of(is_backup).journals()
+            ),
         },
     );
     let orchestrator_handle =
