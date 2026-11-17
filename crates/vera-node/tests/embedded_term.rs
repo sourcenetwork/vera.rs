@@ -45,6 +45,14 @@ fn takeover_change(backup: &EmbeddedNode) -> vera_domain::TermChange {
                     "the backup stayed at block {cut} below finalized block {head}"
                 );
             }
+            // The certificate of the next block can arrive before the block,
+            // which the backup then fetches from the active device.
+            Err(EmbedError::Term(TermRefusal::CertificateAboveCut { height })) => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "block {height} never followed its certificate"
+                );
+            }
             Err(error) => panic!("{error}"),
         }
     }
