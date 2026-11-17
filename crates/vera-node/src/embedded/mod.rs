@@ -80,7 +80,6 @@ impl EmbeddedNode {
         if matches!(config.role, DeviceRole::Backup(_)) && config.deployment.is_some() {
             return Err(EmbedError::Config("a backup takes no key material"));
         }
-        let claim = directory::claim(&config.data_dir)?;
         let (genesis, peers, backup) = match (&config.role, &config.deployment) {
             (DeviceRole::Backup(backup), _) => {
                 let (genesis, peers) = crate::solo::follow_solo(
@@ -107,6 +106,7 @@ impl EmbeddedNode {
             }
         };
         let is_backup = backup.is_some();
+        let claim = directory::claim(&config.data_dir)?;
         // Nothing below may touch a directory another node runs on.
         let storage = config.data_dir.join("commonware");
         if storage.is_dir() {

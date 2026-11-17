@@ -455,7 +455,8 @@ QMDB page cache allocated at start, 1 and 256 pages by default against the
 daemon's 64 and 4,096. A stopped node's directory is free even while clones of
 its `LocalRpc` survive, and starting on a directory in use fails with
 `EmbedError::DirectoryInUse`; the node locks `.node-hold` in its data
-directory from before its first change there until its runtime stops. An RPC address that cannot be bound fails the
+directory from before it changes its term record or consensus storage until
+its runtime stops. An RPC address that cannot be bound fails the
 start. The consensus listener always binds; `127.0.0.1:0` keeps
 it on loopback with a system-chosen port. An embedded node prunes consensus
 archives and state journals by default (`EmbeddedConfig::RETENTION`); finalized

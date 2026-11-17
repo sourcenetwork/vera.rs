@@ -9,8 +9,8 @@ use super::EmbedError;
 
 /// The file Commonware's storage locks for as long as anything can touch the directory.
 const HOLD_NAME: &str = ".hold";
-/// The file an embedded node locks in its data directory from its first
-/// change to the directory until its runtime has stopped. It lies outside
+/// The file an embedded node locks in its data directory from before it
+/// changes its term record or consensus storage until its runtime has stopped. It lies outside
 /// `commonware/`, which a start may remove.
 const CLAIM_NAME: &str = ".node-hold";
 

@@ -24,10 +24,11 @@ requests. It can be awaited from any async runtime. A host crate needs no
 and the host holds it behind a pointer.
 
 A directory that another node holds, in this process or another, fails with
-`EmbedError::DirectoryInUse`. An embedded node locks `.node-hold` in its data
-directory before it changes anything there and keeps the lock until its
+`EmbedError::DirectoryInUse`. Once its deployment's records are checked or
+created, an embedded node locks `.node-hold` in its data directory, before it
+changes its term record or consensus storage, and keeps the lock until its
 runtime has stopped, so a second embedded node is refused before it touches
-the directory; `EmbeddedNode::resume_stopped` takes the same lock. Commonware's
+either; `EmbeddedNode::resume_stopped` takes the same lock. Commonware's
 own lock in `commonware/` is checked just before the runtime takes it, and a
 holder of that lock alone that arrives in between is waited for instead.
 
