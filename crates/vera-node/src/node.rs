@@ -37,7 +37,10 @@ use commonware_glue::{
 use commonware_p2p::{Ingress, Provider as _, authenticated::discovery};
 use commonware_parallel::{Rayon, Sequential};
 use commonware_runtime::{Handle, Spawner as _, Supervisor as _, buffer::paged::CacheRef, tokio};
-use commonware_storage::{archive::prunable, translator::TwoCap};
+use commonware_storage::{
+    archive::{Archive as _, prunable},
+    translator::TwoCap,
+};
 use commonware_utils::{NZDuration, NZU64, NZUsize, sequence::Unit};
 use tracing::{error, info};
 use vera_app::{
@@ -438,6 +441,32 @@ async fn run_node_with_elector<
         )?
         .with_metrics(finalization_metrics.clone()),
     );
+    // An embedded node changes role between starts; marshal and consensus
+    // have not opened their storage yet.
+    let finalizations_by_height = if seat.is_some() {
+        #[cfg(feature = "fault-injection")]
+        let finalizations_by_height = crate::term::fault::orphan(
+            &config.data_dir,
+            finalizations_by_height,
+            finalized_blocks.last_index(),
+            &genesis_block.id().0,
+            history_memory,
+        )
+        .await?;
+        let settled = crate::term::settle_seating(
+            context.child("seating"),
+            &config.data_dir,
+            is_backup,
+            finalizations_by_height,
+            finalized_blocks.last_index(),
+            archive_config("finalizations", page_cache.clone(), ()),
+        )
+        .await?;
+        term_record = crate::term::TermRecord::load(&config.data_dir)?;
+        settled
+    } else {
+        finalizations_by_height
+    };
     let completed_sync_height = plan.completed();
     let mut snapshot_sync = plan.should_sync(config.snapshot.is_some());
     let mut probe_artifact = None;
@@ -523,6 +552,18 @@ async fn run_node_with_elector<
         plan = plan.set_floor(artifact.floor.clone()).await;
     }
 
+    let consensus_floor = if seat.is_some() && !snapshot_sync {
+        crate::term::seat(
+            &history,
+            &finalizations_by_height,
+            &finalized_blocks,
+            &epoch_info,
+            blocks_per_epoch,
+        )
+        .await?
+    } else {
+        None
+    };
     let (marshal_actor, marshal, floor) = MarshalActor::init(
         context.child("marshal"),
         finalizations_by_height,
@@ -567,6 +608,23 @@ async fn run_node_with_elector<
         state_sync,
     )
     .await;
+    // The reshare actor reads an epoch's ceremony from the blocks it holds.
+    // Only Simplex is told where the node stands.
+    let consensus_start = match consensus_floor {
+        Some(seat) => {
+            StateSyncPlan::init(
+                context.child("consensus_seat"),
+                StateSyncConfig {
+                    partition_prefix: format!("{PARTITION_PREFIX}-seat"),
+                    max_participants: MAX_PARTICIPANTS,
+                    max_supported_mode: MAX_SUPPORTED_MODE,
+                },
+                Some(seat),
+            )
+            .await
+        }
+        None => state_sync.clone(),
+    };
     let (fence, gate) = Fence::new();
     let participants_provider = RegistryParticipants::new(
         modules.clone(),
@@ -892,17 +950,12 @@ async fn run_node_with_elector<
                 track_historical_votes: false,
             },
             gate,
-            state_sync,
+            state_sync: consensus_start,
             blocks_per_epoch,
             mailbox_size: MAILBOX_SIZE,
             partition_prefix: format!("{PARTITION_PREFIX}-orchestrator"),
         },
     );
-    // Embedded nodes change role; consensus has not opened its journal yet.
-    if seat.is_some() {
-        crate::term::settle_votes(&config.data_dir, is_backup, history.head_height())?;
-        term_record = crate::term::TermRecord::load(&config.data_dir)?;
-    }
     let orchestrator_handle =
         orchestrator_actor.start(vote_network, certificate_network, resolver_network);
 
@@ -959,28 +1012,22 @@ async fn run_node_with_elector<
         }
         if !is_backup {
             // A device taking the deployment over starts on the cut. A block
-            // above it came from the device being replaced after the cut was
-            // chosen, and the takeover is abandoned: its certificate would
-            // void a block this device already holds.
+            // above it, or its certificate, came from the device being
+            // replaced after the cut was chosen and the archive was cleared,
+            // and the takeover is abandoned: its certificate would void a
+            // block this device already holds.
             if let Some(certificate) = term_record.taking_over.take() {
                 let cut = certificate.change.cut;
                 let above = crate::term::archived(marshal.clone(), cut.height + 1).await;
                 if above != crate::term::Archived::Nothing || recovered.inner().height != cut.height
                 {
                     term_record.store(&config.data_dir)?;
-                    return Err(match above {
-                        crate::term::Archived::Certificate => {
-                            crate::TermRefusal::CertificateAboveCut {
-                                height: cut.height + 1,
-                            }
-                        }
-                        _ => crate::TermRefusal::NotAtCut {
-                            head: recovered
-                                .inner()
-                                .height
-                                .max(cut.height + u64::from(above == crate::term::Archived::Block)),
-                            cut: cut.height,
-                        },
+                    return Err(crate::TermRefusal::NotAtCut {
+                        head: recovered
+                            .inner()
+                            .height
+                            .max(cut.height + u64::from(above != crate::term::Archived::Nothing)),
+                        cut: cut.height,
                     }
                     .into());
                 }
@@ -1319,7 +1366,7 @@ const fn sync_config() -> SyncEngineConfig {
     }
 }
 
-fn archive_config<C>(
+pub(crate) fn archive_config<C>(
     name: &str,
     page_cache: CacheRef,
     codec_config: C,

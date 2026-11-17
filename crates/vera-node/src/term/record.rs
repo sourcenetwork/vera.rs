@@ -8,7 +8,10 @@ use std::{
 use serde::{Deserialize, Serialize};
 use vera_domain::{TermCertificate, TermChange};
 
-use super::TermRefusal;
+use super::{
+    TermRefusal,
+    seating::{Role, Seating},
+};
 
 const FILE: &str = "term.json";
 const PENDING: &str = "term.pending";
@@ -26,9 +29,12 @@ pub(crate) struct TermRecord {
     /// under. It becomes `certificate` once the device has started as the
     /// validator with no block above the cut.
     pub taking_over: Option<TermCertificate>,
-    /// Whether the consensus journal in the directory holds votes this
-    /// device cast as the validator.
-    pub voted: bool,
+    /// The role consensus last opened its storage in. A start in the other
+    /// role removes the vote journals.
+    pub ran: Option<Role>,
+    /// Consensus storage a start decided to clear. A start that finds it
+    /// finishes the clearing before anything opens that storage.
+    pub seating: Option<Seating>,
     /// Whether the consensus archives and state journals must be taken
     /// again from the device this one follows: they hold blocks a later term
     /// voided, which cannot be cut out of them.
@@ -36,9 +42,6 @@ pub(crate) struct TermRecord {
     /// Whether the device last ran as a backup. It validates again only
     /// under a certificate that names it.
     pub followed: bool,
-    /// Height of the device's newest block when it set its vote journal
-    /// aside to follow.
-    pub parked: Option<u64>,
 }
 
 impl TermRecord {
@@ -122,10 +125,10 @@ mod tests {
             }),
             handed_over: Some(change(3)),
             taking_over: None,
-            voted: true,
+            ran: Some(Role::Validator),
+            seating: Some(Seating { cut: Some(7) }),
             resync: false,
             followed: false,
-            parked: None,
         };
         record.store(directory.path()).unwrap();
         assert_eq!(TermRecord::load(directory.path()).unwrap(), record);

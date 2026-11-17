@@ -696,13 +696,13 @@ mod tests {
         let (config, this) = switching(directory.path());
         let mut record = TermRecord {
             handed_over: Some(certificate(1, B256::repeat_byte(8)).change),
-            voted: true,
+            resync: true,
             ..TermRecord::default()
         };
         record.store(directory.path()).unwrap();
         EmbeddedNode::resume_stopped(&config).unwrap();
         refuse_role(&config).unwrap();
-        assert!(TermRecord::load(directory.path()).unwrap().voted);
+        assert!(TermRecord::load(directory.path()).unwrap().resync);
         record.followed = true;
         record.store(directory.path()).unwrap();
         EmbeddedNode::resume_stopped(&config).unwrap();

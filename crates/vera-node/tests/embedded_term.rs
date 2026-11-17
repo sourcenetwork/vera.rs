@@ -8,55 +8,13 @@ mod support;
 
 use std::time::Duration;
 
-use devices::{block, certify, pair};
+use devices::{block, certify, hand_over, pair, takeover_change};
 use short_epochs::{BLOCKS_PER_EPOCH, height, run_until, store_in_files};
 use support::{await_certified_receipt, block_on, finalize_a_write};
 use vera_client::BlsSigner;
 use vera_node::{EmbedError, EmbeddedNode, TermRefusal};
 
 const WINDOW: Duration = Duration::from_secs(30);
-
-/// Hand over to `successor`. A loaded machine can take longer than the
-/// handover waits for the last proposed block, which leaves the device active.
-fn hand_over(node: &EmbeddedNode, successor: &vera_domain::PublicKey) -> vera_domain::TermChange {
-    for _ in 0..10 {
-        match block_on(node.hand_over(successor)) {
-            Ok(change) => return change,
-            Err(EmbedError::Term(
-                TermRefusal::Unsettled | TermRefusal::SuccessorNotCurrent { .. },
-            )) => std::thread::sleep(Duration::from_secs(1)),
-            Err(error) => panic!("{error}"),
-        }
-    }
-    panic!("the handover did not settle");
-}
-
-/// The change `backup` would take over with, once it has executed every
-/// block it knows to be finalized. A loaded machine can leave it behind for
-/// longer than one call waits.
-fn takeover_change(backup: &EmbeddedNode) -> vera_domain::TermChange {
-    let deadline = std::time::Instant::now() + Duration::from_secs(60);
-    loop {
-        match block_on(backup.takeover_change()) {
-            Ok(change) => return change,
-            Err(EmbedError::Term(TermRefusal::NotAtCut { head, cut })) => {
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "the backup stayed at block {cut} below finalized block {head}"
-                );
-            }
-            // The certificate of the next block can arrive before the block,
-            // which the backup then fetches from the active device.
-            Err(EmbedError::Term(TermRefusal::CertificateAboveCut { height })) => {
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "block {height} never followed its certificate"
-                );
-            }
-            Err(error) => panic!("{error}"),
-        }
-    }
-}
 
 /// Let `backup` reach the active device's newest block, then stop the active device.
 fn stop_followed(active: EmbeddedNode, backup: &EmbeddedNode) {
@@ -285,7 +243,7 @@ fn a_handover_needs_a_current_successor_and_is_undone_by_resuming() {
     block_on(laptop.stop()).unwrap();
     assert_eq!(height(&phone), change.cut.height);
     // Nobody produced a block meanwhile. The device takes the handover back
-    // and validates again from the votes it had set aside.
+    // and validates again on its newest block.
     EmbeddedNode::resume_stopped(&first.active).unwrap();
     let laptop = block_on(EmbeddedNode::start(first.active)).unwrap();
     run_until(&laptop, |reached| reached > change.cut.height + 2);
@@ -566,16 +524,20 @@ fn a_term_handed_back_to_the_device_it_came_from_goes_on() {
     let out = certify(hand_over(&laptop, &second.key.public_key()));
     block_on(phone.take_over(dealt.keys().clone(), out.clone())).unwrap();
     block_on(laptop.follow(out.clone())).unwrap();
-    // The phone hands back as soon as the laptop follows it.
+    // The phone builds blocks of its term before it hands back.
+    let signer = BlsSigner::new(79u64.into(), chain_id).unwrap();
+    let between = finalize_a_write(&phone, &signer);
+    run_until(&phone, |reached| reached >= out.change.cut.height + 4);
     let back = certify(hand_over(&phone, &first.key.public_key()));
     assert_eq!(back.change.term, 2);
-    assert!(back.change.cut.height >= out.change.cut.height);
+    assert!(back.change.cut.height >= out.change.cut.height + 4);
     block_on(laptop.take_over(dealt.keys().clone(), back.clone())).unwrap();
     block_on(phone.follow(back.clone())).unwrap();
 
-    let signer = BlsSigner::new(79u64.into(), chain_id).unwrap();
     let written = finalize_a_write(&laptop, &signer);
+    await_certified_receipt(&laptop, between);
     await_certified_receipt(&phone, written);
+    assert_eq!(block(&laptop, out.change.cut.height + 1).term, 1);
     assert_eq!(block(&laptop, back.change.cut.height + 1).term, 2);
     block_on(laptop.stop()).unwrap();
     block_on(phone.stop()).unwrap();
@@ -607,4 +569,50 @@ fn a_device_that_followed_nobody_validates_again_under_a_certificate() {
         std::thread::sleep(Duration::from_millis(100));
     }
     block_on(laptop.stop()).unwrap();
+}
+
+#[test]
+fn a_backup_that_synchronized_by_snapshot_takes_over_before_another_block() {
+    let directories = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+    let chain_id = 9_510;
+    let dealt = short_epochs::deployment(chain_id, 100);
+    let [first, second] = pair(
+        [directories[0].path(), directories[1].path()],
+        &dealt,
+        WINDOW,
+    );
+    // The backup joins in the second epoch, so the block that opened the
+    // epoch is one it never received from consensus.
+    let laptop = block_on(EmbeddedNode::start(first.active.clone())).unwrap();
+    run_until(&laptop, |reached| reached >= BLOCKS_PER_EPOCH + 4);
+    block_on(laptop.stop()).unwrap();
+    // The active device then builds a block only for a request.
+    let mut quiet = first.active;
+    quiet.pacing = Some(vera_node::SoloPacing {
+        idle: vera_node::EmbeddedConfig::HEARTBEAT,
+        batch: vera_node::SoloPacing::BATCH,
+    });
+    let laptop = block_on(EmbeddedNode::start(quiet)).unwrap();
+    let signer = BlsSigner::new(80u64.into(), chain_id).unwrap();
+    let mut before = finalize_a_write(&laptop, &signer);
+    // The backup joins away from the end of an epoch, where the next epoch
+    // would start from the block without a certificate.
+    while height(&laptop) % BLOCKS_PER_EPOCH >= BLOCKS_PER_EPOCH - 2 {
+        before = finalize_a_write(&laptop, &signer);
+    }
+
+    let mut phone = block_on(EmbeddedNode::start(second.backup)).unwrap();
+    await_certified_receipt(&phone, before);
+    let joined = height(&phone);
+    assert_eq!(joined, height(&laptop), "the active device built a block");
+    block_on(laptop.stop()).unwrap();
+
+    let change = takeover_change(&phone);
+    assert_eq!(change.cut.height, joined);
+    block_on(phone.take_over(dealt.keys().clone(), certify(change))).unwrap();
+    let after = finalize_a_write(&phone, &signer);
+    await_certified_receipt(&phone, after);
+    assert_eq!(block(&phone, joined + 1).term, 1);
+    run_until(&phone, |reached| reached >= joined + 3);
+    block_on(phone.stop()).unwrap();
 }

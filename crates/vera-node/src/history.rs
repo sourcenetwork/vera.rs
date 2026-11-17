@@ -46,6 +46,7 @@ pub use query::HistoricalExecution;
 mod peer;
 mod proof;
 mod rewind;
+mod seat;
 mod startup;
 pub use peer::{HistoryPeer, start_history_peer};
 pub(crate) use startup::SnapshotHistory;

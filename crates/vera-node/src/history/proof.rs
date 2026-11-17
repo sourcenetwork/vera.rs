@@ -2,9 +2,9 @@ use super::*;
 use vera_domain::{LIGHT_BLOCK_MAX_ARTIFACT_BYTES, LIGHT_BLOCK_MAX_DESCENDANTS, LightBlock};
 
 #[derive(BorshSerialize, BorshDeserialize)]
-struct ImportedFinality {
+pub(super) struct ImportedFinality {
     block: [u8; 32],
-    certificate: Vec<u8>,
+    pub(super) certificate: Vec<u8>,
     material: Vec<u8>,
 }
 

@@ -53,16 +53,6 @@ pub enum TermRefusal {
         /// Height of the certificate's cut.
         cut: u64,
     },
-    /// The consensus archive holds a finalization certificate for the block
-    /// above the cut, and the block itself never arrived. The archive keeps
-    /// the first certificate stored for a height and cannot be cut back, so
-    /// a term started here could not certify its first block. The device
-    /// takes over once it has that block, from the device that built it.
-    #[error("the certificate of block {height} is stored without its block")]
-    CertificateAboveCut {
-        /// Height of the block that is missing.
-        height: u64,
-    },
     /// This device announced a handover and has not resumed.
     #[error("this device handed the deployment over at block {}", .0.cut.height)]
     HandedOver(Box<TermChange>),
@@ -103,6 +93,9 @@ pub enum TermRefusal {
     /// Finalized history could not be read or cut back.
     #[error("finalized history: {0}")]
     History(String),
+    /// The archive of finalization certificates could not be rebuilt.
+    #[error("finalization archive: {0}")]
+    Archive(String),
     /// The operator policy could not be read from this device's state.
     #[error("operator policy: {0}")]
     Policy(String),

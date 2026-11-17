@@ -323,18 +323,28 @@ where
     /// The newest block, once execution has reached every finalized block
     /// the consensus archive holds. A cut chosen below such a block would
     /// void a block this device is about to apply.
+    ///
+    /// A certificate stored without its block is waited for: the block is
+    /// fetched from the device that built it. When that device is away the
+    /// block never comes, and the cut stays below it: the term voids it, and
+    /// the start under the term removes its certificate.
     async fn executed(&self, wait: Duration) -> Result<TermCut, TermRefusal> {
         let deadline = tokio::time::Instant::now() + wait;
         loop {
             let head = self.head();
             let above = (self.finalized)(head.height + 1).await;
-            if above == Archived::Nothing {
-                return Ok(head);
+            let expired = tokio::time::Instant::now() >= deadline;
+            match above {
+                Archived::Nothing => return Ok(head),
+                Archived::Certificate if expired => return Ok(head),
+                Archived::Block if expired => {
+                    return Err(TermRefusal::NotAtCut {
+                        head: head.height + 1,
+                        cut: head.height,
+                    });
+                }
+                Archived::Certificate | Archived::Block => tokio::time::sleep(POLL).await,
             }
-            if tokio::time::Instant::now() >= deadline {
-                return Err(not_at(&head, head.height, above));
-            }
-            tokio::time::sleep(POLL).await;
         }
     }
 
@@ -412,18 +422,28 @@ where
     }
 
     /// Wait until this node's newest block is `cut`. The final block of a
-    /// handover may still be on its way.
+    /// handover may still be on its way, and so may the block of a
+    /// certificate stored above the cut. A certificate whose block has not
+    /// come when the wait ends is void in the term.
     async fn reach(&self, cut: &TermCut, wait: Duration) -> Result<(), TermRefusal> {
         let deadline = tokio::time::Instant::now() + wait;
         loop {
             let head = self.head();
             let above = (self.finalized)(cut.height + 1).await;
-            if head == *cut && above == Archived::Nothing {
+            let expired = tokio::time::Instant::now() >= deadline;
+            if head == *cut
+                && (above == Archived::Nothing || (above == Archived::Certificate && expired))
+            {
                 return Ok(());
             }
             let waiting = head.height < cut.height || above == Archived::Certificate;
-            if !waiting || tokio::time::Instant::now() >= deadline {
-                return Err(not_at(&head, cut.height, above));
+            if !waiting || expired {
+                return Err(TermRefusal::NotAtCut {
+                    head: head
+                        .height
+                        .max(cut.height + u64::from(above == Archived::Block)),
+                    cut: cut.height,
+                });
             }
             tokio::time::sleep(POLL).await;
         }
@@ -436,10 +456,10 @@ where
             certificate: Some(certificate.clone()),
             handed_over: None,
             taking_over: None,
-            voted: self.record.voted,
+            ran: self.record.ran,
+            seating: self.record.seating,
             resync: self.record.resync,
             followed: self.record.followed,
-            parked: self.record.parked,
         };
         record.store(&self.data_dir)?;
         self.record = record;
@@ -510,20 +530,5 @@ where
             certificate: status.certificate,
         }));
         Asked::Contested
-    }
-}
-
-/// Why a device at `head` cannot start a term on the block at `cut`.
-fn not_at(head: &TermCut, cut: u64, above: Archived) -> TermRefusal {
-    match above {
-        Archived::Certificate => TermRefusal::CertificateAboveCut { height: cut + 1 },
-        Archived::Block => TermRefusal::NotAtCut {
-            head: head.height.max(cut + 1),
-            cut,
-        },
-        Archived::Nothing => TermRefusal::NotAtCut {
-            head: head.height,
-            cut,
-        },
     }
 }
