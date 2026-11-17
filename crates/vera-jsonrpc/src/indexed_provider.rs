@@ -478,6 +478,7 @@ fn indexed_receipt_to_rpc(receipt: IndexedReceipt) -> RpcTransactionReceipt {
             U64::ZERO
         },
         effective_gas_price: U256::ZERO,
+        refusal: receipt.refusal,
     }
 }
 
@@ -809,6 +810,7 @@ mod tests {
             }],
             status: true,
             signer_did: None,
+            refusal: None,
         }
     }
 

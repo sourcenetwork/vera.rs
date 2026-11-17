@@ -2,6 +2,8 @@
 
 use super::oog_dispatch;
 use super::*;
+use crate::precompiles::refusal::{Refuse, Stated, kind_of};
+use vera_domain::RefusalKind;
 use vera_modules::acp::{
     PolicyCreateBudget,
     types::{PolicyCreation, PolicyRecord},
@@ -88,15 +90,32 @@ pub(super) fn dispatch(
 #[derive(Debug, thiserror::Error)]
 enum CreationError {
     /// The caller's request is refused and reverts.
-    #[error("{0}")]
-    Refused(String),
+    #[error("{1}")]
+    Refused(RefusalKind, String),
     /// The node's own fault, which fails the block.
     #[error("{0}")]
     Fault(PrecompileError),
 }
 
-fn refused(reason: impl core::fmt::Display) -> CreationError {
-    CreationError::Refused(reason.to_string())
+impl Refuse for CreationError {
+    fn refusal_kind(&self) -> RefusalKind {
+        match self {
+            Self::Refused(kind, _) => *kind,
+            Self::Fault(_) => RefusalKind::StateError,
+        }
+    }
+}
+
+fn refused(error: impl Refuse) -> CreationError {
+    CreationError::Refused(error.refusal_kind(), error.to_string())
+}
+
+/// A refusal raised as an error, reported as revm displays it.
+fn refused_by(error: &PrecompileError) -> CreationError {
+    CreationError::Refused(
+        kind_of(error),
+        format!("fatal: {}", recoverable_message(error)),
+    )
 }
 
 fn creator(tx: &TxExecCtx) -> Result<Did, CreationError> {
@@ -104,7 +123,7 @@ fn creator(tx: &TxExecCtx) -> Result<Did, CreationError> {
         if internal_fault_reason(&error).is_some() {
             CreationError::Fault(error)
         } else {
-            refused(error)
+            refused_by(&error)
         }
     })
 }
@@ -122,9 +141,13 @@ fn create(
     match selector {
         IAcp::bearerCreatePolicyCall::SELECTOR => {
             let call = IAcp::bearerCreatePolicyCall::abi_decode(input)
-                .map_err(|error| refused(decode_error(error)))?;
-            let policy = std::str::from_utf8(&call.policy)
-                .map_err(|_| refused("invalid UTF-8 in policy"))?;
+                .map_err(|error| refused_by(&decode_error(error)))?;
+            let policy = std::str::from_utf8(&call.policy).map_err(|_| {
+                refused(Stated(
+                    RefusalKind::UndecodableInput,
+                    "invalid UTF-8 in policy",
+                ))
+            })?;
             module
                 .bearer_create_policy_with_budget(
                     vera,
@@ -139,10 +162,14 @@ fn create(
         }
         IAcp::createPolicyCall::SELECTOR => {
             let call = IAcp::createPolicyCall::abi_decode(input)
-                .map_err(|error| refused(decode_error(error)))?;
+                .map_err(|error| refused_by(&decode_error(error)))?;
             let request = PolicyCreation {
-                policy: String::from_utf8(call.policy.to_vec())
-                    .map_err(|_| refused("invalid UTF-8 in policy"))?,
+                policy: String::from_utf8(call.policy.to_vec()).map_err(|_| {
+                    refused(Stated(
+                        RefusalKind::UndecodableInput,
+                        "invalid UTF-8 in policy",
+                    ))
+                })?,
                 marshal_type: marshal_type_from_u8(call.marshalType),
                 required_specification: None,
                 metadata: Default::default(),
@@ -154,9 +181,13 @@ fn create(
         }
         IAcp::createPolicyWithOptionsCall::SELECTOR => {
             let call = IAcp::createPolicyWithOptionsCall::abi_decode(input)
-                .map_err(|error| refused(decode_error(error)))?;
-            let request = serde_json::from_slice(&call.request)
-                .map_err(|error| refused(format!("invalid policy request: {error}")))?;
+                .map_err(|error| refused_by(&decode_error(error)))?;
+            let request = serde_json::from_slice(&call.request).map_err(|error| {
+                refused(Stated(
+                    RefusalKind::UndecodableInput,
+                    format!("invalid policy request: {error}"),
+                ))
+            })?;
             let actor = creator(tx)?;
             module
                 .execute_create_policy_with_budget(&actor, &request, block, tx, budget)

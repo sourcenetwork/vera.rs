@@ -108,14 +108,20 @@ impl VeraClient {
         self.executed(tx_hash).await
     }
 
-    async fn executed(&self, tx_hash: B256) -> Result<TransactionReceipt, ClientError> {
+    pub(super) async fn executed(&self, tx_hash: B256) -> Result<TransactionReceipt, ClientError> {
         let receipt = self
             .wait_for_receipt(tx_hash, RECEIPT_POLL_INTERVAL, RECEIPT_POLL_ATTEMPTS)
             .await?;
         if receipt.status == 0 {
-            return Err(ClientError::TxReverted {
-                status: 0,
-                receipt: Box::new(receipt),
+            return Err(match receipt.refusal.clone() {
+                Some(refusal) => ClientError::Refused {
+                    refusal,
+                    receipt: Box::new(receipt),
+                },
+                None => ClientError::TxReverted {
+                    status: 0,
+                    receipt: Box::new(receipt),
+                },
             });
         }
         Ok(receipt)

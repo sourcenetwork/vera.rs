@@ -176,8 +176,8 @@ async fn a_native_write_is_simulated_for_its_owner_refused_for_another_did_and_w
         .request("vera_simulateNativeCall", delete_policy(OWNER, policy))
         .await
         .unwrap();
-    assert!(allowed.success, "{:?}", allowed.reason);
-    assert_eq!(allowed.reason, None);
+    assert!(allowed.success, "{:?}", allowed.refusal);
+    assert_eq!(allowed.refusal, None);
     assert_eq!(U256::from_be_slice(&allowed.output), U256::from(1));
     assert!(allowed.gas_used > U64::ZERO);
     assert_eq!(allowed.block_number, U64::from(HEAD_NUMBER));
@@ -191,7 +191,9 @@ async fn a_native_write_is_simulated_for_its_owner_refused_for_another_did_and_w
         .await
         .unwrap();
     assert!(!refused.success);
-    assert!(refused.reason.unwrap().contains("only the policy creator"));
+    let refusal = refused.refusal.unwrap();
+    assert_eq!(refusal.kind, vera_domain::RefusalKind::Unauthorized);
+    assert!(refusal.message().contains("only the policy creator"));
     assert!(refused.logs.is_empty() && refused.output.is_empty());
 
     let after = modules.read().unwrap();
@@ -341,7 +343,7 @@ async fn a_call_that_waited_for_a_slot_observes_the_head_published_meanwhile() {
     );
     assert!(estimate.await.unwrap().unwrap() >= 21_000);
     let native = native.await.unwrap().unwrap();
-    assert!(native.success, "{:?}", native.reason);
+    assert!(native.success, "{:?}", native.refusal);
     assert_eq!(native.block_number, U64::from(HEAD_NUMBER + 1));
     assert_eq!(native.timestamp, U64::from(HEAD_TIME + 5));
 }

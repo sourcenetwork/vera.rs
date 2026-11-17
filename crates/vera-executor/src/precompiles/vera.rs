@@ -2,7 +2,6 @@
 
 use alloy_primitives::Bytes;
 use alloy_sol_types::SolCall;
-use revm::precompile::PrecompileError;
 use vera_identity::Did;
 use vera_modules::acp::AcpModule;
 use vera_modules::types::{BlockExecCtx, TxExecCtx};
@@ -30,7 +29,7 @@ pub(super) fn dispatch(
     gas_limit: u64,
 ) -> DispatchReturn {
     if input.len() < 4 {
-        return Ok(err_dispatch("input too short for selector"));
+        return Ok(super::short_input());
     }
     let selector: [u8; 4] = input[..4].try_into().expect("checked length above");
 
@@ -41,12 +40,17 @@ pub(super) fn dispatch(
             }
             let call = IVera::storeThresholdObjectCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > vera_modules::vera::objects::MAX_OBJECT_REQUEST_BYTES {
-                return Err(PrecompileError::Fatal(
-                    "object request is too large".to_string(),
+                return Err(crate::precompiles::refusal::refused(
+                    vera_domain::RefusalKind::ArgumentOutOfBounds,
+                    "object request is too large",
                 ));
             }
-            let object = serde_json::from_slice(&call.request)
-                .map_err(|error| PrecompileError::Fatal(error.to_string()))?;
+            let object = serde_json::from_slice(&call.request).map_err(|error| {
+                crate::precompiles::refusal::refused(
+                    vera_domain::RefusalKind::UndecodableInput,
+                    error,
+                )
+            })?;
             match module.store_threshold_object(acp, block_ctx, tx_ctx, &call.bearerToken, &object)
             {
                 Ok(record) => Ok(ok_dispatch(
@@ -63,12 +67,17 @@ pub(super) fn dispatch(
             }
             let call = IVera::applyRingCommandCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > vera_modules::vera::rings::MAX_RING_REQUEST_BYTES {
-                return Err(PrecompileError::Fatal(
-                    "ring command is too large".to_string(),
+                return Err(crate::precompiles::refusal::refused(
+                    vera_domain::RefusalKind::ArgumentOutOfBounds,
+                    "ring command is too large",
                 ));
             }
-            let command = serde_json::from_slice(&call.request)
-                .map_err(|error| PrecompileError::Fatal(error.to_string()))?;
+            let command = serde_json::from_slice(&call.request).map_err(|error| {
+                crate::precompiles::refusal::refused(
+                    vera_domain::RefusalKind::UndecodableInput,
+                    error,
+                )
+            })?;
             match module.apply_ring_command(acp, block_ctx, tx_ctx, &call.bearerToken, &command) {
                 Ok(record) => Ok(ok_dispatch(
                     500_000,
@@ -85,12 +94,17 @@ pub(super) fn dispatch(
             let call =
                 IVera::applyRingParticipantRequestCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > vera_modules::vera::rings::MAX_RING_REQUEST_BYTES {
-                return Err(PrecompileError::Fatal(
-                    "ring request is too large".to_string(),
+                return Err(crate::precompiles::refusal::refused(
+                    vera_domain::RefusalKind::ArgumentOutOfBounds,
+                    "ring request is too large",
                 ));
             }
-            let signed = serde_json::from_slice(&call.request)
-                .map_err(|error| PrecompileError::Fatal(error.to_string()))?;
+            let signed = serde_json::from_slice(&call.request).map_err(|error| {
+                crate::precompiles::refusal::refused(
+                    vera_domain::RefusalKind::UndecodableInput,
+                    error,
+                )
+            })?;
             match module.apply_ring_participant_request(block_ctx, &signed) {
                 Ok(record) => Ok(ok_dispatch(
                     100_000,
@@ -108,12 +122,17 @@ pub(super) fn dispatch(
             }
             let call = IVera::finalizeRingReshareCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > vera_modules::vera::rings::MAX_RING_REQUEST_BYTES {
-                return Err(PrecompileError::Fatal(
-                    "ring request is too large".to_string(),
+                return Err(crate::precompiles::refusal::refused(
+                    vera_domain::RefusalKind::ArgumentOutOfBounds,
+                    "ring request is too large",
                 ));
             }
-            let signed = serde_json::from_slice(&call.request)
-                .map_err(|error| PrecompileError::Fatal(error.to_string()))?;
+            let signed = serde_json::from_slice(&call.request).map_err(|error| {
+                crate::precompiles::refusal::refused(
+                    vera_domain::RefusalKind::UndecodableInput,
+                    error,
+                )
+            })?;
             match module.finalize_ring_reshare(block_ctx, &signed) {
                 Ok(record) => Ok(ok_dispatch(
                     500_000,
@@ -129,12 +148,17 @@ pub(super) fn dispatch(
             }
             let call = IVera::submitRingReportCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > vera_modules::vera::rings::reports::MAX_REPORT_REQUEST_BYTES {
-                return Err(PrecompileError::Fatal(
-                    "ring request is too large".to_string(),
+                return Err(crate::precompiles::refusal::refused(
+                    vera_domain::RefusalKind::ArgumentOutOfBounds,
+                    "ring request is too large",
                 ));
             }
-            let signed = serde_json::from_slice(&call.request)
-                .map_err(|error| PrecompileError::Fatal(error.to_string()))?;
+            let signed = serde_json::from_slice(&call.request).map_err(|error| {
+                crate::precompiles::refusal::refused(
+                    vera_domain::RefusalKind::UndecodableInput,
+                    error,
+                )
+            })?;
             match module.submit_ring_report(block_ctx, &signed) {
                 Ok(record) => Ok(ok_dispatch(
                     500_000,
@@ -150,12 +174,17 @@ pub(super) fn dispatch(
             }
             let call = IVera::applyNodeRequestCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > vera_modules::vera::nodes::MAX_NODE_BYTES {
-                return Err(PrecompileError::Fatal(
-                    "node request is too large".to_string(),
+                return Err(crate::precompiles::refusal::refused(
+                    vera_domain::RefusalKind::ArgumentOutOfBounds,
+                    "node request is too large",
                 ));
             }
-            let signed = serde_json::from_slice(&call.request)
-                .map_err(|error| PrecompileError::Fatal(error.to_string()))?;
+            let signed = serde_json::from_slice(&call.request).map_err(|error| {
+                crate::precompiles::refusal::refused(
+                    vera_domain::RefusalKind::UndecodableInput,
+                    error,
+                )
+            })?;
             match module.apply_node_request(block_ctx, &signed) {
                 Ok(record) => Ok(ok_dispatch(
                     100_000,
@@ -171,12 +200,18 @@ pub(super) fn dispatch(
             }
             let call = IVera::applyAdministrationCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > 32_768 {
-                return Err(PrecompileError::Fatal(
-                    "administrative request is too large".to_string(),
+                return Err(crate::precompiles::refusal::refused(
+                    vera_domain::RefusalKind::ArgumentOutOfBounds,
+                    "administrative request is too large",
                 ));
             }
             let signed: SignedAdministrativeRequest = serde_json::from_slice(&call.request)
-                .map_err(|error| PrecompileError::Fatal(error.to_string()))?;
+                .map_err(|error| {
+                    crate::precompiles::refusal::refused(
+                        vera_domain::RefusalKind::UndecodableInput,
+                        error,
+                    )
+                })?;
             match module.apply_administrative_request(
                 acp,
                 block_ctx.genesis_id,
@@ -272,8 +307,12 @@ pub(super) fn dispatch(
                 return Ok(oog_dispatch());
             }
             let call = IVera::getJWSTokensByDidCall::abi_decode(input).map_err(decode_error)?;
-            let did = Did::new(&call.did)
-                .map_err(|e| PrecompileError::Fatal(format!("DID parse: {e}")))?;
+            let did = Did::new(&call.did).map_err(|e| {
+                crate::precompiles::refusal::refused(
+                    vera_domain::RefusalKind::UndecodableInput,
+                    format!("DID parse: {e}"),
+                )
+            })?;
 
             let tokens = match module.get_jws_tokens_by_did(&did) {
                 Ok(r) => r,
@@ -315,10 +354,7 @@ pub(super) fn dispatch(
             Ok(ok_dispatch(READ_GAS, ret, vec![]))
         }
 
-        _ => Err(PrecompileError::Fatal(format!(
-            "unknown Vera selector: 0x{}",
-            hex::encode(selector)
-        ))),
+        _ => Err(super::unknown_selector("Vera", selector)),
     }
 }
 

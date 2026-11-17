@@ -330,7 +330,7 @@ pub(crate) fn dispatch_with_journal<CTX: ContextTr>(
     gas_limit: u64,
 ) -> DispatchReturn {
     if input.len() < 4 {
-        return Ok(err_dispatch("input too short for selector"));
+        return Ok(super::short_input());
     }
     let selector: [u8; 4] = input[..4].try_into().expect("checked length above");
 
@@ -698,10 +698,7 @@ pub(crate) fn dispatch_with_journal<CTX: ContextTr>(
             Ok(ok_dispatch(gas_required, ret, vec![]))
         }
 
-        _ => Err(PrecompileError::Fatal(format!(
-            "unknown ValidatorRegistry selector: 0x{}",
-            hex::encode(selector)
-        ))),
+        _ => Err(super::unknown_selector("ValidatorRegistry", selector)),
     }
 }
 

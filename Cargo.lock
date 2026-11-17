@@ -7284,6 +7284,7 @@ dependencies = [
  "parking_lot",
  "thiserror 2.0.18",
  "tracing",
+ "vera-domain",
 ]
 
 [[package]]

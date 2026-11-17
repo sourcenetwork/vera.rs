@@ -47,7 +47,7 @@ use vera_modules::vera::VeraModule;
 use super::{
     ACP_ADDRESS, DispatchResult, DispatchReturn, decode_error, did_from_signer, err_dispatch,
     event_log, internal_fault_reason, is_out_of_gas, json_bytes, ok_dispatch, oog_dispatch,
-    out_of_gas_error, recoverable_message,
+    out_of_gas_error, recoverable_message, refusal_dispatch,
 };
 
 /// Base gas cost for reads and each batch wrapper.
@@ -65,7 +65,7 @@ fn edit_gas(budget: &PolicyEditBudget) -> Result<u64, PrecompileError> {
         .ok_or_else(out_of_gas_error)
 }
 
-fn edit_error(error: impl core::fmt::Display, budget: &PolicyEditBudget) -> DispatchReturn {
+fn edit_error(error: impl super::refusal::Refuse, budget: &PolicyEditBudget) -> DispatchReturn {
     let Ok(gas_used) = edit_gas(budget) else {
         return Ok(oog_dispatch());
     };
@@ -75,7 +75,12 @@ fn edit_error(error: impl core::fmt::Display, budget: &PolicyEditBudget) -> Disp
 }
 
 fn did_from_actor(actor: &str) -> Result<Did, PrecompileError> {
-    Did::new(actor).map_err(|e| PrecompileError::Fatal(format!("actor DID: {e}")))
+    Did::new(actor).map_err(|e| {
+        crate::precompiles::refusal::refused(
+            vera_domain::RefusalKind::UndecodableInput,
+            format!("actor DID: {e}"),
+        )
+    })
 }
 
 /// Decode a structured subject — a `subjectKind` discriminant plus the discrete
@@ -187,9 +192,10 @@ fn build_operations(
 fn batch_revert(
     index: usize,
     gas_used: u64,
-    bytes: &Bytes,
+    inner: &DispatchResult,
     budget: &mut batch_results::Budget,
 ) -> DispatchReturn {
+    let bytes = &inner.precompile.bytes;
     let call_number = index + 1;
     let prefix = format!("batch call {call_number} reverted");
     budget.revert(&prefix, bytes)?;
@@ -205,6 +211,11 @@ fn batch_revert(
     Ok(DispatchResult {
         precompile: PrecompileOutput::revert(gas_used, message.into_bytes().into(), 0),
         logs: vec![],
+        refusal: Some(
+            inner
+                .refusal
+                .unwrap_or(vera_domain::RefusalKind::InvalidArgument),
+        ),
     })
 }
 
@@ -213,12 +224,7 @@ fn batch_error(index: usize, err: PrecompileError) -> PrecompileError {
     if is_out_of_gas(&err) || internal_fault_reason(&err).is_some() {
         return err;
     }
-    match err {
-        PrecompileError::Fatal(message) => {
-            PrecompileError::Fatal(format!("batch call {}: {message}", index + 1))
-        }
-        other => other,
-    }
+    super::refusal::with_context(err, &format!("batch call {}: ", index + 1))
 }
 
 /// Dispatch an ABI-encoded call after bounding batch and leaf array allocations.
@@ -267,7 +273,7 @@ fn dispatch_validated(
     result_budget: &mut batch_results::Budget,
 ) -> DispatchReturn {
     if input.len() < 4 {
-        return Ok(err_dispatch("input too short for selector"));
+        return Ok(super::short_input());
     }
     let selector: [u8; 4] = input[..4].try_into().expect("checked length above");
 
@@ -334,7 +340,7 @@ fn dispatch_validated(
 
                 if inner.precompile.status.is_revert() {
                     (*module, *vera) = snapshot;
-                    return batch_revert(index, inner_gas, &inner.precompile.bytes, result_budget);
+                    return batch_revert(index, inner_gas, &inner, result_budget);
                 }
 
                 // Nested logs were already charged where they originated and are only moved here.
@@ -362,8 +368,12 @@ fn dispatch_validated(
             }
             let budget = PolicyEditBudget::new(gas_limit - WRITE_GAS);
             let call = IAcp::bearerEditPolicyCall::abi_decode(input).map_err(decode_error)?;
-            let policy = std::str::from_utf8(&call.policy)
-                .map_err(|_| PrecompileError::Fatal("invalid UTF-8 in policy".to_string()))?;
+            let policy = std::str::from_utf8(&call.policy).map_err(|_| {
+                crate::precompiles::refusal::refused(
+                    vera_domain::RefusalKind::UndecodableInput,
+                    "invalid UTF-8 in policy",
+                )
+            })?;
             let policy_id = policy_id_to_string(&call.policyId);
             let (removed, record) = match module.bearer_edit_policy_with_budget(
                 vera,
@@ -404,8 +414,12 @@ fn dispatch_validated(
             let call = IAcp::editPolicyCall::abi_decode(input).map_err(decode_error)?;
             let creator = did_from_signer(&tx_ctx.signer)?;
             let policy_id = policy_id_to_string(&call.policyId);
-            let policy_str = std::str::from_utf8(&call.policy)
-                .map_err(|_| PrecompileError::Fatal("invalid UTF-8 in policy".to_string()))?;
+            let policy_str = std::str::from_utf8(&call.policy).map_err(|_| {
+                crate::precompiles::refusal::refused(
+                    vera_domain::RefusalKind::UndecodableInput,
+                    "invalid UTF-8 in policy",
+                )
+            })?;
             let marshal_type = marshal_type_from_u8(call.marshalType);
 
             let (relationships_removed, record) = match module.edit_policy_at_with_budget(
@@ -579,10 +593,7 @@ fn dispatch_validated(
             Ok(ok_dispatch(READ_GAS, ret, vec![]))
         }
 
-        _ => Err(PrecompileError::Fatal(format!(
-            "unknown ACP selector: 0x{}",
-            hex::encode(selector)
-        ))),
+        _ => Err(super::unknown_selector("ACP", selector)),
     }
 }
 

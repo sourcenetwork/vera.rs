@@ -71,7 +71,10 @@ impl Budget {
 }
 
 fn limit() -> PrecompileError {
-    PrecompileError::Fatal("ACP batch result byte limit exceeded".to_string())
+    crate::precompiles::refusal::refused(
+        vera_domain::RefusalKind::WorkLimitExceeded,
+        "ACP batch result byte limit exceeded",
+    )
 }
 
 #[cfg(test)]

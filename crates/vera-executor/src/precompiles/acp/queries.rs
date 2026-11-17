@@ -130,14 +130,15 @@ pub(super) fn dispatch(module: &AcpModule, input: &[u8], gas_limit: u64) -> Disp
                 |records| IAcp::hasRelationshipCall::abi_encode_returns(&!records.is_empty()),
             )
         }
-        _ => Err(PrecompileError::Fatal(
-            "unknown ACP query selector".to_string(),
+        _ => Err(crate::precompiles::refusal::refused(
+            vera_domain::RefusalKind::UnknownSelector,
+            "unknown ACP query selector",
         )),
     }
 }
 
 fn output<T>(
-    result: Result<T, impl core::fmt::Display>,
+    result: Result<T, impl crate::precompiles::refusal::Refuse>,
     budget: &QueryBudget,
     encode: impl FnOnce(T) -> Vec<u8>,
 ) -> DispatchReturn {

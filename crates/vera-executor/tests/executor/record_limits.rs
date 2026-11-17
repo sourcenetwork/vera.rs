@@ -133,8 +133,17 @@ fn oversized_native_registration_rolls_back_and_allows_next_nonce(#[case] batch:
     assert_eq!(failure.executed_tx_indices, Some(vec![0]));
     assert_eq!(failure.receipts.len(), 1);
     assert!(!failure.receipts[0].success());
-    assert_eq!(failure.gas_used, NATIVE_LIMIT);
-    assert_eq!(failure.receipts[0].cumulative_gas_used(), NATIVE_LIMIT);
+    let refusal = failure.receipts[0].refusal.as_ref().unwrap();
+    assert_eq!(refusal.kind, vera_domain::RefusalKind::StorageBounds);
+    assert_eq!(
+        refusal.message(),
+        "module record exceeds native storage bounds"
+    );
+    // The call ran to completion, so it is charged what it used.
+    let charged = failure.receipts[0].gas_used;
+    assert!((5_000..NATIVE_LIMIT).contains(&charged), "{charged}");
+    assert_eq!(failure.gas_used, charged);
+    assert_eq!(failure.receipts[0].cumulative_gas_used(), charged);
     assert!(failure.receipts[0].logs().is_empty());
     let restored = module_state(&failed_modules);
     assert_eq!(&restored.serialize_stores()[..3], &before[..3]);
@@ -167,7 +176,7 @@ fn oversized_native_registration_rolls_back_and_allows_next_nonce(#[case] batch:
     assert!(outcome.receipts[0].logs().is_empty());
     assert!(outcome.receipts[1].success());
     assert_eq!(outcome.receipts[1].logs().len(), 1);
-    assert_eq!(outcome.gas_used, NATIVE_LIMIT + healthy_only.gas_used);
+    assert_eq!(outcome.gas_used, charged + healthy_only.gas_used);
     let modules = module_state(&next);
     assert_eq!(modules.nonces.get_nonce(&actor).unwrap(), 2);
     for id in [object.as_str(), "rolled-back", "healthy"] {

@@ -412,7 +412,8 @@ Every batch wrapper consumes 1,000 execution units, including an empty batch,
 in addition to its children's costs. Insufficient wrapper budget fails before
 decoding. Result order and nested return encoding are preserved. A child failure
 rolls back all ACP and identity-module changes in its enclosing batch and discards
-its logs. Failed native dispatch consumes its full allowance as described in
+its logs. A refused native batch is charged the gas it used up to the failing
+child, and its receipt names the child's refusal kind, as described in
 [execution limits](execution-limits.md).
 
 Batch assembly also shares a separate 12 MiB + 4 KiB result allowance across

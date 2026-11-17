@@ -11,7 +11,10 @@ from unittest.mock import patch
 
 import run_pr
 from record import digest
-from protocol import DISCOVERY, KEYS, TYPES, source_schema, unavailable
+from protocol import DISCOVERY, KEYS, RECEIPTS, TYPES, source_schema, unavailable
+
+
+RECEIPTS_V2 = 'hash.update(b"vera/receipts/v2");\n'
 
 
 class RunPrTests(unittest.TestCase):
@@ -31,6 +34,8 @@ class RunPrTests(unittest.TestCase):
             self.write_schema(side, 'relationship/v5/')
             (source / DISCOVERY).parent.mkdir(parents=True)
             (source / DISCOVERY).write_text('pub struct DiscoveryConfig;\n')
+            (source / RECEIPTS).parent.mkdir(parents=True)
+            (source / RECEIPTS).write_text(RECEIPTS_V2)
             subprocess.run(['git', 'add', '.'], cwd=source, check=True)
             subprocess.run(['git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
                             '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null',
@@ -237,6 +242,26 @@ print({help_text!r} if sys.argv[1:] == ['validator', '--help'] else {side!r})
         identity = json.loads((self.output / 'comparison.json').read_text())
         self.assertEqual(identity['base']['storage_version'], '2026.9.0')
         self.assertEqual(identity['head']['storage_version'], '2026.10.0')
+        for tag in ('base1', 'base2'):
+            for objects in (0, 32):
+                directory = self.output / tag / f'objects-{objects}'
+                self.assertEqual(json.loads((directory / 'unavailable.json').read_text()), unavailable(identity, objects))
+                self.assertFalse((directory / 'workload.jsonl').exists())
+        for tag in ('head1', 'head2'):
+            for objects in (0, 32):
+                self.assertTrue((self.output / tag / f'objects-{objects}' / 'manifest.json').exists())
+
+    def test_changed_receipt_commitment_skips_the_base_the_runner_cannot_verify(self):
+        source = self.root / 'base'
+        (source / RECEIPTS).write_text('hash.update(b"vera/receipts/v1");\n')
+        subprocess.run(['git', 'add', RECEIPTS], cwd=source, check=True)
+        subprocess.run(['git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                        '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null',
+                        'commit', '-qm', 'receipts'], cwd=source, check=True)
+        self.measure(workloads=4)
+        identity = json.loads((self.output / 'comparison.json').read_text())
+        self.assertEqual(identity['base']['receipt_commitment'], 'vera/receipts/v1')
+        self.assertEqual(identity['head']['receipt_commitment'], 'vera/receipts/v2')
         for tag in ('base1', 'base2'):
             for objects in (0, 32):
                 directory = self.output / tag / f'objects-{objects}'

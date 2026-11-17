@@ -194,6 +194,9 @@ pub struct RpcTransactionReceipt {
     pub status: U64,
     /// Effective gas price.
     pub effective_gas_price: U256,
+    /// Why a module refused a native request; absent on success and for EVM transactions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<vera_domain::Refusal>,
 }
 
 /// Extended transaction receipt for `vera_getTransactionReceipt`.
@@ -233,6 +236,9 @@ pub struct RpcNativeReceipt {
     pub status: U64,
     /// Effective gas price.
     pub effective_gas_price: U256,
+    /// Why a module refused a native request; absent on success and for EVM transactions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<vera_domain::Refusal>,
     /// DID of the BLS signer (`None` for EVM transactions).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signer_did: Option<String>,

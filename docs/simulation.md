@@ -73,8 +73,8 @@ Dry-runs one native module call as a named acting DID, without a signature.
 | Result field | Meaning |
 | --- | --- |
 | `success` | Whether the module call ran to completion |
-| `reason` | Why it was refused; absent on success |
-| `gasUsed` | Gas a receipt would record. A refused call records the whole 1,000,000 allowance, as a refused native request does |
+| `refusal` | Why it was refused, as a receipt would record it: `module`, `kind` and `message` (see [receipt commitments](receipt-commitments.md#refusals)); absent on success |
+| `gasUsed` | Gas a receipt would record. A refused call records what it used, at least 5,000; an exhausted allowance records the whole 1,000,000 |
 | `output` | Return data of a successful call |
 | `logs` | Events a successful call would emit: `address`, `topics`, `data` |
 | `blockNumber`, `timestamp` | The head revision the call was evaluated at |

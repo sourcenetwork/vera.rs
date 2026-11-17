@@ -36,10 +36,12 @@ use crate::precompiles::VeraPrecompiles;
 mod gas_budget;
 pub(crate) mod native_authentication;
 pub(crate) mod native_dispatch;
+pub(crate) mod native_outcome;
 
 use gas_budget::BlockGasBudget;
 use native_authentication::{AuthenticatedNativeTx, authenticate_native_tx};
 use native_dispatch::{NATIVE_TX_GAS_LIMIT, NativeCall, dispatch_native_call};
+use native_outcome::native_outcome;
 
 /// Block executor with vera precompiles (ACP, Bulletin, Vera).
 ///
@@ -222,39 +224,16 @@ impl VeraExecutor {
             journal,
         );
 
-        let failed_receipt = || {
-            ExecutionReceipt::new(
-                tx_hash,
-                false,
-                NATIVE_TX_GAS_LIMIT,
-                0, // cumulative gas set by caller
-                vec![],
-                None,
-            )
-        };
-
-        match dispatch_result {
-            Ok(Ok(result)) if result.precompile.status.is_success() => Ok(ExecutionReceipt::new(
-                tx_hash,
-                true,
-                result.precompile.gas_used,
-                0, // cumulative gas set by caller
-                result.logs,
-                None,
-            )),
-            Ok(Ok(_)) => Ok(failed_receipt()),
-            // A fault of the node fails the block. Anything else a module
-            // refused is the request's own: it is rejected, and the block
-            // goes on with the requests after it.
-            Ok(Err(error)) => crate::precompiles::internal_fault_reason(&error).map_or_else(
-                || Ok(failed_receipt()),
-                |fault| Err(ExecutionError::TxExecution(fault)),
-            ),
-            Err(_) => {
-                warn!(%tx_hash, "native tx module panicked");
-                Ok(failed_receipt())
-            }
-        }
+        let outcome = native_outcome(native_tx.target, dispatch_result)?;
+        Ok(ExecutionReceipt::new(
+            tx_hash,
+            outcome.refusal.is_none(),
+            outcome.gas_used,
+            0, // cumulative gas set by caller
+            outcome.logs,
+            None,
+        )
+        .with_refusal(outcome.refusal))
     }
 
     /// Run end-of-block hooks for modules that need per-block maintenance.

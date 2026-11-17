@@ -571,3 +571,53 @@ fn invalid_reproposal_contexts_are_rejected_even_with_valid_signatures() {
         }
     }
 }
+
+#[test]
+fn receipt_evidence_commits_the_refusal_kind_but_not_its_message() {
+    use crate::{
+        ExecutionReceipt, ReceiptResponse, Refusal, RefusalKind, RefusingModule, receipt_commitment,
+    };
+    let submission = B256::repeat_byte(1);
+    let refusal = |kind, message: &str| Refusal::new(RefusingModule::Acp, kind, message);
+    let receipts = vec![
+        ExecutionReceipt::new(submission, false, 5_000, 5_000, vec![], None)
+            .with_refusal(Some(refusal(RefusalKind::InvalidPolicy, "invalid policy"))),
+    ];
+    let response = ReceiptResponse {
+        revision: light_fixture_with(42, |block| {
+            block.receipt_commitment = Some(receipt_commitment(100, &receipts));
+        }),
+        gas_limit: 100,
+        receipts,
+    };
+    let decoded: ReceiptResponse =
+        serde_json::from_slice(&serde_json::to_vec(&response).unwrap()).unwrap();
+    let verified = decoded.verify(submission, &trusted_key()).unwrap();
+    let reported = verified.refusal.as_ref().unwrap();
+    assert_eq!(reported.kind, RefusalKind::InvalidPolicy);
+    assert_eq!(reported.module, RefusingModule::Acp);
+    assert_eq!(reported.message(), "invalid policy");
+
+    let mut reworded = response.clone();
+    reworded.receipts[0].refusal = Some(refusal(RefusalKind::InvalidPolicy, "other words"));
+    assert!(reworded.verify(submission, &trusted_key()).is_ok());
+    let mut reclassified = response.clone();
+    reclassified.receipts[0].refusal = Some(refusal(RefusalKind::OutOfGas, "invalid policy"));
+    assert!(reclassified.verify(submission, &trusted_key()).is_err());
+    let mut dropped = response;
+    dropped.receipts[0].refusal = None;
+    assert!(dropped.verify(submission, &trusted_key()).is_err());
+
+    let succeeded = vec![
+        ExecutionReceipt::new(submission, true, 5_000, 5_000, vec![], None)
+            .with_refusal(Some(refusal(RefusalKind::InvalidPolicy, ""))),
+    ];
+    let contradictory = ReceiptResponse {
+        revision: light_fixture_with(42, |block| {
+            block.receipt_commitment = Some(receipt_commitment(100, &succeeded));
+        }),
+        gas_limit: 100,
+        receipts: succeeded,
+    };
+    assert!(contradictory.verify(submission, &trusted_key()).is_err());
+}

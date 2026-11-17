@@ -2,12 +2,13 @@ use alloy_primitives::{B256, Keccak256};
 
 use crate::ExecutionReceipt;
 
-/// Commit the execution limit and ordered receipt fields using the v1 encoding.
+/// Commit the execution limit and ordered receipt fields using the v2 encoding.
 /// Integers and collection lengths are big-endian u64; presence and status use one byte.
+/// A refusal contributes its module and kind codes; its message is not committed.
 /// Logs include their address, ordered topics and length-prefixed data, without copying.
 pub fn receipt_commitment(gas_limit: u64, receipts: &[ExecutionReceipt]) -> B256 {
     let mut hash = Keccak256::new();
-    hash.update(b"vera/receipts/v1");
+    hash.update(b"vera/receipts/v2");
     hash.update(gas_limit.to_be_bytes());
     hash.update((receipts.len() as u64).to_be_bytes());
     for receipt in receipts {
@@ -15,6 +16,10 @@ pub fn receipt_commitment(gas_limit: u64, receipts: &[ExecutionReceipt]) -> B256
         hash.update(receipt.gas_used.to_be_bytes());
         hash.update(receipt.cumulative_gas_used().to_be_bytes());
         hash.update([u8::from(receipt.success())]);
+        match &receipt.refusal {
+            Some(refusal) => hash.update([1, refusal.module.code(), refusal.kind.code()]),
+            None => hash.update([0]),
+        }
         hash.update([u8::from(receipt.contract_address.is_some())]);
         if let Some(address) = receipt.contract_address {
             hash.update(address);
@@ -38,6 +43,8 @@ mod tests {
     use super::*;
     use alloy_primitives::{Address, Log, keccak256};
 
+    use crate::{Refusal, RefusalKind, RefusingModule};
+
     #[test]
     fn encoding_binds_every_receipt_field_and_collection_boundary() {
         let receipt = ExecutionReceipt::new(
@@ -53,13 +60,13 @@ mod tests {
             Some(Address::repeat_byte(8)),
         );
         let expected = [
-            b"vera/receipts/v1".as_slice(),
+            b"vera/receipts/v2".as_slice(),
             &9_u64.to_be_bytes(),
             &1_u64.to_be_bytes(),
             &[1; 32],
             &2_u64.to_be_bytes(),
             &3_u64.to_be_bytes(),
-            &[1, 1],
+            &[1, 0, 1],
             &[8; 20],
             &1_u64.to_be_bytes(),
             &[4; 20],
@@ -73,7 +80,7 @@ mod tests {
         assert_eq!(root, keccak256(expected));
         assert_ne!(root, receipt_commitment(10, std::slice::from_ref(&receipt)));
         assert_ne!(root, receipt_commitment(9, &[]));
-        for mutation in 0..11 {
+        for mutation in 0..13 {
             let mut changed = receipt.clone();
             match mutation {
                 0 => changed.tx_hash.0[0] ^= 1,
@@ -92,6 +99,14 @@ mod tests {
                 8 => changed.receipt.logs[0].data.data = vec![6].into(),
                 9 => changed.receipt.logs.clear(),
                 10 => changed.receipt.logs.push(changed.receipt.logs[0].clone()),
+                11 => changed = changed.with_refusal(Some(refusal(RefusalKind::InvalidPolicy, ""))),
+                12 => {
+                    changed.refusal = Some(Refusal::new(
+                        RefusingModule::Bulletin,
+                        RefusalKind::InvalidPolicy,
+                        "",
+                    ))
+                }
                 _ => unreachable!(),
             }
             assert_ne!(root, receipt_commitment(9, std::slice::from_ref(&changed)));
@@ -99,6 +114,45 @@ mod tests {
                 receipt_commitment(9, &[receipt.clone(), changed.clone()]),
                 receipt_commitment(9, &[changed, receipt.clone()]),
             );
+        }
+    }
+
+    fn refusal(kind: RefusalKind, message: &str) -> Refusal {
+        Refusal::new(RefusingModule::Acp, kind, message)
+    }
+
+    #[test]
+    fn refusal_kind_is_committed_and_its_message_is_not() {
+        let failed = |refusal| {
+            ExecutionReceipt::new(B256::repeat_byte(1), false, 5_000, 5_000, vec![], None)
+                .with_refusal(refusal)
+        };
+        let policy = failed(Some(refusal(RefusalKind::InvalidPolicy, "first")));
+        let root = receipt_commitment(9, std::slice::from_ref(&policy));
+        let expected = [
+            b"vera/receipts/v2".as_slice(),
+            &9_u64.to_be_bytes(),
+            &1_u64.to_be_bytes(),
+            &[1; 32],
+            &5_000_u64.to_be_bytes(),
+            &5_000_u64.to_be_bytes(),
+            &[0, 1, 1, 5, 0],
+            &0_u64.to_be_bytes(),
+        ]
+        .concat();
+        assert_eq!(root, keccak256(expected));
+        let reworded = failed(Some(refusal(RefusalKind::InvalidPolicy, "second")));
+        assert_eq!(root, receipt_commitment(9, &[reworded]));
+        for other in [
+            failed(None),
+            failed(Some(refusal(RefusalKind::OutOfGas, "first"))),
+            failed(Some(Refusal::new(
+                RefusingModule::Vera,
+                RefusalKind::InvalidPolicy,
+                "first",
+            ))),
+        ] {
+            assert_ne!(root, receipt_commitment(9, &[other]));
         }
     }
 }

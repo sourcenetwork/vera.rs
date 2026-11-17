@@ -634,7 +634,7 @@ async fn validator_registry_adversarial() {
                 &repeated,
             )
             .await,
-        Err(vera_client::ClientError::TxReverted { .. })
+        Err(vera_client::ClientError::Refused { .. })
     ));
     assert_eq!(client.administration().await.unwrap().unwrap().sequence, 1);
 

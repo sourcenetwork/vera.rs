@@ -96,6 +96,8 @@ pub struct IndexedReceipt {
     pub status: bool,
     /// DID of the BLS signer (`None` for EVM transactions).
     pub signer_did: Option<String>,
+    /// Why a module refused a native request (`None` on success and for EVM transactions).
+    pub refusal: Option<vera_domain::Refusal>,
 }
 
 /// An indexed log entry.

@@ -3,6 +3,8 @@
 use alloy_consensus::{Eip658Value, Receipt};
 use alloy_primitives::{Address, B256, Log};
 
+use crate::Refusal;
+
 /// Receipt for a single transaction execution.
 ///
 /// Wraps [`alloy_consensus::Receipt`] with additional execution metadata
@@ -17,6 +19,9 @@ pub struct ExecutionReceipt {
     pub gas_used: u64,
     /// Contract address if this was a contract creation.
     pub contract_address: Option<Address>,
+    /// Why a module refused a native request; absent on success and for EVM requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<Refusal>,
 }
 
 impl ExecutionReceipt {
@@ -38,7 +43,15 @@ impl ExecutionReceipt {
             },
             gas_used,
             contract_address,
+            refusal: None,
         }
+    }
+
+    /// The same receipt, recording why its native request was refused.
+    #[must_use]
+    pub fn with_refusal(mut self, refusal: Option<Refusal>) -> Self {
+        self.refusal = refusal;
+        self
     }
 
     /// Returns whether the transaction succeeded.

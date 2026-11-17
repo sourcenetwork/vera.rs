@@ -36,10 +36,10 @@ pub struct SimulatedLog {
 pub struct NativeCallSimulation {
     /// Whether the call ran to completion.
     pub success: bool,
-    /// Why the call was refused; absent on success.
+    /// Why the call was refused, as a receipt would record it; absent on success.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    /// Gas a receipt would record: the whole allowance for a refused call.
+    pub refusal: Option<crate::Refusal>,
+    /// Gas a receipt would record.
     pub gas_used: U64,
     /// Return data of a successful call.
     pub output: Bytes,

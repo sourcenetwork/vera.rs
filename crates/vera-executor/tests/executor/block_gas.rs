@@ -202,7 +202,7 @@ fn native_limit_is_reserved_before_nonce_or_module_changes(
 #[rstest]
 #[case(false)]
 #[case(true)]
-fn failed_native_and_reverted_batch_consume_full_capacity(#[case] batch: bool) {
+fn failed_native_and_reverted_batch_are_charged_what_they_used(#[case] batch: bool) {
     let executor = VeraExecutor::new(9001);
     let failing = if batch {
         IAcp::batchCallsCall {
@@ -220,11 +220,20 @@ fn failed_native_and_reverted_batch_consume_full_capacity(#[case] batch: bool) {
     let (outcome, next) = executor
         .execute_with_modules(&state, &context, &txs, executor.snapshot())
         .unwrap();
+    // The refusal leaves less than a full allowance, so the next request waits.
     assert_eq!(outcome.executed_tx_indices, Some(vec![0]));
-    assert_eq!(outcome.gas_used, NATIVE_LIMIT);
-    assert!(!outcome.receipts[0].success());
-    assert_eq!(outcome.receipts[0].cumulative_gas_used(), NATIVE_LIMIT);
-    assert!(outcome.receipts[0].logs().is_empty());
+    let receipt = &outcome.receipts[0];
+    assert!(!receipt.success());
+    assert!((5_000..NATIVE_LIMIT).contains(&receipt.gas_used));
+    assert_eq!(outcome.gas_used, receipt.gas_used);
+    assert_eq!(receipt.cumulative_gas_used(), receipt.gas_used);
+    assert!(receipt.logs().is_empty());
+    let refusal = receipt.refusal.as_ref().unwrap();
+    assert_eq!(refusal.kind, vera_domain::RefusalKind::InvalidPolicy);
+    assert_eq!(
+        refusal.message().starts_with("batch call 2 reverted: "),
+        batch
+    );
     assert!(
         module_state(&next)
             .acp
@@ -328,21 +337,23 @@ fn native_and_evm_share_actual_usage_while_reserving_full_limits() {
 }
 
 #[test]
-fn failed_native_leaves_only_remaining_gas_for_evm() {
+fn failed_native_leaves_what_it_did_not_use_for_evm() {
     let executor = VeraExecutor::new(9001);
     let state = MockStateDb::new();
     let (failed, _) = native(0, policy(false));
     let (evm, _) = transfer(&state, 0, 21_000);
-    let (deferred, _) = transfer(&state, 1, 21_000);
-    let txs = [evm, failed, deferred];
+    let (second, _) = transfer(&state, 1, 21_000);
+    let txs = [evm, failed, second];
     let context = context(NATIVE_LIMIT + 21_000);
     let (outcome, next) = executor
         .execute_with_modules(&state, &context, &txs, executor.snapshot())
         .unwrap();
-    assert_eq!(outcome.executed_tx_indices, Some(vec![1, 0]));
-    assert_eq!(outcome.gas_used, NATIVE_LIMIT + 21_000);
+    assert_eq!(outcome.executed_tx_indices, Some(vec![1, 0, 2]));
+    let refused = outcome.receipts[0].gas_used;
+    assert!(refused < NATIVE_LIMIT);
+    assert_eq!(outcome.gas_used, refused + 42_000);
     assert!(!outcome.receipts[0].success());
-    assert!(outcome.receipts[1].success());
+    assert!(outcome.receipts[1].success() && outcome.receipts[2].success());
     verify_selected(&executor, &state, &context, &txs, &outcome, &next);
 }
 
