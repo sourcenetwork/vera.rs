@@ -918,6 +918,8 @@ async fn run_node_with_elector<
         hold.clone(),
         wake.clone(),
     );
+    #[cfg(feature = "fault-injection")]
+    let application = application.with_stall(config.data_dir.clone());
     let deferred = Deferred::new(
         context.child("deferred"),
         application,

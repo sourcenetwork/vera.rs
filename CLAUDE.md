@@ -495,8 +495,9 @@ and it changes no key. The node signs none: the host collects approvals.
 certified state.
 
 `EmbeddedConfig::switching` names the account's devices. `hand_over` holds
-proposals, confirms the successor holds the final block and returns the change
-to certify; `take_over` and `follow` restart the node in place in its new
+proposals, including blocks built ahead of their turn, so nothing finalizes
+above the cut, confirms the successor holds the final block and returns the
+change to certify; `take_over` and `follow` restart the node in place in its new
 role. `term.json` keeps the newest certificate, an announced handover and a
 staged takeover; a device does not start as validator against them.
 `EmbeddedNode::resume_stopped` undoes an announced handover on a stopped
