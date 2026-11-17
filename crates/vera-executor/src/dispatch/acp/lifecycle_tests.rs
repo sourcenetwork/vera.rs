@@ -82,7 +82,7 @@ impl Fixture {
             .into(),
         });
         let bytes = IAcp::createPolicyWithOptionsCall::abi_decode_returns(&output).unwrap();
-        let record: PolicyRecord = PolicyRecord::from_json(&bytes).unwrap();
+        let record: PolicyRecord = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(record.metadata.creation_ts, self.block.timestamp);
         assert_eq!(record.metadata.tx_signer, self.tx.signer);
         assert_eq!(record.supplied_metadata.blob, b"policy");

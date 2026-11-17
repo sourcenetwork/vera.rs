@@ -16,7 +16,7 @@ pub(super) fn assert_policy(
         .verify(ModuleId::Acp, &key, minimum, trusted, RECORD_PROOF_BYTES)
         .expect("policy response should authenticate at its captured revision");
     let value = response.record.value.as_ref().expect("policy should exist");
-    let record: PolicyRecord = PolicyRecord::from_json(value).expect("policy record encoding");
+    let record: PolicyRecord = serde_json::from_slice(value).expect("policy record encoding");
     assert_eq!(record.policy.id.to_string(), policy);
     assert_eq!(record.policy.name, "test-policy");
     assert_eq!(record.raw_policy, super::TEST_POLICY_YAML);

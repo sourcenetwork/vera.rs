@@ -35,7 +35,7 @@ impl AcpModule {
         budget: &QueryBudget,
     ) -> Result<RecordPage<PolicyRecord>> {
         self.record_page(keys::POLICY_PREFIX, after, budget, |key, value| {
-            let record: PolicyRecord = PolicyRecord::from_json(value)
+            let record: PolicyRecord = serde_json::from_slice(value)
                 .map_err(|error| AcpError::State(format!("invalid policy: {error}")))?;
             let id = record.policy.id.as_str();
             if id.len() != 64

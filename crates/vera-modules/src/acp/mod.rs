@@ -65,13 +65,13 @@ mod test_nonce;
 pub(crate) use test_nonce::fresh_nonce;
 /// Permission evaluation over vera's records with acp's evaluator.
 pub mod evaluation;
-/// The policy hash and the policy id derived from it.
-pub mod policy_id;
 /// Key prefixes and builders for ACP KV storage.
 pub mod keys;
 pub mod operation;
 mod operation_budget;
 mod operation_lead;
+/// The policy hash and the policy id derived from it.
+pub mod policy_id;
 pub use operation_lead::POLICY_OPERATION_LEAD_KEY;
 pub mod read_capture;
 pub mod record_error;
@@ -96,9 +96,8 @@ use types::{
     AccessDecision, AccessRequest, AcpParams, Actor, AmendmentEvent, DecisionParams,
     GenerateCommitmentResult, Object, ObjectSelector, PolicyCmd, PolicyCmdResult, PolicyHash,
     PolicyMarshalingType, PolicyNonce, PolicyRecord, PolicySpecification, RecordMetadata,
-    RegistrationProof,
-    RegistrationsCommitment, RelationGenerations, RelationPair, RelationSelector,
-    RelationshipRecord, RelationshipSelector, SubjectSelector, SuppliedMetadata,
+    RegistrationProof, RegistrationsCommitment, RelationGenerations, RelationPair,
+    RelationSelector, RelationshipRecord, RelationshipSelector, SubjectSelector, SuppliedMetadata,
 };
 
 type Result<T> = std::result::Result<T, AcpError>;
@@ -204,7 +203,7 @@ impl AcpModule {
     pub fn from_store(store: InMemoryKvStore) -> Self {
         let mut policies = OrdMap::new();
         for (_, value) in store.prefix_iter(keys::POLICY_PREFIX) {
-            if let Ok(record) = PolicyRecord::from_json(value)
+            if let Ok(record) = serde_json::from_slice::<PolicyRecord>(value)
                 && let Ok(compiled) = evaluation::compile(&record)
             {
                 policies.insert(record.policy.id.to_string(), Arc::new(compiled));
@@ -517,11 +516,12 @@ impl AcpModule {
         required: Option<PolicySpecification>,
     ) -> Result<(Compiled, PolicyHash)> {
         Self::check_definition(policy, marshal_type)?;
-        let compiled = ::acp::policy::compile_text(policy, required.map(Into::into), 0).map_err(
-            |error| AcpError::InvalidPolicy {
-                reason: error.to_string(),
-            },
-        )?;
+        let compiled =
+            ::acp::policy::compile_text(policy, required.map(Into::into), 0).map_err(|error| {
+                AcpError::InvalidPolicy {
+                    reason: error.to_string(),
+                }
+            })?;
         let hash = policy_id::policy_hash(&compiled.policy);
         Ok((compiled, hash))
     }
@@ -651,7 +651,7 @@ impl AcpModule {
     }
 
     fn decode_policy_record(id: &str, bytes: &[u8]) -> Result<PolicyRecord> {
-        let record: PolicyRecord = PolicyRecord::from_json(bytes)
+        let record: PolicyRecord = serde_json::from_slice(bytes)
             .map_err(|error| AcpError::State(format!("invalid policy record: {error}")))?;
         if record.policy.id.as_str() != id {
             return Err(AcpError::State("policy record identity mismatch".into()));

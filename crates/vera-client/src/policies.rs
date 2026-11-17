@@ -89,7 +89,7 @@ impl VeraClient {
 }
 
 fn decode(key: &[u8], value: &[u8]) -> Result<PolicyRecord, ClientError> {
-    let record: PolicyRecord = PolicyRecord::from_json(value)?;
+    let record: PolicyRecord = serde_json::from_slice(value)?;
     let id = record.policy.id.as_str();
     if id.len() != 64
         || !id

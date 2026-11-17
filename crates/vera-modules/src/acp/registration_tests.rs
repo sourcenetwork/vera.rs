@@ -606,7 +606,7 @@ fn corrupt_policy_and_relationship_records_cannot_authorize_or_be_overwritten() 
     let policy_key = keys::policy_key(&policy);
     let policy_bytes = module.store.get(&policy_key).unwrap();
     for invalid in [b"{".to_vec(), {
-        let mut record: PolicyRecord = PolicyRecord::from_json(&policy_bytes).unwrap();
+        let mut record: PolicyRecord = serde_json::from_slice(&policy_bytes).unwrap();
         record.policy.id = ::acp::domain::PolicyId::new("other");
         serde_json::to_vec(&record).unwrap()
     }] {

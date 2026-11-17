@@ -96,7 +96,7 @@ pub(super) fn committed() -> (SharedModuleState, B256) {
     assert!(created.output.status.is_success());
     let returned = &created.output.bytes;
     let length = U256::from_be_slice(&returned[32..64]).to::<usize>();
-    let record: PolicyRecord = PolicyRecord::from_json(&returned[64..64 + length]).unwrap();
+    let record: PolicyRecord = serde_json::from_slice(&returned[64..64 + length]).unwrap();
     (
         Arc::new(RwLock::new(modules)),
         record.policy.id.as_str().parse().unwrap(),

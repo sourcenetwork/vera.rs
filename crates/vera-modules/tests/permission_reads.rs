@@ -45,7 +45,13 @@ const LIMITS: ReadLimits = ReadLimits {
 };
 
 fn policy() -> String {
-    AcpModule::predict_policy_id(DEFINITION, &PolicyMarshalingType::ShortYaml, 1).unwrap()
+    AcpModule::predict_policy_id(
+        DEFINITION,
+        &PolicyMarshalingType::ShortYaml,
+        &Default::default(),
+        OWNER,
+    )
+    .unwrap()
 }
 
 fn owner() -> Did {
@@ -54,7 +60,8 @@ fn owner() -> Did {
 
 fn relationship_key(store: &InMemoryKvStore, relationship: &Relationship) -> Vec<u8> {
     let record: PolicyRecord =
-        PolicyRecord::from_json(&store.get(&keys::policy_key(&policy())).unwrap()).unwrap();
+        serde_json::from_slice::<PolicyRecord>(&store.get(&keys::policy_key(&policy())).unwrap())
+            .unwrap();
     keys::relationship_generation_key(
         &policy(),
         record.relations.pair(relationship).unwrap(),
@@ -66,7 +73,12 @@ fn relationship_key(store: &InMemoryKvStore, relationship: &Relationship) -> Vec
 fn registered() -> AcpModule {
     let mut module = AcpModule::new();
     let record = module
-        .create_policy(&owner(), DEFINITION, PolicyMarshalingType::ShortYaml)
+        .create_policy(
+            &owner(),
+            DEFINITION,
+            PolicyMarshalingType::ShortYaml,
+            Default::default(),
+        )
         .unwrap();
     assert_eq!(record.policy.id.as_str(), policy());
     for (resource, id) in [("document", "report"), ("group", "staff")] {
@@ -315,7 +327,7 @@ fn policy_reads_distinguish_absence_from_invalid_records() {
 
     let mut store = fixture(Subject::AllActors, true);
     let key = keys::policy_key(&policy());
-    let mut record: PolicyRecord = PolicyRecord::from_json(&store.get(&key).unwrap()).unwrap();
+    let mut record: PolicyRecord = serde_json::from_slice(&store.get(&key).unwrap()).unwrap();
     record.policy.id = ::acp::domain::PolicyId::new("another-policy");
     store.put(&key, serde_json::to_vec(&record).unwrap());
     assert!(evaluate_access_request(store.clone(), &policy(), &request()).is_err());

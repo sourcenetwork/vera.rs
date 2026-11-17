@@ -273,7 +273,7 @@ pub(super) fn read_policy<S: RecordStore>(
     store
         .read_record(&keys::policy_key(policy_id))?
         .map(|bytes| {
-            let record: PolicyRecord = PolicyRecord::from_json(&bytes)?;
+            let record: PolicyRecord = serde_json::from_slice(&bytes)?;
             if record.policy.id.as_str() != policy_id {
                 return Err(RecordError::invalid(
                     "policy record ID does not match its key",

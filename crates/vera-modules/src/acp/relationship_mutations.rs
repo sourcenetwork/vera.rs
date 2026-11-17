@@ -219,7 +219,7 @@ fn current_policy<S: RecordStore>(store: &S, id: &str) -> Result<Option<PolicyRe
     store
         .read_record(&keys::policy_key(id))?
         .map(|bytes| {
-            let policy: PolicyRecord = PolicyRecord::from_json(&bytes)?;
+            let policy: PolicyRecord = serde_json::from_slice(&bytes)?;
             if policy.policy.id.as_str() != id {
                 return Err(invalid("policy record identity mismatch"));
             }

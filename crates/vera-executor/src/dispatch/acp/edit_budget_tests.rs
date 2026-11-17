@@ -169,7 +169,7 @@ fn direct_and_bearer_policy_edit_accept_exact_work_gas_and_reject_one_less() {
         // The direct and bearer methods have the same return ABI.
         let decoded = IAcp::editPolicyCall::abi_decode_returns(&output.output.bytes).unwrap();
         assert_eq!(decoded.relationshipsRemoved, 1);
-        let record: PolicyRecord = PolicyRecord::from_json(&decoded.record).unwrap();
+        let record: PolicyRecord = serde_json::from_slice(&decoded.record).unwrap();
         assert_eq!(record.last_modified, Some(fixture.block.timestamp.clone()));
         let mut exact = fixture.clone();
         let result = exact.dispatch(&input, output.output.gas_used).unwrap();

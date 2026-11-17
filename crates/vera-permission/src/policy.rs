@@ -41,7 +41,7 @@ pub(super) fn verify_policy(
     let Some(value) = &proof.value else {
         return Ok(None);
     };
-    let record: PolicyRecord = PolicyRecord::from_json(value)
+    let record: PolicyRecord = serde_json::from_slice(value)
         .map_err(|_| PermissionError::Invalid("policy record encoding"))?;
     if record.policy.id.as_str() != policy || record.derived_id() != policy {
         return Err(PermissionError::Invalid(
