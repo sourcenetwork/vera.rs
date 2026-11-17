@@ -95,10 +95,12 @@ stops:
   never dials them. A backup's watchdog counts a stall only while a peer is
   connected, and its restart re-arms state sync once the deployment may have
   moved past the retained consensus revisions. A backup keeps certificates of
-  an epoch it has not entered (Commonware's orchestrator drops them) and
+  an epoch it has not entered (Commonware's orchestrator drops them), at most
+  256 within 1 MiB, and
   replays them once marshal has processed the epoch's last block. Nodes with
   a peer keep the daemon's burst on the block-fetch channel. A start returns
-  once the node has applied the finalized blocks its archive holds, and the
+  once the node has applied the finalized blocks its archive holds or after
+  30 seconds, whichever comes first, and the
   snapshot floor refresh waits while the synchronization handoff runs.
 
 The finalization callback persists execution and certificate history together
