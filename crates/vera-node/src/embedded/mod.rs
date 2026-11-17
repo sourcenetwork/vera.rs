@@ -114,7 +114,11 @@ impl EmbeddedNode {
         }
         crate::term::settle_role(&config.data_dir, is_backup)?;
         if is_backup {
-            crate::term::rewind(&config.data_dir, config.history_memory)?;
+            let this = config
+                .switching
+                .as_ref()
+                .map(|switching| device_id(&switching.device_key.public_key()));
+            crate::term::rewind(&config.data_dir, this, config.history_memory)?;
         }
         let identity = backup.as_ref().map_or_else(
             || peers.participants[0].clone(),
@@ -564,9 +568,10 @@ impl Drop for EmbeddedNode {
 /// Refuse a role the device's stored term rules out.
 ///
 /// A device that announced a handover, that knows another device holds the
-/// newest term, or that followed the deployment and holds no certificate
-/// naming it, must not validate: it would finalize blocks beside the active
-/// device.
+/// newest term, or that followed the deployment and has accepted no
+/// certificate naming it since, must not validate: it would finalize blocks
+/// beside the active device. A certificate naming this device that it held
+/// before it followed does not count; resuming (`resume_stopped`) does.
 fn refuse_role(config: &EmbeddedConfig) -> Result<(), EmbedError> {
     if matches!(config.role, DeviceRole::Backup(_)) {
         return Ok(());
@@ -595,10 +600,11 @@ fn refuse_role(config: &EmbeddedConfig) -> Result<(), EmbedError> {
         return Err(TermRefusal::HandedOver(Box::new(change)).into());
     }
     match record.deciding() {
-        Some(certificate) if named(certificate) => Ok(()),
-        Some(certificate) => Err(TermRefusal::Superseded(Box::new(certificate.clone())).into()),
-        None if record.followed => Err(TermRefusal::NotCertified.into()),
-        None => Ok(()),
+        Some(certificate) if !named(certificate) => {
+            Err(TermRefusal::Superseded(Box::new(certificate.clone())).into())
+        }
+        _ if record.followed => Err(TermRefusal::NotCertified.into()),
+        _ => Ok(()),
     }
 }
 
@@ -746,6 +752,26 @@ mod tests {
         let mut record = TermRecord::load(directory.path()).unwrap();
         record.taking_over = Some(certificate(1, this));
         record.store(directory.path()).unwrap();
+        refuse_role(&config).unwrap();
+    }
+
+    #[test]
+    fn a_holder_that_followed_validates_again_only_by_resuming() {
+        let directory = tempfile::tempdir().unwrap();
+        let (config, this) = switching(directory.path());
+        TermRecord {
+            certificate: Some(certificate(1, this)),
+            ..TermRecord::default()
+        }
+        .store(directory.path())
+        .unwrap();
+        refuse_role(&config).unwrap();
+        crate::term::settle_role(directory.path(), true).unwrap();
+        assert!(matches!(
+            refuse_role(&config),
+            Err(EmbedError::Term(TermRefusal::NotCertified))
+        ));
+        EmbeddedNode::resume_stopped(&config).unwrap();
         refuse_role(&config).unwrap();
     }
 

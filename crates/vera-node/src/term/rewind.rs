@@ -2,6 +2,8 @@
 
 use std::{io::Write as _, path::Path};
 
+use alloy_primitives::B256;
+
 use super::{TermRecord, TermRefusal};
 use crate::{DiscardedSubmission, FinalizedHistory, HistoryMemory, history::Standing};
 
@@ -10,14 +12,31 @@ const PENDING: &str = "discarded-submissions.pending";
 
 /// Prepare `directory` to follow the device that holds the stored term.
 ///
-/// Blocks this device finalized above the term's cut are void. Their
+/// Nothing is voided or removed while the stored certificate names this
+/// device (`this`): blocks above its cut are this device's own blocks of
+/// that term, and a mark to take the stores again is refused with
+/// [`TermRefusal::HolderResync`].
+///
+/// Otherwise blocks this device finalized above the term's cut are void. Their
 /// submissions are added to the report the host reads, their records are
 /// dropped from finalized history, and the consensus archives and state
 /// journals are removed: those cannot be cut back, so the device takes the
 /// state at a block of the new term from the device it follows, and imports
 /// the history between the cut and that block.
-pub(crate) fn rewind(directory: &Path, memory: HistoryMemory) -> Result<(), TermRefusal> {
+pub(crate) fn rewind(
+    directory: &Path,
+    this: Option<B256>,
+    memory: HistoryMemory,
+) -> Result<(), TermRefusal> {
     let mut record = TermRecord::load(directory)?;
+    if let Some(change) = record.change()
+        && Some(change.holder) == this
+    {
+        return match record.resync {
+            true => Err(TermRefusal::HolderResync(change.term)),
+            false => Ok(()),
+        };
+    }
     let history = directory.join("history");
     if let (Some(change), true) = (record.change().copied(), history.is_dir()) {
         let failed = |error: anyhow::Error| TermRefusal::History(format!("{error:#}"));
@@ -135,8 +154,6 @@ fn report(directory: &Path, voided: Vec<DiscardedSubmission>) -> Result<(), Term
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::B256;
-
     use super::*;
 
     fn submission(height: u64) -> DiscardedSubmission {
@@ -170,16 +187,55 @@ mod tests {
         std::fs::create_dir_all(storage.join("vera-blocks-value")).unwrap();
         std::fs::write(directory.path().join("solo-genesis.json"), b"{}").unwrap();
 
-        rewind(directory.path(), HistoryMemory::EMBEDDED).unwrap();
+        rewind(directory.path(), None, HistoryMemory::EMBEDDED).unwrap();
         assert!(storage.exists());
         let record = TermRecord {
             resync: true,
             ..TermRecord::default()
         };
         record.store(directory.path()).unwrap();
-        rewind(directory.path(), HistoryMemory::EMBEDDED).unwrap();
+        rewind(directory.path(), None, HistoryMemory::EMBEDDED).unwrap();
         assert!(!storage.exists());
         assert!(directory.path().join("solo-genesis.json").exists());
         assert!(!TermRecord::load(directory.path()).unwrap().resync);
+    }
+
+    #[test]
+    fn the_holder_of_the_stored_term_keeps_its_stores() {
+        let directory = tempfile::tempdir().unwrap();
+        let storage = directory.path().join("commonware");
+        std::fs::create_dir_all(storage.join("vera-orchestrator_consensus_0")).unwrap();
+        let this = B256::repeat_byte(2);
+        let certificate = vera_domain::TermCertificate {
+            change: vera_domain::TermChange {
+                genesis_id: B256::repeat_byte(1),
+                term: 3,
+                holder: this,
+                cut: vera_domain::TermCut {
+                    height: 5,
+                    block: B256::repeat_byte(3),
+                },
+            },
+            approvals: Vec::new(),
+        };
+        let record = TermRecord {
+            certificate: Some(certificate),
+            resync: true,
+            ..TermRecord::default()
+        };
+        record.store(directory.path()).unwrap();
+        assert!(matches!(
+            rewind(directory.path(), Some(this), HistoryMemory::EMBEDDED),
+            Err(TermRefusal::HolderResync(3))
+        ));
+        assert!(storage.join("vera-orchestrator_consensus_0").exists());
+        // Another device's copy of the same certificate takes the stores again.
+        rewind(
+            directory.path(),
+            Some(B256::repeat_byte(4)),
+            HistoryMemory::EMBEDDED,
+        )
+        .unwrap();
+        assert!(!storage.exists());
     }
 }

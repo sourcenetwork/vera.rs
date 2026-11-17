@@ -38,7 +38,7 @@ pub(crate) use record::TermRecord;
 pub use refusal::TermRefusal;
 pub(crate) use reporter::{Applied, TermReporter};
 pub(crate) use rewind::{acknowledge, discarded, resync_after, rewind};
-pub(crate) use seating::{Role, settle as settle_seating};
+pub(crate) use seating::{Role, Start, settle as settle_seating};
 pub use switching::{Device, Switching};
 
 use alloy_primitives::B256;

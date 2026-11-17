@@ -48,12 +48,21 @@ fn config() -> prunable::Config<TwoCap, ()> {
     )
 }
 
+/// The identifier of the device the tests run as.
+const THIS: B256 = B256::repeat_byte(2);
+/// The identifier of another device of the account.
+const OTHER: B256 = B256::repeat_byte(4);
+
 fn taking_over(cut: u64) -> TermCertificate {
+    held(cut, THIS)
+}
+
+fn held(cut: u64, holder: B256) -> TermCertificate {
     TermCertificate {
         change: TermChange {
             genesis_id: B256::repeat_byte(1),
             term: 1,
-            holder: B256::repeat_byte(2),
+            holder,
             cut: TermCut {
                 height: cut,
                 block: B256::repeat_byte(3),
@@ -87,6 +96,17 @@ fn backup(directory: &Path) -> std::path::PathBuf {
     storage
 }
 
+/// A start of this device whose newest block in history is its newest in
+/// marshal's archive.
+fn start(backup: bool, newest_block: Option<u64>) -> Start {
+    Start {
+        this: Some(THIS),
+        backup,
+        newest_block,
+        executed: newest_block.unwrap_or(0),
+    }
+}
+
 /// Run `settle` in `directory` on an archive that first receives `stored`,
 /// and return the heights the archive holds afterwards.
 fn settled(
@@ -94,6 +114,14 @@ fn settled(
     stored: Vec<(u64, Certificate)>,
     as_backup: bool,
     newest_block: Option<u64>,
+) -> Result<Vec<u64>, TermRefusal> {
+    settled_as(directory, stored, start(as_backup, newest_block))
+}
+
+fn settled_as(
+    directory: &Path,
+    stored: Vec<(u64, Certificate)>,
+    start: Start,
 ) -> Result<Vec<u64>, TermRefusal> {
     let directory = directory.to_path_buf();
     let storage = directory.join("commonware");
@@ -113,9 +141,8 @@ fn settled(
             let archive = settle(
                 context.child("seating"),
                 &directory,
-                as_backup,
+                start,
                 archive,
-                newest_block,
                 config(),
             )
             .await?;
@@ -160,18 +187,40 @@ fn a_takeover_removes_the_certificates_above_its_cut_with_the_journals_and_the_c
 }
 
 #[test]
-fn a_block_above_the_cut_keeps_every_certificate() {
-    let directory = tempfile::tempdir().unwrap();
-    let storage = backup(directory.path());
-    let mut record = TermRecord::load(directory.path()).unwrap();
-    record.taking_over = Some(taking_over(3));
-    record.store(directory.path()).unwrap();
+fn a_takeover_away_from_its_cut_is_abandoned_before_anything_is_removed() {
+    for (start, head) in [
+        // A block above the cut.
+        (start(false, Some(4)), 4),
+        // Behind the cut.
+        (start(false, Some(2)), 2),
+        // Marshal holds the cut, history does not yet.
+        (
+            Start {
+                executed: 2,
+                ..start(false, Some(3))
+            },
+            2,
+        ),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let storage = backup(directory.path());
+        let mut record = TermRecord::load(directory.path()).unwrap();
+        record.taking_over = Some(taking_over(3));
+        record.store(directory.path()).unwrap();
 
-    let held = settled(directory.path(), certificates(1..=5), false, Some(4)).unwrap();
-    assert_eq!(held, [1, 2, 3, 4, 5]);
-    // Nothing is the term's to clear, and the validator's votes are kept.
-    assert!(storage.join(VOTES).exists() && storage.join(OBSERVED).exists());
-    assert!(storage.join("vera-cache-0-finalizations-key").exists());
+        assert!(matches!(
+            settled_as(directory.path(), certificates(1..=5), start),
+            Err(TermRefusal::NotAtCut { head: refused, cut: 3 }) if refused == head
+        ));
+        assert!(storage.join(VOTES).exists() && storage.join(OBSERVED).exists());
+        assert!(storage.join("vera-cache-0-finalizations-key").exists());
+        let record = TermRecord::load(directory.path()).unwrap();
+        assert_eq!((record.taking_over, record.seating), (None, None));
+        assert_eq!(
+            settled(directory.path(), Vec::new(), false, Some(4)).unwrap(),
+            [1, 2, 3, 4, 5]
+        );
+    }
 }
 
 #[test]
@@ -179,7 +228,7 @@ fn a_backup_drops_a_certificate_above_the_cut_of_the_term_it_follows() {
     let directory = tempfile::tempdir().unwrap();
     let storage = backup(directory.path());
     let mut record = TermRecord::load(directory.path()).unwrap();
-    record.certificate = Some(taking_over(4));
+    record.certificate = Some(held(4, OTHER));
     record.store(directory.path()).unwrap();
 
     let held = settled(directory.path(), certificates(1..=5), true, Some(4)).unwrap();
@@ -189,6 +238,21 @@ fn a_backup_drops_a_certificate_above_the_cut_of_the_term_it_follows() {
     // With a block of the term above the cut, its certificate stays.
     let held = settled(directory.path(), certificates(5..=6), true, Some(6)).unwrap();
     assert_eq!(held, [1, 2, 3, 4, 5, 6]);
+}
+
+#[test]
+fn a_backup_that_holds_its_own_term_keeps_the_certificates_and_votes_above_the_cut() {
+    let directory = tempfile::tempdir().unwrap();
+    let storage = backup(directory.path());
+    let mut record = TermRecord::load(directory.path()).unwrap();
+    record.ran = Some(Role::Validator);
+    record.certificate = Some(held(4, THIS));
+    record.store(directory.path()).unwrap();
+
+    let held = settled(directory.path(), certificates(1..=5), true, Some(4)).unwrap();
+    assert_eq!(held, [1, 2, 3, 4, 5]);
+    assert!(storage.join(VOTES).exists());
+    assert!(storage.join("vera-cache-0-finalizations-key").exists());
 }
 
 #[test]

@@ -59,10 +59,18 @@ pub enum TermRefusal {
     /// Another device holds a later term than this device is active in.
     #[error("another device holds term {}", .0.change.term)]
     Superseded(Box<TermCertificate>),
-    /// This device followed the deployment as a backup and holds no
-    /// certificate that names it. It becomes active through a term certificate.
-    #[error("this device was a backup and holds no term certificate naming it")]
+    /// This device followed the deployment as a backup and has accepted no
+    /// certificate naming it since. It becomes active through a term
+    /// certificate, or by resuming as the holder of its term
+    /// (`EmbeddedNode::resume_stopped`).
+    #[error("this device was a backup and has accepted no term certificate naming it since")]
     NotCertified,
+    /// This device holds the newest term it knows of and was marked to take
+    /// its stores again from another device. Its stores hold the votes and
+    /// blocks of its own term, so they are kept; the device resumes as the
+    /// active device or follows under a later certificate.
+    #[error("this device holds term {0} and keeps its stores")]
+    HolderResync(u64),
     /// The deployment's blocks are in a later term than this device holds.
     #[error("the deployment is in term {seen}, and this device holds term {held}")]
     Behind {

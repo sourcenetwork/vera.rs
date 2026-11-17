@@ -456,9 +456,15 @@ async fn run_node_with_elector<
         let settled = crate::term::settle_seating(
             context.child("seating"),
             &config.data_dir,
-            is_backup,
+            crate::term::Start {
+                this: switching
+                    .as_ref()
+                    .map(|switching| crate::term::device_id(&switching.device_key.public_key())),
+                backup: is_backup,
+                newest_block: finalized_blocks.last_index(),
+                executed: history.head_height(),
+            },
             finalizations_by_height,
-            finalized_blocks.last_index(),
             archive_config("finalizations", page_cache.clone(), ()),
         )
         .await?;
@@ -1016,11 +1022,11 @@ async fn run_node_with_elector<
             applied.seed(recovered_height.get(), recovered.digest());
         }
         if !is_backup {
-            // A device taking the deployment over starts on the cut. A block
-            // above it, or its certificate, came from the device being
-            // replaced after the cut was chosen and the archive was cleared,
-            // and the takeover is abandoned: its certificate would void a
-            // block this device already holds.
+            // A device taking the deployment over starts on the cut. Seating
+            // refused a start away from it before clearing anything; a block
+            // above it, or its certificate, found here arrived from the device
+            // being replaced since, and the takeover is abandoned: its
+            // certificate would void a block this device already holds.
             if let Some(certificate) = term_record.taking_over.take() {
                 let cut = certificate.change.cut;
                 let above = crate::term::archived(marshal.clone(), cut.height + 1).await;

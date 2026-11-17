@@ -11,6 +11,7 @@
 
 use std::path::Path;
 
+use alloy_primitives::B256;
 use commonware_codec::{Decode as _, Encode as _};
 use commonware_consensus::simplex::types::Finalization;
 use commonware_runtime::{Supervisor as _, tokio};
@@ -77,6 +78,18 @@ pub(crate) struct Seating {
     pub cut: Option<u64>,
 }
 
+/// What a start knows of the device before consensus opens its storage.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Start {
+    /// The identifier term certificates name this device by, when it switches.
+    pub this: Option<B256>,
+    pub backup: bool,
+    /// Height of the newest block in marshal's archive.
+    pub newest_block: Option<u64>,
+    /// Height of the newest block in finalized history.
+    pub executed: u64,
+}
+
 /// Clear what the role before left in consensus storage, before marshal and
 /// Simplex open it.
 ///
@@ -90,23 +103,36 @@ pub(crate) struct Seating {
 ///   may be gone. Commonware's archive keeps the first certificate stored
 ///   for a height, so the block the term builds there could not be certified
 ///   in it. A start as the validator under a certificate this device has not
-///   started under therefore removes the vote journals, marshal's cache and
-///   every certificate above the cut. A backup that holds the certificate of
-///   a term does the same while it holds a certificate above the cut.
-/// - A block above the cut is another matter. A validator's start refuses
-///   it, a backup holds it because it belongs to the term, and nothing is
-///   cleared for the cut.
+///   started under therefore removes both roles' journals, marshal's cache
+///   and every certificate above the cut.
+/// - Such a start is refused with [`TermRefusal::NotAtCut`] before anything
+///   is removed unless the device's newest block in history is the cut and
+///   marshal holds no block above it. The takeover is then abandoned.
+/// - A backup that holds the certificate of a term naming another device
+///   does the same as the validator while it holds a certificate above the
+///   cut and no block above it. Without the block it cannot tell the
+///   replaced device's certificate from the holder's, and the holder's is
+///   fetched again with its block. A certificate that names this device
+///   clears nothing: the blocks above its cut are this device's own blocks
+///   of that term, whose votes and blocks the journal and the cache hold.
+/// - A block above the cut is another matter. A backup holds it because it
+///   belongs to the term, and nothing is cleared for the cut.
 ///
 /// The decision is stored before anything is removed, and a start that finds
 /// it finishes the clearing first, whichever role it runs in.
 pub(crate) async fn settle(
     context: tokio::Context,
     directory: &Path,
-    backup: bool,
+    start: Start,
     mut finalizations: Finalizations,
-    newest_block: Option<u64>,
     config: prunable::Config<TwoCap, ()>,
 ) -> Result<Finalizations, TermRefusal> {
+    let Start {
+        this,
+        backup,
+        newest_block,
+        executed,
+    } = start;
     let mut record = TermRecord::load(directory)?;
     if let Some(pending) = record.seating {
         finalizations = clear(
@@ -119,17 +145,34 @@ pub(crate) async fn settle(
         .await?;
     }
     let role = Role::of(backup);
-    let deciding = if backup {
+    if !backup && let Some(certificate) = &record.taking_over {
+        let cut = certificate.change.cut.height;
+        let above = newest_block.filter(|newest| *newest > cut);
+        if above.is_some() || executed != cut {
+            record.taking_over = None;
+            record.store(directory)?;
+            return Err(TermRefusal::NotAtCut {
+                head: above.unwrap_or(executed),
+                cut,
+            });
+        }
+    }
+    let cut = if backup {
         record
             .certificate
             .as_ref()
-            .filter(|certificate| finalizations.last_index() > Some(certificate.change.cut.height))
+            .filter(|certificate| Some(certificate.change.holder) != this)
+            .map(|certificate| certificate.change.cut.height)
+            .filter(|cut| {
+                finalizations.last_index() > Some(*cut)
+                    && newest_block.is_none_or(|newest| newest <= *cut)
+            })
     } else {
-        record.taking_over.as_ref()
+        record
+            .taking_over
+            .as_ref()
+            .map(|certificate| certificate.change.cut.height)
     };
-    let cut = deciding
-        .map(|certificate| certificate.change.cut.height)
-        .filter(|cut| newest_block.is_none_or(|newest| newest <= *cut));
     let changed = record.ran.map_or(backup, |ran| ran != role);
     if (changed && backup) || cut.is_some() {
         let seating = Seating { role, cut };

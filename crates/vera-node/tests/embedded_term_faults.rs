@@ -1,6 +1,6 @@
-//! Taking the deployment over from storage states a running node does not
-//! reach on demand: a finalization certificate stored without its block, and
-//! a start interrupted while consensus storage is cleared.
+//! Switching from storage states a running node does not reach on demand: a
+//! finalization certificate stored without its block, and a start
+//! interrupted while consensus storage is cleared.
 
 #[path = "support/devices.rs"]
 mod devices;
@@ -9,7 +9,7 @@ mod devices;
 mod short_epochs;
 mod support;
 
-use std::{path::Path, time::Duration};
+use std::{collections::BTreeMap, path::Path, time::Duration};
 
 use devices::{Paired, block, certify, devices, hand_over, pair, takeover_change};
 use short_epochs::{height, run_until};
@@ -28,6 +28,45 @@ fn orphan(directory: &Path, source: &Path) {
         source.to_str().unwrap(),
     )
     .unwrap();
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+/// Replace the partitions in `target` whose names start with one of
+/// `prefixes` by those of the stopped node in `source`.
+fn transplant(source: &Path, target: &Path, prefixes: &[&str]) {
+    let partitions = |directory: &Path| {
+        std::fs::read_dir(directory.join("commonware"))
+            .unwrap()
+            .map(|entry| entry.unwrap())
+            .filter(|entry| {
+                let name = entry.file_name();
+                prefixes
+                    .iter()
+                    .any(|prefix| name.to_string_lossy().starts_with(prefix))
+            })
+            .collect::<Vec<_>>()
+    };
+    for partition in partitions(target) {
+        std::fs::remove_dir_all(partition.path()).unwrap();
+    }
+    for partition in partitions(source) {
+        copy_tree(
+            &partition.path(),
+            &target.join("commonware").join(partition.file_name()),
+        );
+    }
 }
 
 /// Stop `backups` while the active device holds its proposals back, let the
@@ -159,4 +198,75 @@ fn a_takeover_interrupted_while_it_clears_consensus_storage_is_finished_by_the_n
     // The certificates up to the cut were kept.
     assert_eq!(block(&phone, cut).term, 0);
     block_on(phone.stop()).unwrap();
+}
+
+#[test]
+fn a_holder_stopped_between_marshals_writes_keeps_its_first_block_across_a_spell_as_a_backup() {
+    let directories = [(); 3].map(|()| tempfile::tempdir().unwrap());
+    let chain_id = 9_513;
+    let dealt = short_epochs::deployment(chain_id, 103);
+    let [first, second] = pair(
+        [directories[0].path(), directories[1].path()],
+        &dealt,
+        WINDOW,
+    );
+    let mut laptop = block_on(EmbeddedNode::start(first.active)).unwrap();
+    let phone = block_on(EmbeddedNode::start(second.backup.clone())).unwrap();
+    run_until(&laptop, |reached| reached >= 3);
+    let change = hand_over(&laptop, &second.key.public_key());
+    let cut = change.cut.height;
+    run_until(&phone, |reached| reached >= cut);
+    block_on(phone.stop()).unwrap();
+    // The copy is the phone at the cut, before it takes over.
+    let copy = directories[2].path();
+    copy_tree(directories[1].path(), copy);
+
+    let mut phone = block_on(EmbeddedNode::start(second.backup.clone())).unwrap();
+    let out = certify(change);
+    block_on(phone.take_over(dealt.keys().clone(), out.clone())).unwrap();
+    block_on(laptop.follow(out.clone())).unwrap();
+    block_on(laptop.stop()).unwrap();
+    let signer = BlsSigner::new(85u64.into(), chain_id).unwrap();
+    let written = finalize_a_write(&phone, &signer);
+    let built: BTreeMap<u64, _> = (cut + 1..=height(&phone))
+        .map(|reached| (reached, block(&phone, reached)))
+        .collect();
+    block_on(phone.stop()).unwrap();
+
+    // The copy becomes the phone as it was had it stopped after it
+    // finalized its first block, between marshal's two writes: the term it
+    // took over, the votes and cached blocks of its term, and the
+    // certificate of block cut + 1 without the block.
+    std::fs::copy(
+        directories[1].path().join("term.json"),
+        copy.join("term.json"),
+    )
+    .unwrap();
+    transplant(
+        directories[1].path(),
+        copy,
+        &["vera-orchestrator_consensus_", "vera-cache"],
+    );
+    orphan(copy, directories[1].path());
+
+    // The host starts it as a backup while nobody else runs, and then
+    // resumes it as the holder of its term.
+    let mut backup = second.backup;
+    backup.data_dir = copy.into();
+    let follower = block_on(EmbeddedNode::start(backup.clone())).unwrap();
+    assert!(height(&follower) >= cut);
+    block_on(follower.stop()).unwrap();
+    let active = backup.activated(dealt.keys().clone()).unwrap();
+    EmbeddedNode::resume_stopped(&active).unwrap();
+    let resumed = block_on(EmbeddedNode::start(active)).unwrap();
+
+    // It finalizes the blocks the phone built, not new ones at their heights.
+    await_certified_receipt(&resumed, written);
+    for (reached, expected) in &built {
+        assert_eq!(&block(&resumed, *reached), expected, "block {reached}");
+    }
+    let last = *built.keys().last().unwrap();
+    run_until(&resumed, |reached| reached > last + 1);
+    assert_eq!(block(&resumed, last + 1).term, out.change.term);
+    block_on(resumed.stop()).unwrap();
 }
