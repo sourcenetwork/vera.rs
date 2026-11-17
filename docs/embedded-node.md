@@ -456,8 +456,12 @@ blocks, so idleness is not a stall.
 
 Everything is under `EmbeddedConfig::data_dir`: `validator.key`, `secrets.json`,
 `solo-genesis.json`, `native-genesis.bin`, `commonware/` and
-`history/regolith/`, and `term.json` on a device that
-[switches](active-term.md#what-a-device-stores). The first two are absent when
+`history/regolith/`, and `term.json`, which records the
+[term](active-term.md#what-a-device-stores) and the role consensus storage was
+last opened in. A start that clears consensus storage for a switch also keeps
+`kept-finalizations` there until it is done; see
+[Consensus storage across a switch](active-term.md#consensus-storage-across-a-switch).
+The first two are absent when
 [the host holds the key material](#key-material-held-by-the-host) and on a
 [backup](#backup-devices), which keeps `transport.key` instead unless the host
 holds that key too. The directory must not be shared with another store; a host

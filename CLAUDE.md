@@ -488,9 +488,16 @@ to certify; `take_over` and `follow` restart the node in place in its new
 role. `term.json` keeps the newest certificate, an announced handover and a
 staged takeover; a device does not start as validator against them.
 `EmbeddedNode::resume_stopped` undoes an announced handover on a stopped
-directory. A device
-that validated sets its vote journal aside when it becomes a backup and takes
-it back if it validates again before receiving a block. A lone
+directory. An embedded node
+settles Commonware's consensus storage at every start, before marshal and
+Simplex open it: a change of role removes the Simplex vote journals, and a
+start under a certificate also removes marshal's cache and rebuilds its
+archive of finalization certificates without those above the cut. The
+decision is stored in `term.json` first and an interrupted clearing is
+finished by the next start. Every start that does not synchronize by snapshot
+hands Simplex the finalization of the node's newest block as its floor, so a
+voter with an empty journal starts on that block. See
+docs/active-term.md#consensus-storage-across-a-switch. A lone
 validator signs an epoch whose ceremony it only observed with the share its
 host holds, once the epoch's sharing confirms it. Devices ask each other where
 they stand on channel 17. An active device whose newest block is older than
@@ -500,9 +507,10 @@ proposal: a verified later certificate demotes the device
 (`EmbeddedNode::demoted`), anything else is a `Contest`
 (`EmbeddedNode::contested`) asked again at the next turn. A device that
 reaches nobody proposes on. A directory that last ran as a backup starts as
-validator only under a certificate naming it (`TermRefusal::NotCertified`),
-and a backup holding the certificate of the next block without the block
-cannot take over (`TermRefusal::CertificateAboveCut`). A backup holding a certificate stops with
+validator only under a certificate naming it (`TermRefusal::NotCertified`).
+A backup holding the certificate of the next block without the block waits
+`Switching::answer_timeout` for the block and then takes over below it: the
+term voids it. A backup holding a certificate stops with
 `TermRefusal::LowerTerm` on a finalized block of a lower term above the cut.
 A device that follows a term whose cut is below blocks it finalized in a
 lower term reports their submissions (`EmbeddedNode::discarded`,

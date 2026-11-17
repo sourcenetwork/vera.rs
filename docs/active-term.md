@@ -192,17 +192,12 @@ cut below such a block would void a block the device is about to apply.
 
 Marshal stores a block and its finalization certificate separately, and a
 backup stopped between the two keeps the certificate of the block above its
-newest one without the block. While the active device is reachable the
-backup fetches the block. When it is not, the backup cannot take over:
-`takeover_change`, `take_over` and the start as validator fail with
-`TermRefusal::CertificateAboveCut`. Commonware's archive keeps the first
-certificate stored for a height and cannot be cut back, so a term started
-there could not certify its first block, and a backup fetching that height
-would be handed a certificate for another block. The device takes over once
-it has the block from the device that built it; otherwise the deployment
-continues on another backup, or this one joins again in an empty directory
-from a device that is active. Removing the certificate needs the consensus
-archives rebuilt above the cut without a peer, which is not built.
+newest one without the block. `takeover_change` and `take_over` wait for
+that block, up to `Switching::answer_timeout`: while the active device is
+reachable the backup fetches it, and the cut moves up to it. When the device
+that built it is away the block never comes. The cut then stays below it,
+the term voids it, and the start under the certificate removes its
+certificate; see [Consensus storage across a switch](#consensus-storage-across-a-switch).
 
 `take_over` checks that the certificate names this device, that its term is
 above every term the device holds or has seen in a block, and that the
@@ -217,9 +212,10 @@ certificate naming the device, fails with `TermRefusal::NotCertified`.
 
 The accepted certificate is stored before the node restarts. The device then
 starts as the validator and checks once more that it holds no block above the
-cut, in its history or in its consensus archive. One can arrive from an
-active device that was still running while the cut was chosen. In that case
-the takeover is abandoned with `TermRefusal::NotAtCut`, the certificate is
+cut, in its history or in its consensus archive, and no certificate of one
+that arrived after its archive was cleared. One can arrive from an active
+device that was still running while the cut was chosen. In that case the
+takeover is abandoned with `TermRefusal::NotAtCut`, the certificate is
 dropped, and the device starts as a backup again with
 `EmbeddedConfig::following`; a new takeover names the later block.
 
@@ -227,32 +223,83 @@ dropped, and the device starts as a backup again with
 
 `term.json` in the data directory holds the newest certificate the device
 verified, an announced handover, a takeover it accepted and has not started
-under, whether its consensus journal holds votes it cast as the validator,
-the block it had when it set that journal aside, whether it last ran as a
-backup, and whether its stores must be taken again.
+under, the role consensus last opened its storage in, consensus storage a
+start decided to clear and has not finished clearing, whether the device last
+ran as a backup, and whether its stores must be taken again.
 None of it is secret. Every embedded node keeps it, with or without
-`switching`, so a device that validated before it was given `switching`
-sets its vote journal aside when it first follows.
+`switching`.
 
 - A start as the active device is refused with `TermRefusal::Superseded` when
   the stored certificate names another device, and with
   `TermRefusal::Behind` when the device's newest block is in a later term
   than it holds.
-- A validator journals its own votes, and Commonware refuses to replay votes
-  under a key the node no longer signs with. A device that validated sets
-  the vote journal of its epochs aside when it next starts as a backup, and
-  keeps a journal of what it observes instead.
-- Simplex has no other record of where an epoch stands. A validator that
-  starts on an empty journal begins the epoch at view 1 on the epoch's first
-  parent, execution refuses each proposal as stale, and nothing finalizes.
-  So a device that validates again while its newest block is still the one
-  it had when it set its journal aside takes that journal back. If it
-  received blocks meanwhile, it continues from the journal it kept as a
-  backup, which holds their certificates.
-- A backup that never received a block of the current epoch has no such
-  journal either: one that synchronized by snapshot and takes over before
-  the active device finalized another block. That case is not handled and
-  was not tested.
+
+### Consensus storage across a switch
+
+A device's state and finalized history are at its newest block whatever role
+it ran in. Commonware's consensus storage is not: it is written in a role.
+
+- Simplex journals an epoch's votes and certificates in
+  `commonware/vera-orchestrator_consensus_<epoch>`. A validator's journal
+  holds its own votes, which Commonware refuses to replay under a key the
+  node no longer signs with. A backup's journal holds the certificates it
+  observed, among them those of blocks a later term voided.
+- Marshal caches the blocks and certificates of recent views in
+  `commonware/vera-cache-*`, and archives finalized blocks and their
+  certificates by height in `vera-blocks-*` and `vera-finalizations-*`. An
+  archive keeps the first entry stored at a height and cannot drop one.
+
+An embedded node therefore settles this storage at every start, before
+marshal and Simplex open it. Nothing in `commonware/` that holds state, the
+reshare ceremony or marshal's processed height is touched.
+
+1. A start in another role than the last removes the vote journals.
+2. A start as the validator under a certificate the device has not started
+   under removes the vote journals and marshal's cache, and rebuilds the
+   archive of certificates without those above the cut. The certificates up
+   to the cut are first copied to `kept-finalizations` in the data directory;
+   the archive is then destroyed and filled again from that file, and the
+   file is removed last.
+3. A backup that holds the certificate of a term does the same while its
+   archive holds a certificate above the cut and no block above it: the
+   certificate of a block of the replaced device that this backup never
+   received either.
+4. A block above the cut is never removed here. A validator's start refuses
+   it (`TermRefusal::NotAtCut`), and a backup holds it because it is a block
+   of the term.
+
+The decision is stored in `term.json` before anything is removed, and a
+start that finds it finishes the clearing first, in whichever role it runs.
+An interruption after `kept-finalizations` is complete is repeated from that
+file.
+
+Simplex has no record of where an epoch stands other than its journal. A
+voter that opens an empty one starts the epoch at view 1 on the last block
+of the epoch before, execution refuses each proposal as stale, and nothing
+finalizes. So at every start that does not synchronize by snapshot, the node
+hands Simplex a floor: the finalization of its newest block, as
+`simplex::Floor::Finalized`. The voter starts at the view after it with that
+block as parent, and records the floor in its journal. A journal that
+already reaches further is not rolled back by a lower floor.
+
+- The floor is the finalization of the newest block in finalized history,
+  or of a block above it that marshal archived with its certificate and
+  delivers again before consensus proposes. It is read from marshal's
+  archive, and from finalized history when the archive does not hold it.
+- The node passes it to the orchestrator as Commonware's state-sync start
+  for consensus (`vera-seat_dkg_state_sync`), with the epoch's public
+  information from genesis or from the last block of the epoch before, read
+  from finalized history. The reshare actor is not given it: it reads the
+  epoch's ceremony from the blocks the device holds, as before.
+- No floor is passed when the newest block is the genesis block or the last
+  of its epoch. The next epoch starts from that block as Commonware starts
+  any epoch. None is passed either when the certificate or the block that
+  opened the epoch is not stored; consensus then starts as Commonware
+  recovers it.
+
+This is what lets a device validate again after it followed nobody, take a
+term back after its successor built blocks, and take over after it
+synchronized by snapshot and received no block since.
 
 ### The epoch a device activates in
 
@@ -441,9 +488,13 @@ These follow from sticky active without a lease and from one shared key:
   `GossipHeader::term`.
 - A device that was rewound serves no certificate below the cut from its
   consensus archive, only from the finalized history it kept.
-- A backup that holds the certificate of the block above its newest one
-  without the block cannot take over while the device that built it is
-  away (`TermRefusal::CertificateAboveCut`).
+- A device that resumes a handover without a certificate
+  (`resume_stopped`) clears no certificate: no term voids anything. If it
+  holds the certificate of a block above its newest one without the block,
+  the successor did take over, and the device should follow it.
+- A certificate above the cut whose block arrives after `takeover_change`
+  stopped waiting for it is voided with the block. The host shows the user
+  the age of the cut before the operators approve.
 
 Also:
 
@@ -465,4 +516,8 @@ Also:
 - A backup dials one address. After a switch its host restarts it with the
   new holder's address (`follow`, `EmbeddedConfig::following`).
 - Announced handover and takeover were exercised between two nodes in one
-  process on loopback. Three devices, and devices on separate hosts, were not.
+  process on loopback, and a takeover past an unreceived certificate between
+  three. Devices on separate hosts were not.
+- The certificate of a block stored without the block is produced in tests
+  by a fault-injection build that writes it into the archive at start. A
+  stop between marshal's two writes was not reproduced.
