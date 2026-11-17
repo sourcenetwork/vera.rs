@@ -20,6 +20,9 @@ use vera_jsonrpc::NodeStatus;
 use vera_modules::acp::abi::IAcp;
 use vera_node::{DeviceKey, EmbedError, EmbeddedNode, SoloError};
 
+/// Revisions per section of the consensus archives.
+const ARCHIVE_SECTION: u64 = 256;
+
 const fn epoch(height: u64) -> u64 {
     height / BLOCKS_PER_EPOCH
 }
@@ -163,14 +166,15 @@ fn a_backup_restarted_behind_the_active_devices_retention_recovers_by_snapshot()
     block_on(follower.stop()).unwrap();
 
     let missed = finalize_a_write(&active, &signer);
-    // Archives are stored in sections of 256 revisions; the backup's next block is in the first.
-    assert!(left_at < 200, "the backup left at {left_at}");
-    let first_section = first
-        .path()
-        .join("commonware/vera-blocks-value/0000000000000000");
-    assert!(first_section.exists());
+    // A backup's first catch-up can end many epochs on when the active device
+    // never pauses, so the section holding its next block is found, not assumed.
+    let next_section = first.path().join(format!(
+        "commonware/vera-blocks-value/{:016x}",
+        (left_at + 1) / ARCHIVE_SECTION * ARCHIVE_SECTION
+    ));
+    assert!(next_section.exists(), "the backup left at {left_at}");
     let deadline = Instant::now() + Duration::from_secs(300);
-    while first_section.exists() {
+    while next_section.exists() {
         assert!(Instant::now() < deadline, "pruning horizon deadline");
         std::thread::sleep(Duration::from_millis(500));
     }
