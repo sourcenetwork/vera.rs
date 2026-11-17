@@ -253,8 +253,8 @@ one retention setting.
 A backup that is behind when the active device crosses an epoch boundary
 receives certificates of an epoch it has not entered. Commonware's
 orchestrator drops such messages and only fetches the epoch's last block, so
-the backup keeps the newest 256 of them on the certificate channel and hands
-them to consensus again once it has entered their epoch. It finalizes the
+the backup keeps the newest 256 of them, within 1 MiB, on the certificate
+channel and hands them to consensus again once it has entered their epoch. It finalizes the
 blocks they certify from its own buffer of recent blocks, also when the
 active device has stopped meanwhile.
 
@@ -264,8 +264,9 @@ on keeps at least the daemon's burst on every node with a peer, whatever
 parallel requests are dropped and it advances by one fetch timeout per
 block.
 
-While the active device is away a backup keeps serving the state it has. It
-finalizes nothing, its height stays where the active device left it, and
+While the active device is away a backup keeps serving the state it has.
+Once it has finalized the blocks it already holds certificates for, it
+finalizes nothing more, its height stays there, and
 `vera_nodeStatus` reports `peerCount` 0. Clients that require fresh state
 refuse it after their freshness limit, as they would for a stopped
 deployment. The finality watchdog (`EmbeddedConfig::watchdog_stall`, 10

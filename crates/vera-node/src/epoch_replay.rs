@@ -21,6 +21,9 @@ use futures::future::BoxFuture;
 
 /// Messages kept for later epochs, oldest dropped first.
 const KEPT: usize = 256;
+/// Bytes kept for later epochs. The messages are unverified until their epoch
+/// is entered, and the channel admits far larger ones than a certificate.
+const KEPT_BYTES: usize = 1024 * 1024;
 const RECHECK: Duration = Duration::from_millis(200);
 
 /// Reads the newest height marshal has processed.
@@ -31,6 +34,7 @@ struct Kept<P> {
     processed: ProcessedHeight,
     entered: u64,
     messages: VecDeque<(u64, Message<P>)>,
+    bytes: usize,
 }
 
 /// A consensus channel receiver, keeping later epochs' messages when it is
@@ -67,6 +71,7 @@ impl<R: Receiver> EpochReplay<R> {
                 processed,
                 entered: 0,
                 messages: VecDeque::new(),
+                bytes: 0,
             }),
         }
     }
@@ -86,12 +91,23 @@ impl<P> Kept<P> {
 
     fn due(&mut self) -> Option<Message<P>> {
         let entered = self.entered;
-        self.messages.retain(|(epoch, _)| *epoch >= entered);
-        let position = self
+        while let Some(position) = self
             .messages
             .iter()
-            .position(|(epoch, _)| *epoch == entered)?;
-        self.messages.remove(position).map(|(_, message)| message)
+            .position(|(epoch, _)| *epoch <= entered)
+        {
+            let (epoch, message) = self.take(position)?;
+            if epoch == entered {
+                return Some(message);
+            }
+        }
+        None
+    }
+
+    fn take(&mut self, position: usize) -> Option<(u64, Message<P>)> {
+        let kept = self.messages.remove(position)?;
+        self.bytes -= kept.1.1.len();
+        Some(kept)
     }
 
     /// Keep `message` if it belongs to an epoch the orchestrator has not entered.
@@ -109,9 +125,16 @@ impl<P> Kept<P> {
         if epoch <= self.entered {
             return;
         }
-        if self.messages.len() == KEPT {
-            self.messages.pop_front();
+        let size = message.1.len();
+        if size > KEPT_BYTES {
+            return;
         }
+        while self.messages.len() == KEPT || self.bytes + size > KEPT_BYTES {
+            if self.take(0).is_none() {
+                break;
+            }
+        }
+        self.bytes += size;
         self.messages.push_back((epoch, message.clone()));
     }
 }
@@ -216,5 +239,44 @@ mod tests {
         );
         let more = tokio::time::timeout(Duration::from_millis(500), replay.recv()).await;
         assert!(more.is_err(), "a message was delivered again twice");
+    }
+
+    fn sized(epoch: u64, size: usize) -> Message<PublicKey> {
+        let mut bytes = UInt(epoch).encode().to_vec();
+        bytes.resize(size, 0);
+        (PrivateKey::from_seed(1).public_key(), IoBuf::from(bytes))
+    }
+
+    #[tokio::test]
+    async fn kept_messages_stay_within_the_byte_budget() {
+        let mut kept = Kept {
+            epocher: FixedEpocher::new(32.try_into().unwrap()),
+            processed: Arc::new(|| Box::pin(async { Some(0) })),
+            entered: 0,
+            messages: VecDeque::new(),
+            bytes: 0,
+        };
+        kept.keep(&sized(1, KEPT_BYTES + 1)).await;
+        assert!(kept.messages.is_empty(), "an oversized message was kept");
+
+        let third = KEPT_BYTES / 3;
+        for epoch in 1..=5 {
+            kept.keep(&sized(epoch, third)).await;
+            assert!(kept.bytes <= KEPT_BYTES);
+        }
+        let epochs: Vec<u64> = kept.messages.iter().map(|(epoch, _)| *epoch).collect();
+        assert_eq!(
+            epochs,
+            [3, 4, 5],
+            "the oldest messages were not dropped first"
+        );
+        assert_eq!(kept.bytes, 3 * third);
+
+        kept.entered = 4;
+        assert!(kept.due().is_some());
+        assert_eq!(
+            kept.bytes, third,
+            "delivered and passed messages still count"
+        );
     }
 }
