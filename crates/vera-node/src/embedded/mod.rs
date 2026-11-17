@@ -225,7 +225,9 @@ impl EmbeddedNode {
                     .with_max_blocking_threads(threads.max_blocking);
                 let table = Arc::new(OnceLock::new());
                 let served = table.clone();
-                let result =
+                let decided = Arc::new(std::sync::Mutex::new(None));
+                let recorded = decided.clone();
+                let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     commonware_runtime::tokio::Runner::new(runtime).start(|context| async move {
                         ::tokio::spawn(async move {
                             if let Ok(rpc) = table_rx.await {
@@ -245,16 +247,28 @@ impl EmbeddedNode {
                         let mut node = std::pin::pin!(crate::run_node_with_options(
                             context, settings, options
                         ));
-                        ::tokio::select! {
-                            result = &mut node => return stopped(result),
-                            _ = stop_rx => {}
+                        let result = async {
+                            ::tokio::select! {
+                                result = &mut node => return stopped(result),
+                                _ = stop_rx => {}
+                            }
+                            // The node keeps running until the views in flight have finalized.
+                            ::tokio::select! {
+                                result = &mut node => stopped(result),
+                                _ = hold.settle(STOP_SETTLE) => Ok(()),
+                            }
                         }
-                        // The node keeps running until the views in flight have finalized.
-                        ::tokio::select! {
-                            result = &mut node => stopped(result),
-                            _ = hold.settle(STOP_SETTLE) => Ok(()),
-                        }
+                        .await;
+                        *recorded
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(result);
                     });
+                }));
+                let decided = decided
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .take();
+                let result = ended(run.is_ok(), decided);
                 // The table holds the node's state, and that state holds the directory.
                 // A host's clone may outlive the node, so the directory is freed here.
                 if let Some(rpc) = table.get() {
@@ -619,6 +633,20 @@ fn launch(
     Box::pin(EmbeddedNode::launch(config))
 }
 
+/// How a node ended, from whether its runtime unwound and the result its root
+/// returned, if it returned.
+///
+/// Commonware aborts the node's tasks once the root has returned, and a task
+/// that observes a sibling's abort can panic then. How the node ended was
+/// decided before that.
+fn ended(completed: bool, decided: Option<Result<(), EmbedError>>) -> Result<(), EmbedError> {
+    let result = decided.ok_or(EmbedError::Panicked)?;
+    if !completed {
+        tracing::warn!("a node task panicked while the stopped node's runtime shut down");
+    }
+    result
+}
+
 fn joined(
     exit: Result<Result<(), EmbedError>, oneshot::error::RecvError>,
     thread: JoinHandle<()>,
@@ -638,6 +666,19 @@ mod tests {
 
     use super::*;
     use crate::{DeviceKey, SoloGenesis, Switching};
+
+    #[test]
+    fn a_panic_after_the_node_returned_keeps_how_it_ended() {
+        let refusal = || Err(EmbedError::Term(TermRefusal::NotCertified));
+        for completed in [true, false] {
+            assert!(matches!(
+                ended(completed, Some(refusal())),
+                Err(EmbedError::Term(TermRefusal::NotCertified))
+            ));
+            assert!(matches!(ended(completed, Some(Ok(()))), Ok(())));
+        }
+        assert!(matches!(ended(false, None), Err(EmbedError::Panicked)));
+    }
 
     fn switching(directory: &std::path::Path) -> (EmbeddedConfig, B256) {
         let genesis = SoloGenesis {
