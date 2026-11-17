@@ -76,13 +76,13 @@ impl EmbeddedNode {
         }
         let node_config = config.node_config();
         let configured = Box::new(config.clone());
-        let claim = directory::claim(&config.data_dir)?;
         refuse_role(&config)?;
+        if matches!(config.role, DeviceRole::Backup(_)) && config.deployment.is_some() {
+            return Err(EmbedError::Config("a backup takes no key material"));
+        }
+        let claim = directory::claim(&config.data_dir)?;
         let (genesis, peers, backup) = match (&config.role, &config.deployment) {
-            (DeviceRole::Backup(_), Some(_)) => {
-                return Err(EmbedError::Config("a backup takes no key material"));
-            }
-            (DeviceRole::Backup(backup), None) => {
+            (DeviceRole::Backup(backup), _) => {
                 let (genesis, peers) = crate::solo::follow_solo(
                     &node_config,
                     &config.genesis,

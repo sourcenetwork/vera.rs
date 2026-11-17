@@ -213,9 +213,18 @@ fn a_holder_stopped_between_marshals_writes_keeps_its_first_block_across_a_spell
     let mut laptop = block_on(EmbeddedNode::start(first.active)).unwrap();
     let phone = block_on(EmbeddedNode::start(second.backup.clone())).unwrap();
     run_until(&laptop, |reached| reached >= 3);
-    let change = hand_over(&laptop, &second.key.public_key());
+    // A block in flight when the laptop held its proposals can finalize
+    // above the cut it named; it then hands over again.
+    let change = loop {
+        let change = hand_over(&laptop, &second.key.public_key());
+        run_until(&phone, |reached| reached >= change.cut.height);
+        std::thread::sleep(Duration::from_secs(1));
+        if height(&laptop) == change.cut.height && height(&phone) == change.cut.height {
+            break change;
+        }
+        block_on(laptop.resume()).unwrap();
+    };
     let cut = change.cut.height;
-    run_until(&phone, |reached| reached >= cut);
     block_on(phone.stop()).unwrap();
     // The copy is the phone at the cut, before it takes over.
     let copy = directories[2].path();
