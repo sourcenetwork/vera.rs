@@ -233,6 +233,13 @@ None of it is secret. Every embedded node keeps it, with or without
   the stored certificate names another device, and with
   `TermRefusal::Behind` when the device's newest block is in a later term
   than it holds.
+- The holder of a term may start as a backup without announcing a handover,
+  as a device may in term 0. No device is active until it resumes or another
+  device takes over.
+- A device that started as a backup validates again only under a
+  certificate naming it that it accepted since, or after
+  `EmbeddedNode::resume_stopped`. A certificate naming it that it held
+  before it followed is refused with `TermRefusal::NotCertified`.
 
 ### Consensus storage across a switch
 
@@ -259,17 +266,27 @@ reshare ceremony or marshal's processed height is touched.
    journals, which predate the blocks the device built since. The
    validator's journal is kept while the device follows, so a device that
    validates again without a new term (`resume_stopped`) replays its own
-   votes.
+   votes. It is removed in two cases only: by a clearing for a cut (items 2
+   and 3), and when a backup is rewound or marked to take its stores again,
+   which removes all of `commonware/` (see
+   [Rewinding above the cut](#rewinding-above-the-cut)).
 2. A start as the validator under a certificate the device has not started
    under removes both roles' journals and marshal's cache, and rebuilds the
    archive of certificates without those above the cut. The certificates up
    to the cut are first copied to `kept-finalizations` in the data directory;
    the archive is then destroyed and filled again from that file, and the
-   file is removed last.
-3. A backup that holds the certificate of a term does the same while its
-   archive holds a certificate above the cut and no block above it: the
-   certificate of a block of the replaced device that this backup never
-   received either.
+   file is removed last. Before anything is removed, the start is refused
+   with `TermRefusal::NotAtCut` and the takeover abandoned unless the
+   device's newest block in finalized history is the cut and marshal holds
+   no block above it.
+3. A backup that holds the certificate of a term naming another device does
+   the same while its archive holds a certificate above the cut and no block
+   above it. Without the block the backup cannot tell a certificate of the
+   replaced device, which the term voids, from one of the holder, which it
+   fetches again with the block; it removes either. A certificate naming
+   this device clears nothing: the blocks above its cut are this device's
+   own blocks of that term, and its journal and marshal's cache hold their
+   votes and blocks. Such a device validates again on them after resuming.
 4. A block above the cut is never removed here. A validator's start refuses
    it (`TermRefusal::NotAtCut`), and a backup holds it because it is a block
    of the term.
@@ -444,6 +461,11 @@ until the directory is replaced.
 
 A rewind also drops an import of history that was interrupted above the cut.
 
+
+A rewind applies only to a certificate naming another device. While the
+stored certificate names this device, its blocks above the cut are its own,
+nothing is voided or removed, and a mark to take the stores again is refused
+with `TermRefusal::HolderResync`.
 ### Discarded submissions
 
 `follow` returns the submissions the rewind voided, and

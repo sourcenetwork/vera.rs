@@ -16,9 +16,11 @@ type FinalizedHeight = Box<dyn Fn() -> u64 + Send + Sync>;
 
 /// Holds back new proposals and waits for the ones already made to finalize.
 ///
-/// Commonware does not replay a validator's own votes after a restart. A lone
-/// validator stopped after voting for a block and before storing that block's
-/// certificate therefore waits out a view timeout on its next start.
+/// After a restart Simplex replays a validator's own journaled votes into its
+/// round state but does not send them again, so no certificate forms from
+/// them. A lone validator stopped after voting for a block and before storing
+/// that block's certificate therefore waits out a view timeout on its next
+/// start.
 #[derive(Clone)]
 pub struct ProposalHold {
     inner: Arc<Inner>,

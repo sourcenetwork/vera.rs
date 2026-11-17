@@ -454,7 +454,8 @@ write-buffer budgets, 8 MiB and 4 MiB by default; the daemon keeps Regolith's
 QMDB page cache allocated at start, 1 and 256 pages by default against the
 daemon's 64 and 4,096. A stopped node's directory is free even while clones of
 its `LocalRpc` survive, and starting on a directory in use fails with
-`EmbedError::DirectoryInUse`. An RPC address that cannot be bound fails the
+`EmbedError::DirectoryInUse`; the node locks `.node-hold` in its data
+directory from before its first change there until its runtime stops. An RPC address that cannot be bound fails the
 start. The consensus listener always binds; `127.0.0.1:0` keeps
 it on loopback with a system-chosen port. An embedded node prunes consensus
 archives and state journals by default (`EmbeddedConfig::RETENTION`); finalized
@@ -494,7 +495,13 @@ Simplex open it: a backup journals in Simplex partitions of its own and keeps
 the validator's vote journal, a start as a backup after one as the validator
 removes the backup's journals, and a start under a certificate removes both
 roles' journals and marshal's cache and rebuilds its archive of finalization
-certificates without those above the cut. The
+certificates without those above the cut. A takeover away from its cut is
+refused before anything is removed. A backup clears certificates above a cut
+only under a certificate naming another device, and a rewind never applies
+to the holder of the stored term (`TermRefusal::HolderResync`). A device that
+followed validates again only under a certificate accepted since or after
+`resume_stopped`. The validator's journal is otherwise removed only by such a
+clearing or by a rewind. The
 decision is stored in `term.json` first and an interrupted clearing is
 finished by the next start. Every start that does not synchronize by snapshot
 hands Simplex the finalization of the node's newest block as its floor, so a
