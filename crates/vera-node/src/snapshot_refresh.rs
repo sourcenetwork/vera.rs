@@ -7,6 +7,12 @@
 //! finalizations for recent rounds in that state, so recovery re-floors
 //! marshal from the newest stored finalization: dispatches resume from a
 //! retained anchor and the database sync retargets to servable targets.
+//!
+//! Processing is also static while the application holds a block marshal
+//! delivered: the database sync records a target or imports history before it
+//! acknowledges. That is no stall. A floor above the held block would make
+//! marshal deliver a block that skips heights the reshare actor has not
+//! applied, and Commonware's reshare actor stops the node on such a block.
 
 use std::time::Duration;
 
@@ -31,6 +37,9 @@ pub(crate) enum Stall {
     Refresh(Height),
     /// Processing is static but no fresher finalization is worth installing.
     Quiet,
+    /// Processing is static because the application has not acknowledged the
+    /// block after the processed height, which marshal holds.
+    Held,
 }
 
 impl FloorRefresh {
@@ -68,14 +77,22 @@ impl FloorRefresh {
             .get_info(Identifier::Latest)
             .await
             .map(|(height, _)| height);
+        let next_held = match processed {
+            Some(processed) => marshal
+                .get_block(Identifier::Height(processed.next()))
+                .await
+                .is_some(),
+            None => false,
+        };
         tracing::debug!(
             processed = ?processed,
             latest = ?latest,
+            next_held,
             "snapshot floor refresh observation"
         );
-        let floor = match self.record(processed, latest) {
+        let floor = match self.record(processed, latest, next_held) {
             Stall::Refresh(height) => height,
-            Stall::Progress | Stall::Quiet => return,
+            Stall::Progress | Stall::Quiet | Stall::Held => return,
         };
         let Some(finalization) = marshal.get_finalization(floor).await else {
             return;
@@ -89,7 +106,13 @@ impl FloorRefresh {
     }
 
     /// Decide whether static processing warrants a re-floor to `latest`.
-    fn record(&mut self, processed: Option<Height>, latest: Option<Height>) -> Stall {
+    /// `next_held` says whether marshal holds the block after `processed`.
+    fn record(
+        &mut self,
+        processed: Option<Height>,
+        latest: Option<Height>,
+        next_held: bool,
+    ) -> Stall {
         let Some(processed) = processed else {
             return Stall::Quiet;
         };
@@ -97,6 +120,9 @@ impl FloorRefresh {
         self.last_processed = Some(processed);
         if !stalled {
             return Stall::Progress;
+        }
+        if next_held {
+            return Stall::Held;
         }
         let Some(height) = latest else {
             return Stall::Quiet;
@@ -134,7 +160,7 @@ mod tests {
     fn first_observation_is_progress_even_when_static() {
         let mut refresh = FloorRefresh::new(Duration::from_secs(1));
         assert_eq!(
-            refresh.record(Some(Height::new(10)), info(30)),
+            refresh.record(Some(Height::new(10)), info(30), false),
             Stall::Progress
         );
     }
@@ -142,9 +168,9 @@ mod tests {
     #[test]
     fn static_processing_refreshes_to_the_latest_height() {
         let mut refresh = FloorRefresh::new(Duration::from_secs(1));
-        refresh.record(Some(Height::new(10)), info(30));
+        refresh.record(Some(Height::new(10)), info(30), false);
         assert_eq!(
-            refresh.record(Some(Height::new(10)), info(30)),
+            refresh.record(Some(Height::new(10)), info(30), false),
             Stall::Refresh(Height::new(30))
         );
     }
@@ -152,10 +178,10 @@ mod tests {
     #[test]
     fn repeated_stalls_do_not_reinstall_the_same_floor() {
         let mut refresh = FloorRefresh::new(Duration::from_secs(1));
-        refresh.record(Some(Height::new(10)), info(30));
-        refresh.record(Some(Height::new(10)), info(30));
+        refresh.record(Some(Height::new(10)), info(30), false);
+        refresh.record(Some(Height::new(10)), info(30), false);
         assert_eq!(
-            refresh.record(Some(Height::new(10)), info(30)),
+            refresh.record(Some(Height::new(10)), info(30), false),
             Stall::Quiet
         );
     }
@@ -163,18 +189,36 @@ mod tests {
     #[test]
     fn latest_at_or_below_processed_is_never_installed() {
         let mut refresh = FloorRefresh::new(Duration::from_secs(1));
-        refresh.record(Some(Height::new(10)), info(10));
+        refresh.record(Some(Height::new(10)), info(10), false);
         assert_eq!(
-            refresh.record(Some(Height::new(10)), info(10)),
+            refresh.record(Some(Height::new(10)), info(10), false),
             Stall::Quiet
         );
-        assert_eq!(refresh.record(Some(Height::new(10)), info(9)), Stall::Quiet);
+        assert_eq!(
+            refresh.record(Some(Height::new(10)), info(9), false),
+            Stall::Quiet
+        );
     }
 
     #[test]
     fn missing_processed_height_stays_quiet() {
         let mut refresh = FloorRefresh::new(Duration::from_secs(1));
-        assert_eq!(refresh.record(None, info(30)), Stall::Quiet);
-        assert_eq!(refresh.record(None, None), Stall::Quiet);
+        assert_eq!(refresh.record(None, info(30), false), Stall::Quiet);
+        assert_eq!(refresh.record(None, None, false), Stall::Quiet);
+    }
+
+    #[test]
+    fn a_held_next_block_is_not_a_stall() {
+        let mut refresh = FloorRefresh::new(Duration::from_secs(1));
+        refresh.record(Some(Height::new(10)), info(30), true);
+        assert_eq!(
+            refresh.record(Some(Height::new(10)), info(30), true),
+            Stall::Held
+        );
+        // Once marshal lacks the next block, the stall refreshes to the same height.
+        assert_eq!(
+            refresh.record(Some(Height::new(10)), info(30), false),
+            Stall::Refresh(Height::new(30))
+        );
     }
 }

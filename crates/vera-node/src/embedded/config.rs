@@ -6,7 +6,10 @@ use vera_config::{DiscoveryConfig, NetworkConfig, NodeConfig, PruningConfig, Sna
 use vera_domain::PublicKey;
 
 use super::{Backup, DeviceRole, ThreadBudget, ThreadSetup};
-use crate::{HistoryMemory, NodeSizing, SoloDeployment, SoloError, SoloGenesis, SoloPacing};
+use crate::{
+    HistoryMemory, NodeSizing, SoloDeployment, SoloError, SoloGenesis, SoloKeys, SoloPacing,
+    Switching, TermRefusal,
+};
 
 /// Configuration of an embedded single-validator node.
 #[derive(Clone, Debug)]
@@ -29,6 +32,12 @@ pub struct EmbeddedConfig {
     /// A backup connects to the active device alone and ignores the list. It
     /// is configuration: nothing in the deployment's state records it.
     pub backups: Vec<PublicKey>,
+    /// The account's devices, for a deployment whose active device may
+    /// change. `None` runs the role the configuration states for good.
+    ///
+    /// With it, the active device also admits every listed device as a
+    /// backup, and a backup's transport key is the one given here.
+    pub switching: Option<Switching>,
     /// Finality stall, in whole seconds, after which the node stops with an error.
     /// Less than a second never stops it.
     ///
@@ -98,6 +107,7 @@ impl EmbeddedConfig {
             deployment: None,
             role: DeviceRole::Active,
             backups: Vec::new(),
+            switching: None,
             watchdog_stall: Duration::from_secs(NodeConfig::default().watchdog_stall_seconds),
             catch_up_timeout: Duration::from_millis(
                 SnapshotConfig::default().initialization_timeout_ms,
@@ -153,6 +163,48 @@ impl EmbeddedConfig {
             record,
             active,
             transport_key: None,
+        }));
+        Ok(config)
+    }
+
+    /// This configuration for the same device as the deployment's validator,
+    /// with the key material `keys`. The device was configured as a backup.
+    ///
+    /// [`crate::EmbeddedNode::take_over`] starts a node with it once a term
+    /// certificate names the device. A host uses it directly to start a
+    /// device that already took the deployment over.
+    pub fn activated(&self, keys: SoloKeys) -> Result<Self, TermRefusal> {
+        let DeviceRole::Backup(backup) = &self.role else {
+            return Err(TermRefusal::Active);
+        };
+        let mut config = self.clone();
+        config.deployment = Some(SoloDeployment::new(backup.record.clone(), keys));
+        config.role = DeviceRole::Active;
+        Ok(config)
+    }
+
+    /// This configuration for the same device as a backup of the device
+    /// `holder`, one of [`Switching::devices`].
+    ///
+    /// [`crate::EmbeddedNode::follow`] starts a node with it. A host uses it
+    /// directly to start a device that handed the deployment over, or that
+    /// another device replaced.
+    pub fn following(&self, holder: &PublicKey) -> Result<Self, TermRefusal> {
+        let switching = self.switching.as_ref().ok_or(TermRefusal::NotConfigured)?;
+        let device = switching
+            .device(holder)
+            .ok_or_else(|| TermRefusal::UnknownDevice(Box::new(holder.clone())))?;
+        let record = match (&self.role, &self.deployment) {
+            (DeviceRole::Backup(backup), _) => backup.record.clone(),
+            (DeviceRole::Active, Some(deployment)) => deployment.record().to_vec(),
+            (DeviceRole::Active, None) => return Err(TermRefusal::KeysInFiles),
+        };
+        let mut config = self.clone();
+        config.deployment = None;
+        config.role = DeviceRole::Backup(Box::new(Backup {
+            record,
+            active: device.address,
+            transport_key: Some(switching.device_key.clone()),
         }));
         Ok(config)
     }

@@ -55,8 +55,8 @@ stops:
 
 - **P2P:** `commonware_p2p::authenticated::discovery` network bootstrapped from
   `peers.json`, with registered channels for votes, certificates, the marshal
-  resolver, backfill, block broadcast, DKG, DKG probe, mempool, history, and
-  authenticated state transfer. Each channel permits 1,000 messages/second per
+  resolver, backfill, block broadcast, DKG, DKG probe, mempool, history,
+  authenticated state transfer, and the devices' term exchange. Each channel permits 1,000 messages/second per
   peer with a burst of 64. Commonware sizes queues from retained-peer count
   times burst size, so the burst also controls startup queue allocation.
   The listener and the genesis DKG run Commonware's recommended discovery
@@ -464,7 +464,9 @@ write-buffer budgets, 8 MiB and 4 MiB by default; the daemon keeps Regolith's
 QMDB page cache allocated at start, 1 and 256 pages by default against the
 daemon's 64 and 4,096. A stopped node's directory is free even while clones of
 its `LocalRpc` survive, and starting on a directory in use fails with
-`EmbedError::DirectoryInUse`. An RPC address that cannot be bound fails the
+`EmbedError::DirectoryInUse`; the node locks `.node-hold` in its data
+directory from before it changes its term record or consensus storage until
+its runtime stops. An RPC address that cannot be bound fails the
 start. The consensus listener always binds; `127.0.0.1:0` keeps
 it on loopback with a system-chosen port. An embedded node prunes consensus
 archives and state journals by default (`EmbeddedConfig::RETENTION`); finalized
@@ -472,14 +474,71 @@ history is not pruned. A host may hold the key material itself:
 `SoloDeployment` pairs the genesis record with the validator key and share,
 `EmbeddedConfig::adopt` opens it in an empty directory or the one that already
 holds it without writing either secret, and `EmbeddedNode::export` returns it
-for another device. The export carries no state, and nothing yet prevents two
-devices from both validating, which forks the deployment.
+for another device. The export carries no state, and two devices started as
+validator fork the deployment until one learns the other's term.
 `EmbeddedConfig::backup` instead starts a backup from the genesis record alone:
 it follows the active device at a given address under its own `DeviceKey`,
 catches up by snapshot from an empty directory, re-executes blocks, serves
 reads and proofs, and holds no validator key or share. The active device lists
 its backups' keys in `EmbeddedConfig::backups`, which is configuration, not
-state. A backup cannot become active. See `docs/embedded-node.md`.
+state. See `docs/embedded-node.md`.
+
+### Terms and the active device
+
+A block carries a `term` that never decreases along a chain, and `GossipHeader`
+repeats it. A `TermCertificate` (deployment, term, holder device, cut) moves
+the active role between an account's devices; the operator policy approves it
+and it changes no key. The node signs none: the host collects approvals.
+`vera-domain` holds the type and digest,
+`vera_permission::verify_term_certificate` checks it against an
+`OperatorPolicy`, and `VeraClient` and the C verifier check it against
+certified state.
+
+`EmbeddedConfig::switching` names the account's devices. `hand_over` holds
+proposals, confirms the successor holds the final block and returns the change
+to certify; `take_over` and `follow` restart the node in place in its new
+role. `term.json` keeps the newest certificate, an announced handover and a
+staged takeover; a device does not start as validator against them.
+`EmbeddedNode::resume_stopped` undoes an announced handover on a stopped
+directory. An embedded node
+settles Commonware's consensus storage at every start, before marshal and
+Simplex open it: a backup journals in Simplex partitions of its own and keeps
+the validator's vote journal, a start as a backup after one as the validator
+removes the backup's journals, and a start under a certificate removes both
+roles' journals and marshal's cache and rebuilds its archive of finalization
+certificates without those above the cut. A takeover away from its cut is
+refused before anything is removed. A backup clears certificates above a cut
+only under a certificate naming another device, and a rewind never applies
+to the holder of the stored term (`TermRefusal::HolderResync`). A device that
+followed validates again only under a certificate accepted since or after
+`resume_stopped`. The validator's journal is otherwise removed only by such a
+clearing or by a rewind. The
+decision is stored in `term.json` first and an interrupted clearing is
+finished by the next start. Every start that does not synchronize by snapshot
+hands Simplex the finalization of the node's newest block as its floor, so a
+voter with an empty journal starts on that block. See
+docs/active-term.md#consensus-storage-across-a-switch. A lone
+validator signs an epoch whose ceremony it only observed with the share its
+host holds, once the epoch's sharing confirms it. Devices ask each other where
+they stand on channel 17. An active device whose newest block is older than
+`Switching::freshness` asks the others under its transport key before it
+builds and again before a built block reaches consensus. Any answer stops the
+proposal: a verified later certificate demotes the device
+(`EmbeddedNode::demoted`), anything else is a `Contest`
+(`EmbeddedNode::contested`) asked again at the next turn. A device that
+reaches nobody proposes on. A directory that last ran as a backup starts as
+validator only under a certificate naming it (`TermRefusal::NotCertified`).
+A backup holding the certificate of the next block without the block waits
+`Switching::answer_timeout` for the block and then takes over below it: the
+term voids it. A backup holding a certificate stops with
+`TermRefusal::LowerTerm` on a finalized block of a lower term above the cut.
+A device that follows a term whose cut is below blocks it finalized in a
+lower term reports their submissions (`EmbeddedNode::discarded`,
+`discarded-submissions.json`), drops those records from history and removes
+`commonware/`, then takes state from the holder and imports history from the
+cut. A device whose history left the holder's below the cut stops with
+`TermRefusal::Diverged`. Blocks carry no certificate, so re-execution alone accepts any term at or
+above the parent's. See `docs/active-term.md`.
 
 ## Crate Structure
 

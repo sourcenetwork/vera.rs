@@ -33,6 +33,7 @@ pub(super) async fn block(source: &OrderedState, height: u64) -> Block {
         parent: BlockId(B256::ZERO),
         height,
         timestamp: 1000 + height,
+        term: 0,
         prevrandao: B256::ZERO,
         randomness: None,
         state_root: StateRoot(vera_qmdb::StateRoot::compute(

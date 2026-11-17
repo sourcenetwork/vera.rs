@@ -24,6 +24,12 @@ pub use block::{
     DkgVariant, MAX_DKG_PARTICIPANTS,
 };
 
+mod term;
+pub use term::term_extends;
+
+mod term_certificate;
+pub use term_certificate::{TermApproval, TermCertificate, TermChange, TermCut, TermError};
+
 mod idents;
 pub use idents::{BlockId, Idents, StateRoot, TxId};
 

@@ -24,6 +24,7 @@ pub(super) fn block(height: u64, parent: BlockId) -> Block {
         parent,
         height,
         timestamp: height,
+        term: 0,
         prevrandao: B256::ZERO,
         randomness: None,
         state_root: StateRoot(B256::ZERO),

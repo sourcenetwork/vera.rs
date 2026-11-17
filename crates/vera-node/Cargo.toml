@@ -14,6 +14,10 @@ fault-injection = ["vera-app/fault-injection"]
 [lints]
 workspace = true
 
+[[test]]
+name = "embedded_term_faults"
+required-features = ["fault-injection"]
+
 [dependencies]
 vera-app.workspace = true
 vera-backend.workspace = true

@@ -47,6 +47,7 @@ pub struct StatefulVeraApp<S: FinalizedSink, D: ApplicationState = OrderedState>
     proposal_idle_wait: std::time::Duration,
     started_at: Arc<std::sync::OnceLock<u64>>,
     timestamp_step: u64,
+    term: crate::TermGuard,
 }
 
 impl<S: FinalizedSink, D: ApplicationState> std::fmt::Debug for StatefulVeraApp<S, D> {
@@ -88,7 +89,21 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
             proposal_idle_wait: std::time::Duration::ZERO,
             started_at: Arc::default(),
             timestamp_step: MAX_TIMESTAMP_STEP_SECS,
+            term: crate::TermGuard::default(),
         }
+    }
+
+    /// Propose in the term `term` holds and refuse a lower one above its cut.
+    #[must_use]
+    pub fn with_term(mut self, term: crate::TermGuard) -> Self {
+        self.term = term;
+        self
+    }
+
+    /// Whether `block` may follow `parent` in the terms this node accepts.
+    fn admits_term(&self, block: &Block, parent: &Block) -> bool {
+        vera_domain::term_extends(parent.term, block.term)
+            && self.term.admits(block.height, block.term)
     }
 
     /// Map consensus leaders to the EVM address credited as block beneficiary.
@@ -328,6 +343,16 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         }
 
         let height = parent.height + 1;
+        let term = self.term.term();
+        if term < parent.term {
+            warn!(
+                height,
+                term,
+                parent_term = parent.term,
+                "propose: the parent belongs to a later term"
+            );
+            return None;
+        }
         let timestamp = now_secs()
             .max(parent.timestamp)
             .min(parent.timestamp.saturating_add(self.timestamp_step));
@@ -376,6 +401,7 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             parent: parent.id(),
             height,
             timestamp,
+            term,
             prevrandao,
             randomness,
             state_root: executed.state_root,
@@ -423,8 +449,21 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             return None;
         }
         if finality == Finality::Finalized {
+            if !self.term.admits_finalized(block.height, block.term) {
+                warn!(
+                    ?digest,
+                    height = block.height,
+                    term = block.term,
+                    held_term = self.term.term(),
+                    "finalized block of a lower term"
+                );
+                return None;
+            }
             return match self.re_execute(&block, batches).await {
-                Ok(merkleized) => Some(merkleized),
+                Ok(merkleized) => {
+                    self.term.observe(block.height, block.term);
+                    Some(merkleized)
+                }
                 Err(error) => {
                     warn!(?digest, height = block.height, %error, "finalized block replay failed");
                     None
@@ -463,6 +502,16 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
                 warn!(?digest, "invalid authenticated consensus randomness");
                 return None;
             }
+        }
+        if !self.admits_term(&block, &parent) {
+            warn!(
+                ?digest,
+                term = block.term,
+                parent_term = parent.term,
+                held_term = self.term.term(),
+                "block of a lower term"
+            );
+            return None;
         }
         if block.timestamp < parent.timestamp {
             warn!(
@@ -537,6 +586,7 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
     ) {
         let ids: Vec<TxId> = block.txs.iter().map(vera_domain::Tx::id).collect();
         self.mempool.prune(&ids);
+        self.term.observe(block.height, block.term);
         self.sink.finalized(block, captured).await;
         self.vrf_seeds.finalized(block.context.round);
     }
@@ -763,6 +813,66 @@ mod processing_failure_tests {
                 "processing must reach the injected local failure"
             );
         });
+    }
+
+    /// Processes a candidate of `term` at height 1 on a parent of `parent_term`.
+    /// A refused block returns `None`; an admitted one reaches the injected failure.
+    fn admitted(parent_term: u64, term: u64, held: Option<(u64, u64)>) -> bool {
+        tokio::Runner::new(tokio::Config::default()).start(|context| async move {
+            let mut genesis = crate::genesis_block(
+                vera_domain::StateRoot(alloy_primitives::B256::ZERO),
+                vera_domain::DbTargets::default(),
+                alloy_primitives::B256::ZERO,
+            );
+            genesis.timestamp = super::now_secs();
+            genesis.term = parent_term;
+            let mut candidate = genesis.clone();
+            candidate.height = 1;
+            candidate.parent = genesis.id();
+            candidate.term = term;
+            let block_context = candidate.context.clone();
+            let ancestry = ancestry::from_iter([candidate, genesis.clone()].map(|block| {
+                let digest = block.digest();
+                Digested::precomputed(block, digest)
+            }));
+            let guard = crate::TermGuard::default();
+            if let Some((term, cut)) = held {
+                guard.raise(term, cut);
+            }
+            let mut app = StatefulVeraApp::<NoopSink, FailingState>::new(
+                VeraExecutor::new(9001),
+                genesis,
+                InMemoryMempool::new(),
+                NoopSink,
+                64,
+                30_000_000,
+            )
+            .with_term(guard);
+            let result = std::panic::AssertUnwindSafe(app.process(
+                (context, block_context),
+                ancestry,
+                (),
+                Finality::Candidate,
+            ))
+            .catch_unwind()
+            .await;
+            assert!(matches!(result, Ok(None) | Err(_)));
+            result.is_err()
+        })
+    }
+
+    #[test]
+    fn a_candidate_of_a_lower_term_than_its_parent_is_refused() {
+        assert!(admitted(2, 2, None));
+        assert!(admitted(2, 3, None));
+        assert!(!admitted(2, 1, None));
+    }
+
+    #[test]
+    fn a_candidate_below_the_held_term_is_refused_above_the_cut() {
+        assert!(!admitted(0, 1, Some((2, 0))));
+        assert!(admitted(0, 2, Some((2, 0))));
+        assert!(admitted(0, 1, Some((2, 1))));
     }
 
     #[test]

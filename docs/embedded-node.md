@@ -24,8 +24,13 @@ requests. It can be awaited from any async runtime. A host crate needs no
 and the host holds it behind a pointer.
 
 A directory that another node holds, in this process or another, fails with
-`EmbedError::DirectoryInUse`. The check runs just before the node's runtime
-takes the directory, so a holder that arrives in between is waited for instead.
+`EmbedError::DirectoryInUse`. Once its deployment's records are checked or
+created, an embedded node locks `.node-hold` in its data directory, before it
+changes its term record or consensus storage, and keeps the lock until its
+runtime has stopped, so a second embedded node is refused before it touches
+either; `EmbeddedNode::resume_stopped` takes the same lock. Commonware's
+own lock in `commonware/` is checked just before the runtime takes it, and a
+holder of that lock alone that arrives in between is waited for instead.
 
 ## Deployment identity
 
@@ -135,7 +140,8 @@ opens it with `EmbeddedConfig::adopt`.
 - Nothing stops two devices from running the deployment as validator at the
   same time. Each then finalizes its own blocks under the same key, the two
   histories diverge, and both verify against the deployment's consensus key.
-  Run the deployment on one device at a time.
+  Run the deployment on one device at a time, and move it between devices
+  with a [term certificate](active-term.md).
 - Every copy is a full signing capability. A copy cannot be revoked short of
   creating a new deployment.
 
@@ -271,15 +277,16 @@ on any node, against its own state.
 
 ### Limits of this version
 
-- A backup cannot become active. There is no handover, no activation and no
-  record of which device is active. Opening a backup's directory as the
-  validator with `EmbeddedConfig::adopt` is not supported: in one run it
-  continued when the backup had stopped before an epoch's midpoint and stalled
-  at the next epoch boundary when it had stopped after it.
-- Nothing enforces a single active device. Two devices started as active each
-  finalize their own blocks under the same key and fork the deployment, as
-  described under [A second device](#a-second-device). Both use the validator
-  key as their network identity, so they also cannot connect to each other.
+- A backup becomes active only through a term certificate; see
+  [Terms and the active device](active-term.md). Opening a backup's directory
+  as the validator with `EmbeddedConfig::adopt` alone records no switch, and
+  the device that was active does not learn of it.
+- Nothing enforces a single active device beyond the term. Two devices
+  started as active each finalize their own blocks under the same key and
+  fork the deployment, as described under
+  [A second device](#a-second-device), until one learns the other's term
+  certificate. Both use the validator key as their network identity, so they
+  cannot connect to each other as validators.
 - A backup is as current as its connection. A request finalized on the active
   device while a backup is disconnected is absent from that backup until it
   reconnects, and a device lost before then takes the request with it.
@@ -454,7 +461,12 @@ blocks, so idleness is not a stall.
 
 Everything is under `EmbeddedConfig::data_dir`: `validator.key`, `secrets.json`,
 `solo-genesis.json`, `native-genesis.bin`, `commonware/` and
-`history/regolith/`. The first two are absent when
+`history/regolith/`, and `term.json`, which records the
+[term](active-term.md#what-a-device-stores) and the role consensus storage was
+last opened in. A start that clears consensus storage for a switch also keeps
+`kept-finalizations` there until it is done; see
+[Consensus storage across a switch](active-term.md#consensus-storage-across-a-switch).
+The first two are absent when
 [the host holds the key material](#key-material-held-by-the-host) and on a
 [backup](#backup-devices), which keeps `transport.key` instead unless the host
 holds that key too. The directory must not be shared with another store; a host
@@ -660,9 +672,9 @@ are not a capacity or multi-validator measurement.
 
 ## Limits
 
-- One validator. A stopped or lost device stops the deployment. Other devices
-  can follow it as backups and serve reads, but none can take over; see
-  [Backup devices](#backup-devices).
+- One validator. A stopped or lost device stops the deployment until a
+  backup takes it over with a term certificate; see
+  [Terms and the active device](active-term.md).
 - Running a second device as validator forks the deployment; see
   [A second device](#a-second-device).
 - An idle deployment still produces a heartbeat block about every 10 s, and

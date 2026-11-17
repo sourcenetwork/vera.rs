@@ -64,6 +64,9 @@ pub struct Block {
     pub height: u64,
     /// Wall-clock timestamp (unix seconds), set by proposer.
     pub timestamp: u64,
+    /// Term of the device that proposed the block. It never decreases along
+    /// a chain; a switch of the active device raises it.
+    pub term: u64,
     /// Seed-derived randomness used for future prevrandao.
     pub prevrandao: B256,
     /// Authenticated prior-round seed for rotating consensus.
@@ -171,6 +174,7 @@ impl Write for Block {
         self.parent.write(buf);
         self.height.write(buf);
         self.timestamp.write(buf);
+        self.term.write(buf);
         Idents::write_b256(&self.prevrandao, buf);
         self.state_root.write(buf);
         Idents::write_b256(&self.module_state_root, buf);
@@ -203,6 +207,7 @@ impl EncodeSize for Block {
             + self.parent.encode_size()
             + self.height.encode_size()
             + self.timestamp.encode_size()
+            + self.term.encode_size()
             + 32
             + self.state_root.encode_size()
             + 32
@@ -239,6 +244,7 @@ impl Read for Block {
         let parent = BlockId::read(buf)?;
         let height = u64::read(buf)?;
         let timestamp = u64::read(buf)?;
+        let term = u64::read(buf)?;
         let prevrandao = Idents::read_b256(buf)?;
         let state_root = StateRoot::read(buf)?;
         let module_state_root = Idents::read_b256(buf)?;
@@ -284,6 +290,7 @@ impl Read for Block {
             parent,
             height,
             timestamp,
+            term,
             prevrandao,
             randomness,
             state_root,
@@ -314,6 +321,7 @@ impl fmt::Debug for Block {
             .field("parent", &self.parent)
             .field("height", &self.height)
             .field("timestamp", &self.timestamp)
+            .field("term", &self.term)
             .field("prevrandao", &self.prevrandao)
             .field("randomness", &self.randomness)
             .field("state_root", &self.state_root)
@@ -387,6 +395,7 @@ mod tests {
             parent: BlockId(B256::repeat_byte(0x01)),
             height: 42,
             timestamp: 1_700_000_000,
+            term: 0,
             prevrandao: B256::repeat_byte(0xab),
             randomness: None,
             state_root: StateRoot(B256::repeat_byte(0xcd)),
@@ -434,6 +443,18 @@ mod tests {
         let mut block2 = sample_block();
         block2.height = 100;
         assert_ne!(block1.id(), block2.id());
+    }
+
+    #[test]
+    fn the_term_is_encoded_and_changes_the_block_id() {
+        let block = sample_block();
+        let mut later = sample_block();
+        later.term = 7;
+        assert_ne!(block.id(), later.id());
+        assert_eq!(later.encode_size(), later.encode().len());
+        let decoded = Block::decode_cfg(later.encode(), &default_block_cfg()).unwrap();
+        assert_eq!(decoded.term, 7);
+        assert_eq!(decoded, later);
     }
 
     #[test]
@@ -586,6 +607,7 @@ mod tests {
             parent: BlockId(B256::ZERO),
             height: 0,
             timestamp: 0,
+            term: 0,
             prevrandao: B256::ZERO,
             randomness: None,
             state_root: StateRoot(B256::ZERO),

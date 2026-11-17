@@ -149,7 +149,9 @@ configurable through `snapshot.initialization_timeout_ms`. While databases are
 pending, startup watches marshal's finalized-processing progress: after
 `snapshot.floor_stall_seconds` without progress (default 15, zero disables),
 it re-floors marshal from the newest stored gossiped finalization, resuming
-dispatches from a retained anchor so the database sync retargets. Exceeding
+dispatches from a retained anchor so the database sync retargets. A pause
+while marshal holds the next block, which the sync has not acknowledged yet,
+re-floors nothing. Exceeding
 the overall deadline still exits with `snapshot initialization deadline
 exceeded`. Under continuous finalization the state sync completes at its
 reached target and settles on the newest one at the first update lull, so

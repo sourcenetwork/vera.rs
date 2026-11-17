@@ -79,6 +79,7 @@ pub fn genesis_block(
         parent: BlockId(B256::ZERO),
         height: 0,
         timestamp: 0,
+        term: 0,
         prevrandao: B256::ZERO,
         randomness: None,
         state_root,

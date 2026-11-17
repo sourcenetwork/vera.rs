@@ -73,6 +73,28 @@ enum Request {
         minimum_height: u64,
         proof: Box<PolicyPrefixResponse>,
     },
+    TermCertificate {
+        trusted_key: String,
+        genesis_id: B256,
+        minimum_height: u64,
+        /// Record proof of the deployment's operator configuration.
+        proof: Box<RecordResponse>,
+        certificate: vera_domain::TermCertificate,
+    },
+}
+
+/// Check `certificate` against the operator policy in `administration`, the
+/// certified value of the deployment's operator configuration record.
+fn verify_term(
+    administration: Option<&[u8]>,
+    genesis_id: &B256,
+    certificate: &vera_domain::TermCertificate,
+) -> Result<(), String> {
+    use vera_modules::vera::administration::AdministrationState;
+    let bytes = administration.ok_or("operator authority is not configured")?;
+    let state = AdministrationState::decode(bytes).map_err(|error| error.to_string())?;
+    vera_permission::verify_term_certificate(certificate, genesis_id, &state.policy)
+        .map_err(|error| error.to_string())
 }
 
 fn trusted_key(value: &str) -> Result<ConsensusPublicKey, String> {
@@ -267,6 +289,33 @@ fn verify(input: &[u8]) -> Result<Value, String> {
                 .map_err(|error| error.to_string())?;
             Ok(json!({"height": proof.revision.height,
                 "timestamp": proof.revision.timestamp, "owner": owner}))
+        }
+        Request::TermCertificate {
+            trusted_key: key,
+            genesis_id,
+            minimum_height,
+            proof,
+            certificate,
+        } => {
+            proof
+                .verify(
+                    ModuleId::Vera,
+                    vera_modules::vera::administration::STATE_KEY,
+                    minimum_height,
+                    &trusted_key(&key)?,
+                    RECORD_PROOF_BYTES,
+                )
+                .map_err(|error| error.to_string())?;
+            verify_term(
+                proof.record.value.as_ref().map(AsRef::as_ref),
+                &genesis_id,
+                &certificate,
+            )?;
+            let change = &certificate.change;
+            Ok(json!({"height": proof.revision.height,
+                "timestamp": proof.revision.timestamp, "term": change.term,
+                "holder": change.holder, "cut_height": change.cut.height,
+                "cut_block": change.cut.block}))
         }
     }
 }

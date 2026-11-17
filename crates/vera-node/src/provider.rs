@@ -135,12 +135,30 @@ impl Provider for ConsensusProvider {
 pub struct Registrar {
     provider: DynamicProvider,
     local: ed25519::PublicKey,
+    held: Option<Share>,
 }
 
 impl Registrar {
     /// Bind registration to this validator's identity in each epoch's committee.
     pub const fn new(provider: DynamicProvider, local: ed25519::PublicKey) -> Self {
-        Self { provider, local }
+        Self {
+            provider,
+            local,
+            held: None,
+        }
+    }
+
+    /// Sign with `share` in an epoch whose ceremony this node finished
+    /// without a share, when the epoch's public sharing confirms it.
+    ///
+    /// A lone validator's share is the same in every epoch. A device that
+    /// followed a ceremony as a backup and then became the validator has no
+    /// record of the dealing it would have received, so the ceremony ends for
+    /// it as for an observer although it holds the epoch's share.
+    #[must_use]
+    pub(crate) fn with_held_share(mut self, share: Option<Share>) -> Self {
+        self.held = share;
+        self
     }
 }
 
@@ -163,8 +181,16 @@ impl RegistrarTrait for Registrar {
                     public_key, self.local,
                     "registered member must be the local participant"
                 );
-                Scheme::member(crate::NAMESPACE, participants, sharing, &public_key)
-                    .expect("registered member must belong to the participant set")
+                self.held
+                    .clone()
+                    .and_then(|share| {
+                        signer_scheme(&self.local, participants.clone(), sharing.clone(), share)
+                            .ok()
+                    })
+                    .unwrap_or_else(|| {
+                        Scheme::member(crate::NAMESPACE, participants, sharing, &public_key)
+                            .expect("registered member must belong to the participant set")
+                    })
             }
             SchemeInfo::Signer {
                 participants,

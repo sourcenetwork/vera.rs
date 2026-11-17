@@ -33,13 +33,16 @@ pub use embedded::{
     Backup, DeviceRole, EmbedError, EmbeddedConfig, EmbeddedNode, ThreadBudget, ThreadSetup,
 };
 
+mod term;
+pub use term::{Contest, Device, Switching, TermRefusal, TermSeat};
+
 mod finalize;
 pub use finalize::{index_finalized_block, subscription_data};
 
 mod history;
 pub use history::{
-    FinalizedHistory, HISTORY_CHUNK_BYTES, HistoricalExecution, HistoryChunk, HistoryLimits,
-    HistoryMemory, HistoryPeer, start_history_peer,
+    DiscardedSubmission, FinalizedHistory, HISTORY_CHUNK_BYTES, HistoricalExecution, HistoryChunk,
+    HistoryLimits, HistoryMemory, HistoryPeer, start_history_peer,
 };
 
 mod marshal;

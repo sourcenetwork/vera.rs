@@ -37,7 +37,10 @@ use commonware_glue::{
 use commonware_p2p::{Ingress, Provider as _, authenticated::discovery};
 use commonware_parallel::{Rayon, Sequential};
 use commonware_runtime::{Handle, Spawner as _, Supervisor as _, buffer::paged::CacheRef, tokio};
-use commonware_storage::{archive::prunable, translator::TwoCap};
+use commonware_storage::{
+    archive::{Archive as _, prunable},
+    translator::TwoCap,
+};
 use commonware_utils::{NZDuration, NZU64, NZUsize, sequence::Unit};
 use tracing::{error, info};
 use vera_app::{
@@ -125,6 +128,8 @@ async fn run_node_with_elector<
         keys,
         backup,
         devices,
+        switching,
+        term: seat,
     } = options;
     let hold = hold.unwrap_or_default();
     if let RpcMode::Network(Some(listener)) = &rpc {
@@ -156,6 +161,8 @@ async fn run_node_with_elector<
             "{error}; check --leader-timeout-ms, --notarization-timeout-ms and --nullify-retry-ms"
         )
     })?;
+    let mut term_record = crate::term::TermRecord::load(&config.data_dir)?;
+    let data_dir = config.data_dir.clone();
     let chain_id = config.chain_id;
     anyhow::ensure!(
         chain_id == genesis.chain_id,
@@ -284,6 +291,7 @@ async fn run_node_with_elector<
     let dkg_probe_network = p2p.register(DKG_PROBE_CHANNEL, channel_rate);
     let (mempool_sender, mempool_receiver) = p2p.register(MEMPOOL_CHANNEL, channel_rate);
     let history_network = p2p.register(crate::HISTORY_CHANNEL, channel_rate);
+    let term_network = p2p.register(crate::TERM_CHANNEL, channel_rate);
     let mut state_resolver_handles = Vec::new();
     macro_rules! state_channel {
         ($id:literal, $db:ty) => {{
@@ -321,6 +329,10 @@ async fn run_node_with_elector<
 
     // Epoch-0 certificate scheme.
     let provider = DynamicProvider::default();
+    let held_share = keys
+        .as_ref()
+        .filter(|_| !is_backup)
+        .map(crate::SoloKeys::consensus_share);
     let mut store = match keys {
         _ if is_backup => NodeSecretStore::Observer(ObserverSecretStore::default()),
         Some(keys) => NodeSecretStore::Held(HeldSecretStore::new(&local, keys.consensus_share())),
@@ -429,6 +441,38 @@ async fn run_node_with_elector<
         )?
         .with_metrics(finalization_metrics.clone()),
     );
+    // An embedded node changes role between starts; marshal and consensus
+    // have not opened their storage yet.
+    let finalizations_by_height = if seat.is_some() {
+        #[cfg(feature = "fault-injection")]
+        let finalizations_by_height = crate::term::fault::orphan(
+            &config.data_dir,
+            finalizations_by_height,
+            finalized_blocks.last_index(),
+            &genesis_block.id().0,
+            history_memory,
+        )
+        .await?;
+        let settled = crate::term::settle_seating(
+            context.child("seating"),
+            &config.data_dir,
+            crate::term::Start {
+                this: switching
+                    .as_ref()
+                    .map(|switching| crate::term::device_id(&switching.device_key.public_key())),
+                backup: is_backup,
+                newest_block: finalized_blocks.last_index(),
+                executed: history.head_height(),
+            },
+            finalizations_by_height,
+            archive_config("finalizations", page_cache.clone(), ()),
+        )
+        .await?;
+        term_record = crate::term::TermRecord::load(&config.data_dir)?;
+        settled
+    } else {
+        finalizations_by_height
+    };
     let completed_sync_height = plan.completed();
     let mut snapshot_sync = plan.should_sync(config.snapshot.is_some());
     let mut probe_artifact = None;
@@ -514,6 +558,18 @@ async fn run_node_with_elector<
         plan = plan.set_floor(artifact.floor.clone()).await;
     }
 
+    let consensus_floor = if seat.is_some() && !snapshot_sync {
+        crate::term::seat(
+            &history,
+            &finalizations_by_height,
+            &finalized_blocks,
+            &epoch_info,
+            blocks_per_epoch,
+        )
+        .await?
+    } else {
+        None
+    };
     let (marshal_actor, marshal, floor) = MarshalActor::init(
         context.child("marshal"),
         finalizations_by_height,
@@ -558,6 +614,23 @@ async fn run_node_with_elector<
         state_sync,
     )
     .await;
+    // The reshare actor reads an epoch's ceremony from the blocks it holds.
+    // Only Simplex is told where the node stands.
+    let consensus_start = match consensus_floor {
+        Some(seat) => {
+            StateSyncPlan::init(
+                context.child("consensus_seat"),
+                StateSyncConfig {
+                    partition_prefix: format!("{PARTITION_PREFIX}-seat"),
+                    max_participants: MAX_PARTICIPANTS,
+                    max_supported_mode: MAX_SUPPORTED_MODE,
+                },
+                Some(seat),
+            )
+            .await
+        }
+        None => state_sync.clone(),
+    };
     let (fence, gate) = Fence::new();
     let participants_provider = RegistryParticipants::new(
         modules.clone(),
@@ -575,7 +648,7 @@ async fn run_node_with_elector<
             participants_provider: participants_provider.clone(),
             secret_store: store,
             strategy: Sequential,
-            registrar: Registrar::new(provider.clone(), local.clone()),
+            registrar: Registrar::new(provider.clone(), local.clone()).with_held_share(held_share),
             marshal: marshal.clone(),
             state_sync: state_sync.clone(),
             fence,
@@ -638,20 +711,35 @@ async fn run_node_with_elector<
     let (headers_tx, _) = ::tokio::sync::broadcast::channel(64);
 
     let validator: SharedValidator = Arc::new(OnceLock::new());
+    let term = seat
+        .as_ref()
+        .map(|seat| seat.view.guard.clone())
+        .unwrap_or_default();
     let finalization_marshal = marshal.clone();
+    let finalization_term = term.clone();
     let finalization_lookup: FinalizationLookup = Arc::new(move |height| {
         let marshal = finalization_marshal.clone();
+        let lookup_term = finalization_term.clone();
         Box::pin(async move {
             // Marshal dispatches only after its finalized archive is durable.
             // Ancestors finalized by a descendant need not have a certificate.
-            marshal
-                .get_finalization(Height::new(height))
-                .await
-                .map(|finalization| FinalizationArtifacts {
-                    epoch: finalization.proposal.round.epoch().get(),
-                    certificate: finalization.certificate.encode().to_vec(),
-                    finalization: finalization.encode().to_vec(),
-                })
+            let finalization = marshal.get_finalization(Height::new(height)).await?;
+            // A device that took the deployment over may hold the certificate
+            // of a block of the term before whose block never arrived. The
+            // archive keeps the first certificate it stored for a height.
+            if lookup_term.term() > 0 {
+                let block = marshal
+                    .get_block(Identifier::Height(Height::new(height)))
+                    .await?;
+                if block.digest() != finalization.proposal.payload {
+                    return None;
+                }
+            }
+            Some(finalization).map(|finalization| FinalizationArtifacts {
+                epoch: finalization.proposal.round.epoch().get(),
+                certificate: finalization.certificate.encode().to_vec(),
+                finalization: finalization.encode().to_vec(),
+            })
         })
     });
     let sink = NodeSink::new(SinkParts {
@@ -676,6 +764,20 @@ async fn run_node_with_elector<
         move || index.head_block_number()
     });
     let participant_addresses = crate::beneficiaries::from_genesis(&genesis)?;
+    // A device that announced a handover and now follows refuses the blocks
+    // it would itself have built above the final one.
+    if let (true, Some(change)) = (is_backup, &term_record.handed_over) {
+        term.raise(change.term, change.cut.height);
+    }
+    if is_backup && let Some(certificate) = &term_record.certificate {
+        term.raise(certificate.change.term, certificate.change.cut.height);
+    }
+    let wake = match (&switching, &seat) {
+        (Some(switching), Some(seat)) if !is_backup => {
+            crate::term::WakeGate::new(switching.freshness, seat.sender.clone())
+        }
+        _ => crate::term::WakeGate::default(),
+    };
     let application = StatefulVeraApp::<_, OrderedState>::new(
         executor.clone(),
         genesis_block.clone(),
@@ -698,7 +800,8 @@ async fn run_node_with_elector<
         genesis
             .timestamp_step_secs
             .unwrap_or(vera_app::MAX_TIMESTAMP_STEP_SECS),
-    );
+    )
+    .with_term(term.clone());
     let vrf_elector = make_elector(application.vrf_seed_cache());
 
     let snapshot_history = crate::history::SnapshotHistory {
@@ -721,6 +824,11 @@ async fn run_node_with_elector<
     let sync_local = local.clone();
     let sync_history_peer = history_peer.clone();
     let sync_status = node_state.clone();
+    let sync_term = term.clone();
+    let (term_refused, mut term_refusals) = ::tokio::sync::mpsc::unbounded_channel();
+    let sync_refused = term_refused.clone();
+    let applied = crate::term::Applied::default();
+    let sync_applied = applied.clone();
     let (stateful_actor, stateful_mailbox) = Stateful::new(
         context.child("stateful"),
         StatefulConfig {
@@ -743,6 +851,16 @@ async fn run_node_with_elector<
                     return Err("synchronized history anchor mismatch".into());
                 }
                 let selected = selected.inner();
+                // A snapshot does not pass through execution, so the term of
+                // the block it is taken at is checked here.
+                if !sync_term.admits(selected.height, selected.term) {
+                    let _ = sync_refused.send(crate::TermRefusal::LowerTerm {
+                        height: selected.height,
+                        term: selected.term,
+                        held: sync_term.term(),
+                    });
+                    return std::future::pending().await;
+                }
                 let mut updates = sync_peers.subscribe().await;
                 let peers = updates
                     .recv()
@@ -755,11 +873,25 @@ async fn run_node_with_elector<
                     .filter(|peer| *peer != sync_local)
                     .collect();
                 let mut client = sync_history_peer.lock().await;
-                snapshot_history
+                if let Err(error) = snapshot_history
                     .recover(&mut client, &peers, selected)
                     .await
-                    .map_err(|e| e.to_string())?;
+                {
+                    let error = format!("{error:#}");
+                    // The history this device kept is not an ancestor of the
+                    // block it synchronized to: it left the deployment's
+                    // history below a cut it never learned of.
+                    if error.contains(crate::history::DISCONNECTED) {
+                        let _ = sync_refused.send(crate::TermRefusal::Diverged {
+                            height: selected.height,
+                        });
+                        return std::future::pending().await;
+                    }
+                    return Err(error);
+                }
+                sync_applied.seed(selected.height, selected.digest());
                 sync_status.set_snapshot_revision(anchor.height.get());
+                sync_term.observe(selected.height, selected.term);
                 sync_status.record_finalized(
                     selected.height,
                     selected.context.round.epoch().get(),
@@ -783,7 +915,8 @@ async fn run_node_with_elector<
             reshare_mailbox.clone(),
             blocks_per_epoch,
         ),
-        hold,
+        hold.clone(),
+        wake.clone(),
     );
     let deferred = Deferred::new(
         context.child("deferred"),
@@ -823,17 +956,28 @@ async fn run_node_with_elector<
                 track_historical_votes: false,
             },
             gate,
-            state_sync,
+            state_sync: consensus_start,
             blocks_per_epoch,
             mailbox_size: MAILBOX_SIZE,
-            partition_prefix: format!("{PARTITION_PREFIX}-orchestrator"),
+            // A backup journals apart, so it leaves the votes of the
+            // validator this device may have been untouched.
+            partition_prefix: format!(
+                "{PARTITION_PREFIX}{}",
+                crate::term::Role::of(is_backup).journals()
+            ),
         },
     );
     let orchestrator_handle =
         orchestrator_actor.start(vote_network, certificate_network, resolver_network);
 
-    let reporters = Reporters::from((
+    let term_reporter = crate::term::TermReporter::new(
         crate::finalization_diagnostics::Reporter::new(stateful_mailbox.clone()),
+        term.clone(),
+        applied.clone(),
+        term_refused,
+    );
+    let reporters = Reporters::from((
+        term_reporter,
         Reporters::from((orchestrator_mailbox, reshare_mailbox)),
     ));
     let marshal_handle = marshal_actor.start(reporters, buffer, resolver);
@@ -873,6 +1017,58 @@ async fn run_node_with_elector<
             recovered.inner().context.round.epoch().get(),
             recovered.inner().context.round.view().get(),
         );
+        term.observe(recovered.inner().height, recovered.inner().term);
+        if recovered.inner().height == recovered_height.get() {
+            applied.seed(recovered_height.get(), recovered.digest());
+        }
+        if !is_backup {
+            // A device taking the deployment over starts on the cut. Seating
+            // refused a start away from it before clearing anything; a block
+            // above it, or its certificate, found here arrived from the device
+            // being replaced since, and the takeover is abandoned: its
+            // certificate would void a block this device already holds.
+            if let Some(certificate) = term_record.taking_over.take() {
+                let cut = certificate.change.cut;
+                let above = crate::term::archived(marshal.clone(), cut.height + 1).await;
+                if above != crate::term::Archived::Nothing || recovered.inner().height != cut.height
+                {
+                    term_record.store(&config.data_dir)?;
+                    return Err(crate::TermRefusal::NotAtCut {
+                        head: recovered
+                            .inner()
+                            .height
+                            .max(cut.height + u64::from(above != crate::term::Archived::Nothing)),
+                        cut: cut.height,
+                    }
+                    .into());
+                }
+                term_record.certificate = Some(certificate);
+                term_record.handed_over = None;
+                term_record.followed = false;
+                term_record.store(&config.data_dir)?;
+            }
+            if let Some(certificate) = &term_record.certificate {
+                term.raise(certificate.change.term, certificate.change.cut.height);
+            }
+            // A validator builds in the term it holds. Blocks of a later term
+            // mean another device was certified since, and this one must follow it.
+            if recovered.inner().term > term.term() {
+                return Err(crate::TermRefusal::Behind {
+                    seen: recovered.inner().term,
+                    held: term.term(),
+                }
+                .into());
+            }
+            if recovered.inner().height > 0 {
+                wake.seed(recovered.inner().timestamp);
+            }
+        }
+    }
+    if let Some(certificate) = &term_record.certificate {
+        node_state.set_term_certificate(certificate.clone());
+        if let Some(seat) = &seat {
+            *seat.view.certificate.write() = Some(certificate.clone());
+        }
     }
     // The stall clock starts after the history scan, which finalizes nothing
     // however long it runs, and before the stateful actor, whose state-sync
@@ -937,6 +1133,9 @@ async fn run_node_with_elector<
                     anyhow::bail!("validator actor stopped during startup: {result:?}");
                 }
                 databases = &mut subscribe_databases => break databases,
+                Some(refusal) = term_refusals.recv() => {
+                    return Err(crate::term::resync_after(&data_dir, refusal));
+                }
                 _ = stalled => {}
                 _ = ::tokio::time::sleep_until(deadline) => {
                     anyhow::bail!(
@@ -952,6 +1151,9 @@ async fn run_node_with_elector<
                 anyhow::bail!("validator actor stopped during startup: {result:?}");
             }
             databases = &mut subscribe_databases => databases,
+            Some(refusal) = term_refusals.recv() => {
+                return Err(crate::term::resync_after(&data_dir, refusal));
+            }
         }
     };
     let native_databases = databases.native_databases();
@@ -1062,6 +1264,42 @@ async fn run_node_with_elector<
         );
     }
 
+    if let Some(seat) = seat {
+        let probe = switching.as_ref().map(|switching| crate::term::Probe {
+            signer: switching.device_key.signer(),
+            validator: peers.participants[0].clone(),
+            max_peers: max_peers_per_set,
+            rate: channel_rate,
+            timeout: switching.answer_timeout,
+        });
+        let parts = crate::term::Parts {
+            seat,
+            record: term_record,
+            data_dir: config.data_dir.clone(),
+            switching,
+            backup: is_backup,
+            genesis_id: genesis_block.id().0,
+            hold,
+            index: block_index.clone(),
+            finalized: {
+                let marshal = marshal.clone();
+                Arc::new(move |height| {
+                    let marshal = marshal.clone();
+                    Box::pin(crate::term::archived(marshal, height))
+                })
+            },
+            modules: modules.clone(),
+            status: node_state.clone(),
+            network: term_network,
+            probe,
+        };
+        state_resolver_handles.push(
+            context
+                .child("term")
+                .spawn(move |context| crate::term::run(context, parts)),
+        );
+    }
+
     let rpc_server = RpcServer::with_state_provider(node_state, rpc_addr, chain_id, state_provider)
         .with_max_connections(config.rpc.max_connections.get())
         .with_tx_submit(tx_submit)
@@ -1115,6 +1353,9 @@ async fn run_node_with_elector<
     ::tokio::select! {
         result = &mut startup_actors => result,
         result = Handle::select(state_resolver_handles) => result,
+        Some(refusal) = term_refusals.recv() => {
+            return Err(crate::term::resync_after(&data_dir, refusal));
+        }
     }
     .map_err(|e| anyhow::anyhow!("validator actor failed: {e:?}"))
 }
@@ -1136,7 +1377,7 @@ const fn sync_config() -> SyncEngineConfig {
     }
 }
 
-fn archive_config<C>(
+pub(crate) fn archive_config<C>(
     name: &str,
     page_cache: CacheRef,
     codec_config: C,

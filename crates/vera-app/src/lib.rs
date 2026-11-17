@@ -32,6 +32,9 @@ pub use scheme::{ConsensusScheme, ReshareInput};
 mod sink;
 pub use sink::{FinalizedSink, NoopSink};
 
+mod term;
+pub use term::TermGuard;
+
 mod targets;
 pub use targets::{db_targets_from_merkleized, db_targets_from_sync, sync_targets};
 

@@ -12,6 +12,7 @@ SCHEMAS = {
 KEYS = 'crates/vera-modules/src/acp/keys.rs'
 TYPES = 'crates/vera-modules/src/acp/types.rs'
 DISCOVERY = 'crates/vera-config/src/discovery.rs'
+BLOCK = 'crates/vera-domain/src/block.rs'
 RECEIPTS = 'crates/vera-domain/src/receipt_commitment.rs'
 
 
@@ -56,6 +57,22 @@ def source_storage_version(source, revision):
     return packages[0]
 
 
+def source_block_encoding(source, revision):
+    """The block encoding at this revision: 2 when a block carries its term, else 1.
+
+    A runner decodes blocks and finality artifacts in its own encoding, so it
+    cannot verify a node of the other one.
+    """
+    text = subprocess.check_output(['git', 'show', f'{revision}:{BLOCK}'], cwd=source, text=True)
+    blocks = re.findall(r'^pub struct Block\s*\{(.*?)^\}', text, re.MULTILINE | re.DOTALL)
+    if len(blocks) != 1:
+        raise ValueError('unrecognized block encoding')
+    terms = re.findall(r'^[ \t]*pub\s+term\s*:\s*([^,\n]+),', blocks[0], re.MULTILINE)
+    if len(terms) > 1 or (terms and terms[0].strip() != 'u64'):
+        raise ValueError('unrecognized block term field')
+    return 2 if terms else 1
+
+
 def source_receipt_commitment(source, revision):
     """The receipt commitment domain at this revision, such as `vera/receipts/v2`.
 
@@ -95,6 +112,8 @@ def incompatibility_reason(identity):
         return 'incompatible ACP proof schema'
     if identity['head'].get('receipt_commitment') != identity['base'].get('receipt_commitment'):
         return 'different receipt commitments; the runner cannot verify the baseline'
+    if identity['head'].get('block_encoding') != identity['base'].get('block_encoding'):
+        return 'different block encodings; the runner cannot decode the baseline'
     return 'different Commonware storage versions; proof compatibility not established'
 
 def baseline_incompatible(identity):
@@ -114,6 +133,14 @@ def baseline_incompatible(identity):
                                    for side in ('head', 'base')):
             raise ValueError('incomplete Commonware storage version provenance')
         if identity['head']['storage_version'] != identity['base']['storage_version']:
+            return True
+    present = ['block_encoding' in identity[side] for side in ('head', 'base')]
+    if any(present):
+        if not all(present) or any(identity[side]['block_encoding'] not in (1, 2) or
+                                   type(identity[side]['block_encoding']) is not int
+                                   for side in ('head', 'base')):
+            raise ValueError('incomplete block encoding provenance')
+        if identity['head']['block_encoding'] != identity['base']['block_encoding']:
             return True
     present = ['receipt_commitment' in identity[side] for side in ('head', 'base')]
     if any(present):
@@ -135,6 +162,9 @@ def unavailable(identity, objects):
         **({'node_storage_version': identity['base']['storage_version'],
             'runner_storage_version': identity['head']['storage_version']}
            if 'storage_version' in identity['base'] else {}),
+        **({'node_block_encoding': identity['base']['block_encoding'],
+            'runner_block_encoding': identity['head']['block_encoding']}
+           if 'block_encoding' in identity['base'] else {}),
         **({'node_receipt_commitment': identity['base']['receipt_commitment'],
             'runner_receipt_commitment': identity['head']['receipt_commitment']}
            if 'receipt_commitment' in identity['base'] else {}),
