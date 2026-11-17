@@ -282,6 +282,42 @@ fn an_interrupted_clearing_is_finished_from_the_kept_certificates_in_either_role
 }
 
 #[test]
+fn a_clearing_interrupted_while_the_archive_was_destroyed_is_finished() {
+    // Commonware destroys the archive's metadata first, then its index and
+    // values; a stop may leave any of them behind.
+    for removed in [
+        &["vera-finalizations-metadata"][..],
+        &["vera-finalizations-metadata", "vera-finalizations-key"],
+        &["vera-finalizations-metadata", "vera-finalizations-value"],
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let storage = backup(directory.path());
+        assert_eq!(
+            settled(directory.path(), certificates(1..=5), true, Some(5)).unwrap(),
+            [1, 2, 3, 4, 5]
+        );
+        let mut writer = kept::Writer::create(directory.path()).unwrap();
+        for (height, certificate) in certificates(1..=2) {
+            writer.push(height, certificate.encode().as_ref()).unwrap();
+        }
+        writer.finish().unwrap();
+        let mut record = TermRecord::load(directory.path()).unwrap();
+        record.seating = Some(Seating {
+            role: Role::Backup,
+            cut: Some(2),
+        });
+        record.store(directory.path()).unwrap();
+        for partition in removed {
+            std::fs::remove_dir_all(storage.join(partition)).unwrap();
+        }
+
+        let held = settled(directory.path(), Vec::new(), true, Some(2)).unwrap();
+        assert_eq!(held, [1, 2], "with {removed:?} removed");
+        assert!(!kept::stored(directory.path()));
+    }
+}
+
+#[test]
 fn a_start_in_the_same_role_clears_nothing() {
     let directory = tempfile::tempdir().unwrap();
     let storage = backup(directory.path());
