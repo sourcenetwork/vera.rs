@@ -139,6 +139,8 @@ def compare(directory):
                                        'base': identity['base']['proof_schema'], 'head': identity['head']['proof_schema'],
                                        'base_storage_version': identity['base'].get('storage_version'),
                                        'head_storage_version': identity['head'].get('storage_version'),
+                                       'base_block_encoding': identity['base'].get('block_encoding'),
+                                       'head_block_encoding': identity['head'].get('block_encoding'),
                                        'head_passes': ['head1', 'head2'], 'baseline_status': 'not_run'})
                 prefix = 'registrations' if objects == 0 else 'fixed updates'
                 metrics = {f'{prefix}: completed workflows/s': lambda r: r[2]['completed_workflows_per_second']}

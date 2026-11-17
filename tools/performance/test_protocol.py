@@ -2,7 +2,8 @@
 import unittest
 from unittest.mock import patch
 
-from protocol import (DISCOVERY, SCHEMAS, baseline_incompatible, discovery_section, source_discovery_setting,
+from protocol import (BLOCK, DISCOVERY, SCHEMAS, baseline_incompatible, discovery_section,
+                      incompatibility_reason, source_block_encoding, source_discovery_setting,
                       source_schema, source_storage_version)
 
 
@@ -98,6 +99,31 @@ pub struct RelationshipRecord {
         self.assertFalse(baseline_incompatible(identity))
         del identity['base']['storage_version']
         with self.assertRaisesRegex(ValueError, 'storage version provenance'):
+            baseline_incompatible(identity)
+
+
+    def test_block_encoding_is_read_from_the_recorded_revision(self):
+        block = 'pub struct Block {\n    pub height: u64,\n    pub timestamp: u64,\n%s    pub txs: Vec<Tx>,\n}\n'
+        for term, expected in (('    pub term: u64,\n', 2), ('', 1)):
+            with patch('protocol.subprocess.check_output', return_value=block % term) as git:
+                self.assertEqual(source_block_encoding('.', 'revision'), expected)
+            self.assertEqual(git.call_args.args[0], ['git', 'show', f'revision:{BLOCK}'])
+        for invalid in ('', block % '    pub term: u32,\n', (block % '') * 2):
+            with patch('protocol.subprocess.check_output', return_value=invalid):
+                with self.assertRaisesRegex(ValueError, 'block'):
+                    source_block_encoding('.', 'revision')
+
+    def test_different_block_encodings_cannot_share_a_runner(self):
+        schema = dict(SCHEMAS['relationship/v5/'])
+        identity = dict(format_version=2,
+                        head=dict(proof_schema=schema, storage_version='2026.10.0', block_encoding=2),
+                        base=dict(proof_schema=schema, storage_version='2026.10.0', block_encoding=1))
+        self.assertTrue(baseline_incompatible(identity))
+        self.assertIn('block encodings', incompatibility_reason(identity))
+        identity['base']['block_encoding'] = 2
+        self.assertFalse(baseline_incompatible(identity))
+        del identity['base']['block_encoding']
+        with self.assertRaisesRegex(ValueError, 'block encoding provenance'):
             baseline_incompatible(identity)
 
 
