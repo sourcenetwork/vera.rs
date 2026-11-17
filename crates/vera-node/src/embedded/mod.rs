@@ -339,8 +339,7 @@ impl EmbeddedNode {
     /// before the operators approved. As with [`Self::resume`], resuming
     /// after the successor received a certificate forks the deployment. A
     /// device that knows another device holds a later term is refused with
-    /// [`TermRefusal::Superseded`], and one that already started to follow
-    /// the successor with [`TermRefusal::NotCertified`].
+    /// [`TermRefusal::Superseded`].
     pub fn resume_stopped(config: &EmbeddedConfig) -> Result<(), EmbedError> {
         let storage = config.data_dir.join("commonware");
         if storage.is_dir() {
@@ -357,12 +356,11 @@ impl EmbeddedNode {
         {
             return Err(TermRefusal::Superseded(Box::new(certificate.clone())).into());
         }
-        // A device that started to follow dropped the votes it cast as the
-        // validator and validates again only under a certificate.
-        if record.followed {
-            return Err(TermRefusal::NotCertified.into());
-        }
+        // The device is still the holder of its term, also if it started to
+        // follow the successor meanwhile. If the successor did take over, the
+        // start as validator is refused on the later term of its blocks.
         record.handed_over = None;
+        record.followed = false;
         Ok(record.store(&config.data_dir)?)
     }
 
@@ -707,10 +705,8 @@ mod tests {
         assert!(TermRecord::load(directory.path()).unwrap().voted);
         record.followed = true;
         record.store(directory.path()).unwrap();
-        assert!(matches!(
-            EmbeddedNode::resume_stopped(&config),
-            Err(EmbedError::Term(TermRefusal::NotCertified))
-        ));
+        EmbeddedNode::resume_stopped(&config).unwrap();
+        refuse_role(&config).unwrap();
         record.followed = false;
 
         record.certificate = Some(certificate(1, B256::repeat_byte(8)));

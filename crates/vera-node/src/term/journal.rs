@@ -1,49 +1,21 @@
-//! The consensus journal across a change of role.
+//! Whether a device last ran as a backup.
 
 use std::path::Path;
 
 use super::{TermRecord, TermRefusal};
-use crate::node::PARTITION_PREFIX;
 
-/// Prepare `directory` for a start as a backup (`backup`) or as the validator.
+/// Record a start as a backup in `directory`.
 ///
-/// A validator journals its own votes, and Commonware refuses to replay
-/// votes cast under a key the node no longer signs with. A device that
-/// validated and now follows therefore drops the journal of the epochs it
-/// voted in. It loses nothing by that: a backup casts no vote, and finalized
-/// blocks are kept elsewhere.
+/// A device that followed the deployment validates again only under a
+/// certificate that names it, which clears the mark when the device has
+/// started on the certificate's cut.
 pub(crate) fn settle_role(directory: &Path, backup: bool) -> Result<(), TermRefusal> {
     let mut record = TermRecord::load(directory)?;
-    if record.voted != backup && record.followed == backup {
+    if !backup || record.followed {
         return Ok(());
     }
-    if backup && record.voted {
-        let storage = directory.join("commonware");
-        remove_votes(&storage).map_err(|source| TermRefusal::Io {
-            path: storage,
-            source,
-        })?;
-    }
-    record.voted = !backup;
-    // A validator stops counting as a backup once it has started on its cut.
-    record.followed |= backup;
+    record.followed = true;
     record.store(directory)
-}
-
-fn remove_votes(storage: &Path) -> std::io::Result<()> {
-    let prefix = format!("{PARTITION_PREFIX}-orchestrator_consensus_");
-    let entries = match std::fs::read_dir(storage) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error),
-    };
-    for entry in entries {
-        let entry = entry?;
-        if entry.file_name().to_string_lossy().starts_with(&prefix) {
-            std::fs::remove_dir_all(entry.path())?;
-        }
-    }
-    std::fs::File::open(storage)?.sync_all()
 }
 
 #[cfg(test)]
@@ -51,27 +23,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_device_that_validated_drops_its_votes_when_it_follows() {
+    fn a_start_as_a_backup_is_remembered() {
         let directory = tempfile::tempdir().unwrap();
-        let storage = directory.path().join("commonware");
-        let votes = storage.join("vera-orchestrator_consensus_3");
-        let blocks = storage.join("vera-blocks-value");
-        for partition in [&votes, &blocks] {
-            std::fs::create_dir_all(partition).unwrap();
-        }
-
-        settle_role(directory.path(), true).unwrap();
-        assert!(
-            votes.exists(),
-            "a backup's journal holds no vote of its own"
-        );
         settle_role(directory.path(), false).unwrap();
-        assert!(TermRecord::load(directory.path()).unwrap().voted);
-        assert!(votes.exists());
+        assert!(!directory.path().join("term.json").exists());
         settle_role(directory.path(), true).unwrap();
-        assert!(!votes.exists());
-        assert!(blocks.exists());
-        let record = TermRecord::load(directory.path()).unwrap();
-        assert!(!record.voted && record.followed);
+        settle_role(directory.path(), false).unwrap();
+        assert!(TermRecord::load(directory.path()).unwrap().followed);
     }
 }

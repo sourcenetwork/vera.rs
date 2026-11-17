@@ -489,7 +489,8 @@ role. `term.json` keeps the newest certificate, an announced handover and a
 staged takeover; a device does not start as validator against them.
 `EmbeddedNode::resume_stopped` undoes an announced handover on a stopped
 directory. A device
-that validated drops its vote journal when it becomes a backup. A lone
+that validated sets its vote journal aside when it becomes a backup and takes
+it back if it validates again before receiving a block. A lone
 validator signs an epoch whose ceremony it only observed with the share its
 host holds, once the epoch's sharing confirms it. Devices ask each other where
 they stand on channel 17. An active device whose newest block is older than

@@ -36,6 +36,9 @@ pub(crate) struct TermRecord {
     /// Whether the device last ran as a backup. It validates again only
     /// under a certificate that names it.
     pub followed: bool,
+    /// Height of the device's newest block when it set its vote journal
+    /// aside to follow.
+    pub parked: Option<u64>,
 }
 
 impl TermRecord {
@@ -122,6 +125,7 @@ mod tests {
             voted: true,
             resync: false,
             followed: false,
+            parked: None,
         };
         record.store(directory.path()).unwrap();
         assert_eq!(TermRecord::load(directory.path()).unwrap(), record);

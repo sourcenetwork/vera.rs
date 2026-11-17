@@ -439,6 +439,7 @@ where
             voted: self.record.voted,
             resync: self.record.resync,
             followed: self.record.followed,
+            parked: self.record.parked,
         };
         record.store(&self.data_dir)?;
         self.record = record;

@@ -898,6 +898,11 @@ async fn run_node_with_elector<
             partition_prefix: format!("{PARTITION_PREFIX}-orchestrator"),
         },
     );
+    // Embedded nodes change role; consensus has not opened its journal yet.
+    if seat.is_some() {
+        crate::term::settle_votes(&config.data_dir, is_backup, history.head_height())?;
+        term_record = crate::term::TermRecord::load(&config.data_dir)?;
+    }
     let orchestrator_handle =
         orchestrator_actor.start(vote_network, certificate_network, resolver_network);
 

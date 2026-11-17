@@ -276,7 +276,7 @@ fn a_handover_needs_a_current_successor_and_is_undone_by_resuming() {
     assert_eq!(laptop.term(), 0);
 
     // A device that announced a handover may follow the successor before
-    // the certificate reaches it. Once it has, it does not take the handover back.
+    // the certificate reaches it.
     let change = hand_over(&laptop, &second.key.public_key());
     block_on(laptop.stop()).unwrap();
     let following = first.active.following(&second.key.public_key()).unwrap();
@@ -284,10 +284,13 @@ fn a_handover_needs_a_current_successor_and_is_undone_by_resuming() {
     assert_eq!(height(&laptop), change.cut.height);
     block_on(laptop.stop()).unwrap();
     assert_eq!(height(&phone), change.cut.height);
-    assert!(matches!(
-        EmbeddedNode::resume_stopped(&first.active),
-        Err(EmbedError::Term(TermRefusal::NotCertified))
-    ));
+    // Nobody produced a block meanwhile. The device takes the handover back
+    // and validates again from the votes it had set aside.
+    EmbeddedNode::resume_stopped(&first.active).unwrap();
+    let laptop = block_on(EmbeddedNode::start(first.active)).unwrap();
+    run_until(&laptop, |reached| reached > change.cut.height + 2);
+    run_until(&phone, |reached| reached > change.cut.height + 2);
+    block_on(laptop.stop()).unwrap();
     block_on(phone.stop()).unwrap();
 }
 
@@ -543,5 +546,65 @@ fn a_second_device_that_validates_is_answered_and_does_not_propose() {
         block_on(phone.rpc().call_empty("vera_nodeStatus")).unwrap();
     assert_eq!(status.proposed_count, 0);
     block_on(phone.stop()).unwrap();
+    block_on(laptop.stop()).unwrap();
+}
+
+#[test]
+fn a_term_handed_back_to_the_device_it_came_from_goes_on() {
+    let directories = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+    let chain_id = 9_509;
+    let dealt = short_epochs::deployment(chain_id, 99);
+    let [first, second] = pair(
+        [directories[0].path(), directories[1].path()],
+        &dealt,
+        WINDOW,
+    );
+    let mut laptop = block_on(EmbeddedNode::start(first.active)).unwrap();
+    let mut phone = block_on(EmbeddedNode::start(second.backup)).unwrap();
+    run_until(&laptop, |reached| reached >= 3);
+
+    let out = certify(hand_over(&laptop, &second.key.public_key()));
+    block_on(phone.take_over(dealt.keys().clone(), out.clone())).unwrap();
+    block_on(laptop.follow(out.clone())).unwrap();
+    // The phone hands back as soon as the laptop follows it.
+    let back = certify(hand_over(&phone, &first.key.public_key()));
+    assert_eq!(back.change.term, 2);
+    assert!(back.change.cut.height >= out.change.cut.height);
+    block_on(laptop.take_over(dealt.keys().clone(), back.clone())).unwrap();
+    block_on(phone.follow(back.clone())).unwrap();
+
+    let signer = BlsSigner::new(79u64.into(), chain_id).unwrap();
+    let written = finalize_a_write(&laptop, &signer);
+    await_certified_receipt(&phone, written);
+    assert_eq!(block(&laptop, back.change.cut.height + 1).term, 2);
+    block_on(laptop.stop()).unwrap();
+    block_on(phone.stop()).unwrap();
+}
+
+#[test]
+fn a_device_that_followed_nobody_validates_again_under_a_certificate() {
+    let directories = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+    let dealt = short_epochs::deployment(9_508, 98);
+    let [first, _second] = pair(
+        [directories[0].path(), directories[1].path()],
+        &dealt,
+        WINDOW,
+    );
+    let laptop = block_on(EmbeddedNode::start(first.active.clone())).unwrap();
+    run_until(&laptop, |reached| reached >= 5);
+    block_on(laptop.stop()).unwrap();
+
+    let mut laptop = block_on(EmbeddedNode::start(first.backup)).unwrap();
+    let change = block_on(laptop.takeover_change()).unwrap();
+    block_on(laptop.take_over(dealt.keys().clone(), certify(change))).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    while height(&laptop) <= change.cut.height + 2 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "stalled at height {}",
+            height(&laptop)
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
     block_on(laptop.stop()).unwrap();
 }

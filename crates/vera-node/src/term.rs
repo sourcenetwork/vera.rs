@@ -16,6 +16,7 @@ mod refusal;
 mod reporter;
 mod rewind;
 mod switching;
+mod votes;
 mod wire;
 
 pub(crate) use actor::{Parts, run};
@@ -33,6 +34,7 @@ pub use refusal::TermRefusal;
 pub(crate) use reporter::{Applied, TermReporter};
 pub(crate) use rewind::{acknowledge, discarded, resync_after, rewind};
 pub use switching::{Device, Switching};
+pub(crate) use votes::settle as settle_votes;
 
 use alloy_primitives::B256;
 use commonware_codec::Encode as _;

@@ -156,10 +156,10 @@ was issued, or `EmbeddedNode::resume_stopped(&config)` when the node is not
 running: the host quit before the operators approved. Only the host knows
 whether the successor received a certificate; resuming after it did forks
 the deployment. Both are refused with `TermRefusal::Superseded` on a device
-that holds a certificate naming another device, and `resume_stopped` with
-`TermRefusal::NotCertified` on a device that already started to follow the
-successor: it dropped its vote journal, and it validates again only under a
-certificate. A takeover the device later
+that holds a certificate naming another device. A device that started to
+follow the successor meanwhile may still resume; if the successor did take
+over, the start as validator fails with `TermRefusal::Behind` on the later
+term of its blocks. A takeover the device later
 accepts under a certificate naming it replaces the announcement. A proposal that was held back is not
 answered when the hold is lifted, so the first block after `resume`, or after
 a refused handover, can be late by the leader timeout.
@@ -228,19 +228,31 @@ dropped, and the device starts as a backup again with
 `term.json` in the data directory holds the newest certificate the device
 verified, an announced handover, a takeover it accepted and has not started
 under, whether its consensus journal holds votes it cast as the validator,
-whether it last ran as a backup, and whether its stores must be taken again.
+the block it had when it set that journal aside, whether it last ran as a
+backup, and whether its stores must be taken again.
 None of it is secret. Every embedded node keeps it, with or without
 `switching`, so a device that validated before it was given `switching`
-drops its vote journal when it first follows.
+sets its vote journal aside when it first follows.
 
 - A start as the active device is refused with `TermRefusal::Superseded` when
   the stored certificate names another device, and with
   `TermRefusal::Behind` when the device's newest block is in a later term
   than it holds.
 - A validator journals its own votes, and Commonware refuses to replay votes
-  under a key the node no longer signs with. A device that validated drops
-  the vote journal of its epochs when it next starts as a backup. Finalized
-  blocks and state are kept.
+  under a key the node no longer signs with. A device that validated sets
+  the vote journal of its epochs aside when it next starts as a backup, and
+  keeps a journal of what it observes instead.
+- Simplex has no other record of where an epoch stands. A validator that
+  starts on an empty journal begins the epoch at view 1 on the epoch's first
+  parent, execution refuses each proposal as stale, and nothing finalizes.
+  So a device that validates again while its newest block is still the one
+  it had when it set its journal aside takes that journal back. If it
+  received blocks meanwhile, it continues from the journal it kept as a
+  backup, which holds their certificates.
+- A backup that never received a block of the current epoch has no such
+  journal either: one that synchronized by snapshot and takes over before
+  the active device finalized another block. That case is not handled and
+  was not tested.
 
 ### The epoch a device activates in
 
