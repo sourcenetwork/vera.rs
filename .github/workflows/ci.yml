@@ -58,12 +58,16 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_reproducible_linux_release.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_release_packages.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_prepare_daemon_release.py
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_check_test_assignment.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_worker_progress.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_qualify_snapshots.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_record.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_heap_profile.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_storage_summary.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/performance -p test_live_status.py
+
+      - name: Check every integration test is assigned to a job
+        run: python3 .github/scripts/check-test-assignment.py
 
       - name: Check independent Git SDK sources
         env:
@@ -548,6 +552,11 @@ jobs:
               --test native_membership
               --test quorum_recovery
               --test cold_replay
+              --test node_restart
+              --test administration
+              --test delegation
+              --test native_nodes
+              --test native_refusals
           - suite: snapshot-catchup
             exact: ""
             binary-features: ""
@@ -568,6 +577,11 @@ jobs:
             binary-features: "--features fault-injection"
             test-features: "--features fault-injection"
             tests: --test module_commit_crash
+          - suite: share-crash
+            exact: --exact
+            binary-features: "--features fault-injection"
+            test-features: "--features fault-injection"
+            tests: --test native_membership native_member_recovers_after_share_persistence_crash
           - suite: snapshot-interrupted
             exact: ""
             binary-features: "--features fault-injection"
