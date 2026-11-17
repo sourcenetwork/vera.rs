@@ -1,8 +1,8 @@
 //! Unsigned dry run of a native module call as a named acting DID.
 
 use alloy_primitives::{Address, Bytes, Log};
-use revm::precompile::PrecompileStatus;
 use thiserror::Error;
+use vera_domain::Refusal;
 use vera_identity::Did;
 use vera_modules::ModuleState;
 use vera_modules::types::TxExecCtx;
@@ -11,13 +11,11 @@ use vera_traits::StateDbRead;
 use super::SimulationContext;
 use crate::ExecutionError;
 use crate::executor::native_authentication::is_native_target;
-use crate::executor::native_dispatch::{NATIVE_TX_GAS_LIMIT, NativeCall, dispatch_native_call};
-use crate::precompiles::{internal_fault_reason, is_out_of_gas, recoverable_message};
+use crate::executor::native_dispatch::{NativeCall, dispatch_native_call};
+use crate::executor::native_outcome::native_outcome;
 
 /// Longest acting DID a simulation accepts.
 pub const MAX_SIMULATED_SIGNER_BYTES: usize = 256;
-
-const OUT_OF_GAS: &str = "out of gas";
 
 /// A module call to dry-run, within the bounds of a native submission.
 /// Nothing authenticates the signer: the result says what that DID could do,
@@ -66,9 +64,9 @@ impl NativeSimulateRequest {
 pub struct NativeSimulateResult {
     /// Whether the call ran to completion.
     pub success: bool,
-    /// Why the call was refused; `None` on success.
-    pub reason: Option<String>,
-    /// Gas a receipt would record: the whole allowance for a refused call.
+    /// Why the call was refused, as a receipt would record it; `None` on success.
+    pub refusal: Option<Refusal>,
+    /// Gas a receipt would record.
     pub gas_used: u64,
     /// Return data of a successful call.
     pub output: Bytes,
@@ -130,34 +128,14 @@ pub fn simulate_native_call<S: StateDbRead>(
         &mut context.evm(state),
     );
 
-    let refused = |reason: String| NativeSimulateResult {
-        success: false,
-        reason: Some(reason),
-        gas_used: NATIVE_TX_GAS_LIMIT,
-        output: Bytes::new(),
-        logs: Vec::new(),
-    };
-    match dispatch {
-        Ok(Ok(result)) => match result.precompile.status {
-            PrecompileStatus::Success => Ok(NativeSimulateResult {
-                success: true,
-                reason: None,
-                gas_used: result.precompile.gas_used,
-                output: result.precompile.bytes,
-                logs: result.logs,
-            }),
-            PrecompileStatus::Revert => Ok(refused(
-                String::from_utf8_lossy(&result.precompile.bytes).into_owned(),
-            )),
-            PrecompileStatus::Halt(_) => Ok(refused(OUT_OF_GAS.into())),
-        },
-        Ok(Err(error)) if is_out_of_gas(&error) => Ok(refused(OUT_OF_GAS.into())),
-        Ok(Err(error)) => internal_fault_reason(&error).map_or_else(
-            || Ok(refused(recoverable_message(&error))),
-            |fault| Err(ExecutionError::TxExecution(fault)),
-        ),
-        Err(_) => Ok(refused("module execution failed".into())),
-    }
+    let outcome = native_outcome(request.target, dispatch)?;
+    Ok(NativeSimulateResult {
+        success: outcome.refusal.is_none(),
+        refusal: outcome.refusal,
+        gas_used: outcome.gas_used,
+        output: outcome.output,
+        logs: outcome.logs,
+    })
 }
 
 #[cfg(test)]

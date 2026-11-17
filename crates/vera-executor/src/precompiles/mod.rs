@@ -8,8 +8,12 @@
 
 mod acp;
 mod bulletin;
+pub(crate) mod refusal;
 pub(crate) mod validator_registry;
 mod vera;
+
+use refusal::{Refuse, Stated};
+use vera_domain::RefusalKind;
 
 use std::sync::{Arc, Mutex};
 
@@ -59,7 +63,10 @@ pub(super) fn did_from_signer(signer: &str) -> Result<Did, PrecompileError> {
     // A call that is not the transaction's own has no signer, which is the
     // caller's doing. A signer the executor derived cannot be malformed.
     if signer.is_empty() {
-        return Err(PrecompileError::Fatal(UNAUTHENTICATED_CALLER.to_string()));
+        return Err(refusal::refused(
+            RefusalKind::Unauthenticated,
+            UNAUTHENTICATED_CALLER,
+        ));
     }
     Did::new(signer).map_err(|e| internal_fault(format!("DID: {e}")))
 }
@@ -93,11 +100,23 @@ pub(crate) fn internal_fault_reason(error: &PrecompileError) -> Option<String> {
 }
 
 pub(super) fn decode_error(e: alloy_sol_types::Error) -> PrecompileError {
-    PrecompileError::Fatal(format!("ABI decode: {e}"))
+    refusal::refused(RefusalKind::UndecodableInput, format!("ABI decode: {e}"))
 }
 
-pub(super) fn module_error(e: impl core::fmt::Display) -> PrecompileOutput {
-    PrecompileOutput::revert(0, Bytes::from(e.to_string().into_bytes()), 0)
+/// A call naming no method of its module.
+pub(super) fn unknown_selector(module: &str, selector: [u8; 4]) -> PrecompileError {
+    refusal::refused(
+        RefusalKind::UnknownSelector,
+        format!("unknown {module} selector: 0x{}", hex::encode(selector)),
+    )
+}
+
+/// Calldata too short to hold a selector.
+pub(super) fn short_input() -> DispatchResult {
+    err_dispatch(Stated(
+        RefusalKind::UnknownSelector,
+        "input too short for selector",
+    ))
 }
 
 pub(super) fn json_bytes(v: &impl serde::Serialize) -> Bytes {
@@ -112,6 +131,7 @@ pub(super) const fn oog_dispatch() -> DispatchResult {
     DispatchResult {
         precompile: PrecompileOutput::halt(PrecompileHalt::OutOfGas, 0),
         logs: vec![],
+        refusal: None,
     }
 }
 
@@ -128,12 +148,17 @@ pub(crate) fn is_out_of_gas(error: &PrecompileError) -> bool {
 }
 
 /// Message carried by a recoverable dispatch error, without the fatal-error
-/// display prefix — module-style reverts report the bare cause.
+/// display prefix or refusal tag — module-style reverts report the bare cause.
 pub(crate) fn recoverable_message(error: &PrecompileError) -> String {
     match error {
-        PrecompileError::Fatal(message) => message.clone(),
+        PrecompileError::Fatal(message) => refusal::split(message).1.to_owned(),
         other => other.to_string(),
     }
+}
+
+/// A revert carrying a refusal raised as an error, with its kind.
+pub(crate) fn refusal_dispatch(error: &PrecompileError) -> DispatchResult {
+    err_dispatch(Stated(refusal::kind_of(error), recoverable_message(error)))
 }
 
 /// Result of dispatching to a vera module, including any emitted event logs.
@@ -143,6 +168,8 @@ pub struct DispatchResult {
     pub precompile: PrecompileOutput,
     /// EVM-compatible logs emitted during the dispatch.
     pub logs: Vec<Log>,
+    /// What the module refused, for a revert.
+    pub refusal: Option<RefusalKind>,
 }
 
 /// Return type for module dispatch functions.
@@ -152,14 +179,27 @@ pub(super) fn ok_dispatch(gas: u64, ret: Vec<u8>, logs: Vec<Log>) -> DispatchRes
     DispatchResult {
         precompile: ok_output(gas, ret),
         logs,
+        refusal: None,
     }
 }
 
-pub(crate) fn err_dispatch(e: impl core::fmt::Display) -> DispatchResult {
+/// A revert carrying the refusal's message as its data, charging no gas.
+pub(crate) fn err_dispatch(e: impl Refuse) -> DispatchResult {
     DispatchResult {
-        precompile: module_error(e),
+        precompile: PrecompileOutput::revert(0, Bytes::from(e.to_string().into_bytes()), 0),
         logs: vec![],
+        refusal: Some(e.refusal_kind()),
     }
+}
+
+/// A revert for a successful call whose records exceed the native storage bounds.
+pub(crate) fn storage_bounds_dispatch(gas_used: u64) -> DispatchResult {
+    let mut rejected = err_dispatch(Stated(
+        RefusalKind::StorageBounds,
+        "module record exceeds native storage bounds",
+    ));
+    rejected.precompile.gas_used = gas_used;
+    rejected
 }
 
 pub(super) fn event_log<E: alloy_sol_types::SolEvent>(address: Address, event: &E) -> Log {
@@ -379,8 +419,10 @@ impl<CTX: ContextTr> PrecompileProvider<CTX> for VeraPrecompiles {
 
             if inputs.bytecode_address == VALIDATOR_REGISTRY_ADDRESS {
                 if !direct_caller && !validator_registry::is_query(&calldata) {
-                    let mut rejected =
-                        err_dispatch("module write requires an authenticated caller");
+                    let mut rejected = err_dispatch(Stated(
+                        RefusalKind::Unauthenticated,
+                        "module write requires an authenticated caller",
+                    ));
                     rejected.precompile.gas_used = inputs.gas_limit;
                     return Self::dispatch_result_to_interpreter(inputs, Ok(rejected))
                         .map(|(result, _)| result);
@@ -524,9 +566,7 @@ impl VeraPrecompiles {
         {
             // Charge the full allowance: the record cannot be published, so the
             // writer loses the call the same way an out-of-gas precompile does.
-            let mut rejected = err_dispatch("module record exceeds native storage bounds");
-            rejected.precompile.gas_used = inputs.gas_limit;
-            dispatch_result = Ok(rejected);
+            dispatch_result = Ok(storage_bounds_dispatch(inputs.gas_limit));
         }
         Self::dispatch_result_to_interpreter(inputs, dispatch_result)
     }
@@ -548,6 +588,7 @@ mod tests {
         let missing = did_from_signer("").unwrap_err();
         assert_eq!(internal_fault_reason(&missing), None);
         assert_eq!(recoverable_message(&missing), UNAUTHENTICATED_CALLER);
+        assert_eq!(refusal::kind_of(&missing), RefusalKind::Unauthenticated);
 
         let malformed = did_from_signer("not-a-did").unwrap_err();
         assert!(internal_fault_reason(&malformed).is_some());

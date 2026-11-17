@@ -214,6 +214,15 @@ failed receipt, and the block goes on. Only an error marked as the node's own
 read back) fails the block, including inside an ACP batch. A call that exhausts
 its gas allowance is a failure too: nothing it wrote is kept, a native request
 is charged its full limit, and a contract's call returns no gas.
+A refused native request's receipt names why: `vera_domain::Refusal` carries the
+module, a `RefusalKind` that the receipt commitment binds, and the module's
+message, bounded to 1,024 bytes and not committed because it embeds parser and
+library text. A module error's variant decides its kind
+(`vera_executor::precompiles::refusal`). A refusal is charged what the call
+reported, at least 5,000; `out_of_gas` and a module panic keep the full limit.
+`vera-client` returns `ClientError::Refused` for a refused native request and
+`TxReverted` for an EVM revert; a contract caller still gets the message as
+revert data. See `docs/receipt-commitments.md#refusals`.
 Only a transaction's own call to a module carries its signer's authority. A call
 made by contract code, DELEGATECALL and CALLCODE included, has no signer, and a
 method that needs one refuses it.
@@ -229,8 +238,8 @@ Pending alternatives retain isolated module snapshots. Database transitions fini
 before query maps are published. Startup aligns all journals to marshal's durable
 anchor, checks the combined native root, and then enables admission and RPC.
 Finalized receipts and certificates are recovered through `FinalizedHistory`.
-Native proposals also bind ordered receipt fields and the execution gas limit
-through `Block::receipt_commitment`. Re-execution verifies this commitment;
+Native proposals also bind ordered receipt fields, including each refusal's
+module and kind, and the execution gas limit through `Block::receipt_commitment`. Re-execution verifies this commitment;
 history checks it before persistence and before indexing a recovered record.
 See `docs/receipt-commitments.md` for the canonical encoding.
 
@@ -344,7 +353,7 @@ Index publication and removal update all lookup maps under one lock.
 
 Revision number/hash, transaction and receipt point queries use bounded archive
 reads when absent from memory. The native receipt endpoint uses the same
-conversion for recent and historical data, including signer identity and nonce.
+conversion for recent and historical data, including signer identity, nonce and refusal.
 Archive reconstruction uses one retained revision and the existing index builder;
 it does not populate the global memory index. Archive errors propagate, and
 occupied history-read slots return a retryable -32002 response.
@@ -374,7 +383,8 @@ stays taken until its execution ends. Each observes the head revision's height
 and time, the deployment's genesis record and its membership limit, and writes
 nothing. `eth_call` carries no signer, so module writes revert there.
 `vera_simulateNativeCall` dry-runs a module call as a named DID without a
-signature or sequence and returns success or the refusal reason, gas and logs.
+signature or sequence and returns success or the refusal its receipt would
+name, gas and logs.
 It is unauthenticated: it answers what a DID could do and authorizes nothing.
 Its input is bounded like a native submission. See `docs/simulation.md`.
 An estimate is a limit the call succeeded with. The search stops within 1/64 of

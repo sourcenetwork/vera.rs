@@ -195,9 +195,11 @@ path. Reads and local policy validation do not allocate a submission lane.
 
 Proposal construction and verification enforce a shared execution budget. A
 request must fit its full allowance before dispatch; successful execution
-charges its actual reported cost, and failed native dispatch consumes its full
-allowance. See [execution limits](execution-limits.md) for sequence, rollback
-and resource-accounting semantics.
+charges its actual reported cost, a refused native request is charged what it
+used (at least 5,000) and an exhausted allowance its full limit. The failed
+receipt names the refusal's module and kind. See
+[execution limits](execution-limits.md) for sequence, rollback and
+resource-accounting semantics.
 
 ## ACP reads
 

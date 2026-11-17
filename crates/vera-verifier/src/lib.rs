@@ -202,7 +202,8 @@ fn verify(input: &[u8]) -> Result<Value, String> {
                 .map_err(|error| error.to_string())?;
             Ok(
                 json!({"height": proof.revision.height, "timestamp": proof.revision.timestamp,
-                "submission": receipt.tx_hash, "success": receipt.success(), "logs": receipt.logs()}),
+                "submission": receipt.tx_hash, "success": receipt.success(), "gas_used": receipt.gas_used,
+                "refusal": receipt.refusal, "logs": receipt.logs()}),
             )
         }
         Request::Record {

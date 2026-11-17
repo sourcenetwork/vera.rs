@@ -13,6 +13,7 @@ KEYS = 'crates/vera-modules/src/acp/keys.rs'
 TYPES = 'crates/vera-modules/src/acp/types.rs'
 DISCOVERY = 'crates/vera-config/src/discovery.rs'
 BLOCK = 'crates/vera-domain/src/block.rs'
+RECEIPTS = 'crates/vera-domain/src/receipt_commitment.rs'
 
 
 def source_schema(source, revision):
@@ -72,6 +73,19 @@ def source_block_encoding(source, revision):
     return 2 if terms else 1
 
 
+def source_receipt_commitment(source, revision):
+    """The receipt commitment domain at this revision, such as `vera/receipts/v2`.
+
+    A runner recomputes receipt commitments under its own domain, so it
+    cannot verify the receipts of a node that commits under another.
+    """
+    text = subprocess.check_output(['git', 'show', f'{revision}:{RECEIPTS}'], cwd=source, text=True)
+    domains = set(re.findall(r'b"(vera/receipts/v\d+)"', text))
+    if len(domains) != 1:
+        raise ValueError('unrecognized receipt commitment domain')
+    return domains.pop()
+
+
 def source_discovery_setting(source, revision):
     """Whether node configuration at this revision accepts `[network.discovery]`."""
     listed = subprocess.check_output(['git', 'ls-tree', '--name-only', revision, '--', DISCOVERY],
@@ -96,6 +110,8 @@ def discovery_section(identity, side):
 def incompatibility_reason(identity):
     if identity['head']['proof_schema'] != identity['base']['proof_schema']:
         return 'incompatible ACP proof schema'
+    if identity['head'].get('receipt_commitment') != identity['base'].get('receipt_commitment'):
+        return 'different receipt commitments; the runner cannot verify the baseline'
     if identity['head'].get('block_encoding') != identity['base'].get('block_encoding'):
         return 'different block encodings; the runner cannot decode the baseline'
     return 'different Commonware storage versions; proof compatibility not established'
@@ -126,6 +142,14 @@ def baseline_incompatible(identity):
             raise ValueError('incomplete block encoding provenance')
         if identity['head']['block_encoding'] != identity['base']['block_encoding']:
             return True
+    present = ['receipt_commitment' in identity[side] for side in ('head', 'base')]
+    if any(present):
+        if not all(present) or any(not isinstance(identity[side]['receipt_commitment'], str) or
+                                   not re.fullmatch(r'vera/receipts/v\d+', identity[side]['receipt_commitment'])
+                                   for side in ('head', 'base')):
+            raise ValueError('incomplete receipt commitment provenance')
+        if identity['head']['receipt_commitment'] != identity['base']['receipt_commitment']:
+            return True
     return identity['head']['proof_schema'] != identity['base']['proof_schema']
 
 
@@ -141,6 +165,9 @@ def unavailable(identity, objects):
         **({'node_block_encoding': identity['base']['block_encoding'],
             'runner_block_encoding': identity['head']['block_encoding']}
            if 'block_encoding' in identity['base'] else {}),
+        **({'node_receipt_commitment': identity['base']['receipt_commitment'],
+            'runner_receipt_commitment': identity['head']['receipt_commitment']}
+           if 'receipt_commitment' in identity['base'] else {}),
     }
 
 

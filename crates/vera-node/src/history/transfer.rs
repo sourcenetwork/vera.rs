@@ -261,14 +261,21 @@ fn decode_record(mut input: &[u8], limits: HistoryLimits) -> Result<Block> {
             ensure!(bytes.is_empty(), "trailing history log bytes");
             logs.push(log);
         }
-        receipts.push(ExecutionReceipt::new(
-            hash.into(),
-            success,
-            gas,
-            cumulative,
-            logs,
-            contract.map(Address::from),
-        ));
+        let refusal = Option::<super::StoredRefusal>::deserialize(&mut input)?
+            .as_ref()
+            .map(super::StoredRefusal::decode)
+            .transpose()?;
+        receipts.push(
+            ExecutionReceipt::new(
+                hash.into(),
+                success,
+                gas,
+                cumulative,
+                logs,
+                contract.map(Address::from),
+            )
+            .with_refusal(refusal),
+        );
     }
     ensure!(input.is_empty(), "trailing history record bytes");
     check_receipts(&block, &receipts, gas_limit)?;

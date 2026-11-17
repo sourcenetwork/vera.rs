@@ -62,6 +62,7 @@ impl VeraApiImpl {
                         .collect(),
                     r.contract_address,
                 )
+                .with_refusal(r.refusal.clone())
             })
             .collect::<Vec<_>>();
         let response = ReceiptResponse {

@@ -2,8 +2,9 @@
 import unittest
 from unittest.mock import patch
 
-from protocol import (BLOCK, DISCOVERY, SCHEMAS, baseline_incompatible, discovery_section,
+from protocol import (BLOCK, DISCOVERY, RECEIPTS, SCHEMAS, baseline_incompatible, discovery_section,
                       incompatibility_reason, source_block_encoding, source_discovery_setting,
+                      source_receipt_commitment,
                       source_schema, source_storage_version)
 
 
@@ -124,6 +125,31 @@ pub struct RelationshipRecord {
         self.assertFalse(baseline_incompatible(identity))
         del identity['base']['block_encoding']
         with self.assertRaisesRegex(ValueError, 'block encoding provenance'):
+            baseline_incompatible(identity)
+
+    def test_receipt_commitment_is_read_from_the_recorded_revision(self):
+        source = 'hash.update(b"vera/receipts/v%d");\nassert_eq!(b"vera/receipts/v%d".as_slice(), domain);\n'
+        with patch('protocol.subprocess.check_output', return_value=source % (2, 2)) as git:
+            self.assertEqual(source_receipt_commitment('.', 'revision'), 'vera/receipts/v2')
+        self.assertEqual(git.call_args.args[0], ['git', 'show', f'revision:{RECEIPTS}'])
+        for invalid in ('', source % (1, 2)):
+            with patch('protocol.subprocess.check_output', return_value=invalid):
+                with self.assertRaisesRegex(ValueError, 'receipt commitment'):
+                    source_receipt_commitment('.', 'revision')
+
+    def test_different_receipt_commitments_cannot_share_a_runner(self):
+        schema = dict(SCHEMAS['relationship/v5/'])
+        identity = dict(format_version=2,
+                        head=dict(proof_schema=schema, storage_version='2026.10.0',
+                                  receipt_commitment='vera/receipts/v2'),
+                        base=dict(proof_schema=schema, storage_version='2026.10.0',
+                                  receipt_commitment='vera/receipts/v1'))
+        self.assertTrue(baseline_incompatible(identity))
+        self.assertIn('receipt commitments', incompatibility_reason(identity))
+        identity['base']['receipt_commitment'] = 'vera/receipts/v2'
+        self.assertFalse(baseline_incompatible(identity))
+        del identity['base']['receipt_commitment']
+        with self.assertRaisesRegex(ValueError, 'receipt commitment provenance'):
             baseline_incompatible(identity)
 
 

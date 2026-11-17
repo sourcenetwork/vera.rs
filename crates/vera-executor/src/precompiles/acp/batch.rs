@@ -87,9 +87,15 @@ fn word(input: &[u8], offset: usize) -> Result<usize, PrecompileError> {
 }
 
 fn invalid() -> PrecompileError {
-    PrecompileError::Fatal("invalid ACP batch ABI".to_string())
+    crate::precompiles::refusal::refused(
+        vera_domain::RefusalKind::UndecodableInput,
+        "invalid ACP batch ABI",
+    )
 }
 
 fn limit(resource: &str) -> PrecompileError {
-    PrecompileError::Fatal(format!("ACP batch {resource} limit exceeded"))
+    crate::precompiles::refusal::refused(
+        vera_domain::RefusalKind::ArgumentOutOfBounds,
+        format!("ACP batch {resource} limit exceeded"),
+    )
 }

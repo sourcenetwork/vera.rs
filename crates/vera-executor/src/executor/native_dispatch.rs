@@ -10,8 +10,8 @@ use vera_modules::types::{BlockExecCtx, TxExecCtx};
 use vera_modules::vera::VeraModule;
 
 use crate::precompiles::{
-    DispatchReturn, VALIDATOR_REGISTRY_ADDRESS, dispatch_to_module, err_dispatch, internal_fault,
-    validator_registry,
+    DispatchReturn, VALIDATOR_REGISTRY_ADDRESS, dispatch_to_module, internal_fault,
+    storage_bounds_dispatch, validator_registry,
 };
 
 /// Gas budget for native BLS transactions dispatched to modules.
@@ -81,9 +81,12 @@ pub(crate) fn dispatch_native_call<CTX: ContextTr>(
             && bulletin.store().changes_fit_native_bounds(before.1.store())
             && vera.store().changes_fit_native_bounds(before.2.store()))
     {
-        let mut rejected = err_dispatch("module record exceeds native storage bounds");
-        rejected.precompile.gas_used = NATIVE_TX_GAS_LIMIT;
-        dispatch_result = Ok(Ok(rejected));
+        // The call ran to completion, so it is charged what it used.
+        let used = match &dispatch_result {
+            Ok(Ok(result)) => result.precompile.gas_used,
+            _ => unreachable!("checked that the call succeeded"),
+        };
+        dispatch_result = Ok(Ok(storage_bounds_dispatch(used)));
     }
 
     // A halt is a failure like a revert: an exhausted allowance commits nothing.

@@ -70,7 +70,7 @@ impl<S: StateDbRead> IndexedStateProvider<S> {
             .await?;
         Ok(NativeCallSimulation {
             success: result.success,
-            reason: result.reason,
+            refusal: result.refusal,
             gas_used: U64::from(result.gas_used),
             output: result.output,
             logs: result

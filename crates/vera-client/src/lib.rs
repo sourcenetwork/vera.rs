@@ -43,8 +43,8 @@ pub mod threshold_objects;
 /// Certified token lifecycle reads.
 pub mod tokens;
 pub use vera_domain::{
-    ExecutionReceipt, NativeCallRequest, NativeCallSimulation, ReceiptResponse,
-    ReceiptResponseError, SimulatedLog,
+    ExecutionReceipt, MAX_REFUSAL_MESSAGE_BYTES, NativeCallRequest, NativeCallSimulation,
+    ReceiptResponse, ReceiptResponseError, Refusal, RefusalKind, RefusingModule, SimulatedLog,
 };
 pub use vera_permission::{
     AccessRequest, Actor, ModuleId, Object, Operation, PERMISSION_LIMITS, PermissionLimits,

@@ -278,7 +278,7 @@ async fn actor_signed_command_rejects_substitution_and_deduplicates_across_worke
             .native_revoke_delegation(&other, &unused)
             .await
             .unwrap_err(),
-        vera_client::ClientError::TxReverted { .. }
+        vera_client::ClientError::Refused { .. }
     ));
     assert!(
         client

@@ -28,7 +28,17 @@ pub enum ClientError {
     #[error("ABI decode error: {0}")]
     AbiDecode(String),
 
-    /// Transaction was included but reverted.
+    /// A module refused a native request. The request was executed and its
+    /// sequence consumed; the receipt says why it had no effect.
+    #[error("{refusal}")]
+    Refused {
+        /// The committed module and kind, with the module's message.
+        refusal: vera_domain::Refusal,
+        /// Full receipt for inspection.
+        receipt: Box<TransactionReceipt>,
+    },
+
+    /// An EVM transaction was included but reverted.
     #[error("transaction reverted: status={status}")]
     TxReverted {
         /// EVM status code (0 = revert).

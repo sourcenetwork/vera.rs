@@ -10,7 +10,8 @@ import sys
 from compare_pr import TAGS, compare
 from record import digest
 from protocol import (baseline_incompatible, incompatibility_reason, source_block_encoding,
-                      source_discovery_setting, source_schema, source_storage_version, unavailable)
+                      source_discovery_setting, source_receipt_commitment, source_schema,
+                      source_storage_version, unavailable)
 
 
 def supports_rpc_listener(node):
@@ -45,6 +46,7 @@ def main():
             'proof_schema': source_schema(sources[side], revisions[side]),
             'storage_version': source_storage_version(sources[side], revisions[side]),
             'block_encoding': source_block_encoding(sources[side], revisions[side]),
+            'receipt_commitment': source_receipt_commitment(sources[side], revisions[side]),
             'discovery_setting': source_discovery_setting(sources[side], revisions[side]),
             'runner_source': revisions['head'],
             'node_sha256': digest(binaries / side / 'verad'),

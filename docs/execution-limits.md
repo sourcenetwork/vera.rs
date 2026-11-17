@@ -31,20 +31,35 @@ that remain, so the sender of a removed request can resubmit at the same nonce
 without waiting for the next finalized revision. A request omitted for the budget, or for a nonce that is
 still ahead, stays pending.
 
-Every failed native dispatch consumes the full 1,000,000 units, including a
-module-reported revert and a reverted batch. Module and journal changes roll
-back, while the accepted request consumes its signing sequence. Invalid native
-authentication or sequence does not produce a failure receipt: construction
-omits that request, and verification rejects it. Fatal execution errors abort
-execution of the revision.
+A native request a module refuses is charged the gas the call reported, and at
+least 5,000 units, the base charge of a module write. This covers a
+module-reported revert, a reverted batch, an undecodable or unknown call and an
+argument out of bounds. Methods with fixed charges report no usage when they
+refuse, and budgeted methods report the work they completed, so a refusal costs
+no less than the cheapest successful write and no more than the work it did. A
+call that exhausts its allowance, and a module panic, are charged the full
+1,000,000 units. The receipt names the refusal's kind, which tells an exhausted
+allowance (`out_of_gas`) from a refusal of what the caller sent; see
+[receipt commitments](receipt-commitments.md#refusals). Module and journal
+changes roll back, while the accepted request consumes its signing sequence.
+Invalid native authentication or sequence does not produce a failure receipt:
+construction omits that request, and verification rejects it. Fatal execution
+errors abort execution of the revision.
+
+Admission still requires the full allowance to fit before dispatch, so a
+refusal cannot overrun the revision budget. Charging a refusal what it used
+lets more refused requests fit in one revision than the earlier full charge
+did: a signer can now spend a revision's budget on refused requests at the
+rate it could already spend it on successful ones. Native requests carry no
+fee, so the budget, not a price, bounds this work in both cases.
 
 Accounting uses checked arithmetic. A receipt cannot charge more than its
 request allowance, and cumulative usage cannot exceed the revision limit.
 Receipts retain both individual and cumulative usage. Their authenticated
 encoding is described in [receipt commitments](receipt-commitments.md).
 
-For example, with a 1,000,000-unit revision limit, a successful native request
-charged 5,000 leaves 995,000. Another native request cannot fit its full
+For example, with a 1,000,000-unit revision limit, a successful or refused
+native request charged 5,000 leaves 995,000. Another native request cannot fit its full
 allowance. In a deployment permitting EVM execution, a request declaring at
 most 995,000 can still execute.
 
@@ -72,8 +87,9 @@ relationship keys contain hexadecimal encodings of object identifiers.
 
 Before accepting a successful native dispatch, execution checks changed records
 against its pre-dispatch snapshot. Oversized records produce an ordinary failed
-receipt: module and account-journal effects and logs are discarded, the native
-sequence is consumed, and the request charges the normal failure allowance.
+receipt naming `storage_bounds`: module and account-journal effects and logs
+are discarded, the native sequence is consumed, and the request is charged what
+the call reported using, since it ran to completion.
 Subsequent requests can execute with the remaining revision budget. Optional EVM
 module calls perform the same check before returning success; an oversized write
 fails that call and follows its existing call-frame rollback semantics.

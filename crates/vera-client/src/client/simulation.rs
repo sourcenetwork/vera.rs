@@ -42,8 +42,12 @@ mod tests {
     async fn a_dry_run_names_its_signer_and_decodes_a_refusal() {
         let stub = Stub::serve(vec![Reply::Result(json!({
             "success": false,
-            "reason": "only the policy creator can delete it",
-            "gasUsed": "0xf4240",
+            "refusal": {
+                "module": "acp",
+                "kind": "unauthorized",
+                "message": "only the policy creator can delete it",
+            },
+            "gasUsed": "0x1388",
             "output": "0x",
             "logs": [],
             "blockNumber": "0x7",
@@ -55,11 +59,10 @@ mod tests {
             .await
             .unwrap();
         assert!(!simulation.success);
-        assert_eq!(
-            simulation.reason.as_deref(),
-            Some("only the policy creator can delete it")
-        );
-        assert_eq!(simulation.gas_used.to::<u64>(), 1_000_000);
+        let refusal = simulation.refusal.unwrap();
+        assert_eq!(refusal.kind, vera_domain::RefusalKind::Unauthorized);
+        assert_eq!(refusal.message(), "only the policy creator can delete it");
+        assert_eq!(simulation.gas_used.to::<u64>(), 5_000);
         assert_eq!(simulation.block_number.to::<u64>(), 7);
 
         let requests = stub.requests();

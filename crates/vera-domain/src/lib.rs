@@ -60,6 +60,10 @@ pub mod evm;
 
 mod receipt;
 pub use receipt::ExecutionReceipt;
+mod refusal;
+pub use refusal::{
+    MAX_REFUSAL_MESSAGE_BYTES, Refusal, RefusalKind, RefusalMessageTooLong, RefusingModule,
+};
 mod receipt_commitment;
 pub use receipt_commitment::receipt_commitment;
 mod receipt_response;

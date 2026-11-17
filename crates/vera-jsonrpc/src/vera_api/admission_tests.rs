@@ -161,6 +161,7 @@ async fn receipt_poll_does_not_wait_for_a_missing_certificate() {
             logs: vec![],
             status: true,
             signer_did: None,
+            refusal: None,
         }],
     );
     let lookups = Arc::new(AtomicUsize::new(0));
@@ -335,6 +336,7 @@ async fn evidence_deadline_is_a_retryable_error() {
             logs: vec![],
             status: true,
             signer_did: None,
+            refusal: None,
         }],
     );
     let (release, receiver) = std::sync::mpsc::channel();

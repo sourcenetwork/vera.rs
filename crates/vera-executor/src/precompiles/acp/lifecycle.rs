@@ -121,8 +121,9 @@ pub(super) fn dispatch(
             }
         }
 
-        _ => Err(PrecompileError::Fatal(
-            "unknown ACP lifecycle selector".to_string(),
+        _ => Err(crate::precompiles::refusal::refused(
+            vera_domain::RefusalKind::UnknownSelector,
+            "unknown ACP lifecycle selector",
         )),
     }
 }

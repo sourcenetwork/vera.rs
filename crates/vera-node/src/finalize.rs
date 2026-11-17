@@ -140,6 +140,7 @@ pub fn index_finalized_block(
                 logs,
                 status: receipt.success(),
                 signer_did,
+                refusal: receipt.refusal.clone(),
             });
         } else {
             warn!(
