@@ -169,7 +169,7 @@ jobs:
           for file in crates/vera-node/tests/embedded_*.rs; do
             targets+=(--test "$(basename "$file" .rs)")
           done
-          cargo test --frozen -p vera-node "${targets[@]}"
+          cargo test --frozen -p vera-node --features fault-injection "${targets[@]}"
 
   e2e-canonical:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
