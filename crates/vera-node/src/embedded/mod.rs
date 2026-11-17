@@ -76,6 +76,7 @@ impl EmbeddedNode {
         }
         let node_config = config.node_config();
         let configured = Box::new(config.clone());
+        let claim = directory::claim(&config.data_dir)?;
         refuse_role(&config)?;
         let (genesis, peers, backup) = match (&config.role, &config.deployment) {
             (DeviceRole::Backup(_), Some(_)) => {
@@ -210,6 +211,7 @@ impl EmbeddedNode {
                 if let Some(setup) = thread_setup
                     && let Err(error) = setup.run()
                 {
+                    drop(claim);
                     let _ = exit_tx.send(Err(EmbedError::ThreadSetup(error)));
                     return;
                 }
@@ -254,6 +256,7 @@ impl EmbeddedNode {
                 if let Some(rpc) = table.get() {
                     rpc.close();
                 }
+                drop(claim);
                 // A host that dropped the node no longer observes the outcome.
                 let _ = exit_tx.send(result);
             })
@@ -341,6 +344,7 @@ impl EmbeddedNode {
     /// device that knows another device holds a later term is refused with
     /// [`TermRefusal::Superseded`].
     pub fn resume_stopped(config: &EmbeddedConfig) -> Result<(), EmbedError> {
+        let _claim = directory::claim(&config.data_dir)?;
         let storage = config.data_dir.join("commonware");
         if storage.is_dir() {
             directory::refuse_held(&storage)?;
