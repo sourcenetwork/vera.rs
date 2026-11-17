@@ -490,9 +490,11 @@ staged takeover; a device does not start as validator against them.
 `EmbeddedNode::resume_stopped` undoes an announced handover on a stopped
 directory. An embedded node
 settles Commonware's consensus storage at every start, before marshal and
-Simplex open it: a change of role removes the Simplex vote journals, and a
-start under a certificate also removes marshal's cache and rebuilds its
-archive of finalization certificates without those above the cut. The
+Simplex open it: a backup journals in Simplex partitions of its own and keeps
+the validator's vote journal, a start as a backup after one as the validator
+removes the backup's journals, and a start under a certificate removes both
+roles' journals and marshal's cache and rebuilds its archive of finalization
+certificates without those above the cut. The
 decision is stored in `term.json` first and an interrupted clearing is
 finished by the next start. Every start that does not synchronize by snapshot
 hands Simplex the finalization of the node's newest block as its floor, so a

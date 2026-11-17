@@ -239,11 +239,13 @@ None of it is secret. Every embedded node keeps it, with or without
 A device's state and finalized history are at its newest block whatever role
 it ran in. Commonware's consensus storage is not: it is written in a role.
 
-- Simplex journals an epoch's votes and certificates in
-  `commonware/vera-orchestrator_consensus_<epoch>`. A validator's journal
-  holds its own votes, which Commonware refuses to replay under a key the
-  node no longer signs with. A backup's journal holds the certificates it
-  observed, among them those of blocks a later term voided.
+- Simplex journals an epoch's votes and certificates. A validator journals
+  in `commonware/vera-orchestrator_consensus_<epoch>`, a backup in
+  `commonware/vera-observer_consensus_<epoch>`. A validator's journal holds
+  the votes its key cast: Commonware refuses to replay them under a key the
+  node does not sign with, and a voter that lost them could cast a different
+  vote in a view it already voted in. A backup's journal holds the
+  certificates it observed, among them those of blocks a later term voided.
 - Marshal caches the blocks and certificates of recent views in
   `commonware/vera-cache-*`, and archives finalized blocks and their
   certificates by height in `vera-blocks-*` and `vera-finalizations-*`. An
@@ -253,9 +255,13 @@ An embedded node therefore settles this storage at every start, before
 marshal and Simplex open it. Nothing in `commonware/` that holds state, the
 reshare ceremony or marshal's processed height is touched.
 
-1. A start in another role than the last removes the vote journals.
+1. A start as a backup after a start as the validator removes the backup's
+   journals, which predate the blocks the device built since. The
+   validator's journal is kept while the device follows, so a device that
+   validates again without a new term (`resume_stopped`) replays its own
+   votes.
 2. A start as the validator under a certificate the device has not started
-   under removes the vote journals and marshal's cache, and rebuilds the
+   under removes both roles' journals and marshal's cache, and rebuilds the
    archive of certificates without those above the cut. The certificates up
    to the cut are first copied to `kept-finalizations` in the data directory;
    the archive is then destroyed and filled again from that file, and the
@@ -521,3 +527,10 @@ Also:
 - The certificate of a block stored without the block is produced in tests
   by a fault-injection build that writes it into the archive at start. A
   stop between marshal's two writes was not reproduced.
+- An interrupted clearing is tested at one point: after `kept-finalizations`
+  is complete and before the archive is destroyed. A stop while Commonware
+  destroys the archive, or while it is filled again, is repeated from the
+  same file, provided Commonware opens the partly removed archive at the
+  next start; that was not exercised.
+- A start under a certificate removes the validator's journal. Votes it held
+  above the cut are void in the new term, like the blocks above the cut.
