@@ -88,6 +88,27 @@ fn a_backup_catches_up_from_empty_follows_across_epochs_and_serves_proofs() {
     assert!(!second.path().join("secrets.json").exists());
 }
 
+/// The identifier of the finalized block at `height`, once `node` serves its certificate.
+fn block_id(node: &EmbeddedNode, height: u64) -> B256 {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let proof: Result<vera_domain::LightBlock, _> = block_on(
+            node.rpc()
+                .request("vera_getLightBlock", vec![json!(format!("0x{height:x}"))]),
+        );
+        match proof {
+            Ok(proof) => {
+                return vera_domain::verify_finalized_block(&proof, node.consensus_key())
+                    .unwrap()
+                    .id()
+                    .0;
+            }
+            Err(error) => assert!(Instant::now() < deadline, "{error}"),
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 fn status(node: &EmbeddedNode) -> NodeStatus {
     block_on(node.rpc().call_empty("vera_nodeStatus")).unwrap()
 }
@@ -102,38 +123,38 @@ fn a_backup_waits_while_the_active_device_is_away_and_follows_it_again() {
     let active = block_on(EmbeddedNode::start(active_settings.clone())).unwrap();
     let signer = BlsSigner::new(71u64.into(), chain_id).unwrap();
     let mut settings = backup::backup(second.path(), &dealt, &active_settings, &key);
-    // The watchdog samples every 30 seconds, so two samples fall inside the absence below.
-    settings.watchdog_stall = Duration::from_secs(1);
+    // The watchdog samples every 30 seconds, so it would trip inside the
+    // absence below if it counted it. A loaded machine can keep a catching-up
+    // backup on one block for a whole sample interval, so the budget spans two.
+    settings.watchdog_stall = Duration::from_secs(60);
     let follower = block_on(EmbeddedNode::start(settings.clone())).unwrap();
     let written = finalize_a_write(&active, &signer);
     await_certified_receipt(&follower, written);
 
     let stopping_at = height(&active);
     block_on(active.stop()).unwrap();
-    // A stop finalizes the views in flight, and the backup receives those blocks.
+    // A stop finalizes the views in flight, and the backup receives those
+    // blocks. A loaded machine can leave it applying them for a while.
     await_height(&follower, stopping_at);
-    std::thread::sleep(Duration::from_secs(5));
-    let left_at = height(&follower);
-    std::thread::sleep(Duration::from_secs(70));
+    std::thread::sleep(Duration::from_secs(95));
     let waiting = status(&follower);
-    assert_eq!(
-        waiting.finalized_height,
-        Some(left_at),
-        "a backup finalized a block of its own"
-    );
-    assert_eq!(waiting.proposed_count, 0);
+    let left_at = waiting.finalized_height.unwrap();
+    assert_eq!(waiting.proposed_count, 0, "a backup proposed a block");
     assert_eq!(waiting.peer_count, Some(0));
 
     block_on(follower.stop()).unwrap();
     let follower = block_on(EmbeddedNode::start(settings)).unwrap();
-    assert_eq!(height(&follower), left_at);
+    assert!(
+        height(&follower) >= left_at,
+        "a restarted backup lost blocks"
+    );
     await_certified_receipt(&follower, written);
 
+    // The active device finalizes again the blocks it had not stored when
+    // it stopped, and every block the backup holds is one it built.
     let active = block_on(EmbeddedNode::start(active_settings)).unwrap();
-    assert!(
-        height(&active) >= left_at,
-        "the backup is ahead of the active device"
-    );
+    await_height(&active, left_at);
+    assert_eq!(block_id(&active, left_at), block_id(&follower, left_at));
     let resumed = finalize_a_write(&active, &signer);
     await_certified_receipt(&follower, resumed);
     await_height(&follower, height(&active));

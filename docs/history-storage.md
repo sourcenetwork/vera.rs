@@ -151,7 +151,8 @@ pending, startup watches marshal's finalized-processing progress: after
 it re-floors marshal from the newest stored gossiped finalization, resuming
 dispatches from a retained anchor so the database sync retargets. A pause
 while marshal holds the next block, which the sync has not acknowledged yet,
-re-floors nothing. Exceeding
+while it repairs a gap from the top down, or while the handoff imports
+history re-floors nothing. Exceeding
 the overall deadline still exits with `snapshot initialization deadline
 exceeded`. Under continuous finalization the state sync completes at its
 reached target and settles on the newest one at the first update lull, so

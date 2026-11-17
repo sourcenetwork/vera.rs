@@ -59,13 +59,18 @@ cannot reach the gossiped tip, so no newer finalized targets arrive. While
 databases are pending, startup watches marshal's processed height and, after
 `floor_stall_seconds` without progress (default 15, zero disables), re-floors
 marshal from the newest stored gossiped finalization when marshal does not
-hold the block after the processed height. Dispatches resume from that
+hold the block after the processed height. Marshal repairs a gap from the
+newest finalization down, so the processed height stays put while it does;
+a run of held blocks below the newest finalization that reaches further
+down than at the last observation counts as progress. Dispatches resume from that
 retained anchor and the transfer retargets. Processing also pauses while the
-transfer records a target or the handoff imports history, with the next block
-delivered and not yet acknowledged; that is no stall, and a floor above that
-block would make marshal deliver a block that skips heights the reshare actor
-has not applied, which Commonware's reshare actor refuses by stopping the
-node. The overall
+transfer records a target or the handoff imports history; that is no stall,
+and a floor above the processed height would make marshal deliver a block
+that skips heights the reshare actor has not applied, which Commonware's
+reshare actor refuses by stopping the node. The transfer is recognized by
+the next block being delivered and not yet acknowledged. The history import
+runs at the anchor, where marshal need not hold the next block, so startup
+does not re-floor at all while the handoff runs. The overall
 `initialization_timeout_ms` deadline still bounds the attempt. Sync completes
 at its reached target and settles on the newest one at the first update lull,
 so stale targets converge without network quiescence.
