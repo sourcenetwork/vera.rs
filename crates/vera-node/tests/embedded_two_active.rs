@@ -13,13 +13,13 @@ mod support;
 use std::time::{Duration, Instant};
 
 use alloy_primitives::B256;
-use devices::{Paired, block, certify, pair, reach_at, takeover_change};
+use devices::{Paired, block, certify, devices_with, pair, reach_at, takeover_change};
 use proxy::Relay;
 use short_epochs::{height, run_until};
 use support::{await_certified_receipt, block_on, finalize_a_write};
 use vera_client::BlsSigner;
 use vera_domain::{LightBlock, verify_finalized_block};
-use vera_node::{Contest, EmbeddedNode, TermRefusal};
+use vera_node::{Contest, DeviceKey, EmbeddedNode, TermRefusal};
 
 const SHORT: Duration = Duration::from_secs(2);
 /// Longer than any gap in the blocks of a device that proposes at the
@@ -385,4 +385,48 @@ fn the_holder_of_a_later_term_tells_the_device_it_replaced_and_goes_on() {
     assert_eq!(contest(&phone), None);
     block_on(laptop.stop()).unwrap();
     block_on(phone.stop()).unwrap();
+}
+
+#[test]
+fn a_device_opened_beside_one_that_is_checking_is_answered() {
+    let keys = [(); 2].map(|()| DeviceKey::generate().unwrap());
+    // Each device is the one already running once, so the outcome does not
+    // follow from which key is lower.
+    for running in [0, 1] {
+        let directories = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+        let dealt = short_epochs::deployment(9_526 + running as u64, 126);
+        let paths = [directories[0].path(), directories[1].path()];
+        let addresses = paths.map(|path| short_epochs::settings(path, &dealt, true).p2p_listen);
+        let mut devices = devices_with(paths, &dealt, SHORT, keys.clone(), addresses);
+        // The running device's background check waits out the answer of a
+        // device that is not up, so it is asking when the other one opens.
+        for device in &mut devices {
+            device.active.switching.as_mut().unwrap().answer_timeout = Duration::from_secs(10);
+        }
+        let first = block_on(EmbeddedNode::start(devices[running].active.clone())).unwrap();
+        run_until(&first, |reached| reached >= 3);
+        std::thread::sleep(SHORT + Duration::from_secs(1));
+        let opened = block_on(EmbeddedNode::start(devices[1 - running].active.clone())).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let answered = loop {
+            if let Some(answered) = contest(&opened) {
+                break answered;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the opened device was not answered: it reached height {}",
+                height(&opened)
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert_eq!(answered.device, devices[running].key.public_key());
+        // The running device goes on through further checks of its own.
+        std::thread::sleep(2 * SHORT);
+        let reached = height(&first);
+        run_until(&first, |now| now > reached + 3);
+        assert_eq!(contest(&first), None);
+        assert_eq!(height(&opened), 0, "the opened device finalized a block");
+        block_on(opened.stop()).unwrap();
+        block_on(first.stop()).unwrap();
+    }
 }

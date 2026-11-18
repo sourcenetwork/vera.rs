@@ -85,7 +85,8 @@ struct Actor<S, R> {
     gate: WakeGate,
     /// The newest answer of each device.
     heard: HashMap<PublicKey, Status>,
-    /// Whether this device is asking the others before it proposes.
+    /// Whether this device holds a proposal back while it asks the others.
+    /// The background check of a device that proposes does not.
     asking: bool,
 }
 
@@ -175,7 +176,7 @@ where
                 let _ = reply.send(self.accept(*certificate, role).await);
             }
             Command::Probe { reply } => {
-                let _ = reply.send(self.probe().await);
+                let _ = reply.send(self.probe(true).await);
             }
         }
     }
@@ -245,7 +246,7 @@ where
         if self.hold.is_held() || self.view.demoted.borrow().is_some() {
             return;
         }
-        if self.probe().await == Asked::Contested {
+        if self.probe(false).await == Asked::Contested {
             self.gate.expire();
         }
     }
@@ -270,8 +271,15 @@ where
             height: head.height,
             block: head.block,
             certificate: self.record.certificate.clone(),
-            waiting: self.asking || self.view.contested.borrow().is_some(),
+            waiting: self.holds_back(),
         }
+    }
+
+    /// Whether this device proposes nothing for now: a proposal waits for
+    /// the others' answers, another device answered, or its newest block is
+    /// too old for it to propose before it has asked.
+    fn holds_back(&self) -> bool {
+        self.asking || self.view.contested.borrow().is_some() || !self.gate.fresh()
     }
 
     /// The newest term this node holds or has seen in a finalized block.
@@ -577,18 +585,21 @@ where
     /// this device must not propose, with three exceptions: a device in a
     /// lower term than the one this device holds was replaced, and learns of
     /// it from the question; a device that holds the certificate of this
-    /// device's term was replaced by it; and of two devices asking each
-    /// other at once, the one with the lower key goes on. A certificate of a later term
+    /// device's term was replaced by it; and a device that holds its
+    /// proposals back stops neither a device that proposes nor, of two that
+    /// hold back, the one with the lower key. `held` says whether a proposal
+    /// waits for the answer. A certificate of a later term
     /// that verifies and is stored replaces this device for good; anything
     /// else is reported to the host and asked again at the next proposal.
-    async fn probe(&mut self) -> Asked {
+    async fn probe(&mut self, held: bool) -> Asked {
         let (Some(switching), Some(probe), false) = (&self.switching, &self.probe, self.backup)
         else {
             return Asked::Clear;
         };
         let this = device_id(&switching.device_key.public_key());
         let (devices, probe) = (switching.devices.clone(), probe.clone());
-        self.asking = true;
+        self.asking = held;
+        let waits = self.holds_back();
         let question = Message::Query(self.standing());
         let context = self.context.child("term_probes");
         let asked = futures::future::join_all(devices.into_iter().map(|device| {
@@ -655,7 +666,8 @@ where
             // A device that holds this device's own term follows it, or was
             // replaced by it and has not followed yet.
             let follows = holding > 0 && term == holding && names_this;
-            term >= holding && !follows && !(status.waiting && device_id(device) > this)
+            let stands = super::contest::stands(waits, this, status.waiting, device_id(device));
+            term >= holding && !follows && stands
         });
         let Some((device, status)) = contest else {
             self.view.contested.send_replace(None);

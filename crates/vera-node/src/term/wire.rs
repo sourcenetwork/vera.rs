@@ -35,8 +35,8 @@ pub(crate) struct Status {
     pub block: B256,
     /// The newest certificate the device verified.
     pub certificate: Option<TermCertificate>,
-    /// Whether the device holds its proposals back: it is asking the others
-    /// before it proposes, was answered, or handed the deployment over.
+    /// Whether the device proposes nothing for now: a proposal waits for the
+    /// others' answers, the device was answered, or it has yet to ask.
     pub waiting: bool,
 }
 

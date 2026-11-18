@@ -409,11 +409,15 @@ age a verifying client still accepts a state at), it asks every device in
   certificate this device holds, or one that holds that same certificate,
   comes from a device it replaced, which learns of the term from the
   question; the device goes on. And an answer
-  from a device that is itself asking, or was answered and holds back, is a
-  device that does not propose either: of the two, the one whose transport
-  key is lower goes on, and the other is answered. This settles two devices
-  that start together, and two that noticed each other and both hold back,
-  with one device proposing.
+  from a device that holds a proposal back for its own question, was
+  answered and holds back, or has no block inside the window and has yet to
+  ask, comes from a device that does not propose. It
+  does not stop a device that proposes: the background check of an awake
+  device holds nothing back, so a device opened beside it is answered and
+  the awake device goes on. When the asker holds back too, the one whose
+  transport key is lower goes on, and the other is answered. This settles
+  two devices that start together, and two that noticed each other and both
+  hold back, with one device proposing.
 - An answer that carries a certificate of a later term, held by another
   device and valid under the operator policy in this device's own state,
   demotes the device: it stores the certificate, proposes nothing more, and
