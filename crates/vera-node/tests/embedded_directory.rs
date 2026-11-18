@@ -78,10 +78,10 @@ async fn an_occupied_rpc_address_fails_the_start_and_frees_the_directory() {
         .await
         .expect("start deadline");
 
-    let Err(EmbedError::Stopped(reason)) = refused else {
+    let Err(EmbedError::RpcBind { address, .. }) = refused else {
         panic!("a node without its requested listener must not report a start");
     };
-    assert!(reason.contains("failed to bind server"), "{reason}");
+    assert_eq!(address, occupant.local_addr().unwrap());
     let node = start(directory.path()).await.unwrap();
     node.stop().await.unwrap();
 }

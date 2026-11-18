@@ -297,7 +297,12 @@ async fn run_node_with_elector<
     let dkg_network = p2p.register(DKG_CHANNEL, channel_rate);
     let dkg_probe_network = p2p.register(DKG_PROBE_CHANNEL, channel_rate);
     let (mempool_sender, mempool_receiver) = p2p.register(MEMPOOL_CHANNEL, channel_rate);
-    let history_network = p2p.register(crate::HISTORY_CHANNEL, channel_rate);
+    let transfer_rate = if has_peers {
+        sizing.transfer_rate()
+    } else {
+        channel_rate
+    };
+    let history_network = p2p.register(crate::HISTORY_CHANNEL, transfer_rate);
     let term_network = p2p.register(crate::TERM_CHANNEL, channel_rate);
     let mut state_resolver_handles = Vec::new();
     macro_rules! state_channel {
@@ -318,7 +323,7 @@ async fn run_node_with_elector<
                 },
             );
             state_resolver_handles
-                .push(actor.start(p2p.register(crate::QMDB_CHANNELS[$id], channel_rate)));
+                .push(actor.start(p2p.register(crate::QMDB_CHANNELS[$id], transfer_rate)));
             StateResolver::<$db>::new(mailbox)
         }};
     }
@@ -1440,7 +1445,10 @@ const fn sync_config() -> SyncEngineConfig {
     SyncEngineConfig {
         fetch_batch_size: MAX_FETCH_OPS,
         apply_batch_size: NZU64!(64),
-        max_outstanding_requests: commonware_utils::NZUsize!(8),
+        max_outstanding_requests: std::num::NonZeroUsize::new(
+            crate::sizing::TRANSFER_REQUESTS.get() as usize,
+        )
+        .unwrap(),
     }
 }
 

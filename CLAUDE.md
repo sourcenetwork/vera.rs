@@ -98,7 +98,8 @@ stops:
   an epoch it has not entered (Commonware's orchestrator drops them), at most
   256 within 1 MiB, and
   replays them once marshal has processed the epoch's last block. Nodes with
-  a peer keep the daemon's burst on the block-fetch channel. A start returns
+  a peer keep the daemon's burst on the block-fetch channel and a burst of at
+  least eight on the state and history transfer channels. A start returns
   once the node has applied the finalized blocks its archive holds or after
   30 seconds, whichever comes first, and the
   snapshot floor refresh waits while the synchronization handoff runs.
@@ -267,7 +268,9 @@ Seven authenticated peer resolvers serve bounded operation-log ranges. Fetches
 allow up to 64 operations, with eight-operation inspection batches and responses
 below the 4 MiB transport limit. Native keys are limited to 64 KiB; values and
 commit metadata to 1 MiB. Code-partition peer messages cap values at 1 MiB even
-though the older local journal codec permits larger records.
+though the older local journal codec permits larger records. A request for a
+size the server has not reached yet waits for it, without the database lock,
+for up to one second (at most 64 waiting per database) before it is refused.
 
 A `[snapshot]` configuration section requests initial authenticated snapshot
 catch-up for an admitted member. Startup resumes interrupted synchronization from
@@ -474,7 +477,9 @@ its `LocalRpc` survive, and starting on a directory in use fails with
 `EmbedError::DirectoryInUse`; the node locks `.node-hold` in its data
 directory from before it changes its term record or consensus storage until
 its runtime stops. An RPC address that cannot be bound fails the
-start. The consensus listener always binds; `127.0.0.1:0` keeps
+start with `EmbedError::RpcBind`. `EmbeddedNode::rpc_addr` reports the bound
+RPC address, including a port the system chose for port 0, and stays the same
+across `take_over` and `follow`. The consensus listener always binds; `127.0.0.1:0` keeps
 it on loopback with a system-chosen port. An embedded node prunes consensus
 archives and state journals by default (`EmbeddedConfig::RETENTION`); finalized
 history is not pruned. A host may hold the key material itself:

@@ -8,6 +8,7 @@ mod config;
 mod directory;
 mod error;
 mod role;
+mod rpc_socket;
 mod thread_budget;
 mod thread_setup;
 
@@ -28,6 +29,7 @@ use vera_jsonrpc::LocalRpc;
 pub use config::EmbeddedConfig;
 pub use error::EmbedError;
 pub use role::{Backup, DeviceRole};
+use rpc_socket::RpcSocket;
 pub use thread_budget::ThreadBudget;
 pub use thread_setup::ThreadSetup;
 
@@ -50,6 +52,7 @@ const STOP_SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
 #[derive(Debug)]
 pub struct EmbeddedNode {
     rpc: LocalRpc,
+    rpc_socket: Option<RpcSocket>,
     genesis: VeraGenesis,
     consensus_key: ConsensusPublicKey,
     identity: PublicKey,
@@ -66,10 +69,13 @@ pub struct EmbeddedNode {
 impl EmbeddedNode {
     /// Create or reopen the deployment and return once the node serves requests.
     pub async fn start(config: EmbeddedConfig) -> Result<Self, EmbedError> {
-        launch(config).await
+        launch(config, None).await
     }
 
-    async fn launch(config: EmbeddedConfig) -> Result<Self, EmbedError> {
+    async fn launch(
+        config: EmbeddedConfig,
+        rpc_socket: Option<RpcSocket>,
+    ) -> Result<Self, EmbedError> {
         let threads = config.thread_budget();
         if let Some(reason) = config.history_memory.rejection() {
             return Err(EmbedError::Config(reason));
@@ -152,15 +158,24 @@ impl EmbeddedNode {
                 "idle wait must be shorter than the leader timeout",
             ));
         }
+        let rpc_socket = match (rpc_socket, config.rpc_listen) {
+            (Some(socket), Some(_)) => Some(socket),
+            (_, Some(address)) => Some(RpcSocket::bind(address)?),
+            (_, None) => None,
+        };
+        let rpc = match &rpc_socket {
+            Some(socket) => RpcMode::Network(Some(socket.share()?)),
+            None => RpcMode::Local,
+        };
         let settings = NodeSettings {
             secrets_path: node_config.data_dir.join("secrets.json"),
             config: node_config,
             genesis: genesis.clone(),
             peers,
-            // Unused unless `rpc_listen` is set.
-            rpc_addr: config
-                .rpc_listen
-                .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 0))),
+            // Unused without a network listener.
+            rpc_addr: rpc_socket
+                .as_ref()
+                .map_or_else(|| SocketAddr::from(([127, 0, 0, 1], 0)), RpcSocket::address),
             leader_timeout: config.leader_timeout,
             certification_timeout: config.certification_timeout,
             timeout_retry: config.timeout_retry,
@@ -176,10 +191,7 @@ impl EmbeddedNode {
             devices.extend(switching.devices.iter().map(|device| device.key.clone()));
         }
         let options = NodeOptions {
-            rpc: match config.rpc_listen {
-                Some(_) => RpcMode::Network(None),
-                None => RpcMode::Local,
-            },
+            rpc,
             watchdog: WatchdogMode::Report,
             ready: Some(table_tx),
             solo_pacing: config.pacing,
@@ -296,6 +308,7 @@ impl EmbeddedNode {
         };
         Ok(Self {
             rpc,
+            rpc_socket,
             genesis,
             consensus_key,
             identity,
@@ -314,6 +327,14 @@ impl EmbeddedNode {
     #[must_use]
     pub const fn rpc(&self) -> &LocalRpc {
         &self.rpc
+    }
+
+    /// The address the network RPC listener is bound to, with the port the
+    /// system chose when [`EmbeddedConfig::rpc_listen`] asked for port 0.
+    /// `None` when the node has no network listener.
+    #[must_use]
+    pub fn rpc_addr(&self) -> Option<SocketAddr> {
+        self.rpc_socket.as_ref().map(RpcSocket::address)
     }
 
     /// The deployment's genesis.
@@ -538,8 +559,9 @@ impl EmbeddedNode {
 
     /// Stop this node and start one with `config` in its place.
     async fn restart(&mut self, config: EmbeddedConfig) -> Result<(), EmbedError> {
+        let rpc_socket = self.rpc_socket.take();
         self.halt().await?;
-        *self = Self::start(config).await?;
+        *self = launch(config, rpc_socket).await?;
         Ok(())
     }
 
@@ -625,8 +647,9 @@ fn refuse_role(config: &EmbeddedConfig) -> Result<(), EmbedError> {
 #[inline(never)]
 fn launch(
     config: EmbeddedConfig,
+    rpc_socket: Option<RpcSocket>,
 ) -> Pin<Box<dyn Future<Output = Result<EmbeddedNode, EmbedError>> + Send>> {
-    Box::pin(EmbeddedNode::launch(config))
+    Box::pin(EmbeddedNode::launch(config, rpc_socket))
 }
 
 /// How a node ended, from whether its runtime unwound and the result its root

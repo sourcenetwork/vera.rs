@@ -12,6 +12,14 @@ pub enum EmbedError {
     /// The configuration cannot run.
     #[error("invalid configuration: {0}")]
     Config(&'static str),
+    /// The network RPC address could not be bound.
+    #[error("cannot bind RPC listener {address}: {source}")]
+    RpcBind {
+        /// The address that was requested.
+        address: std::net::SocketAddr,
+        /// Why binding failed.
+        source: std::io::Error,
+    },
     /// Another node, or one that has not finished stopping, holds the directory.
     #[error("node directory {} is in use", .0.display())]
     DirectoryInUse(std::path::PathBuf),
