@@ -10,7 +10,7 @@ const REVISIONS: u64 = 3_000;
 const EPOCH: u64 = 8;
 /// Reads of a start that rereads only the resident window: its records and
 /// certificates, the epoch boundaries before it and a few metadata keys.
-const BOUNDED_READS: u64 = 2 * MAX_CACHED_REVISIONS as u64 + MAX_CACHED_EPOCHS as u64 + 16;
+const BOUNDED_READS: u64 = 2 * MAX_CACHED_REVISIONS as u64 + 2 * MAX_CACHED_EPOCHS as u64 + 16;
 
 struct Recovered {
     index: BlockIndex,
@@ -182,6 +182,59 @@ async fn a_start_without_a_matching_validated_head_checks_every_record() {
         .unwrap();
     let error = recover(&fixture).await.err().expect("query head");
     assert!(error.to_string().contains("ancestry mismatch"), "{error}");
+}
+
+#[tokio::test]
+async fn a_damaged_epoch_boundary_is_refused_before_its_material_is_restored() {
+    // An epoch boundary below the resident window, which a validated start
+    // reads for its material without rereading the chain around it.
+    let boundary = EPOCH * 200 - 1;
+    let rewrite = |fixture: &Heartbeats, height: u64, change: &dyn Fn(&mut Block)| {
+        let stored = fixture
+            .history
+            .db
+            .get(key(RECORD, height))
+            .unwrap()
+            .unwrap();
+        let mut record: Record = borsh::from_slice(&stored).unwrap();
+        let (mut block, _) = record.decode().unwrap();
+        change(&mut block);
+        record.block = block.encode().to_vec();
+        fixture
+            .history
+            .db
+            .put(key(RECORD, height), borsh::to_vec(&record).unwrap())
+            .unwrap();
+        block.id()
+    };
+    let other_epoch = |block: &mut Block| {
+        let Some(Payload::EpochInfo(info)) = &mut block.payload else {
+            panic!("the boundary carries its epoch");
+        };
+        info.epoch = commonware_consensus::types::Epoch::new(info.epoch.get() + 1);
+    };
+
+    // The record changed under the chain: the next record no longer names it.
+    let fixture = heartbeats(REVISIONS, EPOCH);
+    rewrite(&fixture, boundary, &other_epoch);
+    let fixture = fixture.reopen();
+    assert_eq!(
+        validated(&fixture.history),
+        Some(stored_head(&fixture.history))
+    );
+    let error = recover(&fixture).await.err().expect("boundary");
+    assert!(error.to_string().contains("ancestry mismatch"), "{error}");
+
+    // Even a boundary its next record names is refused when it carries
+    // another epoch than the one its height ends.
+    let fixture = heartbeats(REVISIONS, EPOCH);
+    let renamed = rewrite(&fixture, boundary, &other_epoch);
+    rewrite(&fixture, boundary + 1, &|block: &mut Block| {
+        block.parent = renamed
+    });
+    let fixture = fixture.reopen();
+    let error = recover(&fixture).await.err().expect("epoch");
+    assert!(error.to_string().contains("names another epoch"), "{error}");
 }
 
 fn next_heartbeat(parent: &Block) -> Block {

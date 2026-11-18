@@ -316,7 +316,10 @@ HISTORY_START_REVISIONS=10000,100000,1000000 cargo test --release -p vera-node -
 
 Checking every record costs about 4 µs a revision with the store in the
 operating system's page cache. A start over a validated head reads the window's
-records and certificates and at most 128 epoch boundaries, whatever the length.
+records and certificates and at most 128 epoch boundaries, each with the record
+after it, whatever the length. A recovery whose anchor is behind the durable
+head first reads the records it discards, at most 1,024, to remove their hash
+mappings.
 The fixture stores 545 to 772 bytes a revision, less than the 1.05 kB a running
 node's idle revisions take, and the measurement leaves out a cold disk and the
 rest of node start-up.

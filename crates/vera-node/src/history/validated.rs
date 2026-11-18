@@ -83,6 +83,10 @@ impl FinalizedHistory {
     /// Restore the epoch material that a walk of the records below `end`
     /// would have left in the cache: the newest epochs' artifacts, read from
     /// the last block of each preceding epoch.
+    ///
+    /// A boundary is not reread as part of the chain, so each is checked on
+    /// its own before its material is cached: the next record names it as
+    /// parent, and it carries the epoch its height says it ends.
     pub(super) fn restore_epochs_before(&self, end: u64, light: &LightBlockIndex) -> Result<()> {
         let length = light.epoch_length().get();
         let last = end / length;
@@ -98,6 +102,21 @@ impl FinalizedHistory {
                 .context("missing finalized epoch boundary; restore a complete node backup")?;
             let (block, _) = borsh::from_slice::<Record>(&bytes)?.decode()?;
             ensure!(block.height == height, "epoch boundary height mismatch");
+            let next = self
+                .db
+                .get(key(RECORD, height + 1))?
+                .context("missing finalized execution history; restore a complete node backup")?;
+            let (child, _) = borsh::from_slice::<Record>(&next)?.decode()?;
+            ensure!(
+                child.height == height + 1 && child.parent == block.id(),
+                "finalized history ancestry mismatch"
+            );
+            if let Some(Payload::EpochInfo(info)) = &block.payload {
+                ensure!(
+                    info.epoch.get() == (height + 1) / length,
+                    "epoch boundary names another epoch"
+                );
+            }
             restore_epoch(light, &block);
         }
         Ok(())
