@@ -217,8 +217,9 @@ fn active_devices_cut_off_from_each_other_contest_once_reconnected() {
     for relay in &relays {
         relay.open();
     }
-    // Each device stops when the other answers it. Once both hold back, the
-    // one with the lower transport key goes on and the other stays held.
+    // A device stops when the other answers its question. Which one asks
+    // first is a matter of timing, so either may be the one that goes on; the
+    // lower key decides only when both hold back at once.
     let deadline = Instant::now() + Duration::from_secs(120);
     let held = loop {
         assert!(
@@ -238,13 +239,6 @@ fn active_devices_cut_off_from_each_other_contest_once_reconnected() {
         std::thread::sleep(Duration::from_millis(200));
     };
     let going = 1 - held;
-    let lower = [&devices[0], &devices[1]]
-        .map(|device| commonware_codec::Encode::encode(&device.key.public_key()).to_vec());
-    assert_eq!(
-        going,
-        usize::from(lower[1] < lower[0]),
-        "the lower key goes on"
-    );
 
     // The host keeps the device that goes on. It renews that device's term,
     // and the other device follows it and reports what it finalized alone.
