@@ -7,6 +7,9 @@ use commonware_utils::{NZU32, NZUsize};
 
 use crate::consts::{MESSAGE_RATE, PAGE_CACHE_SIZE};
 
+/// Requests a state transfer keeps outstanding for each database.
+pub(crate) const TRANSFER_REQUESTS: NonZeroU32 = NZU32!(8);
+
 /// Sizes of the allocations a node makes when it starts, before any request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NodeSizing {
@@ -45,5 +48,32 @@ impl NodeSizing {
     /// per block. This channel keeps the daemon's burst at least.
     pub(crate) fn backfill_rate(self) -> Quota {
         MESSAGE_RATE.allow_burst(self.channel_burst.max(MESSAGE_RATE.burst_size()))
+    }
+
+    /// The rate of the channels a device catching up transfers state and
+    /// history on, for a node with peers.
+    ///
+    /// A state transfer keeps [`TRANSFER_REQUESTS`] requests outstanding per
+    /// database, and a burst below that drops the requests and answers past
+    /// it, each of which then waits out a fetch timeout.
+    pub(crate) fn transfer_rate(self) -> Quota {
+        MESSAGE_RATE.allow_burst(self.channel_burst.max(TRANSFER_REQUESTS))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NodeSizing, TRANSFER_REQUESTS};
+
+    #[test]
+    fn a_transfer_burst_covers_the_requests_a_transfer_keeps_outstanding() {
+        assert_eq!(
+            NodeSizing::EMBEDDED.transfer_rate().burst_size(),
+            TRANSFER_REQUESTS
+        );
+        assert_eq!(
+            NodeSizing::DAEMON.transfer_rate().burst_size(),
+            NodeSizing::DAEMON.channel_burst
+        );
     }
 }

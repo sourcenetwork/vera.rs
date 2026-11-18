@@ -75,6 +75,22 @@ does not re-floor at all while the handoff runs. The overall
 at its reached target and settles on the newest one at the first update lull,
 so stale targets converge without network quiescence.
 
+A syncing node learns of a finalized block from its certificate, which can
+arrive before the serving node has applied that block's state, so its
+requests name a size just past the server's tip. The server waits for that
+size, checking every 5 ms without holding the database lock, for up to one
+second, below the requester's two-second fetch timeout, and then answers or
+refuses. At most 64 requests wait at once for one database; others are
+answered at once. A request refused at once is retried after the 100 ms
+retry delay, by when a busy deployment has finalized the next block, so the
+transfer converged only where the deployment paused.
+
+On a node with a peer, the seven state channels and the history channel keep
+a burst of at least eight, the requests a transfer keeps outstanding for each
+database, whatever `NodeSizing::channel_burst` says. With a burst of one,
+the peer rate limit drops requests and answers sent within a millisecond of
+one another, and each one dropped waits out the two-second fetch timeout.
+
 `vera_nodeStatus` includes `snapshotRevision` after snapshot recovery. On restart,
 it reports the persisted snapshot recovery floor, which can also cover execution
 completed during the original handoff. It is operational status; clients still

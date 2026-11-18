@@ -105,6 +105,7 @@ impl Partition for CodeDb {
     }
 }
 
+mod ahead;
 mod serve;
 
 /// Maximum operation count requested or served by a partition resolver.
@@ -150,7 +151,10 @@ impl<DB: Partition> Read for WireOperation<DB> {
 }
 
 /// Serving handle for Commonware's peer resolver actor.
-pub struct WireDatabase<DB: Partition>(Shared<DB>);
+pub struct WireDatabase<DB: Partition> {
+    db: Shared<DB>,
+    ahead: ahead::Ahead,
+}
 
 impl<DB: Partition> std::fmt::Debug for WireDatabase<DB> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -160,8 +164,17 @@ impl<DB: Partition> std::fmt::Debug for WireDatabase<DB> {
 
 impl<DB: Partition> WireDatabase<DB> {
     /// Wrap an existing database; serving retains its read lock through proof generation.
+    ///
+    /// A request for a size the database has not reached yet waits for it,
+    /// without the lock, for up to a second.
     pub fn new(db: Shared<DB>) -> Shared<Self> {
-        Shared::new("partition_resolver", Self(db))
+        Shared::new(
+            "partition_resolver",
+            Self {
+                db,
+                ahead: ahead::Ahead::default(),
+            },
+        )
     }
 }
 
@@ -172,8 +185,8 @@ impl<DB: Partition> Source for WireDatabase<DB> {
     type Error = ServeError<mmr::Family>;
 
     async fn serve(&self, request: Request<Self::Family>) -> source::Result<Self> {
-        let db = self.0.read().await;
         let request = bounded(request);
+        let db = self.ahead.reached(&self.db, request.size()).await;
         let response = match serve::response(&*db, request).await {
             Ok(response) => response,
             Err(error) => {

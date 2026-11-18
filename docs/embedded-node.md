@@ -262,7 +262,10 @@ The channel a catching-up device fetches finalized blocks and certificates
 on keeps at least the daemon's burst on every node with a peer, whatever
 `channel_burst` says: with a burst of one, all but one of the answers to its
 parallel requests are dropped and it advances by one fetch timeout per
-block.
+block. The seven channels that transfer state and the one that transfers
+history keep a burst of at least eight on such a node, the requests a
+transfer keeps outstanding for each database, for the same reason; see
+[snapshot recovery](snapshot-recovery.md).
 
 While the active device is away a backup keeps serving the state it has.
 Once it has finalized the blocks it already holds certificates for, it
@@ -551,7 +554,9 @@ connects. A solo deployment tracks 100 peers, so a burst of 64 reserves about
 56 MiB for a validator that has none. The embedded sizes assume no peers; a
 deployment that gains validators needs the daemon's. A node with a backup or
 an active device to follow keeps the daemon's burst on the block-fetch
-channel, about 3.5 MiB of it, so a backup can catch up.
+channel, about 3.5 MiB of it, and a burst of eight on the eight state and
+history transfer channels, by the same proportion about 3.5 MiB more, so a
+backup can catch up. The second figure is computed, not measured.
 
 Measured with
 `PROFILE_WRITES=1000 cargo test --release -p vera-node --test embedded_solo_profile -- --ignored --nocapture`
