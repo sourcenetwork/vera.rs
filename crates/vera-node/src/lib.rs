@@ -67,6 +67,7 @@ mod peer_discovery;
 mod proposal_hold;
 pub use proposal_hold::ProposalHold;
 mod epoch_replay;
+mod idle_pacing;
 mod provider;
 mod ready_application;
 mod rejoin;

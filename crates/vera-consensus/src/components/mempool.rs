@@ -185,27 +185,25 @@ impl InMemoryMempool {
         }
     }
 
-    /// Wait up to `idle` for the first eligible request, then batch for at most `batch`.
+    /// Wait up to `idle` for a request outside `excluded`. Returns whether one arrived.
     ///
-    /// An empty result after `idle` lets the caller propose an empty block as a heartbeat.
-    pub async fn build_block_idle_wait(
+    /// A proposer that finds none proposes an empty block as a heartbeat.
+    pub async fn await_request(
         &self,
-        max_txs: usize,
         excluded: &std::collections::BTreeSet<TxId>,
-        batch: std::time::Duration,
         idle: std::time::Duration,
-    ) -> Vec<Tx> {
+    ) -> bool {
         let deadline = tokio::time::Instant::now() + idle;
         loop {
             let changed = self.changed.notified();
             tokio::pin!(changed);
             changed.as_mut().enable();
             if !self.build_block(1, excluded).is_empty() {
-                return self.build_block_wait(max_txs, excluded, batch).await;
+                return true;
             }
             tokio::select! {
                 _ = changed => {},
-                _ = tokio::time::sleep_until(deadline) => return Vec::new(),
+                _ = tokio::time::sleep_until(deadline) => return false,
             }
         }
     }
@@ -438,35 +436,30 @@ mod batching_tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn idle_wait_ends_with_the_first_request_and_then_batches_briefly() {
+    async fn an_idle_wait_ends_with_the_first_request() {
         let pool = InMemoryMempool::new();
-        let (batch, idle) = (Duration::from_millis(5), Duration::from_secs(2));
         let started = tokio::time::Instant::now();
         let excluded = BTreeSet::new();
-        let mut waiting = Box::pin(pool.build_block_idle_wait(256, &excluded, batch, idle));
+        let mut waiting = Box::pin(pool.await_request(&excluded, Duration::from_secs(2)));
         assert!(
             tokio::time::timeout(Duration::from_secs(1), &mut waiting)
                 .await
                 .is_err()
         );
-        let first = Tx::new(vec![1].into());
-        pool.insert(first.clone());
-        assert_eq!(waiting.await, vec![first]);
-        assert_eq!(started.elapsed(), Duration::from_secs(1) + batch);
+        pool.insert(Tx::new(vec![1].into()));
+        assert!(waiting.await);
+        assert_eq!(started.elapsed(), Duration::from_secs(1));
     }
 
     #[tokio::test(start_paused = true)]
-    async fn idle_wait_returns_an_empty_heartbeat_and_ignores_excluded_requests() {
+    async fn an_idle_wait_runs_out_and_ignores_excluded_requests() {
         let pool = InMemoryMempool::new();
         let pending = Tx::new(vec![1].into());
         pool.insert(pending.clone());
         let excluded = BTreeSet::from([pending.id()]);
         let idle = Duration::from_secs(2);
         let started = tokio::time::Instant::now();
-        let batch = pool
-            .build_block_idle_wait(256, &excluded, Duration::from_millis(5), idle)
-            .await;
-        assert!(batch.is_empty());
+        assert!(!pool.await_request(&excluded, idle).await);
         assert_eq!(started.elapsed(), idle);
     }
 

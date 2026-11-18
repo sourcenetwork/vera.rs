@@ -44,8 +44,6 @@ pub struct StatefulVeraApp<S: FinalizedSink, D: ApplicationState = OrderedState>
     vrf_verifier: Option<ConsensusScheme>,
     native_pipeline: bool,
     proposal_batch_wait: std::time::Duration,
-    proposal_idle_wait: std::time::Duration,
-    started_at: Arc<std::sync::OnceLock<u64>>,
     timestamp_step: u64,
     term: crate::TermGuard,
 }
@@ -86,8 +84,6 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
             vrf_verifier: None,
             native_pipeline: false,
             proposal_batch_wait: std::time::Duration::ZERO,
-            proposal_idle_wait: std::time::Duration::ZERO,
-            started_at: Arc::default(),
             timestamp_step: MAX_TIMESTAMP_STEP_SECS,
             term: crate::TermGuard::default(),
         }
@@ -122,19 +118,6 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
     ) -> Self {
         self.native_pipeline = enabled;
         self.proposal_batch_wait = batch_wait;
-        self
-    }
-
-    /// Let an idle proposer wait this long for a first request before proposing an empty block.
-    ///
-    /// Proposals do not wait until one block has been finalized since the
-    /// start: a client that verifies state against finalized headers needs a
-    /// current one before it can read.
-    ///
-    /// The wait must stay below the consensus leader and stall timeouts.
-    #[must_use]
-    pub const fn with_idle_wait(mut self, idle_wait: std::time::Duration) -> Self {
-        self.proposal_idle_wait = idle_wait;
         self
     }
 
@@ -310,27 +293,9 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             }
         }
         let excluded = Self::pending_tx_ids(&pending);
-        // This wait runs on the application actor, which also processes finalization.
-        // Idling while an ancestor with requests is unfinalized would delay its receipts.
-        let settled = pending
-            .iter()
-            .filter(|block| block.height > finalized_height)
-            .all(|block| block.txs.is_empty());
-        // Finalization is processed on this actor between proposals, so the
-        // height moves only once a proposal made since the start has returned.
-        let fresh = finalized_height > *self.started_at.get_or_init(|| finalized_height);
-        let idle = fresh && settled && !self.proposal_idle_wait.is_zero();
-        let mut txs = if self.native_pipeline && idle {
-            input
-                .provider
-                .build_block_idle_wait(
-                    self.max_txs,
-                    &excluded,
-                    self.proposal_batch_wait,
-                    self.proposal_idle_wait,
-                )
-                .await
-        } else if self.native_pipeline {
+        // The actor processes finalization only between builds, so a proposer
+        // that idles waits before its request reaches the actor, not here.
+        let mut txs = if self.native_pipeline {
             input
                 .provider
                 .build_block_wait(self.max_txs, &excluded, self.proposal_batch_wait)
