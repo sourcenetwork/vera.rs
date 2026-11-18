@@ -17,7 +17,9 @@ const PENDING: &str = "discarded-submissions.pending";
 /// that term, and a mark to take the stores again is refused with
 /// [`TermRefusal::HolderResync`].
 ///
-/// Otherwise blocks this device finalized above the term's cut are void. Their
+/// Otherwise blocks this device finalized above the term's cut are void, or
+/// above the newest block it shares with the holder when its history left
+/// the holder's below the cut (`TermRecord::common`). Their
 /// submissions are added to the report the host reads, their records are
 /// dropped from finalized history, and the consensus archives and state
 /// journals are removed: those cannot be cut back, so the device takes the
@@ -42,8 +44,13 @@ pub(crate) fn rewind(
         let failed = |error: anyhow::Error| TermRefusal::History(format!("{error:#}"));
         let stored = FinalizedHistory::open_stored(&history, &change.genesis_id, Some(memory))
             .map_err(failed)?;
+        // A history that left the holder's below the cut is cut back to the
+        // newest block the two share, whatever the term of the blocks above it.
+        let (point, term) = record
+            .common
+            .map_or((change.cut, change.term), |common| (common, u64::MAX));
         match stored
-            .standing(change.cut.height, &change.cut.block, change.term)
+            .standing(point.height, &point.block, term)
             .map_err(failed)?
         {
             Standing::Within => {}
@@ -53,15 +60,16 @@ pub(crate) fn rewind(
                 });
             }
             Standing::Above => {
-                let voided = stored
-                    .submissions_above(change.cut.height)
-                    .map_err(failed)?;
+                let voided = stored.submissions_above(point.height).map_err(failed)?;
                 report(directory, voided)?;
                 // The stores are ahead of history from here until they are removed.
                 record.resync = true;
                 record.store(directory)?;
-                stored.rewind_to(change.cut.height).map_err(failed)?;
+                stored.rewind_to(point.height).map_err(failed)?;
             }
+        }
+        if record.common.take().is_some() {
+            record.store(directory)?;
         }
     }
     if record.resync {

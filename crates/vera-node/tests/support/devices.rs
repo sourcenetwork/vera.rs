@@ -64,6 +64,19 @@ pub(crate) fn devices<const N: usize>(
     })
 }
 
+/// Have `device` reach the device known by `other` at `address`, as through a relay.
+#[allow(dead_code, reason = "not every test that switches devices relays them")]
+pub(crate) fn reach_at(device: &mut Paired, other: &DeviceKey, address: std::net::SocketAddr) {
+    let switching = device.active.switching.as_mut().unwrap();
+    for listed in &mut switching.devices {
+        if listed.key == other.public_key() {
+            listed.address = address;
+        }
+    }
+    let followed = switching.devices[0].key.clone();
+    device.backup = device.active.following(&followed).unwrap();
+}
+
 /// Approve `change` as the deployment's only operator, whose secret key is 1.
 pub(crate) fn certify(change: TermChange) -> TermCertificate {
     let mut secret = [0u8; 32];

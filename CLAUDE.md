@@ -481,8 +481,9 @@ history is not pruned. A host may hold the key material itself:
 `SoloDeployment` pairs the genesis record with the validator key and share,
 `EmbeddedConfig::adopt` opens it in an empty directory or the one that already
 holds it without writing either secret, and `EmbeddedNode::export` returns it
-for another device. The export carries no state, and two devices started as
-validator fork the deployment until one learns the other's term.
+for another device. The export carries no state. Two devices started as
+validator fork the deployment while they cannot reach each other; without
+`switching` nothing detects it.
 `EmbeddedConfig::backup` instead starts a backup from the genesis record alone:
 it follows the active device at a given address under its own `DeviceKey`,
 catches up by snapshot from an empty directory, re-executes blocks, serves
@@ -530,11 +531,22 @@ validator signs an epoch whose ceremony it only observed with the share its
 host holds, once the epoch's sharing confirms it. Devices ask each other where
 they stand on channel 17. An active device whose newest block is older than
 `Switching::freshness` asks the others under its transport key before it
-builds and again before a built block reaches consensus. Any answer stops the
-proposal: a verified later certificate demotes the device
+builds and again before a built block reaches consensus, and an active device
+asks again every `Switching::freshness` in the background. A question carries
+the asker's standing and is answered while the asked device asks itself.
+An answer stops the proposal: a verified later certificate demotes the device
 (`EmbeddedNode::demoted`), anything else is a `Contest`
-(`EmbeddedNode::contested`) asked again at the next turn. A device that
-reaches nobody proposes on. A directory that last ran as a backup starts as
+(`EmbeddedNode::contested`) asked again at the next turn. An answer in a lower
+term than the certificate the device holds does not, nor one holding that
+certificate, nor one from a device
+that holds back itself and has the higher transport key, so of two devices
+in one term exactly one goes on. A device that reaches nobody proposes on,
+and both sides of a partition finalize blocks until they reconnect.
+`hand_over` naming the device itself renews its term to settle a contest, and
+`take_over` on the active device accepts that certificate. A demoted device
+keeps its own in-flight blocks; `follow` asks the holder for the newest block
+the two share when its history left the holder's below the cut
+(`TermRecord::common`), and the rewind reports and drops everything above it. A directory that last ran as a backup starts as
 validator only under a certificate naming it (`TermRefusal::NotCertified`).
 A backup holding the certificate of the next block without the block waits
 `Switching::answer_timeout` for the block and then takes over below it: the

@@ -168,17 +168,20 @@ impl EmbeddedConfig {
     }
 
     /// This configuration for the same device as the deployment's validator,
-    /// with the key material `keys`. The device was configured as a backup.
+    /// with the key material `keys`. The device was configured as a backup,
+    /// or as the active device that renews its term.
     ///
     /// [`crate::EmbeddedNode::take_over`] starts a node with it once a term
     /// certificate names the device. A host uses it directly to start a
     /// device that already took the deployment over.
     pub fn activated(&self, keys: SoloKeys) -> Result<Self, TermRefusal> {
-        let DeviceRole::Backup(backup) = &self.role else {
-            return Err(TermRefusal::Active);
+        let record = match (&self.role, &self.deployment) {
+            (DeviceRole::Backup(backup), _) => backup.record.clone(),
+            (DeviceRole::Active, Some(deployment)) => deployment.record().to_vec(),
+            (DeviceRole::Active, None) => return Err(TermRefusal::KeysInFiles),
         };
         let mut config = self.clone();
-        config.deployment = Some(SoloDeployment::new(backup.record.clone(), keys));
+        config.deployment = Some(SoloDeployment::new(record, keys));
         config.role = DeviceRole::Active;
         Ok(config)
     }

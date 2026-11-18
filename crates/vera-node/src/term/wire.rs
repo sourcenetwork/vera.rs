@@ -8,14 +8,21 @@ use vera_domain::TermCertificate;
 /// each of the 128 operators a policy may list.
 const MAX_BYTES: usize = 64 * 1024;
 
+/// Most heights one question about blocks names.
+pub(crate) const MAX_HEIGHTS: usize = 256;
+
 /// A message on the term channel.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum Message {
-    /// Asks a device where it stands.
-    Query,
+    /// Asks a device where it stands, and says where the asker does.
+    Query(Status),
     /// Where the sender stands.
     Status(Status),
+    /// Asks for the identifiers of the sender's finalized blocks at these heights.
+    Ancestry { heights: Vec<u64> },
+    /// The identifiers asked for, at the heights the sender holds a block.
+    Blocks { blocks: Vec<(u64, B256)> },
 }
 
 /// The newest block a device has and the newest term it holds.
@@ -28,6 +35,9 @@ pub(crate) struct Status {
     pub block: B256,
     /// The newest certificate the device verified.
     pub certificate: Option<TermCertificate>,
+    /// Whether the device holds its proposals back: it is asking the others
+    /// before it proposes, was answered, or handed the deployment over.
+    pub waiting: bool,
 }
 
 impl Message {
@@ -48,16 +58,26 @@ mod tests {
 
     #[test]
     fn messages_round_trip_and_oversized_or_unknown_ones_are_dropped() {
-        let status = Message::Status(Status {
+        let standing = Status {
             height: 9,
             block: B256::repeat_byte(4),
             certificate: None,
-        });
-        for message in [Message::Query, status] {
+            waiting: true,
+        };
+        for message in [
+            Message::Query(standing.clone()),
+            Message::Status(standing.clone()),
+            Message::Ancestry {
+                heights: vec![1, 5],
+            },
+            Message::Blocks {
+                blocks: vec![(5, B256::repeat_byte(2))],
+            },
+        ] {
             assert_eq!(Message::decode(&message.encode()), Some(message));
         }
         assert_eq!(Message::decode(b"{\"kind\":\"vote\"}"), None);
-        let mut padded = Message::Query.encode();
+        let mut padded = Message::Query(standing).encode();
         padded.resize(MAX_BYTES + 1, b' ');
         assert_eq!(Message::decode(&padded), None);
     }

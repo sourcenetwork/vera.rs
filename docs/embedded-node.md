@@ -143,6 +143,18 @@ opens it with `EmbeddedConfig::adopt`.
   histories diverge, and both verify against the deployment's consensus key.
   Run the deployment on one device at a time, and move it between devices
   with a [term certificate](active-term.md).
+- Without `EmbeddedConfig::switching`, nothing detects it: neither device
+  asks the other, neither stops, and a client sees both histories verify.
+  With it, each device lists the others, and two that both validate notice
+  each other as soon as one can reach the other: a device does not start
+  proposing while another answers as the validator, and an active device
+  asks again every `Switching::freshness`. One of the two then stops
+  proposing and reports it (`EmbeddedNode::contested`, or
+  `EmbeddedNode::demoted` when the other holds a later term), and the host
+  settles it with a certificate; the device that follows drops what it
+  finalized alone and reports it (`EmbeddedNode::discarded`). Blocks both
+  finalized before they reached each other are not prevented. See
+  [The wake check](active-term.md#the-wake-check).
 - Every copy is a full signing capability. A copy cannot be revoked short of
   creating a new deployment.
 
@@ -202,9 +214,12 @@ in no committee, runs under a key of its own.
 
 `EmbeddedConfig::backups` on the active device lists the transport public keys
 of its backups. The active device accepts a connection only from a listed
-key, after the authenticated handshake; it never dials a backup, so a backup
-needs no reachable address. A backup dials the active device at the address it
-was given and retries while that device is away. Backups do not connect to
+key, after the authenticated handshake. It is given no backup's address, so a
+backup needs no reachable address; once a backup has connected, the active
+device also learns the address the backup announces and can reach it there
+after the backup restarts, which a test that cut the two apart with a relay
+observed. A backup dials the active device at the address it was given and
+retries while that device is away. Backups do not connect to
 each other, and a backup ignores the list.
 
 The list is configuration. Nothing in the deployment's state records which
@@ -299,10 +314,11 @@ on any node, against its own state.
   the device that was active does not learn of it.
 - Nothing enforces a single active device beyond the term. Two devices
   started as active each finalize their own blocks under the same key and
-  fork the deployment, as described under
-  [A second device](#a-second-device), until one learns the other's term
-  certificate. Both use the validator key as their network identity, so they
-  cannot connect to each other as validators.
+  fork the deployment while they cannot reach each other, as described under
+  [A second device](#a-second-device). Both use the validator key as their
+  network identity, so they cannot connect to each other as validators; they
+  find each other only through the term check of devices configured with
+  `switching`.
 - A backup is as current as its connection. A request finalized on the active
   device while a backup is disconnected is absent from that backup until it
   reconnects, and a device lost before then takes the request with it.
@@ -693,8 +709,9 @@ are not a capacity or multi-validator measurement.
 - One validator. A stopped or lost device stops the deployment until a
   backup takes it over with a term certificate; see
   [Terms and the active device](active-term.md).
-- Running a second device as validator forks the deployment; see
-  [A second device](#a-second-device).
+- Running a second device as validator forks the deployment while the two
+  cannot reach each other, and without `switching` for as long as both run;
+  see [A second device](#a-second-device).
 - An idle deployment still produces a heartbeat block about every 10 s, and
   finalized history has no retention, so the directory grows without bound;
   see [Disk](#disk).
