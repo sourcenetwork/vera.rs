@@ -6,7 +6,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use vera_domain::{TermCertificate, TermChange};
+use vera_domain::{TermCertificate, TermChange, TermCut};
 
 use super::{
     TermRefusal,
@@ -42,6 +42,10 @@ pub(crate) struct TermRecord {
     /// Whether the device last ran as a backup. It validates again only
     /// under a certificate that names it.
     pub followed: bool,
+    /// The newest block this device shares with the holder of `certificate`,
+    /// when its history left the holder's below the cut. A rewind cuts the
+    /// history back to it instead of to the cut.
+    pub common: Option<TermCut>,
 }
 
 impl TermRecord {
@@ -132,6 +136,10 @@ mod tests {
             }),
             resync: false,
             followed: false,
+            common: Some(TermCut {
+                height: 4,
+                block: B256::repeat_byte(5),
+            }),
         };
         record.store(directory.path()).unwrap();
         assert_eq!(TermRecord::load(directory.path()).unwrap(), record);

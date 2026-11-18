@@ -270,6 +270,24 @@ fn await_demotion(node: &EmbeddedNode, term: u64) -> vera_domain::TermCertificat
     block_on(node.demoted())
 }
 
+/// Wait until `node` reports that another device answered as the validator.
+fn await_contest(node: &EmbeddedNode) -> vera_node::Contest {
+    let mut contested = std::pin::pin!(node.contested());
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+    let deadline = std::time::Instant::now() + Duration::from_secs(120);
+    loop {
+        if let std::task::Poll::Ready(contest) = contested.as_mut().poll(&mut context) {
+            return contest;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the device was not answered: it reached height {}",
+            height(node)
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 #[test]
 fn a_device_that_wakes_asks_for_the_term_before_it_proposes() {
     let directories = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
@@ -501,7 +519,7 @@ fn a_second_device_that_validates_is_answered_and_does_not_propose() {
     // The phone opens the deployment as its validator in an empty directory,
     // with no certificate: the laptop answers it as the validator.
     let phone = block_on(EmbeddedNode::start(second.active)).unwrap();
-    let contest = block_on(phone.contested());
+    let contest = await_contest(&phone);
     assert_eq!(contest.device, first.key.public_key());
     assert!(contest.height >= 3);
     assert_eq!(contest.certificate, None);

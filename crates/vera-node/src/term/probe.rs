@@ -16,7 +16,7 @@ use commonware_utils::ordered::Set;
 use vera_config::DiscoveryConfig;
 use vera_domain::PublicKey;
 
-use super::wire::{Message, Status};
+use super::wire::Message;
 
 /// Every channel a validator sends on. A message on a channel the receiver
 /// never registered ends the connection.
@@ -55,9 +55,16 @@ pub(crate) struct Probe {
 }
 
 impl Probe {
-    /// Ask the device listening at `address` where it stands, if it answers
-    /// as the deployment's validator within the timeout.
-    pub(crate) async fn ask(&self, context: Context, address: SocketAddr) -> Option<Status> {
+    /// Send `question` to the device listening at `address`, if it answers
+    /// as the deployment's validator, and return the first answer `expected`
+    /// accepts within the timeout.
+    pub(crate) async fn exchange<T>(
+        &self,
+        context: Context,
+        address: SocketAddr,
+        question: &Message,
+        expected: impl Fn(Message) -> Option<T>,
+    ) -> Option<T> {
         let listen = SocketAddr::from(([127, 0, 0, 1], 0));
         let config = crate::peer_discovery::config(
             self.signer.clone(),
@@ -81,17 +88,18 @@ impl Probe {
         let _ = oracle.track(0, Set::from_iter_dedup([self.validator.clone()]));
         let network = network.start();
         let deadline = tokio::time::Instant::now() + self.timeout;
+        let question = question.encode();
         let answer = loop {
             let _ = sender.send(
                 Recipients::One(self.validator.clone()),
-                Message::Query.encode(),
+                question.clone(),
                 true,
             );
             let heard = tokio::time::timeout(RETRY, receiver.recv()).await;
             match heard {
                 Ok(Ok((_, bytes))) => {
-                    if let Some(Message::Status(status)) = Message::decode(bytes.as_ref()) {
-                        break Some(status);
+                    if let Some(answer) = Message::decode(bytes.as_ref()).and_then(&expected) {
+                        break Some(answer);
                     }
                 }
                 Ok(Err(_)) => break None,

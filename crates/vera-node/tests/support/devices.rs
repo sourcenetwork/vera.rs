@@ -41,6 +41,17 @@ pub(crate) fn devices<const N: usize>(
     let keys = [(); N].map(|()| DeviceKey::generate().unwrap());
     let addresses =
         directories.map(|directory| short_epochs::settings(directory, deployment, true).p2p_listen);
+    devices_with(directories, deployment, freshness, keys, addresses)
+}
+
+/// [`devices`] under the transport `keys`, listening on `addresses`.
+pub(crate) fn devices_with<const N: usize>(
+    directories: [&Path; N],
+    deployment: &SoloDeployment,
+    freshness: Duration,
+    keys: [DeviceKey; N],
+    addresses: [std::net::SocketAddr; N],
+) -> [Paired; N] {
     std::array::from_fn(|this| {
         let others = (0..N)
             .filter(|other| *other != this)
@@ -62,6 +73,19 @@ pub(crate) fn devices<const N: usize>(
             backup,
         }
     })
+}
+
+/// Have `device` reach the device known by `other` at `address`, as through a relay.
+#[allow(dead_code, reason = "not every test that switches devices relays them")]
+pub(crate) fn reach_at(device: &mut Paired, other: &DeviceKey, address: std::net::SocketAddr) {
+    let switching = device.active.switching.as_mut().unwrap();
+    for listed in &mut switching.devices {
+        if listed.key == other.public_key() {
+            listed.address = address;
+        }
+    }
+    let followed = switching.devices[0].key.clone();
+    device.backup = device.active.following(&followed).unwrap();
 }
 
 /// Approve `change` as the deployment's only operator, whose secret key is 1.

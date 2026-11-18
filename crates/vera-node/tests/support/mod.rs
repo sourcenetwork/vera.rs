@@ -73,6 +73,7 @@ pub(crate) fn config(directory: &Path, chain_id: u64) -> EmbeddedConfig {
 
 /// Creates a policy through the in-process method table, waits for its certified
 /// receipt and returns the submission.
+#[track_caller]
 pub(crate) fn finalize_a_write(node: &EmbeddedNode, signer: &BlsSigner) -> B256 {
     let call = IAcp::createPolicyCall {
         policy: POLICY.as_bytes().to_vec().into(),
@@ -91,6 +92,7 @@ pub(crate) fn finalize_a_write(node: &EmbeddedNode, signer: &BlsSigner) -> B256 
 }
 
 /// Waits until the node serves a receipt for `submission` that verifies against its consensus key.
+#[track_caller]
 pub(crate) fn await_certified_receipt(node: &EmbeddedNode, submission: B256) {
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {

@@ -134,6 +134,8 @@ pub(super) async fn load_or_create(
         "native genesis did not become durable"
     );
     let native_targets = native.committed_targets().await;
+    #[cfg(feature = "fault-injection")]
+    crate::crash::point(data_dir, "native-genesis");
     let mut block = vera_app::genesis_block(root, targets, module_root);
     block.timestamp = genesis.timestamp;
     // Bind the native schema and consensus parameters into the deployment identity.

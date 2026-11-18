@@ -18,6 +18,14 @@ workspace = true
 name = "embedded_term_faults"
 required-features = ["fault-injection"]
 
+[[test]]
+name = "embedded_crash"
+required-features = ["fault-injection"]
+
+[[test]]
+name = "embedded_crash_term"
+required-features = ["fault-injection"]
+
 [dependencies]
 vera-app.workspace = true
 vera-backend.workspace = true

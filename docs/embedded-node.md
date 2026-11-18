@@ -143,6 +143,18 @@ opens it with `EmbeddedConfig::adopt`.
   histories diverge, and both verify against the deployment's consensus key.
   Run the deployment on one device at a time, and move it between devices
   with a [term certificate](active-term.md).
+- Without `EmbeddedConfig::switching`, nothing detects it: neither device
+  asks the other, neither stops, and a client sees both histories verify.
+  With it, each device lists the others, and two that both validate notice
+  each other as soon as one can reach the other: a device does not start
+  proposing while another answers as the validator, and an active device
+  asks again every `Switching::freshness`. One of the two then stops
+  proposing and reports it (`EmbeddedNode::contested`, or
+  `EmbeddedNode::demoted` when the other holds a later term), and the host
+  settles it with a certificate; the device that follows drops what it
+  finalized alone and reports it (`EmbeddedNode::discarded`). Blocks both
+  finalized before they reached each other are not prevented. See
+  [The wake check](active-term.md#the-wake-check).
 - Every copy is a full signing capability. A copy cannot be revoked short of
   creating a new deployment.
 
@@ -202,9 +214,12 @@ in no committee, runs under a key of its own.
 
 `EmbeddedConfig::backups` on the active device lists the transport public keys
 of its backups. The active device accepts a connection only from a listed
-key, after the authenticated handshake; it never dials a backup, so a backup
-needs no reachable address. A backup dials the active device at the address it
-was given and retries while that device is away. Backups do not connect to
+key, after the authenticated handshake. It is given no backup's address, so a
+backup needs no reachable address; once a backup has connected, the active
+device also learns the address the backup announces and can reach it there
+after the backup restarts, which a test that cut the two apart with a relay
+observed. A backup dials the active device at the address it was given and
+retries while that device is away. Backups do not connect to
 each other, and a backup ignores the list.
 
 The list is configuration. Nothing in the deployment's state records which
@@ -302,10 +317,11 @@ on any node, against its own state.
   the device that was active does not learn of it.
 - Nothing enforces a single active device beyond the term. Two devices
   started as active each finalize their own blocks under the same key and
-  fork the deployment, as described under
-  [A second device](#a-second-device), until one learns the other's term
-  certificate. Both use the validator key as their network identity, so they
-  cannot connect to each other as validators.
+  fork the deployment while they cannot reach each other, as described under
+  [A second device](#a-second-device). Both use the validator key as their
+  network identity, so they cannot connect to each other as validators; they
+  find each other only through the term check of devices configured with
+  `switching`.
 - A backup is as current as its connection. A request finalized on the active
   device while a backup is disconnected is absent from that backup until it
   reconnects, and a device lost before then takes the request with it.
@@ -469,6 +485,34 @@ start is late by the timeout.
 
 Stopping still has no storage shutdown protocol: the stores rely on the same
 recovery path as an interrupted daemon.
+
+### A killed process
+
+`embedded_crash.rs` and `embedded_crash_term.rs` in `crates/vera-node/tests`
+kill a process running embedded nodes at each step they persist and start
+the same directories again. It
+uses the crash points of fault-injection builds: the test names a point in
+the data directory's `crash-at` file, and the process aborts there. The
+points and what the next start was shown to do:
+
+| Killed | Next start |
+| --- | --- |
+| first start in files, after the share and the pending genesis are stored (`solo-dealt`) | publishes the genesis and starts |
+| first start, after the state journals are initialized under the genesis intent and before `native-genesis.bin` (`native-genesis`) | initializes again under the intent and starts |
+| adoption, or a backup's first start, after the record is stored as pending (`solo-record`) | publishes the record and starts; no key file is written |
+| after a block carrying a request was proposed (`proposed`) | the request either finalized once or was dropped with the pool, and is taken again unchanged |
+| while a finalized block is committed, after the ACP journal and before the others (the daemon's `module-commit-crash`) | applies the block once |
+| after finalized history is written and before the index publishes it (`history-before-index`) | serves the request once |
+| a backup during snapshot catch-up, after the first imported history record (the daemon's `snapshot-import-crash`) | completes the catch-up |
+| after a handover is announced (`handover-announced`) | refuses to validate with `TermRefusal::HandedOver`, and the change is certified and taken over |
+| after a takeover is accepted (`takeover-accepted`) and after the start under it decided to clear consensus storage (`seating-decided`) | starts as the validator in the new term |
+| a rewind after the discarded submissions are reported (`rewind-reported`) and after history is cut back (`rewind-cut`) | completes the rewind and reports each submission once |
+
+After each restart the test checks that every request the killed process saw
+finalized has a receipt that verifies, that its signer's sequence moved past
+it once, and that sending the signed request again is refused. A kill while
+Commonware destroys or refills an archive, or inside a journal write, is not
+among the points.
 
 Once the node has stopped, by `stop` or by itself, its directory is free and
 another node can start on it. That holds while clones of its `LocalRpc` are
@@ -703,8 +747,9 @@ are not a capacity or multi-validator measurement.
 - One validator. A stopped or lost device stops the deployment until a
   backup takes it over with a term certificate; see
   [Terms and the active device](active-term.md).
-- Running a second device as validator forks the deployment; see
-  [A second device](#a-second-device).
+- Running a second device as validator forks the deployment while the two
+  cannot reach each other, and without `switching` for as long as both run;
+  see [A second device](#a-second-device).
 - An idle deployment still produces a heartbeat block about every 10 s, and
   finalized history has no retention, so the directory grows without bound;
   see [Disk](#disk).

@@ -1,5 +1,7 @@
 //! The node's side of a switch: it answers the host and the other devices.
 
+mod ancestry;
+
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use alloy_primitives::B256;
@@ -11,7 +13,7 @@ use vera_indexer::BlockIndex;
 use vera_jsonrpc::NodeState;
 
 use super::{
-    Accept, Switching, TermRecord, TermRefusal, TermSeat,
+    Accept, Switching, TermRecord, TermRefusal, TermSeat, WakeGate,
     control::{Asked, Command, View},
     device_id,
     probe::Probe,
@@ -38,6 +40,9 @@ pub(crate) enum Archived {
 pub(crate) type Finalized =
     Arc<dyn Fn(u64) -> futures::future::BoxFuture<'static, Archived> + Send + Sync>;
 
+/// Reads the identifier of the block finalized history holds at a height above genesis.
+pub(crate) type Blocks = Arc<dyn Fn(u64) -> Option<B256> + Send + Sync>;
+
 /// What the term actor works with.
 pub(crate) struct Parts<S, R> {
     pub seat: TermSeat,
@@ -50,11 +55,14 @@ pub(crate) struct Parts<S, R> {
     pub hold: ProposalHold,
     pub index: Arc<BlockIndex>,
     pub finalized: Finalized,
+    pub blocks: Blocks,
     pub modules: SharedModuleState,
     pub status: NodeState,
     pub network: (S, R),
     /// What a wake check dials the other devices with.
     pub probe: Option<Probe>,
+    /// The check proposals pass; a contest makes the next one ask again.
+    pub gate: WakeGate,
 }
 
 struct Actor<S, R> {
@@ -68,13 +76,18 @@ struct Actor<S, R> {
     hold: ProposalHold,
     index: Arc<BlockIndex>,
     finalized: Finalized,
+    blocks: Blocks,
     modules: SharedModuleState,
     status: NodeState,
     sender: S,
     receiver: R,
     probe: Option<Probe>,
+    gate: WakeGate,
     /// The newest answer of each device.
     heard: HashMap<PublicKey, Status>,
+    /// Whether this device holds a proposal back while it asks the others.
+    /// The background check of a device that proposes does not.
+    asking: bool,
 }
 
 /// Answer the host and the other devices until the node stops.
@@ -97,13 +110,28 @@ where
         hold: parts.hold,
         index: parts.index,
         finalized: parts.finalized,
+        blocks: parts.blocks,
         modules: parts.modules,
         status: parts.status,
         sender: parts.network.0,
         receiver: parts.network.1,
         probe: parts.probe,
+        gate: parts.gate,
         heard: HashMap::new(),
+        asking: false,
     };
+    // An active device that stays awake asks again every freshness window:
+    // another device may have been opened as the validator, or taken over,
+    // while the two could not reach each other.
+    let period = match (&actor.switching, &actor.probe, actor.backup) {
+        (Some(switching), Some(_), false) => Some(switching.freshness),
+        _ => None,
+    };
+    let mut recheck = period.map(|period| {
+        let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        interval
+    });
     loop {
         tokio::select! {
             command = commands.recv() => match command {
@@ -114,6 +142,12 @@ where
                 Ok((peer, bytes)) => actor.hear(peer, bytes.as_ref()),
                 Err(_) => return,
             },
+            _ = async {
+                match &mut recheck {
+                    Some(interval) => interval.tick().await,
+                    None => std::future::pending().await,
+                }
+            } => actor.recheck().await,
         }
     }
 }
@@ -142,23 +176,78 @@ where
                 let _ = reply.send(self.accept(*certificate, role).await);
             }
             Command::Probe { reply } => {
-                let _ = reply.send(self.probe().await);
+                let _ = reply.send(self.probe(true).await);
             }
         }
     }
 
     fn hear(&mut self, peer: PublicKey, bytes: &[u8]) {
         match Message::decode(bytes) {
-            Some(Message::Query) => {
+            Some(Message::Query(asking)) => {
                 let status = Message::Status(self.standing());
                 let _ = self
                     .sender
                     .send(Recipients::One(peer), status.encode(), true);
+                // The asker may hold a later term than this device: a device
+                // replaced while it could not reach the others learns it here.
+                if !self.backup
+                    && let Some(certificate) = asking.certificate
+                {
+                    self.learn(certificate);
+                }
             }
             Some(Message::Status(status)) => {
                 self.heard.insert(peer, status);
             }
-            None => {}
+            Some(Message::Ancestry { heights }) => {
+                let blocks = Message::Blocks {
+                    blocks: self.held_blocks(&heights),
+                };
+                let _ = self
+                    .sender
+                    .send(Recipients::One(peer), blocks.encode(), true);
+            }
+            Some(Message::Blocks { .. }) | None => {}
+        }
+    }
+
+    /// Store a certificate of a later term held by another device, if it
+    /// verifies, and stop proposing for good. Returns whether it did.
+    fn learn(&mut self, certificate: TermCertificate) -> bool {
+        let Ok(this) = self.this_device() else {
+            return false;
+        };
+        let change = certificate.change;
+        if change.term <= self.seen() || change.holder == this || self.verify(&certificate).is_err()
+        {
+            return false;
+        }
+        if let Err(error) = self.store(certificate.clone()) {
+            tracing::error!(%error, "term certificate could not be stored");
+            return false;
+        }
+        tracing::warn!(
+            term = change.term,
+            cut = change.cut.height,
+            "another device holds a later term; this device stops proposing"
+        );
+        self.hold.hold();
+        // Blocks this device proposed before the hold still finalize here.
+        // They are void in the new term, and the rewind that follows drops
+        // them; refusing them now would stop the node.
+        self.view.guard.raise(change.term, u64::MAX);
+        self.view.contested.send_replace(None);
+        self.view.demoted.send_replace(Some(certificate));
+        true
+    }
+
+    /// Ask the others again while this device proposes.
+    async fn recheck(&mut self) {
+        if self.hold.is_held() || self.view.demoted.borrow().is_some() {
+            return;
+        }
+        if self.probe(false).await == Asked::Contested {
+            self.gate.expire();
         }
     }
 
@@ -182,7 +271,15 @@ where
             height: head.height,
             block: head.block,
             certificate: self.record.certificate.clone(),
+            waiting: self.holds_back(),
         }
+    }
+
+    /// Whether this device proposes nothing for now: a proposal waits for
+    /// the others' answers, another device answered, or its newest block is
+    /// too old for it to propose before it has asked.
+    fn holds_back(&self) -> bool {
+        self.asking || self.view.contested.borrow().is_some() || !self.gate.fresh()
     }
 
     /// The newest term this node holds or has seen in a finalized block.
@@ -222,7 +319,10 @@ where
         if self.backup {
             return Err(TermRefusal::Backup);
         }
-        if switching.device(&successor).is_none() {
+        // A device that names itself renews its term: it settles a contest
+        // in its favour, and needs no other device to confirm the cut.
+        let renewal = successor == switching.device_key.public_key();
+        if !renewal && switching.device(&successor).is_none() {
             return Err(TermRefusal::UnknownDevice(Box::new(successor)));
         }
         // A device that already gave the deployment up, or was replaced,
@@ -232,7 +332,7 @@ where
         }
         let wait = switching.answer_timeout;
         let held = self.hold.is_held();
-        let change = self.announce(successor, wait).await;
+        let change = self.announce(successor, wait, renewal).await;
         if change.is_err() && !held {
             self.hold.release();
         }
@@ -243,12 +343,13 @@ where
         &mut self,
         successor: PublicKey,
         wait: Duration,
+        renewal: bool,
     ) -> Result<TermChange, TermRefusal> {
         if !self.hold.settle(SETTLE).await {
             return Err(TermRefusal::Unsettled);
         }
         let cut = self.head();
-        if !self.confirmed(&successor, &cut, wait).await {
+        if !renewal && !self.confirmed(&successor, &cut, wait).await {
             return Err(TermRefusal::SuccessorNotCurrent { height: cut.height });
         }
         let change = TermChange {
@@ -260,6 +361,8 @@ where
         let mut record = self.record.clone();
         record.handed_over = Some(change);
         record.store(&self.data_dir)?;
+        #[cfg(feature = "fault-injection")]
+        crate::crash::point(&self.data_dir, "handover-announced");
         self.record = record;
         Ok(change)
     }
@@ -271,7 +374,7 @@ where
         loop {
             let _ = self.sender.send(
                 Recipients::One(device.clone()),
-                Message::Query.encode(),
+                Message::Query(self.standing()).encode(),
                 true,
             );
             if let Ok(Ok((peer, bytes))) = tokio::time::timeout(POLL, self.receiver.recv()).await {
@@ -377,7 +480,8 @@ where
         let change = certificate.change;
         match role {
             Accept::TakeOver => {
-                if !self.backup {
+                let renewal = self.record.handed_over == Some(change);
+                if !self.backup && !renewal {
                     return Err(TermRefusal::Active);
                 }
                 if change.holder != this {
@@ -396,27 +500,33 @@ where
                 let mut record = self.record.clone();
                 record.taking_over = Some(certificate);
                 record.store(&self.data_dir)?;
+                #[cfg(feature = "fault-injection")]
+                crate::crash::point(&self.data_dir, "takeover-accepted");
                 self.record = record;
                 Ok(())
             }
             Accept::Follow => {
-                self.verify(&certificate)?;
-                if change.holder == this {
-                    return Err(TermRefusal::Holder);
+                // A wake check or another device's question may have stored it already.
+                if self.record.certificate.as_ref() != Some(&certificate) {
+                    self.verify(&certificate)?;
+                    if change.holder == this {
+                        return Err(TermRefusal::Holder);
+                    }
+                    // A term this device already holds a certificate of, or one
+                    // below a block it has seen, is not news. A backup may be
+                    // given the certificate of the term its newest blocks are in.
+                    let stored = self.record.change().map_or(0, |held| held.term);
+                    let seen = self.seen();
+                    if change.term <= stored || change.term < seen {
+                        return Err(TermRefusal::Stale {
+                            offered: change.term,
+                            held: stored.max(seen),
+                        });
+                    }
+                    self.hold.hold();
+                    self.store(certificate)?;
                 }
-                // A term this device already holds a certificate of, or one
-                // below a block it has seen, is not news. A backup may be
-                // given the certificate of the term its newest blocks are in.
-                let stored = self.record.change().map_or(0, |held| held.term);
-                let seen = self.seen();
-                if change.term <= stored || change.term < seen {
-                    return Err(TermRefusal::Stale {
-                        offered: change.term,
-                        held: stored.max(seen),
-                    });
-                }
-                self.hold.hold();
-                self.store(certificate)
+                self.locate(&change).await
             }
         }
     }
@@ -460,6 +570,7 @@ where
             seating: self.record.seating,
             resync: self.record.resync,
             followed: self.record.followed,
+            common: None,
         };
         record.store(&self.data_dir)?;
         self.record = record;
@@ -471,30 +582,60 @@ where
     /// Ask every other device where it stands.
     ///
     /// Only a device that runs as the validator answers, so any answer means
-    /// this device must not propose. A certificate of a later term that
-    /// verifies and is stored replaces it for good; anything else is reported
-    /// to the host and asked again at the next proposal.
-    async fn probe(&mut self) -> Asked {
+    /// this device must not propose, with three exceptions: a device in a
+    /// lower term than the one this device holds was replaced, and learns of
+    /// it from the question; a device that holds the certificate of this
+    /// device's term was replaced by it; and a device that holds its
+    /// proposals back stops neither a device that proposes nor, of two that
+    /// hold back, the one with the lower key. `held` says whether a proposal
+    /// waits for the answer. A certificate of a later term
+    /// that verifies and is stored replaces this device for good; anything
+    /// else is reported to the host and asked again at the next proposal.
+    async fn probe(&mut self, held: bool) -> Asked {
         let (Some(switching), Some(probe), false) = (&self.switching, &self.probe, self.backup)
         else {
             return Asked::Clear;
         };
         let this = device_id(&switching.device_key.public_key());
-        let asked = switching.devices.iter().map(|device| async {
-            let answer = probe
-                .ask(self.context.child("term_probe"), device.address)
-                .await;
-            answer.map(|status| (device.key.clone(), status))
-        });
-        let answers: Vec<_> = futures::future::join_all(asked)
-            .await
-            .into_iter()
-            .flatten()
-            .collect();
-        let Some((device, status)) = answers.first().cloned() else {
-            self.view.contested.send_replace(None);
-            return Asked::Clear;
+        let (devices, probe) = (switching.devices.clone(), probe.clone());
+        self.asking = held;
+        let waits = self.holds_back();
+        let question = Message::Query(self.standing());
+        let context = self.context.child("term_probes");
+        let asked = futures::future::join_all(devices.into_iter().map(|device| {
+            let (probe, question) = (probe.clone(), question.clone());
+            let context = context.child("term_probe");
+            async move {
+                let answer = probe
+                    .exchange(
+                        context,
+                        device.address,
+                        &question,
+                        |message| match message {
+                            Message::Status(status) => Some(status),
+                            _ => None,
+                        },
+                    )
+                    .await;
+                answer.map(|status| (device.key, status))
+            }
+        }));
+        let mut asked = std::pin::pin!(asked);
+        // A device asking this one at the same time is answered meanwhile.
+        let answers = loop {
+            tokio::select! {
+                answers = &mut asked => break answers,
+                message = self.receiver.recv() => match message {
+                    Ok((peer, bytes)) => self.hear(peer, bytes.as_ref()),
+                    Err(_) => break asked.await,
+                },
+            }
         };
+        self.asking = false;
+        if self.view.demoted.borrow().is_some() {
+            return Asked::Replaced;
+        }
+        let answers: Vec<_> = answers.into_iter().flatten().collect();
         let held = self.seen();
         let later = answers
             .iter()
@@ -504,24 +645,34 @@ where
                 change.term > held && change.holder != this && self.verify(certificate).is_ok()
             })
             .max_by_key(|certificate| certificate.change.term);
-        if let Some(certificate) = later {
-            match self.store(certificate.clone()) {
-                Ok(()) => {
-                    tracing::warn!(
-                        term = certificate.change.term,
-                        cut = certificate.change.cut.height,
-                        "another device holds a later term; this device stops proposing"
-                    );
-                    self.hold.hold();
-                    self.view
-                        .guard
-                        .raise(certificate.change.term, certificate.change.cut.height);
-                    self.view.demoted.send_replace(Some(certificate));
-                    return Asked::Replaced;
-                }
-                Err(error) => tracing::error!(%error, "term certificate could not be stored"),
-            }
+        if let Some(certificate) = later
+            && self.learn(certificate)
+        {
+            return Asked::Replaced;
         }
+        let holding = self
+            .record
+            .certificate
+            .as_ref()
+            .filter(|certificate| certificate.change.holder == this)
+            .map_or(0, |certificate| certificate.change.term);
+        let contest = answers.into_iter().find(|(device, status)| {
+            let (term, names_this) = status
+                .certificate
+                .as_ref()
+                .map_or((0, false), |certificate| {
+                    (certificate.change.term, certificate.change.holder == this)
+                });
+            // A device that holds this device's own term follows it, or was
+            // replaced by it and has not followed yet.
+            let follows = holding > 0 && term == holding && names_this;
+            let stands = super::contest::stands(waits, this, status.waiting, device_id(device));
+            term >= holding && !follows && stands
+        });
+        let Some((device, status)) = contest else {
+            self.view.contested.send_replace(None);
+            return Asked::Clear;
+        };
         tracing::warn!(%device, height = status.height, "another device validates this deployment");
         self.view.contested.send_replace(Some(crate::Contest {
             device,

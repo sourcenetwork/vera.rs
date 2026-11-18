@@ -354,6 +354,16 @@ like the [host-held share](embedded-node.md#the-share-after-the-first-epoch).
   in a lower term: such a block comes from a device that was replaced. The
   node stops with `TermRefusal::LowerTerm` before the block reaches
   execution. The block stays in its consensus archive.
+- A client sees blocks of both sides of a fork verify: each carries a valid
+  finalization under the deployment's consensus key, and neither
+  `verify_finalized_block` nor the current-evidence checks compare them with
+  blocks the client accepted earlier. A client notices only by comparing the
+  identifier of a block at a height it already accepted, or by finding that a
+  block does not extend its parent. A certificate settles which side
+  continues above its cut (`TermCertificate::keeps`, `admits`); a block below
+  the cut, on a history that left the holder's earlier, cannot be judged from
+  the certificate, and the client compares it with the holder's block at
+  that height.
 
 A block that raises the term carries no certificate. A re-executing node
 accepts any term at or above its parent's; it requires a certificate only to
@@ -368,7 +378,8 @@ device took the deployment over meanwhile. Nothing expires in this design:
 the active device never stops on its own. So before it proposes after a gap in
 its own blocks longer than `Switching::freshness` (30 seconds by default, the
 age a verifying client still accepts a state at), it asks every device in
-`Switching::devices` where it stands.
+`Switching::devices` where it stands, and it asks again every
+`Switching::freshness` while it proposes.
 
 - The gap is measured on the wall clock, from the timestamp of the device's
   newest block at start and from each block it proposes afterwards. The wall
@@ -378,19 +389,41 @@ age a verifying client still accepts a state at), it asks every device in
 - The device asks before it builds a block and again when the block is
   built, before consensus sees it: an idle proposer waits up to the heartbeat
   for a first request, and a machine can sleep inside that wait.
+- A device that stays awake asks in the background once every freshness
+  window, without holding its proposals back for the answer. Two devices
+  that validated while they could not reach each other, after a partition or
+  a takeover the awake device missed, therefore notice each other within one
+  window and the answer timeout of the first connection that succeeds.
 - Two devices that both run as the validator share one network key and cannot
   connect. The device therefore asks over a separate connection under its
   transport key, which the device that replaced it admits as a backup's. It
   dials each listed address and waits up to `Switching::answer_timeout` for
-  an answer.
+  an answer, answering questions from the others meanwhile.
+- The question carries the asker's standing: its newest block and the newest
+  certificate it holds. A device asked by one that holds a later term, valid
+  under the operator policy in the asked device's own state, learns of it
+  from the question and is demoted as below.
 - Only a device that runs as the validator answers under the validator key,
-  so any answer means another device is active, and the device does not
-  propose.
+  so an answer means another device is active, and the device does not
+  propose, with two exceptions. An answer in a lower term than the
+  certificate this device holds, or one that holds that same certificate,
+  comes from a device it replaced, which learns of the term from the
+  question; the device goes on. And an answer
+  from a device that holds a proposal back for its own question, was
+  answered and holds back, or has no block inside the window and has yet to
+  ask, comes from a device that does not propose. It
+  does not stop a device that proposes: the background check of an awake
+  device holds nothing back, so a device opened beside it is answered and
+  the awake device goes on. When the asker holds back too, the one whose
+  transport key is lower goes on, and the other is answered. This settles
+  two devices that start together, and two that noticed each other and both
+  hold back, with one device proposing.
 - An answer that carries a certificate of a later term, held by another
   device and valid under the operator policy in this device's own state,
   demotes the device: it stores the certificate, proposes nothing more, and
-  `EmbeddedNode::demoted` resolves with the certificate. The host then calls
-  `follow`. `resume` and `hand_over` are refused with
+  `EmbeddedNode::demoted` resolves with the certificate. Blocks it proposed
+  before it learned still finalize on it; they are above the cut and void.
+  The host then calls `follow`. `resume` and `hand_over` are refused with
   `TermRefusal::Superseded`.
 - Any other answer is a contest: no certificate, one the device cannot
   verify (the operators were rotated in blocks it does not have), one of a
@@ -402,10 +435,12 @@ age a verifying client still accepts a state at), it asks every device in
   covers two devices certified for the same term number and a device opened
   as validator without a certificate. The answer does not carry the chain of
   certificates since the asker's term: holding is enough to stop the fork,
-  and the host resolves it with a certificate the device can verify.
+  and the host resolves it with a certificate the device can verify; see
+  [Settling a contest](#settling-a-contest).
 - With no answer the device proposes. An idle deployment's heartbeat keeps
-  its newest block inside the window, so a device that stays awake asks only
-  once after it starts or wakes.
+  its newest block inside the window, so the check before a proposal runs
+  only once after a device starts or wakes; the background check runs every
+  window.
 
 ```rust
 let mut node = EmbeddedNode::start(active_config).await?;
@@ -417,11 +452,36 @@ tokio::select! {
 
 This bounds a fork; it does not prevent one. A device that wakes while no
 other device is reachable goes on as the active device, and so does one that
-restarts inside the window. A device that stays awake and is cut off from
-the others never asks. If another device took over meanwhile, both
-finalize blocks until the woken one next asks, or the host gives it the
-certificate with `follow`. Preventing that takes a lease and an always-on
+restarts inside the window. While two devices that both validate cannot
+reach each other, both finalize blocks, and each verifies against the
+deployment's consensus key: two certified blocks exist at one height. The
+fork stops growing once they reach each other, and its blocks are dropped
+from the device that follows. Preventing it takes a lease and an always-on
 voter, which this version does not have.
+
+### Settling a contest
+
+Two devices that validated in the same term without a certificate between
+them, as two devices that adopted one export, end with one of them
+proposing and the other answered. The operators decide which history the
+deployment keeps. The device that keeps it renews its term:
+
+```rust
+let change = keeper.hand_over(&keeper_device_key.public_key()).await?; // next term, itself, its newest block
+let certificate = TermCertificate { change, approvals };
+keeper.take_over(keys, certificate.clone()).await?;   // restarts in place in the new term
+other.follow(certificate).await?;                     // returns what it finalized alone
+```
+
+A `hand_over` that names the device itself holds proposals, waits for the
+blocks already proposed to finalize, and names its newest block as the cut,
+with no successor to confirm it. `take_over` on the active device accepts
+only the certificate of that announcement.
+
+The other device's history left the keeper's below the cut, so the cut does
+not tell it which of its blocks are void. `follow` asks the holder for its
+blocks and finds the newest one the two share, then rewinds to that block
+instead of the cut; see [Rewinding above the cut](#rewinding-above-the-cut).
 
 ## Rewinding above the cut
 
@@ -435,7 +495,11 @@ its directory back to the cut before the node opens it:
    void when the first of them is in a lower term than the certificate's; a
    term never decreases along a chain, so the rest are too. Records above
    the cut that are already in the term were received from its holder and
-   stay.
+   stay. A device whose block at the cut's height is another block, or whose
+   newest block the holder does not hold, left the holder's history below
+   the cut. `follow` then asks the holder for its blocks at chosen heights
+   until it finds the newest block the two share, and stores it in
+   `term.json`; every record above that block is void, whatever its term.
 2. It adds every submission those records finalized to
    `discarded-submissions.json`, then drops the records and their query
    mappings from history.
@@ -451,16 +515,18 @@ Each step is durable before the next begins, and an interrupted rewind is
 completed by the next start as a backup. A start never prepares a directory
 another node runs on.
 
-A device whose block at the cut's height is another block than the cut left
-the deployment's history below the cut. It cannot follow, and the start fails
-with `TermRefusal::Diverged`; the device joins again as a backup in an empty
-directory. This needs two switches that each lost blocks, with this device
-absent for both. A device whose newest block is below the cut cannot be
-judged from the certificate. It is found out when it connects: the holder's
-next block does not extend its newest block, or the history it imports does
-not connect to the records it kept. The node stops with
-`TermRefusal::Diverged` before the block reaches execution, on every start,
-until the directory is replaced.
+A device that left the deployment's history below the cut, and could not
+reach the holder when it was told to follow, or was started with
+`EmbeddedConfig::following` without `follow`, cannot find the block it
+shares with the holder. A block at the cut's height that is another block
+than the cut fails the start with `TermRefusal::Diverged`; the device joins
+again as a backup in an empty directory. A device whose newest block is below
+the cut cannot be judged from the certificate. It is found out when it
+connects: the holder's next block does not extend its newest block, or the
+history it imports does not connect to the records it kept. The node stops
+with `TermRefusal::Diverged` before the block reaches execution, on every
+start, until the directory is replaced. Only a backup is left there by a
+switch: an active device that is told to follow asks the holder.
 
 A rewind also drops an import of history that was interrupted above the cut.
 
@@ -504,8 +570,15 @@ snapshot is taken at and refuses the same way.
 
 These follow from sticky active without a lease and from one shared key:
 
-- An active device that stays awake and is cut off from the others never
-  asks, and an unanswered check permits proposing.
+- An unanswered check permits proposing. Two devices that cannot reach each
+  other both validate, and both finalize blocks, until they can; then they
+  notice within one freshness window and the answer timeout.
+- Two devices that start as the validator at nearly the same moment can each
+  finish asking before the other answers, and both propose until the next
+  background check.
+- A device without `switching`, or one whose listed address does not reach
+  it, asks nobody and is asked by nobody: nothing detects two such devices
+  validating.
 - Nothing binds a certificate to a version of the operator policy. A
   verifier reads the policy at its own newest state, so a certificate
   approved before a rotation may not verify after it, and the reverse.
@@ -533,9 +606,11 @@ Also:
   finalize blocks in any term; the term and its certificate tell honest
   devices and clients which chain to follow, and they do not take the key
   away from a stolen device. That needs key rotation, which is not built.
-- Sticky active without a lease. A fork is bounded by the wake check and by
-  clients that require certificates; it is not prevented. A confirmed
-  takeover loses whatever the replaced device finalized after the cut.
+- Sticky active without a lease. A fork is bounded by the wake check, the
+  background check and clients that require certificates; it is not
+  prevented. A confirmed takeover loses whatever the replaced device
+  finalized after the cut, and a settled contest whatever the other device
+  finalized after the block the two share.
 - Catch-up after a rewind transfers the whole state. Its cost was not
   measured, and neither was a handover or a takeover on a deployment of
   realistic age and size.
@@ -548,12 +623,18 @@ Also:
   new holder's address (`follow`, `EmbeddedConfig::following`).
 - Announced handover and takeover were exercised between two nodes in one
   process on loopback, and a takeover past an unreceived certificate between
-  three. Devices on separate hosts were not.
+  three. Partitions were made with a TCP relay between two nodes in one
+  process (`crates/vera-node/tests/embedded_two_active.rs`). Devices on
+  separate hosts were not.
 - The certificate of a block stored without the block is produced in tests
   by a fault-injection build that writes it into the archive at start. A
   stop between marshal's two writes was not reproduced.
-- An interrupted clearing is tested at one point: after `kept-finalizations`
-  is complete and before the archive is destroyed. A stop while Commonware
+- An interrupted clearing is tested at two points: a process killed after
+  the decision is stored, and a start that fails after `kept-finalizations`
+  is complete and before the archive is destroyed. A process killed after
+  a handover is announced, after a takeover is accepted, and at each step of
+  a rewind is tested too; see
+  [A killed process](embedded-node.md#a-killed-process). A stop while Commonware
   destroys the archive, or while it is filled again, is repeated from the
   same file, provided Commonware opens the partly removed archive at the
   next start; that was not exercised.

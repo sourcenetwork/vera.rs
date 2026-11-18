@@ -513,11 +513,7 @@ impl EmbeddedNode {
             .find(|device| device_id(&device.key) == certificate.change.holder)
             .ok_or(TermRefusal::Holder)?;
         let config = self.config.following(&holder.key)?;
-        // A device told of a later term by its wake check already stored the certificate.
-        let held = self.term.certificate();
-        if held.map(|held| held.change) != Some(certificate.change) {
-            self.term.accept(certificate, Accept::Follow).await?;
-        }
+        self.term.accept(certificate, Accept::Follow).await?;
         self.restart(config).await?;
         self.discarded()
     }

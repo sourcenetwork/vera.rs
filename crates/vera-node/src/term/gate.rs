@@ -58,6 +58,13 @@ impl WakeGate {
         }
     }
 
+    /// Make the next proposal ask first: another device answered as the validator.
+    pub(crate) fn expire(&self) {
+        if let Some(inner) = &self.0 {
+            inner.last.store(0, Ordering::Release);
+        }
+    }
+
     /// Whether the newest block is inside the freshness window, so the
     /// device may build without asking.
     pub(crate) fn fresh(&self) -> bool {

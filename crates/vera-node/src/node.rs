@@ -771,6 +771,8 @@ async fn run_node_with_elector<
         validator: validator.clone(),
     })
     .with_metrics(finalization_metrics);
+    #[cfg(feature = "fault-injection")]
+    let sink = sink.with_crash_directory(config.data_dir.clone());
     hold.attach({
         let index = block_index.clone();
         move || index.head_block_number()
@@ -1338,10 +1340,18 @@ async fn run_node_with_elector<
                     Box::pin(crate::term::archived(marshal, height))
                 })
             },
+            blocks: {
+                let history = history.clone();
+                Arc::new(move |height| {
+                    let block = history.stored_block(height).ok().flatten()?;
+                    Some(block.id().0)
+                })
+            },
             modules: modules.clone(),
             status: node_state.clone(),
             network: term_network,
             probe,
+            gate: wake.clone(),
         };
         state_resolver_handles.push(
             context
