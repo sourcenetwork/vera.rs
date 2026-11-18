@@ -29,14 +29,17 @@ pub(crate) enum Message {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Status {
-    /// Height of the newest finalized block.
+    /// Height of the newest finalized block when the message was made.
     pub height: u64,
     /// Identifier of that block; zero when the device has none.
     pub block: B256,
     /// The newest certificate the device verified.
     pub certificate: Option<TermCertificate>,
     /// Whether the device proposes nothing for now: a proposal waits for the
-    /// others' answers, the device was answered, or it has yet to ask.
+    /// others' answers, the device was answered, or it has yet to ask. A
+    /// device that waits stops no device that proposes; of two that wait,
+    /// the one with the higher `height` goes on, and at equal heights the
+    /// one with the lower transport key.
     pub waiting: bool,
 }
 

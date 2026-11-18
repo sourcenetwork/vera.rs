@@ -58,6 +58,13 @@ impl WakeGate {
         }
     }
 
+    /// Record that the others were asked and none answered as the validator.
+    pub(crate) fn cleared(&self) {
+        if let Some(inner) = &self.0 {
+            inner.last.store(now(), Ordering::Release);
+        }
+    }
+
     /// Make the next proposal ask first: another device answered as the validator.
     pub(crate) fn expire(&self) {
         if let Some(inner) = &self.0 {
@@ -92,7 +99,7 @@ impl WakeGate {
             return;
         }
         match answer.await {
-            Ok(Asked::Clear) | Err(_) => inner.last.store(now(), Ordering::Release),
+            Ok(Asked::Clear) | Err(_) => self.cleared(),
             // The next proposal asks again.
             Ok(Asked::Contested | Asked::Replaced) => std::future::pending().await,
         }

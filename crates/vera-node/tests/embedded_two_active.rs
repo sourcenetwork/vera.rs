@@ -13,6 +13,7 @@ mod support;
 use std::time::{Duration, Instant};
 
 use alloy_primitives::B256;
+use commonware_codec::Encode as _;
 use devices::{Paired, block, certify, devices_with, pair, reach_at, takeover_change};
 use proxy::Relay;
 use short_epochs::{height, run_until};
@@ -180,6 +181,63 @@ fn devices_started_together_as_active_leave_one_proposing() {
 }
 
 #[test]
+fn of_two_devices_that_hold_back_the_one_with_history_goes_on_whatever_its_key() {
+    let mut keys = [(); 2].map(|()| DeviceKey::generate().unwrap());
+    keys.sort_by_key(|key| key.public_key().encode());
+    let [lower, higher] = keys;
+    let directories = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+    let dealt = short_epochs::deployment(9_528, 128);
+    let paths = [directories[0].path(), directories[1].path()];
+    let addresses = paths.map(|path| short_epochs::settings(path, &dealt, true).p2p_listen);
+    // The device with history holds the higher key; the other adopts the
+    // deployment into an empty directory.
+    let [kept, adopted] = devices_with(paths, &dealt, SHORT, [higher.clone(), lower], addresses);
+    let first = block_on(EmbeddedNode::start(kept.active.clone())).unwrap();
+    run_until(&first, |reached| reached >= 3);
+    block_on(first.stop()).unwrap();
+    // Its newest block falls outside the window, so it holds back when it starts.
+    std::thread::sleep(SHORT + Duration::from_secs(2));
+
+    let nodes = std::thread::scope(|scope| {
+        let started = [kept.active.clone(), adopted.active.clone()]
+            .map(|config| scope.spawn(move || block_on(EmbeddedNode::start(config)).unwrap()));
+        started.map(|thread| thread.join().unwrap())
+    });
+    let [history, empty] = &nodes;
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let answered = loop {
+        assert_eq!(
+            contest(history),
+            None,
+            "the device with history was answered"
+        );
+        if let Some(answered) = contest(empty) {
+            break answered;
+        }
+        assert!(Instant::now() < deadline, "neither device was answered");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let reached = height(history);
+    run_until(history, |now| now > reached + 3);
+    assert_eq!(answered.device, higher.public_key());
+    assert!(
+        answered.height >= 3,
+        "answered at height {}",
+        answered.height
+    );
+    assert_eq!(contest(history), None);
+    assert_eq!(proposed(empty), 0);
+    assert_eq!(
+        height(empty),
+        0,
+        "the device without history finalized a block"
+    );
+    for node in nodes {
+        block_on(node.stop()).unwrap();
+    }
+}
+
+#[test]
 fn active_devices_cut_off_from_each_other_contest_once_reconnected() {
     let directories = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
     let chain_id = 9_523;
@@ -218,8 +276,9 @@ fn active_devices_cut_off_from_each_other_contest_once_reconnected() {
         relay.open();
     }
     // A device stops when the other answers its question. Which one asks
-    // first is a matter of timing, so either may be the one that goes on; the
-    // lower key decides only when both hold back at once.
+    // first is a matter of timing, so either may be the one that goes on;
+    // the finalized heights, and the keys at equal heights, decide only when
+    // both hold back at once.
     let deadline = Instant::now() + Duration::from_secs(120);
     let held = loop {
         assert!(

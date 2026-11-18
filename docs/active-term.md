@@ -414,10 +414,30 @@ age a verifying client still accepts a state at), it asks every device in
   ask, comes from a device that does not propose. It
   does not stop a device that proposes: the background check of an awake
   device holds nothing back, so a device opened beside it is answered and
-  the awake device goes on. When the asker holds back too, the one whose
-  transport key is lower goes on, and the other is answered. This settles
-  two devices that start together, and two that noticed each other and both
-  hold back, with one device proposing.
+  the awake device goes on. When the asker holds back too, the one with the
+  higher finalized height goes on, and the other is answered; at equal
+  heights the one whose transport key is lower goes on, whether or not the
+  two hold the same block at that height. This settles two devices that
+  start together, and two that noticed each other and both hold back, with
+  one device proposing, and it keeps the device that holds the deployment's
+  history ahead of one that adopted the deployment into an empty directory.
+  The height rule applies only where an answer counts at all: an answer in a
+  lower term, or one holding the asker's own certificate, still does not
+  stop the asker.
+- Both devices of one exchange judge it from the same pair: the height the
+  question carried when it was sent and the height the answer carried. A
+  device that holds back can still finalize blocks while it waits: blocks it
+  proposed before it held back, and blocks its consensus archive held
+  finalized when it started. Its own question and its answers to the other
+  device can therefore carry different heights. A device that holds back
+  and answers a question that the exchange lets go on stops as well, even if
+  its own question lets it go on, and a device whose check lets it go on
+  answers that it proposes from then on. Two exchanges that disagree
+  therefore stop both devices for one turn, and they ask again at their next
+  turn, at heights that no longer move; they never let both go on.
+  A device does not yield to one in a lower term than it holds, nor to one
+  that carries its own certificate: it replaced the first, the second
+  follows it, and the answer of either would not stop its own check.
 - An answer that carries a certificate of a later term, held by another
   device and valid under the operator policy in this device's own state,
   demotes the device: it stores the certificate, proposes nothing more, and
