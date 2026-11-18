@@ -104,19 +104,29 @@ fn devices_that_adopt_one_export_without_switching_fork_unnoticed() {
         .each_ref()
         .map(|directory| short_epochs::settings(directory.path(), &dealt, true));
     let nodes = configs.map(|config| block_on(EmbeddedNode::start(config)).unwrap());
-    for node in &nodes {
-        run_until(node, |reached| reached >= 3);
-    }
-    let blocks = nodes.each_ref().map(|node| light_block(node, 2));
-    let verified = blocks
-        .each_ref()
-        .map(|light| verify_finalized_block(light, nodes[0].consensus_key()));
-    let [first, second] = verified.map(Result::unwrap);
+    // Idle devices can build identical blocks; a write only one of them holds
+    // makes their blocks at its height differ.
+    let signer = BlsSigner::new(79u64.into(), chain_id).unwrap();
+    let written = finalize_a_write(&nodes[0], &signer);
+    let proof: vera_domain::ReceiptResponse = block_on(
+        nodes[0]
+            .rpc()
+            .request("vera_getReceiptProof", vec![serde_json::json!(written)]),
+    )
+    .unwrap();
+    let first = verify_finalized_block(&proof.revision, nodes[0].consensus_key()).unwrap();
+    run_until(&nodes[1], |reached| reached >= first.height);
+    let second = verify_finalized_block(
+        &light_block(&nodes[1], first.height),
+        nodes[0].consensus_key(),
+    )
+    .unwrap();
     assert_ne!(
         first.id(),
         second.id(),
         "two certified blocks at one height"
     );
+    assert!(!receipt(&nodes[1], written));
     // Neither device notices: both go on.
     for node in &nodes {
         let reached = height(node);
