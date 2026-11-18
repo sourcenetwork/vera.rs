@@ -131,13 +131,15 @@ fn a_backup_takes_over_on_confirmation_while_the_active_device_is_down() {
     let directories = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
     let chain_id = 9_502;
     let dealt = short_epochs::deployment(chain_id, 92);
-    let [first, second] = pair(
+    let [first, mut second] = pair(
         [directories[0].path(), directories[1].path()],
         &dealt,
         WINDOW,
     );
+    second.backup.rpc_listen = Some(std::net::SocketAddr::from(([127, 0, 0, 1], 0)));
     let laptop = block_on(EmbeddedNode::start(first.active)).unwrap();
     let mut phone = block_on(EmbeddedNode::start(second.backup.clone())).unwrap();
+    let served = phone.rpc_addr().unwrap();
     // A backup's directory does not open as the validator without a certificate.
     assert!(matches!(
         block_on(EmbeddedNode::start(
@@ -171,6 +173,9 @@ fn a_backup_takes_over_on_confirmation_while_the_active_device_is_down() {
 
     block_on(phone.take_over(dealt.keys().clone(), certify(change))).unwrap();
     assert_eq!(phone.term(), 1);
+    // The validator that replaced the backup serves the address the backup bound.
+    assert_eq!(phone.rpc_addr(), Some(served));
+    assert!(served_status(served).contains(&format!("\"chainId\":{chain_id}")));
     let after = finalize_a_write(&phone, &signer);
     await_certified_receipt(&phone, before);
     await_certified_receipt(&phone, after);
@@ -627,4 +632,22 @@ fn a_backup_that_synchronized_by_snapshot_takes_over_before_another_block() {
     assert_eq!(block(&phone, joined + 1).term, 1);
     run_until(&phone, |reached| reached >= joined + 3);
     block_on(phone.stop()).unwrap();
+}
+
+/// The `vera_nodeStatus` response of the network listener at `address`.
+fn served_status(address: std::net::SocketAddr) -> String {
+    use std::io::{Read as _, Write as _};
+
+    let body = r#"{"jsonrpc":"2.0","id":1,"method":"vera_nodeStatus","params":[]}"#;
+    let mut stream = std::net::TcpStream::connect(address).unwrap();
+    write!(
+        stream,
+        "POST / HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    response
 }
