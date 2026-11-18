@@ -397,12 +397,9 @@ fn a_device_opened_beside_one_that_is_checking_is_answered() {
         let dealt = short_epochs::deployment(9_526 + running as u64, 126);
         let paths = [directories[0].path(), directories[1].path()];
         let addresses = paths.map(|path| short_epochs::settings(path, &dealt, true).p2p_listen);
-        let mut devices = devices_with(paths, &dealt, SHORT, keys.clone(), addresses);
+        let devices = devices_with(paths, &dealt, SHORT, keys.clone(), addresses);
         // The running device's background check waits out the answer of a
-        // device that is not up, so it is asking when the other one opens.
-        for device in &mut devices {
-            device.active.switching.as_mut().unwrap().answer_timeout = Duration::from_secs(10);
-        }
+        // device that is not up, so it is asking most of the time.
         let first = block_on(EmbeddedNode::start(devices[running].active.clone())).unwrap();
         run_until(&first, |reached| reached >= 3);
         std::thread::sleep(SHORT + Duration::from_secs(1));
