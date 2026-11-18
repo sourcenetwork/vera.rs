@@ -168,7 +168,7 @@ async fn eth_call_and_estimate_observe_the_head_height_and_time() {
 #[tokio::test]
 async fn a_native_write_is_simulated_for_its_owner_refused_for_another_did_and_writes_nothing() {
     let (modules, policy) = committed();
-    let root = modules.read().unwrap().state_root();
+    let before = modules.read().unwrap().serialize_stores();
     let local = local(provider(modules.clone()));
     assert!(local.method_names().contains(&"vera_simulateNativeCall"));
 
@@ -197,7 +197,7 @@ async fn a_native_write_is_simulated_for_its_owner_refused_for_another_did_and_w
     assert!(refused.logs.is_empty() && refused.output.is_empty());
 
     let after = modules.read().unwrap();
-    assert_eq!(after.state_root(), root);
+    assert_eq!(after.serialize_stores(), before);
     assert_eq!(after.nonces.get_nonce(OWNER).unwrap(), 0);
     assert!(after.acp.query_policy(&hex::encode(policy)).is_ok());
 }

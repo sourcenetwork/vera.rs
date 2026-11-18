@@ -129,7 +129,7 @@ fn simulate(modules: &ModuleState, signer: &str, calldata: Vec<u8>) -> NativeSim
 #[test]
 fn a_write_succeeds_for_the_owner_is_refused_for_another_did_and_changes_nothing() {
     let (modules, policy) = committed();
-    let root = modules.state_root();
+    let before = modules.serialize_stores();
     let transfer = || {
         IAcp::transferObjectCall {
             policyId: policy,
@@ -155,7 +155,7 @@ fn a_write_succeeds_for_the_owner_is_refused_for_another_did_and_changes_nothing
     assert!(refused.gas_used >= NATIVE_REFUSAL_GAS && refused.gas_used < NATIVE_TX_GAS_LIMIT);
     assert!(refused.logs.is_empty() && refused.output.is_empty());
 
-    assert_eq!(modules.state_root(), root);
+    assert_eq!(modules.serialize_stores(), before);
     assert_eq!(modules.nonces.get_nonce(OWNER).unwrap(), 0);
     let still_owned = simulate(&modules, OWNER, transfer());
     assert!(still_owned.success, "the first dry run moved the object");
