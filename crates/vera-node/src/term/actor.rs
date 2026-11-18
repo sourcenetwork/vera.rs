@@ -180,6 +180,9 @@ where
             } => {
                 let _ = reply.send(self.accept(*certificate, role).await);
             }
+            // A proposal consensus dropped no longer waits for this answer,
+            // and asking for it would delay the next proposal's question.
+            Command::Probe { reply } if reply.is_closed() => {}
             Command::Probe { reply } => {
                 let _ = reply.send(self.probe(true).await);
             }
@@ -278,8 +281,13 @@ where
     }
 
     /// Ask the others again while this device proposes.
+    ///
+    /// A device whose newest block is outside the window asks before its
+    /// next proposal instead. Asking here as well would hold that question
+    /// back: a device that does not answer costs each check the whole
+    /// answer timeout, which can exceed the window.
     async fn recheck(&mut self) {
-        if self.hold.is_held() || self.view.demoted.borrow().is_some() {
+        if self.hold.is_held() || self.view.demoted.borrow().is_some() || !self.gate.fresh() {
             return;
         }
         if self.probe(false).await == Asked::Contested {

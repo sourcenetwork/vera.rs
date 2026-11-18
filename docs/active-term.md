@@ -394,6 +394,11 @@ age a verifying client still accepts a state at), it asks every device in
   that validated while they could not reach each other, after a partition or
   a takeover the awake device missed, therefore notice each other within one
   window and the answer timeout of the first connection that succeeds.
+  A device whose newest block is outside the window skips the background
+  check, since its next proposal asks, and it drops the question of a
+  proposal consensus abandoned. Neither then delays the question of the
+  proposal that follows, which an unreachable device would otherwise hold
+  back by an answer timeout each time.
 - Two devices that both run as the validator share one network key and cannot
   connect. The device therefore asks over a separate connection under its
   transport key, which the device that replaced it admits as a backup's. It
