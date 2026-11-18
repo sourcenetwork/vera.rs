@@ -19,11 +19,9 @@ pub struct BlockContext {
     /// decide whether speculative module state should be
     /// overwritten on re-execution at the same height.
     pub is_verification: bool,
-    /// Expected module state root from the block being verified.
+    /// Module state root of the block being verified. Ordered storage compares
+    /// it with the root of its authenticated partitions; the executor does not.
     pub expected_module_state_root: Option<B256>,
-    /// Skip executor-owned module commitments when reconstructing receipts or
-    /// sealing the logical changes in external authenticated storage.
-    pub receipt_only: bool,
 }
 
 impl BlockContext {
@@ -36,7 +34,6 @@ impl BlockContext {
             prevrandao,
             is_verification: false,
             expected_module_state_root: None,
-            receipt_only: false,
         }
     }
 
@@ -51,13 +48,6 @@ impl BlockContext {
     #[must_use]
     pub const fn with_expected_module_state_root(mut self, root: B256) -> Self {
         self.expected_module_state_root = Some(root);
-        self
-    }
-
-    /// Skip full-store hashing when authenticated storage supplies the commitment.
-    #[must_use]
-    pub const fn with_receipt_only(mut self) -> Self {
-        self.receipt_only = true;
         self
     }
 

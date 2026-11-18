@@ -7,7 +7,7 @@ use crate::{
     BlockContext, ExecutionConfig, ExecutionError, ExecutionOutcome, ExecutionReceipt,
     ModuleSnapshot, StateDbAdapter, build_receipt, decode_evm_tx, extract_changes,
 };
-use alloy_primitives::{B256, Bytes, U256, keccak256};
+use alloy_primitives::{Bytes, U256, keccak256};
 use commonware_parallel::{Rayon, Sequential, Strategy};
 use revm::{
     Context, ExecuteCommitEvm, InspectEvm, Journal, MainBuilder,
@@ -513,11 +513,6 @@ impl VeraExecutor {
         }
 
         outcome.gas_used = gas_budget.used();
-        outcome.module_state_root = if context.receipt_only {
-            B256::ZERO
-        } else {
-            modules.state_root()
-        };
 
         Ok((outcome, ModuleSnapshot { modules }))
     }
@@ -608,7 +603,7 @@ mod tests {
         let outcome = execute(&executor, &context, &txs).unwrap();
         assert_eq!(outcome.gas_used, 0);
         assert!(outcome.receipts.is_empty());
-        assert_ne!(outcome.module_state_root, B256::ZERO);
+        assert_eq!(outcome.module_state_root, B256::ZERO);
     }
 
     #[test]
@@ -697,13 +692,15 @@ mod tests {
             let (proposed, next) = executor
                 .execute_with_modules(&MockStateDb, &context, &[], parent.clone())
                 .unwrap();
-            let mut verification =
-                context.with_expected_module_state_root(proposed.module_state_root);
-            verification.is_verification = true;
             let (verified, verified_state) = executor
-                .execute_with_modules(&MockStateDb, &verification, &[], parent.clone())
+                .execute_with_modules(
+                    &MockStateDb,
+                    &context.with_verification(),
+                    &[],
+                    parent.clone(),
+                )
                 .unwrap();
-            assert_eq!(verified.module_state_root, proposed.module_state_root);
+            assert_eq!(verified.gas_used, proposed.gas_used);
             assert_eq!(
                 verified_state.modules.serialize_stores(),
                 next.modules.serialize_stores()
@@ -818,12 +815,17 @@ mod tests {
             B256::ZERO,
             B256::ZERO,
         );
-        let before = parallel.snapshot().modules.state_root();
-        let expected = execute(&sequential, &context, &txs).unwrap();
-        let actual = execute(&parallel, &context, &txs).unwrap();
+        let before = parallel.snapshot().modules.serialize_stores();
+        let run = |executor: &VeraExecutor, context: &BlockContext, txs: &[Bytes]| {
+            executor
+                .execute_with_modules(&MockStateDb, context, txs, executor.snapshot())
+                .map(|(outcome, state)| (outcome, state.modules.serialize_stores()))
+        };
+        let (expected, expected_state) = run(&sequential, &context, &txs).unwrap();
+        let (actual, actual_state) = run(&parallel, &context, &txs).unwrap();
         assert_eq!(actual.receipts.len(), 64);
         assert_eq!(actual.executed_tx_indices, expected.executed_tx_indices);
-        assert_eq!(actual.module_state_root, expected.module_state_root);
+        assert_eq!(actual_state, expected_state);
         assert_eq!(actual.gas_used, expected.gas_used);
         assert_eq!(
             serde_json::to_value(&actual.receipts).unwrap(),
@@ -835,8 +837,9 @@ mod tests {
             .into_iter()
             .map(|i| txs[i].clone())
             .collect();
-        let verified = execute(&parallel, &context.clone().with_verification(), &included).unwrap();
-        assert_eq!(verified.module_state_root, actual.module_state_root);
+        let (verified, verified_state) =
+            run(&parallel, &context.clone().with_verification(), &included).unwrap();
+        assert_eq!(verified_state, actual_state);
         assert_eq!(
             serde_json::to_value(verified.receipts).unwrap(),
             serde_json::to_value(actual.receipts).unwrap()
@@ -850,7 +853,7 @@ mod tests {
             execute(&parallel, &context.with_verification(), &txs),
             Err(ExecutionError::NonceMismatch { .. })
         ));
-        assert_eq!(parallel.snapshot().modules.state_root(), before);
+        assert_eq!(parallel.snapshot().modules.serialize_stores(), before);
     }
 
     #[test]

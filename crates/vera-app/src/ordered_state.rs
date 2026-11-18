@@ -328,12 +328,10 @@ impl OrderedState {
         txs: &[Tx],
     ) -> Result<(OrderedSealed, ExecutionOutcome), AppError> {
         let (accounts, storage, code, acp, bulletin, vera, nonces, _) = parent.databases;
-        // Ordered storage supplies the module commitment after execution.
-        let execution_context = context.clone().with_receipt_only();
         let mut executed = execute_block(
             executor,
             (accounts, storage, code),
-            &execution_context,
+            context,
             txs,
             parent.modules.clone(),
         )

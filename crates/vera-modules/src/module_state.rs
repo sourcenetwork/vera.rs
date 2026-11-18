@@ -46,26 +46,9 @@ impl ModuleState {
         std::array::from_fn(|i| stores[i].diff_from(parents[i]))
     }
 
-    /// Compute a deterministic state root from all module stores.
-    ///
-    /// Uses keccak256-based hashing of serialized stores. Native deployments
-    /// combine the four authenticated QMDB roots with `combine_module_roots` instead.
-    pub fn state_root(&self) -> B256 {
-        let acp_bytes = self.acp.store().serialize();
-        let bulletin_bytes = self.bulletin.store().serialize();
-        let vera_bytes = self.vera.store().serialize();
-        let nonce_bytes = self.nonces.store().serialize();
-
-        let mut buf = Vec::with_capacity(MODULE_ROOT_NAMESPACE.len() + 128);
-        buf.extend_from_slice(MODULE_ROOT_NAMESPACE);
-        buf.extend_from_slice(keccak256(&acp_bytes).as_slice());
-        buf.extend_from_slice(keccak256(&bulletin_bytes).as_slice());
-        buf.extend_from_slice(keccak256(&vera_bytes).as_slice());
-        buf.extend_from_slice(keccak256(&nonce_bytes).as_slice());
-        keccak256(buf)
-    }
-
-    /// Serialize each module's store for persistence.
+    /// Serialize each module's store. Tests compare module states with it;
+    /// the commitment to module state is `combine_module_roots` over the
+    /// authenticated partitions.
     pub fn serialize_stores(&self) -> [Vec<u8>; 4] {
         [
             self.acp.store().serialize(),
@@ -109,28 +92,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn empty_state_root_is_deterministic() {
-        let s1 = ModuleState::default();
-        let s2 = ModuleState::default();
-        assert_eq!(s1.state_root(), s2.state_root());
-        assert_ne!(s1.state_root(), B256::ZERO);
-    }
-
-    #[test]
-    fn state_root_changes_with_data() {
-        let s1 = ModuleState::default();
-        let root_empty = s1.state_root();
-
-        let mut s2 = ModuleState::default();
-        s2.nonces
-            .check_and_increment("did:key:z6MkAlice", 0)
-            .unwrap();
-        let root_with_nonce = s2.state_root();
-
-        assert_ne!(root_empty, root_with_nonce);
-    }
-
-    #[test]
     fn combine_module_roots_deterministic() {
         let roots = [[0xAAu8; 32], [0xBBu8; 32], [0xCCu8; 32], [0xDDu8; 32]];
         let r1 = combine_module_roots(&roots);
@@ -166,7 +127,7 @@ mod tests {
         ];
         let restored = ModuleState::from_stores(deserialized);
 
-        assert_eq!(state.state_root(), restored.state_root());
+        assert_eq!(state.serialize_stores(), restored.serialize_stores());
         assert_eq!(restored.nonces.get_nonce("did:key:z6MkAlice").unwrap(), 1);
     }
 }

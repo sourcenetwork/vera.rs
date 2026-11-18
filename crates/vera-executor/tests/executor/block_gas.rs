@@ -132,7 +132,6 @@ fn verify_selected(
         )
         .unwrap();
     assert_eq!(verified.gas_used, outcome.gas_used);
-    assert_eq!(verified.module_state_root, outcome.module_state_root);
     assert_eq!(
         serde_json::to_value(verified.receipts).unwrap(),
         serde_json::to_value(&outcome.receipts).unwrap()

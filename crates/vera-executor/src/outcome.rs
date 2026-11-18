@@ -13,7 +13,8 @@ pub struct ExecutionOutcome {
     pub receipts: Vec<ExecutionReceipt>,
     /// Total gas used by all transactions.
     pub gas_used: u64,
-    /// Module state root after execution.
+    /// Module state root after execution. The executor leaves it zero:
+    /// ordered storage sets it from its authenticated partitions.
     pub module_state_root: B256,
     /// Indices of input txs that were actually executed.
     ///
