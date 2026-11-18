@@ -1,4 +1,4 @@
-//! A single-validator node hosted in the test process, with no RPC socket.
+//! A single-validator node hosted in the test process.
 
 use std::{net::SocketAddr, path::Path, time::Duration};
 
@@ -401,5 +401,36 @@ async fn a_rejected_request_does_not_stop_the_heartbeat() {
     assert!(after > at + 1);
     let accepted = create_policy(&node, &signer, "after_rejected").await;
     verified_receipt(&node, accepted).await;
+    node.stop().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_node_reports_the_rpc_address_it_bound_for_port_zero() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut settings = config(directory.path(), 9408, ACCOUNT_KEY);
+    settings.rpc_listen = Some(SocketAddr::from(([127, 0, 0, 1], 0)));
+
+    let node = EmbeddedNode::start(settings).await.unwrap();
+    let address = node.rpc_addr().expect("a network listener was configured");
+    assert!(address.ip().is_loopback());
+    assert_ne!(address.port(), 0);
+
+    let status = vera_client::VeraClient::new(format!("http://{address}"))
+        .node_status()
+        .await
+        .unwrap();
+    assert_eq!(status.chain_id, 9408);
+    node.stop().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_node_without_a_network_listener_reports_no_rpc_address() {
+    let directory = tempfile::tempdir().unwrap();
+
+    let node = EmbeddedNode::start(config(directory.path(), 9409, ACCOUNT_KEY))
+        .await
+        .unwrap();
+
+    assert_eq!(node.rpc_addr(), None);
     node.stop().await.unwrap();
 }

@@ -355,8 +355,13 @@ Tokio, and from any thread. After the node stops they fail with
   `vera_getLightBlock` fills it.
 
 Set `EmbeddedConfig::rpc_listen` to also serve the same methods over the
-network. It is off by default. The address is bound during start, so an
-address in use fails the start.
+network. It is off by default. `start` binds the address before it starts the
+node thread, so an address in use fails the start with `EmbedError::RpcBind`.
+`EmbeddedNode::rpc_addr` returns the bound address, or `None` without a
+network listener. A host that wants a system-chosen port sets port 0 and reads
+the port from `rpc_addr`; nothing releases the port between choosing and
+binding it, so no other process can take it. `take_over` and `follow` keep the
+socket open while the node restarts in place, so the address does not change.
 
 ## Threads
 
