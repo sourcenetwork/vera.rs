@@ -809,7 +809,6 @@ async fn run_node_with_elector<
             |pacing| pacing.batch,
         ),
     )
-    .with_idle_wait(solo_pacing.map_or(Duration::ZERO, |pacing| pacing.idle))
     .with_timestamp_step(
         genesis
             .timestamp_step_secs
@@ -930,10 +929,18 @@ async fn run_node_with_elector<
     );
 
     let (application, application_ready) = crate::ready_application::ReadyApplication::new(
-        reshare::Application::new(
-            stateful_mailbox.clone(),
-            reshare_mailbox.clone(),
-            blocks_per_epoch,
+        crate::idle_pacing::IdlePacing::new(
+            reshare::Application::new(
+                stateful_mailbox.clone(),
+                reshare_mailbox.clone(),
+                blocks_per_epoch,
+            ),
+            mempool.clone(),
+            solo_pacing.map_or(Duration::ZERO, |pacing| pacing.idle),
+            {
+                let index = block_index.clone();
+                move || index.head_block_number()
+            },
         ),
         hold.clone(),
         wake.clone(),

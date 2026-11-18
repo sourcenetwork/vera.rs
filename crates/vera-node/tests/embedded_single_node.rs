@@ -8,7 +8,7 @@ use serde_json::json;
 use vera_client::{ACP_ADDRESS, BlsSigner};
 use vera_domain::ReceiptResponse;
 use vera_modules::{acp::abi::IAcp, vera::administration::OperatorPolicy};
-use vera_node::{EmbedError, EmbeddedConfig, EmbeddedNode, SoloError, SoloGenesis};
+use vera_node::{EmbedError, EmbeddedConfig, EmbeddedNode, SoloError, SoloGenesis, SoloPacing};
 
 const ACCOUNT_KEY: &str = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
 const OTHER_ACCOUNT_KEY: &str =
@@ -246,12 +246,64 @@ fn age(header: &vera_domain::GossipHeader) -> u64 {
         .saturating_sub(header.timestamp)
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn an_idle_node_publishes_each_heartbeat_block_as_it_finalizes() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut settings = config(directory.path(), 9410, ACCOUNT_KEY);
+    let heartbeat = Duration::from_secs(6);
+    settings.pacing = Some(SoloPacing {
+        idle: heartbeat,
+        batch: SoloPacing::BATCH,
+    });
+    let node = EmbeddedNode::start(settings).await.unwrap();
+    let mut headers = node
+        .rpc()
+        .subscribe("vera_subscribeHeaders", Vec::new(), 8)
+        .await
+        .unwrap();
+    let mut next = async || -> (vera_domain::GossipHeader, std::time::Instant) {
+        let header = tokio::time::timeout(heartbeat * 4, headers.next())
+            .await
+            .expect("the heartbeat finalizes a block")
+            .unwrap()
+            .unwrap();
+        (header, std::time::Instant::now())
+    };
+    // The first block after the start does not wait for a request.
+    let (mut previous, mut arrived) = next().await;
+    for _ in 0..3 {
+        let (header, at) = next().await;
+        // A block is proposed and finalized at once; its timestamp is in whole
+        // seconds, so its age overstates the delay by up to a second.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap();
+        let delay = now.saturating_sub(Duration::from_secs(header.timestamp));
+        assert!(
+            delay < heartbeat / 2,
+            "block {} was published {delay:?} after it was proposed",
+            header.height
+        );
+        // One empty block per heartbeat, none in between.
+        assert_eq!(header.height, previous.height + 1);
+        assert!(
+            at - arrived > heartbeat / 2,
+            "block {} followed its parent after {:?}",
+            header.height,
+            at - arrived
+        );
+        (previous, arrived) = (header, at);
+    }
+    drop(headers);
+    node.stop().await.unwrap();
+}
+
 #[test]
 fn an_idle_or_paused_node_keeps_its_block_timestamps_on_the_clock() {
     let directory = tempfile::tempdir().unwrap();
     let settings = config(directory.path(), 9407, ACCOUNT_KEY);
-    // A header reaches subscribers one heartbeat after its block was proposed.
-    let limit = EmbeddedConfig::HEARTBEAT.as_secs() + 4;
+    // A header reaches subscribers as its block finalizes.
+    let limit = 4;
 
     let node = block_on(EmbeddedNode::start(settings.clone())).unwrap();
     let mut headers =
@@ -391,7 +443,7 @@ async fn a_rejected_request_does_not_stop_the_heartbeat() {
     let at = rejected.revision.height.max(before);
 
     // The node keeps finalizing: its heartbeat, and a later request.
-    // Two idle waits pass before the second block after the request is published.
+    // Two idle waits pass before the second block after the request.
     let after = tokio::time::timeout(
         EmbeddedConfig::HEARTBEAT * 3,
         finalized_beyond(&node, at + 1),

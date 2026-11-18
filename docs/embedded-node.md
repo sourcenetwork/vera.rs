@@ -677,24 +677,25 @@ comparable with the table under [Proposal pacing](#proposal-pacing).
 `EmbeddedConfig::pacing` controls how the lone validator paces proposals. The
 default has two parts:
 
-- **Idle wait.** With no request pending and no unfinalized block that carries
-  requests, the proposer waits up to `EmbeddedConfig::HEARTBEAT` (10 s) for a
-  first request, then proposes an empty block as a heartbeat. A request ends
-  the wait at once. The wait must stay below the leader timeout, 12 s by
+- **Idle wait.** With no request pending, the proposer waits up to
+  `EmbeddedConfig::HEARTBEAT` (10 s) for a first request, then proposes an
+  empty block as a heartbeat. A request ends the wait at once; requests
+  already in an unfinalized block do not. The wait must stay below the leader timeout, 12 s by
   default, and that below the certification timeout and the solo genesis stall
   timeout of 30 s; `start` rejects settings that would not.
 
   The heartbeat cannot be dropped: a client that verifies state against
   finalized headers refuses a state older than its freshness limit, which is
-  30 seconds in Backbone's light client. A header reaches clients one idle
-  wait after its block was proposed, because the node processes a block's
-  finalization only when the next proposal returns. With the 10 s default an
-  idle node's newest published state is therefore between 10 and 20 seconds
-  old, which leaves room for one late heartbeat. A host that lengthens the
-  idle wait must keep twice the wait inside the limit its clients use.
+  30 seconds in Backbone's light client. The wait runs before the proposal
+  request reaches the actor that processes finalization, so a block's header,
+  light block and current evidence are published as it finalizes, tens of
+  milliseconds after it is proposed. With the 10 s default an idle node's
+  newest published state is therefore at most about 10 seconds old, which
+  leaves room for one late heartbeat. A host that lengthens the idle wait must
+  keep twice the wait inside the limit its clients use.
 
-  The wait does not apply until one block has been finalized since the start,
-  so a node that just started publishes a current state at once.
+  The first proposal after a start does not wait, so a node that just started
+  publishes a current state at once.
 
   Block timestamps follow the device's clock. A solo genesis lifts the limit
   on how far a timestamp may advance past its parent's
@@ -705,8 +706,8 @@ default has two parts:
   The leader timeout is also how long a lone validator waits before it tries
   again after a proposal it could not build.
 - **Batch window.** Once a request has arrived the proposer collects more for
-  50 ms. While a block that carries requests is unfinalized it keeps this
-  cadence, because the wait runs on the actor that also processes finalization.
+  50 ms. An empty heartbeat block is built after the same window, so heartbeats
+  are about 10.05 s apart.
 
 `pacing: None` keeps the standalone daemon's cadence.
 
