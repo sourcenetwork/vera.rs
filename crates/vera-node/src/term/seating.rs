@@ -178,6 +178,8 @@ pub(crate) async fn settle(
         let seating = Seating { role, cut };
         record.seating = Some(seating);
         record.store(directory)?;
+        #[cfg(feature = "fault-injection")]
+        crate::crash::point(directory, "seating-decided");
         finalizations = clear(
             context.child("cleared"),
             directory,

@@ -41,6 +41,17 @@ pub(crate) fn devices<const N: usize>(
     let keys = [(); N].map(|()| DeviceKey::generate().unwrap());
     let addresses =
         directories.map(|directory| short_epochs::settings(directory, deployment, true).p2p_listen);
+    devices_with(directories, deployment, freshness, keys, addresses)
+}
+
+/// [`devices`] under the transport `keys`, listening on `addresses`.
+pub(crate) fn devices_with<const N: usize>(
+    directories: [&Path; N],
+    deployment: &SoloDeployment,
+    freshness: Duration,
+    keys: [DeviceKey; N],
+    addresses: [std::net::SocketAddr; N],
+) -> [Paired; N] {
     std::array::from_fn(|this| {
         let others = (0..N)
             .filter(|other| *other != this)

@@ -625,8 +625,12 @@ Also:
 - The certificate of a block stored without the block is produced in tests
   by a fault-injection build that writes it into the archive at start. A
   stop between marshal's two writes was not reproduced.
-- An interrupted clearing is tested at one point: after `kept-finalizations`
-  is complete and before the archive is destroyed. A stop while Commonware
+- An interrupted clearing is tested at two points: a process killed after
+  the decision is stored, and a start that fails after `kept-finalizations`
+  is complete and before the archive is destroyed. A process killed after
+  a handover is announced, after a takeover is accepted, and at each step of
+  a rewind is tested too; see
+  [A killed process](embedded-node.md#a-killed-process). A stop while Commonware
   destroys the archive, or while it is filled again, is repeated from the
   same file, provided Commonware opens the partly removed archive at the
   next start; that was not exercised.

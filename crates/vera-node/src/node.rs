@@ -766,6 +766,8 @@ async fn run_node_with_elector<
         validator: validator.clone(),
     })
     .with_metrics(finalization_metrics);
+    #[cfg(feature = "fault-injection")]
+    let sink = sink.with_crash_directory(config.data_dir.clone());
     hold.attach({
         let index = block_index.clone();
         move || index.head_block_number()

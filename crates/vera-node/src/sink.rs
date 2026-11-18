@@ -63,6 +63,8 @@ pub struct NodeSink {
     validator: SharedValidator,
     state: Arc<OnceLock<VeraStateSet>>,
     metrics: Option<Arc<crate::finalization_metrics::FinalizationMetrics>>,
+    #[cfg(feature = "fault-injection")]
+    crash_directory: Option<std::path::PathBuf>,
 }
 
 impl std::fmt::Debug for NodeSink {
@@ -110,6 +112,13 @@ impl std::fmt::Debug for SinkParts {
 }
 
 impl NodeSink {
+    /// Let a test stop the process at a crash point; see `crate::crash`.
+    #[cfg(feature = "fault-injection")]
+    pub(crate) fn with_crash_directory(mut self, directory: std::path::PathBuf) -> Self {
+        self.crash_directory = Some(directory);
+        self
+    }
+
     pub(crate) fn with_metrics(
         mut self,
         metrics: Option<Arc<crate::finalization_metrics::FinalizationMetrics>>,
@@ -137,6 +146,8 @@ impl NodeSink {
             validator: parts.validator,
             state: Arc::new(OnceLock::new()),
             metrics: None,
+            #[cfg(feature = "fault-injection")]
+            crash_directory: None,
         }
     }
 
@@ -208,6 +219,12 @@ impl FinalizedSink for NodeSink {
         .await
         .expect("finalized history writer stopped")
         .expect("persist finalized execution before publication");
+        #[cfg(feature = "fault-injection")]
+        if let Some(directory) = &self.crash_directory
+            && !block.txs.is_empty()
+        {
+            crate::crash::point(directory, "history-before-index");
+        }
         let persisted_elapsed = started.map(|started| started.elapsed());
         self.node_state.inc_finalized();
         self.node_state.set_backfilling(false);

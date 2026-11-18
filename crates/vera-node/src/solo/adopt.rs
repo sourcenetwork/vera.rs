@@ -72,6 +72,8 @@ pub(super) fn store_record(
         std::fs::create_dir_all(directory).map_err(|source| io(directory, source))?;
         let pending = directory.join(PENDING_FILE);
         vera_cli::write_durable(&pending, record).map_err(|source| io(&pending, source))?;
+        #[cfg(feature = "fault-injection")]
+        crate::crash::point(directory, "solo-record");
         std::fs::rename(&pending, &stored).map_err(|source| io(&stored, source))?;
         vera_cli::sync_parent(&stored).map_err(|source| io(directory, source))?;
     }

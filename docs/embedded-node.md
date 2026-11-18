@@ -478,6 +478,34 @@ start is late by the timeout.
 Stopping still has no storage shutdown protocol: the stores rely on the same
 recovery path as an interrupted daemon.
 
+### A killed process
+
+`embedded_crash.rs` and `embedded_crash_term.rs` in `crates/vera-node/tests`
+kill a process running embedded nodes at each step they persist and start
+the same directories again. It
+uses the crash points of fault-injection builds: the test names a point in
+the data directory's `crash-at` file, and the process aborts there. The
+points and what the next start was shown to do:
+
+| Killed | Next start |
+| --- | --- |
+| first start in files, after the share and the pending genesis are stored (`solo-dealt`) | publishes the genesis and starts |
+| first start, after the state journals are initialized under the genesis intent and before `native-genesis.bin` (`native-genesis`) | initializes again under the intent and starts |
+| adoption, or a backup's first start, after the record is stored as pending (`solo-record`) | publishes the record and starts; no key file is written |
+| after a block carrying a request was proposed (`proposed`) | the request either finalized once or was dropped with the pool, and is taken again unchanged |
+| while a finalized block is committed, after the ACP journal and before the others (the daemon's `module-commit-crash`) | applies the block once |
+| after finalized history is written and before the index publishes it (`history-before-index`) | serves the request once |
+| a backup during snapshot catch-up, after the first imported history record (the daemon's `snapshot-import-crash`) | completes the catch-up |
+| after a handover is announced (`handover-announced`) | refuses to validate with `TermRefusal::HandedOver`, and the change is certified and taken over |
+| after a takeover is accepted (`takeover-accepted`) and after the start under it decided to clear consensus storage (`seating-decided`) | starts as the validator in the new term |
+| a rewind after the discarded submissions are reported (`rewind-reported`) and after history is cut back (`rewind-cut`) | completes the rewind and reports each submission once |
+
+After each restart the test checks that every request the killed process saw
+finalized has a receipt that verifies, that its signer's sequence moved past
+it once, and that sending the signed request again is refused. A kill while
+Commonware destroys or refills an archive, or inside a journal write, is not
+among the points.
+
 Once the node has stopped, by `stop` or by itself, its directory is free and
 another node can start on it. That holds while clones of its `LocalRpc` are
 still alive: the node releases the method table they share, and their calls

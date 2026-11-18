@@ -353,6 +353,8 @@ where
         let mut record = self.record.clone();
         record.handed_over = Some(change);
         record.store(&self.data_dir)?;
+        #[cfg(feature = "fault-injection")]
+        crate::crash::point(&self.data_dir, "handover-announced");
         self.record = record;
         Ok(change)
     }
@@ -490,6 +492,8 @@ where
                 let mut record = self.record.clone();
                 record.taking_over = Some(certificate);
                 record.store(&self.data_dir)?;
+                #[cfg(feature = "fault-injection")]
+                crate::crash::point(&self.data_dir, "takeover-accepted");
                 self.record = record;
                 Ok(())
             }

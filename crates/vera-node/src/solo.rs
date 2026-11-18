@@ -120,6 +120,8 @@ pub fn prepare_solo(
             }
         } else {
             create(config, identity, &local, &store, &pending)?;
+            #[cfg(feature = "fault-injection")]
+            crate::crash::point(directory, "solo-dealt");
         }
         std::fs::rename(&pending, &stored).map_err(|source| io(&stored, source))?;
         vera_cli::sync_parent(&stored).map_err(|source| io(directory, source))?;

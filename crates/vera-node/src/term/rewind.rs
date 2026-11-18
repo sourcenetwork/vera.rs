@@ -65,7 +65,11 @@ pub(crate) fn rewind(
                 // The stores are ahead of history from here until they are removed.
                 record.resync = true;
                 record.store(directory)?;
+                #[cfg(feature = "fault-injection")]
+                crate::crash::point(directory, "rewind-reported");
                 stored.rewind_to(point.height).map_err(failed)?;
+                #[cfg(feature = "fault-injection")]
+                crate::crash::point(directory, "rewind-cut");
             }
         }
         if record.common.take().is_some() {

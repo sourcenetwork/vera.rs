@@ -35,7 +35,8 @@ impl<A> ReadyApplication<A> {
         )
     }
 
-    /// Lets a test hold a staged block back; see `term::fault::stall_staged`.
+    /// Lets a test hold a staged block back, see `term::fault::stall_staged`,
+    /// and stop the process once a block is proposed, see `crate::crash`.
     #[cfg(feature = "fault-injection")]
     pub(crate) fn with_stall(mut self, directory: std::path::PathBuf) -> Self {
         self.stall = Some(directory);
@@ -131,6 +132,10 @@ where
         if let Some(block) = &proposal {
             self.hold.record(block.height().get());
             self.gate.proposed();
+            #[cfg(feature = "fault-injection")]
+            if let Some(directory) = &self.stall {
+                crate::crash::point(directory, "proposed");
+            }
         }
         drop(building);
         proposal

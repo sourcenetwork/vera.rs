@@ -45,6 +45,8 @@ pub use history::{
     HistoryLimits, HistoryMemory, HistoryPeer, start_history_peer,
 };
 
+#[cfg(feature = "fault-injection")]
+mod crash;
 mod marshal;
 mod native_genesis;
 mod node;

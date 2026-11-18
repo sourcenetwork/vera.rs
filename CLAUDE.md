@@ -489,7 +489,12 @@ it follows the active device at a given address under its own `DeviceKey`,
 catches up by snapshot from an empty directory, re-executes blocks, serves
 reads and proofs, and holds no validator key or share. The active device lists
 its backups' keys in `EmbeddedConfig::backups`, which is configuration, not
-state. See `docs/embedded-node.md`.
+state. See `docs/embedded-node.md`. Fault-injection builds abort an embedded
+node at a point named in its directory's `crash-at` (`crate::crash`), and
+`embedded_crash.rs` and `embedded_crash_term.rs` kill a child process at each
+persisted first-boot, adoption, proposal, history, catch-up, handover,
+takeover and rewind step and check the restart keeps every finalized request
+once.
 
 ### Terms and the active device
 
