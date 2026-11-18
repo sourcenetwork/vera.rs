@@ -37,6 +37,9 @@ IGNORED_CASES = {
     ),
     'embedded_solo_profile::profile_solo_writes_and_idle_cost': 'measurement, run explicitly in release mode',
     'embedded_backup_profile::profile_backup_catch_up_and_idle_cost': 'measurement, run explicitly in release mode',
+    'embedded_backup_busy_profile::profile_backup_catch_up_from_a_busy_active_device': (
+        'measurement, run explicitly in release mode'
+    ),
 }
 
 IGNORE = re.compile(r'#\[ignore\b[^\]]*\]')

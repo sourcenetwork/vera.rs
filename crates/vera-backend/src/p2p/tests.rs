@@ -7,6 +7,7 @@ use commonware_runtime::{
 };
 use commonware_storage::{merkle::Location, qmdb::any::unordered::Update};
 use commonware_utils::{NZU16, NZUsize};
+use std::time::Duration;
 
 type Operation = <CodeDb as Source>::Op;
 
@@ -168,4 +169,75 @@ async fn cancelling_translated_retry_closes_the_original_request() {
     })
     .await
     .expect("cancelling a retry left the source request open");
+}
+
+async fn write_code(db: &Shared<CodeDb>, byte: u8) {
+    let batch = db
+        .new_batches()
+        .await
+        .write(CodeKey::new([byte; 32]), Some(vec![byte; 8]))
+        .merkleize()
+        .await
+        .unwrap();
+    db.apply(batch).await;
+    assert!(db.finalize().await.durable().await);
+}
+
+#[test]
+fn a_request_one_block_ahead_is_answered_once_the_block_is_applied() {
+    let directory = tempfile::tempdir().unwrap();
+    runtime_tokio::Runner::new(
+        runtime_tokio::Config::new().with_storage_directory(directory.path()),
+    )
+    .start(|context| async move {
+        let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
+        let db = Shared::<CodeDb>::init(
+            context.child("code"),
+            state_set_config("code", cache.clone()).2,
+            None,
+        )
+        .await;
+        // The same blocks on a second database give the target of the next block.
+        let reference = Shared::<CodeDb>::init(
+            context.child("reference"),
+            state_set_config("reference", cache).2,
+            None,
+        )
+        .await;
+        for byte in [1, 2] {
+            write_code(&reference, byte).await;
+        }
+        let next = reference.committed_targets().await;
+        write_code(&db, 1).await;
+        let wire = WireDatabase::<CodeDb>::new(db.clone());
+        let writer = {
+            let db = db.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                write_code(&db, 2).await;
+                db.committed_targets().await
+            })
+        };
+        let started = std::time::Instant::now();
+        let served = wire
+            .serve(Request::Operations {
+                size: next.range.end(),
+                start: next.range.start(),
+                max_ops: MAX_FETCH_OPS,
+            })
+            .await;
+        assert_eq!(writer.await.unwrap(), next);
+        assert!(served.is_ok(), "{:?}", served.err());
+        assert!(started.elapsed() >= Duration::from_millis(100));
+
+        let never = wire
+            .serve(Request::Operations {
+                size: next.range.end() + 100,
+                start: next.range.start(),
+                max_ops: MAX_FETCH_OPS,
+            })
+            .await;
+        assert!(never.is_err());
+        assert!(started.elapsed() >= ahead::WAIT);
+    });
 }
