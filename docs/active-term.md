@@ -500,6 +500,12 @@ its directory back to the cut before the node opens it:
    the cut. `follow` then asks the holder for its blocks at chosen heights
    until it finds the newest block the two share, and stores it in
    `term.json`; every record above that block is void, whatever its term.
+   A block that either device fails to read never counts as a difference.
+   A holder that fails to read a requested block does not answer, and the
+   device stores nothing, as when the holder cannot be reached. A device
+   that fails to read one of its own blocks refuses `follow` with
+   `TermRefusal::History` before storing anything; it keeps holding its
+   proposals and its history, and `follow` can be called again.
 2. It adds every submission those records finalized to
    `discarded-submissions.json`, then drops the records and their query
    mappings from history.

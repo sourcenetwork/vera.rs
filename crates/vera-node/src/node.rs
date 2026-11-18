@@ -1349,10 +1349,7 @@ async fn run_node_with_elector<
             },
             blocks: {
                 let history = history.clone();
-                Arc::new(move |height| {
-                    let block = history.stored_block(height).ok().flatten()?;
-                    Some(block.id().0)
-                })
+                Arc::new(move |height| Ok(history.stored_block(height)?.map(|block| block.id().0)))
             },
             modules: modules.clone(),
             status: node_state.clone(),

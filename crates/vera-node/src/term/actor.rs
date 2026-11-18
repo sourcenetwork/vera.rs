@@ -40,8 +40,9 @@ pub(crate) enum Archived {
 pub(crate) type Finalized =
     Arc<dyn Fn(u64) -> futures::future::BoxFuture<'static, Archived> + Send + Sync>;
 
-/// Reads the identifier of the block finalized history holds at a height above genesis.
-pub(crate) type Blocks = Arc<dyn Fn(u64) -> Option<B256> + Send + Sync>;
+/// Reads the identifier of the block finalized history holds at a height
+/// above genesis: `None` when it holds none there, an error when the read fails.
+pub(crate) type Blocks = Arc<dyn Fn(u64) -> anyhow::Result<Option<B256>> + Send + Sync>;
 
 /// What the term actor works with.
 pub(crate) struct Parts<S, R> {
@@ -199,14 +200,21 @@ where
             Some(Message::Status(status)) => {
                 self.heard.insert(peer, status);
             }
-            Some(Message::Ancestry { heights }) => {
-                let blocks = Message::Blocks {
-                    blocks: self.held_blocks(&heights),
-                };
-                let _ = self
-                    .sender
-                    .send(Recipients::One(peer), blocks.encode(), true);
-            }
+            // A partial answer would read as a fork to the asking device;
+            // without an answer it records nothing.
+            Some(Message::Ancestry { heights }) => match self.held_blocks(&heights) {
+                Ok(blocks) => {
+                    let blocks = Message::Blocks { blocks };
+                    let _ = self
+                        .sender
+                        .send(Recipients::One(peer), blocks.encode(), true);
+                }
+                Err(error) => tracing::warn!(
+                    height = error.height,
+                    %error,
+                    "ancestry request left unanswered"
+                ),
+            },
             Some(Message::Blocks { .. }) | None => {}
         }
     }
