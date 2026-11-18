@@ -570,6 +570,15 @@ section. A lone validator has no peer that needs older consensus data from it.
 Finalized history, which serves receipts and historical lookups, is not
 pruned by this setting or any other. It is what still grows.
 
+Its length does not lengthen a start: a start rereads the newest 1,024
+revisions and at most 128 epoch boundaries, which took about 15 ms of history
+recovery on an Apple M5 Max whether the history held 10,000 revisions or
+1,000,000. A start checks the
+whole chain, at about 4 µs a revision, after a backup imports history and after
+a crash that left finalized history ahead of the recovered state by revisions
+carrying requests. See
+[the validated head](history-storage.md#the-validated-head).
+
 Measured on an Apple M5 Max with a release build: an idle node at the daemon
 cadence (`pacing: None`, about 6.6 revisions a second) for five minutes, about
 1,970 empty revisions, one run each.

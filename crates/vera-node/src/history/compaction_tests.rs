@@ -6,17 +6,19 @@ use regolith::env::{
 use std::{io, path::PathBuf, sync::atomic::AtomicBool};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Phase {
+pub(super) enum Phase {
     PartialWrite,
     TableSync,
     ManifestSync,
+    /// Half of one write-ahead log write reaches the file.
+    WalWrite,
 }
 
 #[derive(Debug)]
-struct Fault {
+pub(super) struct Fault {
     phase: Phase,
-    armed: AtomicBool,
-    hits: AtomicUsize,
+    pub(super) armed: AtomicBool,
+    pub(super) hits: AtomicUsize,
     submitted_bytes: AtomicUsize,
     retained_bytes: AtomicUsize,
 }
@@ -47,10 +49,12 @@ struct FaultFile {
 
 impl WriteFile for FaultFile {
     fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
-        if self.sync_phase == Phase::TableSync
-            && bytes.len() > 1
-            && self.fault.inject(Phase::PartialWrite)
-        {
+        let torn = match self.sync_phase {
+            Phase::TableSync => Phase::PartialWrite,
+            Phase::WalWrite => Phase::WalWrite,
+            _ => return self.inner.write_all(bytes),
+        };
+        if bytes.len() > 1 && self.fault.inject(torn) {
             let retained = bytes.len() / 2;
             self.inner.write_all(&bytes[..retained])?;
             self.fault
@@ -67,14 +71,14 @@ impl WriteFile for FaultFile {
     }
 
     fn sync_all(&mut self) -> io::Result<()> {
-        if self.fault.inject(self.sync_phase) {
+        if self.sync_phase != Phase::WalWrite && self.fault.inject(self.sync_phase) {
             return Err(failure());
         }
         self.inner.sync_all()
     }
 
     fn sync_data(&mut self) -> io::Result<()> {
-        if self.fault.inject(self.sync_phase) {
+        if self.sync_phase != Phase::WalWrite && self.fault.inject(self.sync_phase) {
             return Err(failure());
         }
         self.inner.sync_data()
@@ -90,7 +94,7 @@ impl WriteFile for FaultFile {
 }
 
 #[derive(Debug)]
-struct FaultEnv {
+pub(super) struct FaultEnv {
     inner: StdEnv,
     fault: Arc<Fault>,
 }
@@ -114,6 +118,8 @@ impl Env for FaultEnv {
             Some(Phase::TableSync)
         } else if path.file_name().is_some_and(|name| name == "MANIFEST") {
             Some(Phase::ManifestSync)
+        } else if path.extension().is_some_and(|extension| extension == "log") {
+            Some(Phase::WalWrite)
         } else {
             None
         };
@@ -181,6 +187,22 @@ impl Env for FaultEnv {
     }
 }
 
+/// A disarmed fault of `phase` and the storage environment that injects it.
+pub(super) fn faulty(phase: Phase) -> (Arc<Fault>, Arc<FaultEnv>) {
+    let fault = Arc::new(Fault {
+        phase,
+        armed: AtomicBool::new(false),
+        hits: AtomicUsize::new(0),
+        submitted_bytes: AtomicUsize::new(0),
+        retained_bytes: AtomicUsize::new(0),
+    });
+    let env = Arc::new(FaultEnv {
+        inner: StdEnv::new(),
+        fault: fault.clone(),
+    });
+    (fault, env)
+}
+
 fn tables(directory: &Path) -> Vec<PathBuf> {
     let mut paths = std::fs::read_dir(directory.join("regolith/sst"))
         .unwrap()
@@ -239,17 +261,7 @@ fn failed_compaction_preserves_history_receipts_and_durable_reopen() {
         let directory = tempfile::tempdir().unwrap();
         let genesis = block(0, BlockId(B256::ZERO));
         drop(FinalizedHistory::open(directory.path(), &genesis).unwrap());
-        let fault = Arc::new(Fault {
-            phase,
-            armed: AtomicBool::new(false),
-            hits: AtomicUsize::new(0),
-            submitted_bytes: AtomicUsize::new(0),
-            retained_bytes: AtomicUsize::new(0),
-        });
-        let env = Arc::new(FaultEnv {
-            inner: StdEnv::new(),
-            fault: fault.clone(),
-        });
+        let (fault, env) = faulty(phase);
         let history = FinalizedHistory {
             db: DB::open_for_test(directory.path(), env).unwrap(),
             head: Mutex::new((0, genesis.id())),

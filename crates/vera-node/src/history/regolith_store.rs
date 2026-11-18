@@ -12,6 +12,10 @@ pub(crate) const BACKGROUND_THREADS: usize = 1;
 pub(super) struct HistoryDb {
     db: regolith::Db,
     statistics: Option<Arc<regolith::Statistics>>,
+    #[cfg(test)]
+    reads: std::sync::atomic::AtomicU64,
+    #[cfg(test)]
+    unsynced: std::sync::atomic::AtomicBool,
 }
 
 impl HistoryDb {
@@ -63,15 +67,45 @@ impl HistoryDb {
             path.join("regolith"),
             Self::options(memory, statistics.clone()),
         )?;
-        Ok(Self { db, statistics })
+        Ok(Self {
+            db,
+            statistics,
+            #[cfg(test)]
+            reads: Default::default(),
+            #[cfg(test)]
+            unsynced: Default::default(),
+        })
     }
 
     pub(super) fn get(&self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
+        #[cfg(test)]
+        self.count_read();
         Ok(self.db.get(key.as_ref())?)
     }
 
     pub(super) fn get_pinned(&self, key: impl AsRef<[u8]>) -> Result<Option<regolith::DbSlice>> {
+        #[cfg(test)]
+        self.count_read();
         Ok(self.db.get_slice(key.as_ref())?)
+    }
+
+    #[cfg(test)]
+    fn count_read(&self) {
+        self.reads
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Skip the WAL sync of later writes, to build long fixtures quickly.
+    #[cfg(test)]
+    pub(super) fn skip_sync_for_test(&self) {
+        self.unsynced
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Point reads served through this handle since it was opened.
+    #[cfg(test)]
+    pub(super) fn reads(&self) -> u64 {
+        self.reads.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub(super) fn snapshot(&self) -> Snapshot {
@@ -104,7 +138,10 @@ impl HistoryDb {
 
     pub(super) fn write_sync(&self, batch: WriteBatch) -> Result<()> {
         let options = regolith::WriteOptions {
+            #[cfg(not(test))]
             sync: true,
+            #[cfg(test)]
+            sync: !self.unsynced.load(std::sync::atomic::Ordering::Relaxed),
             ..Default::default()
         };
         // A stalled write consumes its batch without applying it; retain it for retry.
@@ -133,7 +170,14 @@ impl HistoryDb {
                 .max_background_compactions(0)
                 .statistics(statistics.clone()),
         )?;
-        Ok(Self { db, statistics })
+        Ok(Self {
+            db,
+            statistics,
+            #[cfg(test)]
+            reads: Default::default(),
+            #[cfg(test)]
+            unsynced: Default::default(),
+        })
     }
 
     #[cfg(test)]
@@ -229,6 +273,8 @@ mod tests {
         let store = Arc::new(HistoryDb {
             db: regolith::Db::open(directory.path().join("regolith"), options).unwrap(),
             statistics: None,
+            reads: Default::default(),
+            unsynced: Default::default(),
         });
         for key in [b"fill1", b"fill2"] {
             regolith::through_stalls(|| store.db.put(key, b"v")).unwrap();

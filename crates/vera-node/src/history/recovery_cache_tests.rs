@@ -174,6 +174,8 @@ async fn recovery_restores_certificates_only_inside_the_cache_window() {
 #[tokio::test]
 async fn recent_cache_recovery_still_rejects_damage_in_uncached_history() {
     let fixture = fixture(MAX_CACHED_REVISIONS + 32, 0);
+    // Without the validated head every start checks the whole chain.
+    fixture.history.db.delete(VALIDATED).unwrap();
     let original = fixture.history.db.get(key(RECORD, 1)).unwrap().unwrap();
     for damage in ["missing", "ancestry", "receipt"] {
         let mut record: Record = borsh::from_slice(&original).unwrap();
