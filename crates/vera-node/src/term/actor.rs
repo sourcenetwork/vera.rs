@@ -89,6 +89,9 @@ struct Actor<S, R> {
     /// Whether this device holds a proposal back while it asks the others.
     /// The background check of a device that proposes does not.
     asking: bool,
+    /// The device this one answered while it held back, since its own check
+    /// began, that the exchange lets go on, and what that device asked with.
+    yielded: Option<(PublicKey, Status)>,
 }
 
 /// Answer the host and the other devices until the node stops.
@@ -120,6 +123,7 @@ where
         gate: parts.gate,
         heard: HashMap::new(),
         asking: false,
+        yielded: None,
     };
     // An active device that stays awake asks again every freshness window:
     // another device may have been opened as the validator, or taken over,
@@ -185,17 +189,21 @@ where
     fn hear(&mut self, peer: PublicKey, bytes: &[u8]) {
         match Message::decode(bytes) {
             Some(Message::Query(asking)) => {
-                let status = Message::Status(self.standing());
-                let _ = self
-                    .sender
-                    .send(Recipients::One(peer), status.encode(), true);
+                let answer = self.standing();
+                let _ = self.sender.send(
+                    Recipients::One(peer.clone()),
+                    Message::Status(answer.clone()).encode(),
+                    true,
+                );
                 // The asker may hold a later term than this device: a device
                 // replaced while it could not reach the others learns it here.
                 if !self.backup
-                    && let Some(certificate) = asking.certificate
+                    && let Some(certificate) = asking.certificate.clone()
+                    && self.learn(certificate)
                 {
-                    self.learn(certificate);
+                    return;
                 }
+                self.yield_to(peer, asking, &answer);
             }
             Some(Message::Status(status)) => {
                 self.heard.insert(peer, status);
@@ -216,6 +224,26 @@ where
                 ),
             },
             Some(Message::Blocks { .. }) | None => {}
+        }
+    }
+
+    /// Note that this device answered `peer`, which asked with `asking`, and
+    /// that the exchange lets the asker go on.
+    ///
+    /// The asker decides from the same two statuses, so a device that holds
+    /// back stops whenever an exchange it answered lets the asker go on, even
+    /// if its own question, asked at other heights, would have let it go on.
+    fn yield_to(&mut self, peer: PublicKey, asking: Status, answer: &Status) {
+        let Some(switching) = &self.switching else {
+            return;
+        };
+        let listed = switching.devices.iter().any(|device| device.key == peer);
+        if self.backup || !answer.waiting || !listed || self.view.demoted.borrow().is_some() {
+            return;
+        }
+        let this = device_id(&switching.device_key.public_key());
+        if !super::contest::stops(device_id(&peer), &asking, this, answer) {
+            self.yielded = Some((peer, asking));
         }
     }
 
@@ -595,10 +623,13 @@ where
     /// it from the question; a device that holds the certificate of this
     /// device's term was replaced by it; and a device that holds its
     /// proposals back stops neither a device that proposes nor, of two that
-    /// hold back, the one with the lower key. `held` says whether a proposal
-    /// waits for the answer. A certificate of a later term
-    /// that verifies and is stored replaces this device for good; anything
-    /// else is reported to the host and asked again at the next proposal.
+    /// hold back, the one with more finalized blocks, or with as many and the
+    /// lower key. A device this one answered meanwhile, whose exchange lets
+    /// it go on, stops this one as well, so the two exchanges cannot let both
+    /// go on. `held` says whether a proposal waits for the answer. A
+    /// certificate of a later term that verifies and is stored replaces this
+    /// device for good; anything else is reported to the host and asked again
+    /// at the next proposal.
     async fn probe(&mut self, held: bool) -> Asked {
         let (Some(switching), Some(probe), false) = (&self.switching, &self.probe, self.backup)
         else {
@@ -607,8 +638,9 @@ where
         let this = device_id(&switching.device_key.public_key());
         let (devices, probe) = (switching.devices.clone(), probe.clone());
         self.asking = held;
-        let waits = self.holds_back();
-        let question = Message::Query(self.standing());
+        self.yielded = None;
+        let asking = self.standing();
+        let question = Message::Query(asking.clone());
         let context = self.context.child("term_probes");
         let asked = futures::future::join_all(devices.into_iter().map(|device| {
             let (probe, question) = (probe.clone(), question.clone());
@@ -644,13 +676,13 @@ where
             return Asked::Replaced;
         }
         let answers: Vec<_> = answers.into_iter().flatten().collect();
-        let held = self.seen();
+        let seen = self.seen();
         let later = answers
             .iter()
             .filter_map(|(_, status)| status.certificate.clone())
             .filter(|certificate| {
                 let change = &certificate.change;
-                change.term > held && change.holder != this && self.verify(certificate).is_ok()
+                change.term > seen && change.holder != this && self.verify(certificate).is_ok()
             })
             .max_by_key(|certificate| certificate.change.term);
         if let Some(certificate) = later
@@ -658,27 +690,18 @@ where
         {
             return Asked::Replaced;
         }
-        let holding = self
-            .record
-            .certificate
-            .as_ref()
-            .filter(|certificate| certificate.change.holder == this)
-            .map_or(0, |certificate| certificate.change.term);
-        let contest = answers.into_iter().find(|(device, status)| {
-            let (term, names_this) = status
-                .certificate
-                .as_ref()
-                .map_or((0, false), |certificate| {
-                    (certificate.change.term, certificate.change.holder == this)
-                });
-            // A device that holds this device's own term follows it, or was
-            // replaced by it and has not followed yet.
-            let follows = holding > 0 && term == holding && names_this;
-            let stands = super::contest::stands(waits, this, status.waiting, device_id(device));
-            term >= holding && !follows && stands
-        });
+        let contest = answers
+            .into_iter()
+            .find(|(device, status)| {
+                super::contest::stops(this, &asking, device_id(device), status)
+            })
+            .or_else(|| self.yielded.take());
         let Some((device, status)) = contest else {
             self.view.contested.send_replace(None);
+            // A device asked from here on must hear that this one proposes.
+            if held {
+                self.gate.cleared();
+            }
             return Asked::Clear;
         };
         tracing::warn!(%device, height = status.height, "another device validates this deployment");
