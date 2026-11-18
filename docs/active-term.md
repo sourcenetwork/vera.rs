@@ -435,6 +435,9 @@ age a verifying client still accepts a state at), it asks every device in
   answers that it proposes from then on. Two exchanges that disagree
   therefore stop both devices for one turn, and they ask again at their next
   turn, at heights that no longer move; they never let both go on.
+  A device does not yield to one in a lower term than it holds, nor to one
+  that carries its own certificate: it replaced the first, the second
+  follows it, and the answer of either would not stop its own check.
 - An answer that carries a certificate of a later term, held by another
   device and valid under the operator policy in this device's own state,
   demotes the device: it stores the certificate, proposes nothing more, and

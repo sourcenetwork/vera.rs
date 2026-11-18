@@ -242,7 +242,7 @@ where
             return;
         }
         let this = device_id(&switching.device_key.public_key());
-        if !super::contest::stops(device_id(&peer), &asking, this, answer) {
+        if super::contest::yields(device_id(&peer), &asking, this, answer) {
             self.yielded = Some((peer, asking));
         }
     }

@@ -52,6 +52,33 @@ pub(crate) fn stops(asker: B256, question: &Status, answerer: B256, answer: &Sta
 }
 
 /// Where a device stands in one exchange of a wake check.
+/// Whether the answerer, which holds back, stops itself because this
+/// exchange lets the asker go on.
+///
+/// A device whose certificate is of a lower term than the one the answerer
+/// holds was replaced by the answerer, and one that carries the answerer's
+/// own certificate follows it: the answer of either would not stop the
+/// answerer's own check, and neither does its question, whatever the heights.
+pub(crate) fn yields(asker: B256, question: &Status, answerer: B256, answer: &Status) -> bool {
+    let holding = answer
+        .certificate
+        .as_ref()
+        .filter(|certificate| certificate.change.holder == answerer)
+        .map_or(0, |certificate| certificate.change.term);
+    let (asked_in, names_answerer) =
+        question
+            .certificate
+            .as_ref()
+            .map_or((0, false), |certificate| {
+                (
+                    certificate.change.term,
+                    certificate.change.holder == answerer,
+                )
+            });
+    let follows = holding > 0 && asked_in == holding && names_answerer;
+    asked_in >= holding && !follows && !stops(asker, question, answerer, answer)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Rank {
     /// Whether the device proposes nothing for now.
@@ -174,6 +201,44 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_holder_does_not_yield_to_a_device_of_a_term_it_replaced() {
+        // The holder of term 2 is asked by the device it replaced, which is
+        // ahead of it: the blocks above the cut are the ones it discards.
+        let holder = status(true, 3, Some((2, LOW)));
+        for replaced in [Some((1, HIGH)), None] {
+            let question = status(true, 50, replaced);
+            assert!(
+                !stops(HIGH, &question, LOW, &holder),
+                "heights alone let the asker go on"
+            );
+            assert!(!yields(HIGH, &question, LOW, &holder));
+        }
+        // Nor to one that carries the holder's own certificate: it follows.
+        let follower = status(true, 50, Some((2, LOW)));
+        assert!(!yields(HIGH, &follower, LOW, &holder));
+        // With no term between them the exchange decides, and the device behind yields.
+        assert!(yields(
+            HIGH,
+            &status(true, 50, None),
+            LOW,
+            &status(true, 3, None)
+        ));
+        assert!(!yields(
+            HIGH,
+            &status(true, 3, None),
+            LOW,
+            &status(true, 50, None)
+        ));
+        // An answerer whose certificate names the asker holds no term of its own, and yields to it.
+        assert!(yields(
+            HIGH,
+            &status(true, 50, Some((1, HIGH))),
+            LOW,
+            &status(true, 3, Some((2, HIGH)))
+        ));
     }
 
     #[test]
