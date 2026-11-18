@@ -18,6 +18,9 @@ mod recovery_cache_tests;
 #[path = "start_cost_tests.rs"]
 mod start_cost_tests;
 
+#[path = "validated_tests.rs"]
+mod validated_tests;
+
 #[path = "memory_tests.rs"]
 mod memory_tests;
 

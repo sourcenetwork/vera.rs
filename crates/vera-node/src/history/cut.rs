@@ -135,6 +135,7 @@ impl FinalizedHistory {
         // blocks; the next start selects a block of the term to import from.
         batch.delete(transfer::IMPORT);
         batch.put(HEAD, borsh::to_vec(&(height, id.0))?);
+        self.cut_validated(height, &id, &mut batch)?;
         write(&self.db, batch)?;
         *head = (height, BlockId(id));
         Ok(())

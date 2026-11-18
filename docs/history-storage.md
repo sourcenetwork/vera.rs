@@ -226,20 +226,67 @@ power cut across the validator's other stores.
 
 ## Recovery of recent execution indexes
 
-Startup still decodes every retained execution record, checks receipt commitments
-and ancestry through the selected durable anchor, restores epoch material and
-reconciles query mappings. Transaction indexes are constructed and certificates
-read only for the most recent 1,024 revisions, matching the resident cache
-limits. An older certificate is not decoded at startup: a malformed one fails the
-proof request that reads it, and one that was never stored is treated as an
-ancestor finalized through a descendant. When the history head is at most 1,024
-revisions past the anchor and its mappings are current, recovery removes only
-the discarded revisions' hash mappings, in the batch that rewinds the head, and
-restores any submission mapping they had overwritten. A missing or mismatched
-mapping head, a longer or unreadable suffix, or a pending import rebuilds every
-mapping. Older
-executions and receipts remain available through durable history lookups;
-consumers still verify their finality evidence independently. Cache eviction does not weaken history validation or change durability.
+Startup rebuilds the resident caches from the most recent 1,024 revisions: it
+constructs their transaction indexes, reads their certificates and restores
+epoch material. A certificate missing from the store is requested from marshal
+and stored. An older certificate is not decoded at startup: a malformed one
+fails the proof request that reads it, and one that was never stored is treated
+as an ancestor finalized through a descendant. When the history head is at most
+1,024 revisions past the anchor and its mappings are current, recovery removes
+only the discarded revisions' hash mappings, in the batch that rewinds the head,
+and restores any submission mapping they had overwritten. A missing or
+mismatched mapping head, a longer or unreadable suffix, or a pending import
+rebuilds every mapping. Older executions and receipts remain available through
+durable history lookups; consumers still verify their finality evidence
+independently.
+
+### The validated head
+
+The `validated` key holds a height and block hash. It states that every record
+from genesis through that block decodes, matches its receipt commitment and
+names its predecessor as parent. Only a batch that establishes the statement
+writes it:
+
+| Write | Validated head |
+| --- | --- |
+| First open | genesis |
+| Append whose parent is the validated head | the appended block; the append checks contiguity and the receipt commitment before writing |
+| Recovery | its anchor, after checking the chain through it, in the batch that sets the history head |
+| Cut back to a block of the chain it covers | that block, in the batch that removes the later records |
+| Import | unchanged, at or below the committed prefix the import builds on |
+
+The key shares its batch with the records and head it describes, so a write that
+fails or is torn leaves both or neither. An import therefore leaves the
+validated head below its records, and the recovery that publishes them checks
+the whole chain.
+
+A start rereads only the resident window when all of these hold: the query
+mappings are current, or only lose a discarded suffix that carried no
+submissions; no import is pending; and the validated head equals the durable
+history head, lies at or above the recovery anchor and names the block stored
+at its height. Before the window it reads the last block of each of the 128
+newest epochs, by height from the fixed epoch length, so the epoch cache holds
+what a walk of every record would leave. The window's records are decoded,
+checked against their receipt commitments, chained to one another and to the
+anchor.
+
+Otherwise startup decodes every retained record and checks receipt commitments
+and ancestry from genesis through the anchor: when the validated head is absent,
+malformed, or names another block or height than the durable head; when the
+mappings need a rebuild; when an import is being published; and when a
+discarded suffix carried submissions, whose earlier mappings are found again by
+reading every record. Deleting the `validated` key makes the next start check
+every record.
+
+A start over a validated head does not reread records older than the window, so
+damage to one of them on disk is not found at start. It is found where the
+record is read. Hash and submission lookups decode the record, check its receipt
+commitment and require it to match the requested key
+(`FinalizedHistory::execution_bounded`). A lookup by height decodes the record
+and checks its commitment; proof assembly also checks ancestry across the
+descendants it reads, and consumers verify the finality certificate against the
+block. Epoch-boundary reads check the record they decode in the same way.
+Writes check what they always have.
 
 The focused history regressions compare the recovered cache with full replay and
 check that missing records, broken ancestry and altered receipts outside the cache
@@ -247,6 +294,32 @@ window still reject recovery. An ignored component timing fixture uses 5,120
 revisions containing 20,480 signed reverted native submissions. It measures record
 validation and index construction; it does not measure consensus, ACP throughput
 or production restart readiness.
+
+`start_cost_against_history_length` measures recovery against history length.
+It builds idle histories through `append_finalized`: empty native revisions with
+pseudo-random roots, a 236-byte pseudo-random finalization each, and the epoch
+artifact on the last revision of every 256-revision epoch. Its writes skip the
+log sync to build long histories quickly; the store is reopened with the
+embedded memory budgets before each timed recovery. Measured on an Apple M5 Max
+with a release build, one run, each recovery directly after the previous one:
+
+```sh
+HISTORY_START_REVISIONS=10000,100000,1000000 cargo test --release -p vera-node --lib \
+  start_cost_against_history_length -- --ignored --nocapture
+```
+
+| Revisions | Store size | Every record checked | Validated head |
+| --- | --- | --- | --- |
+| 10,000 | 6.5 MB | 0.063 s, 11,028 reads | 0.013 to 0.018 s, 2,088 reads |
+| 100,000 | 54 MB | 0.40 s, 101,028 reads | 0.016 s, 2,181 reads |
+| 1,000,000 | 772 MB | 4.1 s, 1,001,028 reads | 0.015 to 0.016 s, 2,181 reads |
+
+Checking every record costs about 4 µs a revision with the store in the
+operating system's page cache. A start over a validated head reads the window's
+records and certificates and at most 128 epoch boundaries, whatever the length.
+The fixture stores 545 to 772 bytes a revision, less than the 1.05 kB a running
+node's idle revisions take, and the measurement leaves out a cold disk and the
+rest of node start-up.
 
 Restart qualification emits a bounded `recovery_readiness_failure` record when
 cluster RPC readiness exceeds its deadline. It identifies unavailable member

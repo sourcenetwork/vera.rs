@@ -42,17 +42,11 @@ impl Heartbeats {
         }
     }
 
-    pub(super) async fn recover(&self, epochs: &LightBlockIndex) -> Result<()> {
+    pub(super) async fn recover(&self, index: &BlockIndex, epochs: &LightBlockIndex) -> Result<()> {
         let lookup: FinalizationLookup =
             Arc::new(|_| panic!("persisted certificates must not invoke network lookup"));
         self.history
-            .recover(
-                &self.genesis,
-                &self.head,
-                &BlockIndex::new(),
-                epochs,
-                &lookup,
-            )
+            .recover(&self.genesis, &self.head, index, epochs, &lookup)
             .await
     }
 }
@@ -122,7 +116,21 @@ fn directory_bytes(path: &std::path::Path) -> u64 {
         .sum()
 }
 
+/// Seconds and store reads of one recovery after reopening the store.
+async fn timed_recover(fixture: Heartbeats) -> (Heartbeats, f64, u64) {
+    let fixture = fixture.reopen();
+    let epochs = fixture.epochs();
+    let reads = fixture.history.db.reads();
+    let started = Instant::now();
+    fixture.recover(&BlockIndex::new(), &epochs).await.unwrap();
+    let seconds = started.elapsed().as_secs_f64();
+    let reads = fixture.history.db.reads() - reads;
+    (fixture, seconds, reads)
+}
+
 /// `HISTORY_START_REVISIONS` lists the history lengths, 10,000 and 100,000 by default.
+/// Each length is recovered once without the validated head, which checks
+/// every record, and then twice with it.
 #[tokio::test]
 #[ignore = "start-up cost is measured on demand with a release build"]
 async fn start_cost_against_history_length() {
@@ -135,29 +143,22 @@ async fn start_cost_against_history_length() {
         let written = Instant::now();
         let fixture = heartbeats(revisions, crate::SOLO_BLOCKS_PER_EPOCH);
         let write_seconds = written.elapsed().as_secs_f64();
-        let fixture = fixture.reopen();
+        fixture.history.db.delete(VALIDATED).unwrap();
         let bytes = directory_bytes(fixture.directory.path());
-        let epochs = fixture.epochs();
-        let reads = fixture.history.db.reads();
-        let started = Instant::now();
-        fixture.recover(&epochs).await.unwrap();
-        let seconds = started.elapsed().as_secs_f64();
-        let reads = fixture.history.db.reads() - reads;
-        let fixture = fixture.reopen();
-        let epochs = fixture.epochs();
-        let again = Instant::now();
-        fixture.recover(&epochs).await.unwrap();
-        let second = again.elapsed().as_secs_f64();
+        let (fixture, full_seconds, full_reads) = timed_recover(fixture).await;
+        let (fixture, validated_seconds, validated_reads) = timed_recover(fixture).await;
+        let (_, again_seconds, _) = timed_recover(fixture).await;
         println!(
             "history_start_cost={}",
             serde_json::json!({
                 "revisions": revisions,
                 "history_bytes": bytes,
                 "write_seconds": write_seconds,
-                "recover_seconds": seconds,
-                "recover_microseconds_per_revision": seconds * 1e6 / revisions as f64,
-                "store_reads": reads,
-                "second_recover_seconds": second,
+                "full_seconds": full_seconds,
+                "full_microseconds_per_revision": full_seconds * 1e6 / revisions as f64,
+                "full_store_reads": full_reads,
+                "validated_seconds": [validated_seconds, again_seconds],
+                "validated_store_reads": validated_reads,
             })
         );
     }

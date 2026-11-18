@@ -169,6 +169,9 @@ async fn authenticated_reverse_import_resumes_and_requires_matching_state_recove
         .import_record(&second_bytes, limits, &certify(&second, 7).0)
         .unwrap();
     assert_eq!(target.import_next().unwrap(), None);
+    // The imported records are not validated until the recovery that publishes them.
+    assert_eq!(target.head_height(), 3);
+    assert_eq!(target.db.get(VALIDATED).unwrap(), Some(validated(&first)));
     assert!(target.record_chunk(3, 0, 1).is_err());
     assert!(target.light_block(3, &epochs).is_err());
     assert!(
@@ -185,12 +188,18 @@ async fn authenticated_reverse_import_resumes_and_requires_matching_state_recove
         .await
         .unwrap();
     assert_eq!(index.head_block_number(), 3);
+    assert_eq!(target.db.get(VALIDATED).unwrap(), Some(validated(&third)));
     assert_eq!(collect(&target, 3), third_bytes);
     assert_eq!(collect(&target, 2), second_bytes);
     assert!(target.db.get(IMPORT).unwrap().is_none());
     assert_eq!(target.import_anchor().unwrap(), None);
     let (fourth, receipts) = revision(4, third.id());
     target.append(&fourth, &receipts, 100).unwrap();
+    assert_eq!(target.db.get(VALIDATED).unwrap(), Some(validated(&fourth)));
+}
+
+fn validated(block: &Block) -> Vec<u8> {
+    borsh::to_vec(&(block.height, block.id().0.0)).unwrap()
 }
 
 #[test]
@@ -415,6 +424,7 @@ async fn resumed_snapshot_can_advance_an_unpublished_history_selection() {
                 )
                 .unwrap();
         }
+        assert_eq!(target.db.get(VALIDATED).unwrap(), Some(validated(&genesis)));
         let index = BlockIndex::new();
         let lookup: FinalizationLookup =
             Arc::new(|_| panic!("imported certificates must be retained"));
@@ -429,6 +439,7 @@ async fn resumed_snapshot_can_advance_an_unpublished_history_selection() {
             .await
             .unwrap();
         assert_eq!(index.head_block_number(), 3);
+        assert_eq!(target.db.get(VALIDATED).unwrap(), Some(validated(&third)));
     }
 }
 
