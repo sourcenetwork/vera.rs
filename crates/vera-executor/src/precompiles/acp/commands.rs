@@ -18,6 +18,7 @@ pub(super) const fn handles(selector: [u8; 4]) -> bool {
             | IAcp::revealRegistrationCall::SELECTOR
             | IAcp::flagHijackAttemptCall::SELECTOR
             | IAcp::bearerPolicyCmdCall::SELECTOR
+            | IAcp::bearerPolicyCmdsCall::SELECTOR
             | IAcp::executePolicyCommandCall::SELECTOR
             | IAcp::transferObjectCall::SELECTOR
             | IAcp::checkManagementAuthorityCall::SELECTOR
@@ -101,6 +102,7 @@ fn reserve_fields(
         | IAcp::executePolicyCommandCall::SELECTOR
         | IAcp::commitRegistrationsCall::SELECTOR => &[1],
         IAcp::bearerPolicyCmdCall::SELECTOR => &[0, 2],
+        IAcp::bearerPolicyCmdsCall::SELECTOR => &[0, 1],
         _ => &[],
     };
     for field in fields {
@@ -110,7 +112,9 @@ fn reserve_fields(
             IAcp::revealRegistrationCall::SELECTOR
             | IAcp::executePolicyCommandCall::SELECTOR
             | IAcp::commitRegistrationsCall::SELECTOR => false,
-            IAcp::bearerPolicyCmdCall::SELECTOR => *field == 0,
+            IAcp::bearerPolicyCmdCall::SELECTOR | IAcp::bearerPolicyCmdsCall::SELECTOR => {
+                *field == 0
+            }
             _ => true,
         };
         if is_string {
@@ -585,6 +589,10 @@ fn run(
 
             let ret = IAcp::bearerPolicyCmdCall::abi_encode_returns(&json_bytes(&result));
             Ok(ok_dispatch(0, ret, vec![]))
+        }
+
+        IAcp::bearerPolicyCmdsCall::SELECTOR => {
+            super::command_list::dispatch(module, vera, block_ctx, tx_ctx, input, budget)
         }
 
         IAcp::executePolicyCommandCall::SELECTOR => {

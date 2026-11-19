@@ -10,6 +10,8 @@ pub mod catalogue;
 mod command_auxiliary;
 mod command_budget;
 mod command_context;
+mod command_list;
+pub use command_list::MAX_POLICY_COMMAND_LIST;
 mod command_stamp;
 mod command_storage;
 pub use command_budget::CommandBudget;

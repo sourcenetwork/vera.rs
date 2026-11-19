@@ -294,7 +294,7 @@ impl AcpModule {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn with_delegation_with_budget<T: Serialize + DeserializeOwned>(
+    pub(super) fn with_delegation_with_budget<T: Serialize + DeserializeOwned>(
         &mut self,
         vera: &mut VeraModule,
         context: &BlockExecCtx,

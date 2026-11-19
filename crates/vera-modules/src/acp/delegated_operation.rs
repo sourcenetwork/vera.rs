@@ -22,6 +22,8 @@ pub enum DelegatedOperation<'a> {
     EditPolicy(&'a str, &'a str, &'a PolicyMarshalingType),
     /// Policy identifier and the complete graph command.
     PolicyCommand(&'a str, &'a PolicyCmd),
+    /// Ordered policy identifiers and graph commands, applied in order, all or none.
+    PolicyCommandList(&'a [(String, PolicyCmd)]),
     /// Policy identifier, target actor and ordered permission operations.
     CheckAccess(&'a str, &'a AccessRequest),
 }
@@ -32,7 +34,9 @@ impl DelegatedOperation<'_> {
         match self {
             Self::CreatePolicy(..) => DelegationScope::CreatePolicy,
             Self::EditPolicy(..) => DelegationScope::EditPolicy,
-            Self::PolicyCommand(..) => DelegationScope::PolicyCommands,
+            Self::PolicyCommand(..) | Self::PolicyCommandList(..) => {
+                DelegationScope::PolicyCommands
+            }
             Self::CheckAccess(..) => DelegationScope::RecordAccessDecision,
             Self::RingCommand(..) => DelegationScope::ManageRings,
             Self::StoreThresholdObject(..) => DelegationScope::StoreThresholdObject,

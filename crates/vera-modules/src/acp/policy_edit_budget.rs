@@ -57,6 +57,10 @@ impl PolicyEditBudget {
         Ok(())
     }
 
+    pub(super) fn units(&self, amount: u64) -> Result<()> {
+        self.charge(amount)
+    }
+
     pub(super) fn definition(&self, bytes: usize) -> Result<()> {
         self.charge((bytes as u64).div_ceil(BYTE_QUANTUM).saturating_mul(8))
     }

@@ -37,6 +37,11 @@ impl CommandBudget {
         self.finish(self.permissions.records.definition(bytes))
     }
 
+    /// Reserve a fixed dispatch cost, such as each further command of a list.
+    pub fn reserve(&self, units: u64) -> Result<()> {
+        self.finish(self.permissions.records.units(units))
+    }
+
     pub(super) fn finish<T>(&self, result: Result<T>) -> Result<T> {
         if self.is_exhausted() {
             Err(AcpError::CommandBudgetExceeded)
