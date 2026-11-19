@@ -62,7 +62,8 @@ mod worker;
 pub use worker::NativeWorker;
 
 pub use bearer::{
-    create_bearer_token, create_operation_token, create_relay_token, create_scoped_bearer_token,
+    create_bearer_token, create_operation_token, create_operation_token_with_lead,
+    create_relay_token, create_scoped_bearer_token,
 };
 pub use bls_signer::BlsSigner;
 pub use client::{

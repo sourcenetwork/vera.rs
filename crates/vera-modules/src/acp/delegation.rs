@@ -311,8 +311,9 @@ impl AcpModule {
             Did::new(&submission.signer).map_err(|error| AcpError::InvalidBearerToken {
                 reason: error.to_string(),
             })?;
+        let lead = self.operation_lead(delegated.0, budget)?;
         let claims = vera
-            .authorize_delegation(context, &caller, token, delegated.0, delegated.1)
+            .authorize_delegation(context, &caller, token, delegated.0, delegated.1, lead)
             .map_err(invalid)?;
         // The token keeps the spelling its issuer signed; the operation, its
         // outcome and every record it writes name the actor canonically.

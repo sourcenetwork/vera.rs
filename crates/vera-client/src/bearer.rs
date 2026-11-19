@@ -53,10 +53,27 @@ pub fn create_operation_token(
     signing_key: &SigningKey,
     claims: &vera_crypto::jwt::JwtClaims,
 ) -> Result<String, ClientError> {
+    create_operation_token_with_lead(
+        signing_key,
+        claims,
+        vera_crypto::operation::DEFAULT_OPERATION_LEAD,
+    )
+}
+
+/// Sign one exact caller operation whose deadline may lie up to `max_lead`
+/// seconds after issuance; see [`UnsignedToken::operation_with_lead`].
+pub fn create_operation_token_with_lead(
+    signing_key: &SigningKey,
+    claims: &vera_crypto::jwt::JwtClaims,
+    max_lead: u64,
+) -> Result<String, ClientError> {
     if claims.iss != issuer(signing_key)? {
         return Err(ClientError::Signing("invalid operation issuer".into()));
     }
-    Ok(sign(signing_key, UnsignedToken::operation(claims)?))
+    Ok(sign(
+        signing_key,
+        UnsignedToken::operation_with_lead(claims, max_lead)?,
+    ))
 }
 
 /// Sign an operation-bound relay assertion. The issuer must match the signing key.

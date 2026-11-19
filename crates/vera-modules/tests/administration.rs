@@ -279,3 +279,6 @@ fn exhausted_sequence_cannot_change_parameters() {
     );
     assert_eq!((vera.store().serialize(), acp.store().serialize()), before);
 }
+
+#[path = "support/operation_lead_administration.rs"]
+mod operation_lead;

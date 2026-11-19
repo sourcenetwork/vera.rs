@@ -2,6 +2,8 @@
 mod decisions;
 #[path = "key_type_tests.rs"]
 mod key_types;
+#[path = "lead_tests.rs"]
+mod lead;
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use k256::ecdsa::{Signature, SigningKey, signature::Signer as _};
