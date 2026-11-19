@@ -108,12 +108,14 @@ impl EmbeddedConfig {
         retained_state_revisions: 256,
     };
 
-    /// Default finalized-history retention: 16,384 revisions, about 45 hours
-    /// of an idle deployment's heartbeats, or 64 epochs of 256 blocks.
+    /// Default finalized-history retention: 16,384 revisions, 64 epochs of
+    /// 256 blocks, or 45.5 hours of heartbeats at [`Self::HEARTBEAT`].
     ///
     /// It bounds the history store, the part of the directory that otherwise
-    /// grows for as long as the deployment runs, to about 17 MB of idle
-    /// revisions; revisions that carry requests are larger.
+    /// grows for as long as the deployment runs. With idle revisions the
+    /// store measured between 9.6 MB and 25.5 MB once the window was full,
+    /// on an Apple M5 Max with a release build; revisions that carry
+    /// requests are larger.
     pub const HISTORY_RETENTION: u64 = 16_384;
 
     /// Defaults for a lone validator: quiet when idle, with timeouts ordered below the genesis stall timeout.

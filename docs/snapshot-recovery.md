@@ -50,11 +50,19 @@ execution state is ready, so speculative DKG requests cannot ask for future
 committee selections before the recovered policy state is available.
 
 History is imported down to the store's own committed prefix, which is genesis
-for an empty directory. A peer whose history is pruned answers a request below
-its floor with a refusal naming that floor. When every peer refuses or fails a
-record, the import stops with `HistoryPruned`, the handoff fails, and the node
-does not start. A joining node therefore needs a peer that retains the history
-it lacks; importing from a pruned peer is not supported.
+for an empty directory, or to a floor. A peer whose history is pruned serves its
+floor's parent and refuses lower records with a refusal naming its floor. When
+every peer fails the next record and one refused it, the importer finishes at
+the lowest epoch start whose parent it has imported, removing its own older
+records in the same write, provided that floor is not above the first block of
+the selected block's epoch. Those older records of its own cannot be compared
+with the deployment's history, which the peers no longer hold, and their
+submissions are not reported as discarded; the node logs a warning naming the
+heights it drops. The refusal is not authenticated: a peer that refuses falsely
+leaves the importer with less history, never with wrong history. When the
+floor would be higher, the import stops with `HistoryPruned`, the
+handoff fails, and the node does not start. See
+[importing from a pruned peer](history-storage.md#importing-from-a-pruned-peer).
 
 An interrupted history import retains its selection, trust and cursor. If storage
 resumes at a later verified revision, history starts a new descending pass from
@@ -242,7 +250,8 @@ adds its acknowledgement safety window to both counts and schedules maintenance
 at a randomized phase. The example is not a qualified deployment sizing target.
 
 These settings do not touch execution and certificate history, which the separate
-history store keeps in full unless `history_retention` is set; see
+history store keeps in full unless `history_retention` is set (an embedded node
+sets it by default); see
 [retention and the floor](history-storage.md#retention-and-the-floor). Pruning waits for durable state and completed application callbacks. A node that
 falls behind the consensus archive window may need authenticated snapshot catch-up;
 size the window for expected downtime and observed revision rate. Increasing a

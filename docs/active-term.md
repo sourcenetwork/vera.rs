@@ -525,6 +525,10 @@ its directory back to the cut before the node opens it:
    the cut. `follow` then asks the holder for its blocks at chosen heights
    until it finds the newest block the two share, and stores it in
    `term.json`; every record above that block is void, whatever its term.
+   Each answer names the oldest block the holder's history retains, and the
+   two devices compare blocks only from the higher of their floors: when
+   they differ there, `follow` refuses with `TermRefusal::Pruned` instead
+   of storing a block the two may not share.
    A block that either device fails to read never counts as a difference.
    A holder that fails to read a requested block does not answer, and the
    device stores nothing, as when the holder cannot be reached. A device

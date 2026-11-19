@@ -111,8 +111,9 @@ Marshal serves the certificate lookup independently of the stateful callback.
 History uses Regolith with explicit synchronous writes and rejects foreign
 directory layouts before opening the database.
 See [history storage](docs/history-storage.md) for the format and qualification limits.
-`history_retention` (default none) removes records below a persisted floor,
-keeping epoch boundaries; reads below it fail with `HistoryPruned`. See
+`history_retention` (daemon default none) removes records below an epoch-aligned
+floor, keeping only the floor's parent below it; reads below it fail with
+`HistoryPruned`, and an importer from a pruned peer adopts a floor. See
 [retention and the floor](docs/history-storage.md#retention-and-the-floor).
 Proposal transaction exclusion stops at the published finalized revision, including
 the recovered index head, so it does not fetch pruned finalized ancestors.
@@ -486,7 +487,8 @@ RPC address, including a port the system chose for port 0, and stays the same
 across `take_over` and `follow`. The consensus listener always binds; `127.0.0.1:0` keeps
 it on loopback with a system-chosen port. An embedded node prunes consensus
 archives and state journals by default (`EmbeddedConfig::RETENTION`); finalized
-history is kept in full unless `history_retention` is set. A host may hold the key material itself:
+history keeps `EmbeddedConfig::HISTORY_RETENTION` (16,384 revisions); receipts
+and light blocks below its floor are unavailable on every device. A host may hold the key material itself:
 `SoloDeployment` pairs the genesis record with the validator key and share,
 `EmbeddedConfig::adopt` opens it in an empty directory or the one that already
 holds it without writing either secret, and `EmbeddedNode::export` returns it

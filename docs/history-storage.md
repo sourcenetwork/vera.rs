@@ -222,32 +222,45 @@ power cut across the validator's other stores.
 
 ## Retention and the floor
 
-By default history keeps every finalized record. `history_retention` in
-`config.toml`, or `EmbeddedConfig::history_retention`, names how many revisions
-below the head it keeps. After each finalized revision that the maintenance
-interval selects (`pruning.maintenance_interval`, or every 64 revisions when
-consensus pruning is not configured), the node raises the floor towards that
-many revisions below the head, at most 1,024 heights in one pass, on the
-blocking pool after the revision is published. A failed prune stops the node
-the way a failed append does: a store that refuses that write would refuse the
-next append.
+The daemon keeps every finalized record unless `history_retention` in
+`config.toml` names how many revisions below the head to keep. An embedded node
+keeps `EmbeddedConfig::HISTORY_RETENTION`, 16,384 revisions, unless its host sets
+`history_retention` to another value or `None`. After each finalized revision
+that the maintenance interval selects (`pruning.maintenance_interval`, or every
+64 revisions when consensus pruning is not configured), the node runs one
+maintenance pass on the blocking pool after the revision is published: it
+raises the floor to that many revisions below the head and sweeps at most 1,024
+heights below it. A pass leaves a pending history import alone. A failed pass
+stops the node the way a failed append does: a store that refuses that write
+would refuse the next append.
 
-The `floor` key holds the height and block hash of the oldest record kept in
-sequence; every record from it through the head is present. Without the key the
-floor is height 1. A prune works in batches of 256 heights. Each batch is one
-atomic write that removes the records below the new floor, their certificates,
-imported finality and proof blocks, the block-hash mappings and the submission
-mappings that still point at them, and stores the new floor with its block's
-hash. A submission hash that a retained revision repeats keeps its mapping. A
-crash between batches leaves the floor of the last batch written.
+The floor is the first block of an epoch, or height 1 while nothing is pruned;
+a pass rounds its target down to an epoch's first block, so at least the
+configured revisions stay. The `floor` key holds its height and block hash.
+The store serves the records from the floor through the head and keeps the
+floor's parent, the last block of the previous epoch, which carries the floor
+epoch's verifier material: light-block assembly reads it for a revision of that
+epoch whose material is not cached, and a start reads it to fill the epoch cache
+before walking from the floor. Readers do not serve the floor's parent as a
+revision.
 
-Below the floor the records of epoch boundaries stay: the last block of each
-epoch, whose artifact carries the next epoch's verifier material and roster, and
-the first block of the next epoch, which a start reads to check the boundary.
-Light-block assembly reads the former for an epoch whose material is not cached,
-the participant provider reads it for an older epoch's roster, and a start reads
-both to restore the epoch cache. They cost two records an epoch. No reader serves
-them as revisions.
+Raising the floor is one small atomic write. It stores the new floor with its
+block's hash, removes every certificate, imported finality and proof block below
+it, and removes the hash mappings of the new floor's parent. From then on readers
+refuse heights below the floor, and a mapping that still names one reads as
+pruned. The records left below the floor's parent are removed afterwards by a
+sweep driven by the `sweep` key, the lowest height whose record may remain. Each
+sweep batch is one atomic write over at most 256 heights that ends after the
+record bringing its mapping deletes to 4,096: it removes the block-hash and
+submission mappings that still name those records, then the records, and
+advances the cursor. A submission hash that a retained revision repeats keeps its
+mapping. A crash after the floor write or between sweep batches resumes from the
+cursor, and the sweep never reaches the floor's parent.
+
+The participant provider reads a roster from history only for epoch `E + 2`
+while the last block of the current epoch `E` is derived, so the boundary it
+reads is that block, inside any retained window. A roster whose boundary lies
+below the floor's parent fails with `HistoryPruned`.
 
 The node refuses a retention below the windows it reads under its head: the
 1,024 revisions of the execution index, the 1,024-revision suffix a recovery
@@ -260,26 +273,53 @@ floor:
 
 | Read | Below the floor |
 | --- | --- |
-| Point lookup by height (`execution_bounded`), light block, history chunk or proof served to a peer | `HistoryPruned`; over JSON-RPC code `4444` with `{"retryable": false, "floor": F}` |
+| Point lookup by height (`execution_bounded`), light block | `HistoryPruned`; over JSON-RPC code `4444` with `{"retryable": false, "floor": F}` |
+| History chunk or proof served to an importing peer | served for the floor's parent; `HistoryPruned` below it, which the peer receives as a refusal naming the floor |
 | Lookup by block or submission hash | not found once the mapping is removed; a mapping that still names a pruned revision fails with `HistoryPruned` |
 | Log range (`eth_getLogs`) reaching below the floor | fails with `4444` at the first pruned revision; results are never skipped |
 | Receipt (`vera_getTransactionReceipt`, `vera_getReceiptProof`) | `null` for a pruned submission, as for an unknown one; it does not become available later. `4444` when a stale mapping names a pruned revision |
 | Cut back to a block (`standing`, `rewind_to`) or a recovery anchor | `HistoryPruned`; nothing is removed |
-| Term ancestry search | starts from the block at the floor; a device whose history left the holder's at or below its floor refuses with `TermRefusal::Pruned` instead of reporting a shared block |
+| Term ancestry search | compares blocks only from the higher of the two devices' floors; differing there refuses with `TermRefusal::Pruned` instead of reporting a shared block |
 
 Code `4444` is the code Ethereum clients return for pruned history. It is not
-retryable on the same node. A client polling for the receipt of a submission
-older than the retained window sees `null` until its own deadline: the node
-cannot tell a pruned submission from one it never received once the mapping is
-gone. The Rust client's `wait_for_receipt` then returns `ReceiptTimeout`, and
-returns `ReceiptUnavailable` at once for a `4444` reply.
+retryable on the same node. Receipts and light blocks below the floor are
+unavailable on every device of a deployment, since a device that catches up
+adopts its peer's floor. A pruned submission's receipt reads as unknown: a client
+polling for it sees `null` until its own deadline, because the node cannot tell
+a pruned submission from one it never received once the mapping is gone. The
+Rust client's `wait_for_receipt` then returns `ReceiptTimeout`, and returns
+`ReceiptUnavailable` at once for a `4444` reply.
 
-A node whose history is pruned cannot serve it to a device that imports history
-down to its own head: the producer answers a request below its floor with a
-refusal naming the floor, and the importer fails with `HistoryPruned` once every
-peer has refused or failed, instead of waiting out its deadline. The snapshot
-handoff then fails and the joining node stops with that error. Importing from a
-pruned peer is not supported.
+### Importing from a pruned peer
+
+A snapshot import walks back from the selected block to the importer's own head,
+genesis for an empty directory. A peer serves records and proofs down to its
+floor's parent and answers a lower request with a refusal naming its floor. When
+every peer fails the next record and at least one refused it as pruned, the
+importer finishes at a floor of its own choosing: the lowest epoch start whose
+parent it has already imported. The records from that parent through the
+selected block are one run authenticated by ancestry from the certified
+selection; a peer's stated floor is never used. The refusal itself is not
+authenticated: a peer that refuses falsely can leave the importer with less
+history, never with wrong history. A peer that keeps the floor's parent hands
+on the same floor to the next importer.
+
+The floor may not lie above the first block of the selected block's epoch:
+recovery at the selected block needs it at or below the anchor, and the anchor
+epoch's verifier material lies in the floor's parent. A higher floor fails the
+import with `HistoryPruned`, the snapshot handoff fails and the node stops with
+that error.
+
+Finishing is one atomic write. It removes every record below the floor's parent,
+including older records the importer held of its own, with their certificates
+and imported finality, and every hash mapping; it stores the floor, a sweep
+cursor at the floor's parent and the selected block as head, and completes the
+import at the floor's parent. Dropping records of the importer's own logs a
+warning naming their heights. The
+recovery that publishes the import then rebuilds the mappings from the floor. A
+crash before the write repeats the attempt; a crash after it leaves a completed
+import that recovery publishes. A later selection imports down to the floor's
+parent again.
 
 ## Recovery of recent execution indexes
 
