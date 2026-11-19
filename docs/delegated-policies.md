@@ -43,7 +43,7 @@ The supported scopes are separate:
 
 | Scope | Authorized operations |
 |---|---|
-| `acp:policy` | Existing object registration, archival and relationship commands |
+| `acp:policy` | Existing object registration, archival and relationship commands, singly or as an ordered list |
 | `acp:policy:create` | Create policies owned by the token issuer |
 | `acp:policy:edit` | Edit policies already owned by the token issuer |
 | `acp:access:record` | Record granted access for the requested target actor |
@@ -218,8 +218,9 @@ remain separate. The worker and issuer may revoke individual assertions through
 
 The operation commitment is SHA-256 of `vera/acp-operation/v1\0` followed by
 compact UTF-8 JSON from `DelegatedOperation`. Its externally tagged variants are
-`CreatePolicy: [definition, format]`, `EditPolicy: [policyId, definition, format]`
-`PolicyCommand: [policyId, command]` and `CheckAccess: [policyId, request]`. The JSON has no whitespace outside
+`CreatePolicy: [definition, format]`, `EditPolicy: [policyId, definition, format]`,
+`PolicyCommand: [policyId, command]`, `PolicyCommandList: [[policyId, command], ...]`
+and `CheckAccess: [policyId, request]`. The JSON has no whitespace outside
 strings; strings use serde JSON escaping, fields retain declaration order, and
 formats use their enum names such as `ShortYaml`. Graph commands use the typed
 `PolicyCmd` representation. Access requests contain ordered `operations` followed
@@ -243,7 +244,9 @@ separately signed submissions of the same operation may execute more than once.
 
 Caller operation IDs add bounded cross-worker idempotency to these delegated
 methods. The signed request claim binds the exact operation and genesis, and
-retries return the original successful outcome. See
+retries return the original successful outcome. Graph commands and command lists
+may carry identities up to the deployment's policy-command lead, but a relay
+assertion still lasts at most 600 seconds. See
 [operation-identities.md](operation-identities.md) for deadlines, resource
 budgets, verification and recovery semantics.
 

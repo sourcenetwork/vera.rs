@@ -189,7 +189,11 @@ caller wrote it. See docs/delegated-policies.md#one-actor-per-key.
 Signed caller operation identities deduplicate successful effects across workers
 and across spellings of the actor's key.
 Outcomes are bounded, expire without allowing ID reuse, and share the execution
-rollback boundary. Operator approvals configure the retained outcome budget.
+rollback boundary. Operator approvals configure the retained outcome budget and
+the policy-command lead: identities on graph commands may lie up to that lead
+ahead of execution (600 seconds by default, at most 30 days); other operations
+keep 600 seconds. `bearerPolicyCmds` applies an ordered list of up to 64 graph
+commands in order, all or none, under one signed operation digest and one outcome.
 See `docs/operation-identities.md`.
 
 ### State and recovery
