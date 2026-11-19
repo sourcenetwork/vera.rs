@@ -87,6 +87,9 @@ impl FinalizedHistory {
     }
 
     /// Charge encoded record bytes before decoding, across a caller's whole query.
+    ///
+    /// A revision below the floor fails with [`HistoryPruned`]; a hash whose
+    /// mapping was removed with its record is not found.
     pub fn execution_bounded(
         &self,
         query: IndexQuery,
@@ -131,6 +134,10 @@ impl FinalizedHistory {
             height > 0 && height <= maximum,
             "history query exceeds published head"
         );
+        check_retained(
+            height,
+            floor::floor_height(snapshot.get(FLOOR)?.as_deref())?,
+        )?;
         let bytes = snapshot
             .get_pinned(key(RECORD, height))?
             .context("missing indexed execution record")?;

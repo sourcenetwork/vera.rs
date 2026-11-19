@@ -70,7 +70,7 @@ fn native_record_rpc_keeps_the_captured_revision_across_finalization() {
                             entered.send(()).unwrap();
                             release
                                 .recv_timeout(Duration::from_secs(2))
-                                .map_err(|e| e.to_string())?;
+                                .map_err(|e| vera_jsonrpc::RpcError::Internal(e.to_string()))?;
                         }
                         lookup
                             .read()
@@ -78,7 +78,9 @@ fn native_record_rpc_keeps_the_captured_revision_across_finalization() {
                             .get(&height)
                             .cloned()
                             .map(Some)
-                            .ok_or_else(|| "revision unavailable".into())
+                            .ok_or_else(|| {
+                                vera_jsonrpc::RpcError::Internal("revision unavailable".into())
+                            })
                     }))
                     .start_with_local(None)
                     .unwrap();

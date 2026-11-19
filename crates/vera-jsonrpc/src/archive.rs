@@ -90,3 +90,7 @@ pub(crate) fn log_error(error: IndexerError) -> RpcError {
         RpcError::LimitExceeded(error.to_string())
     }
 }
+
+#[cfg(test)]
+#[path = "archive_tests.rs"]
+mod tests;

@@ -38,7 +38,7 @@ fn locate(
         let blocks = answer(&heights, &holder).ok();
         async move { blocks }
     };
-    block_on(search(HEAD, HEAD, own, ask))
+    block_on(search(HEAD, HEAD, 1, own, ask))
 }
 
 #[test]

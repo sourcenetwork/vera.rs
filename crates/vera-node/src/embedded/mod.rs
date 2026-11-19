@@ -150,6 +150,12 @@ impl EmbeddedNode {
                 .map(|parameters| std::time::Duration::from_millis(parameters.stall_timeout_ms)),
         )
         .map_err(|error| EmbedError::Config(error.reason()))?;
+        if let (Some(retained), Some(epoch_length)) = (
+            config.history_retention,
+            std::num::NonZeroU64::new(genesis.blocks_per_epoch),
+        ) {
+            crate::check_history_retention(retained, epoch_length)?;
+        }
         if config
             .pacing
             .is_some_and(|pacing| pacing.idle >= config.leader_timeout)

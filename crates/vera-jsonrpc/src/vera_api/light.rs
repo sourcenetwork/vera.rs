@@ -60,7 +60,7 @@ impl VeraApiImpl {
         })
         .await
         .map_err(|error| RpcError::Internal(format!("light block lookup failed: {error}")))?
-        .map_err(|error| RpcError::Internal(error).into())
+        .map_err(Into::into)
     }
 }
 

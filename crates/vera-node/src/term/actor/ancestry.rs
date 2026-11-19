@@ -20,7 +20,15 @@ pub(crate) struct UnreadBlock {
 
 impl From<UnreadBlock> for TermRefusal {
     fn from(error: UnreadBlock) -> Self {
-        Self::History(error.to_string())
+        error
+            .reason
+            .downcast_ref::<crate::HistoryPruned>()
+            .map_or_else(
+                || Self::History(error.to_string()),
+                |pruned| Self::Pruned {
+                    floor: pruned.floor,
+                },
+            )
     }
 }
 
@@ -45,12 +53,18 @@ pub(super) fn answer(
 /// `at` is not the holder's. `at` is at or below the cut's height, and
 /// `ask` returns the holder's blocks at the heights it is given.
 ///
+/// `floor` is the oldest block this device's history retains, 1 until it
+/// is pruned. Below it this device holds no block to compare: the search
+/// starts from the block at the floor, and refuses with
+/// [`TermRefusal::Pruned`] when the histories differ there.
+///
 /// `None` when the histories agree at `at`, or the holder does not answer.
 /// A block of this device's that fails to read ends the search with a
 /// refusal; it is never taken for a difference.
 pub(super) async fn search<A, F>(
     at: u64,
     cut_height: u64,
+    floor: u64,
     held: impl Fn(u64) -> Result<Option<B256>, UnreadBlock>,
     ask: A,
 ) -> Result<Option<TermCut>, TermRefusal>
@@ -58,6 +72,11 @@ where
     A: Fn(Vec<u64>) -> F,
     F: Future<Output = Option<Vec<(u64, B256)>>>,
 {
+    // Genesis is shared while nothing is pruned.
+    let lowest = if floor > 1 { floor } else { 0 };
+    if at < lowest {
+        return Err(TermRefusal::Pruned { floor });
+    }
     if at < cut_height {
         let Some(theirs) = ask(vec![at]).await else {
             return Ok(None);
@@ -66,9 +85,24 @@ where
             return Ok(None);
         }
     }
-    // Genesis is shared, and the block at `at` is not. Histories that agree
-    // at a height agree below it.
-    let (mut shared, mut differs) = (0, at);
+    // The block at `at` is not shared.
+    if at == lowest && lowest > 0 {
+        return Err(TermRefusal::Pruned { floor });
+    }
+    if lowest > 0 {
+        let Some(theirs) = ask(vec![lowest]).await else {
+            return Ok(None);
+        };
+        let holders = theirs
+            .iter()
+            .find(|(answered, _)| *answered == lowest)
+            .map(|(_, block)| *block);
+        if holders.is_none() || holders != held(lowest)? {
+            return Err(TermRefusal::Pruned { floor });
+        }
+    }
+    // Histories that agree at a height agree below it.
+    let (mut shared, mut differs) = (lowest, at);
     while differs - shared > 1 {
         let span = differs - shared - 1;
         let samples = span.min(MAX_HEIGHTS as u64);
@@ -126,7 +160,9 @@ where
     /// from there. Without the holder's answer nothing is recorded, and a
     /// history that left the holder's is found out by the rewind. A block
     /// of this device's that fails to read refuses with
-    /// [`TermRefusal::History`] and records nothing.
+    /// [`TermRefusal::History`] and records nothing. A shared block that
+    /// cannot be found above the oldest block its history retains refuses
+    /// with [`TermRefusal::Pruned`].
     pub(super) async fn locate(&mut self, change: &TermChange) -> Result<(), TermRefusal> {
         if self.backup {
             return Ok(());
@@ -147,6 +183,7 @@ where
             return Ok(());
         };
         let address = holder.address;
+        let floor = (self.history_floor)().map_err(|error| TermRefusal::history(&error))?;
         let context = self.context.child("term_probes");
         let ask = |heights: Vec<u64>| {
             let (probe, context) = (probe.clone(), context.child("term_ancestry"));
@@ -164,7 +201,14 @@ where
                     .await
             }
         };
-        let found = search(at, change.cut.height, |height| self.held_block(height), ask).await?;
+        let found = search(
+            at,
+            change.cut.height,
+            floor,
+            |height| self.held_block(height),
+            ask,
+        )
+        .await?;
         let Some(common) = found else {
             return Ok(());
         };
@@ -184,3 +228,7 @@ where
 #[cfg(test)]
 #[path = "ancestry_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "ancestry_floor_tests.rs"]
+mod floor_tests;

@@ -489,7 +489,7 @@ async fn indirect_proof_survives_reopen_and_uses_the_rpc_history_lookup() {
                 calls.fetch_add(1, Ordering::Relaxed);
                 history
                     .certified_light_block(height, &epochs)
-                    .map_err(|error| error.to_string())
+                    .map_err(|error| vera_jsonrpc::RpcError::Internal(error.to_string()))
             })
         });
     let restored = api
@@ -555,7 +555,7 @@ async fn indirect_proof_survives_reopen_and_uses_the_rpc_history_lookup() {
             Arc::new(move |hash| {
                 history
                     .receipt_proof(hash, &epochs)
-                    .map_err(|error| error.to_string())
+                    .map_err(|error| vera_jsonrpc::RpcError::Internal(error.to_string()))
             })
         });
     let archived = archive_api

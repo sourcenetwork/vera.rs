@@ -1,9 +1,11 @@
 //! How far the stored chain is known to be valid, so a start need not reread it.
 //!
 //! The `validated` key holds a height and block hash. It claims that every
-//! record from genesis through that block decodes, matches its receipt
-//! commitment and names its predecessor as parent. A start relies on it only
-//! while it names the durable head.
+//! record from the floor through that block decodes, matches its receipt
+//! commitment and names its predecessor as parent, and that the record at the
+//! floor is the block the floor names. A start relies on it only while it
+//! names the durable head. Raising the floor removes records from the start
+//! of the claim and leaves it true.
 //!
 //! Only a write that establishes the claim stores it, in the same batch as
 //! the records it covers: the first open (genesis), an append whose parent is

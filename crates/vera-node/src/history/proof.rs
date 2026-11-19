@@ -92,6 +92,7 @@ impl FinalizedHistory {
     }
 
     /// Assemble a bounded ancestry proof from one durable history snapshot.
+    /// A revision below the floor fails with [`HistoryPruned`].
     pub fn light_block(&self, height: u64, epochs: &LightBlockIndex) -> Result<LightBlock> {
         let snapshot = self.db.snapshot();
         ensure!(
@@ -104,6 +105,10 @@ impl FinalizedHistory {
             height > 0 && height <= head,
             "block not found at height {height}"
         );
+        check_retained(
+            height,
+            floor::floor_height(snapshot.get(FLOOR)?.as_deref())?,
+        )?;
         let last = height.saturating_add(LIGHT_BLOCK_MAX_DESCENDANTS as u64);
         let mut blocks = Vec::new();
         let mut remaining = LIGHT_BLOCK_MAX_ARTIFACT_BYTES;

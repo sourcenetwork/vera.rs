@@ -12,6 +12,9 @@ pub enum EmbedError {
     /// The configuration cannot run.
     #[error("invalid configuration: {0}")]
     Config(&'static str),
+    /// The history retention is shorter than the deployment allows.
+    #[error(transparent)]
+    HistoryRetention(#[from] crate::RetentionTooShort),
     /// The network RPC address could not be bound.
     #[error("cannot bind RPC listener {address}: {source}")]
     RpcBind {

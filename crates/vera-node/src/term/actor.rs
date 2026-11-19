@@ -44,6 +44,10 @@ pub(crate) type Finalized =
 /// above genesis: `None` when it holds none there, an error when the read fails.
 pub(crate) type Blocks = Arc<dyn Fn(u64) -> anyhow::Result<Option<B256>> + Send + Sync>;
 
+/// Reads the oldest height finalized history retains: 1 until it is pruned.
+/// [`Blocks`] fails for a height below it.
+pub(crate) type HistoryFloor = Arc<dyn Fn() -> anyhow::Result<u64> + Send + Sync>;
+
 /// What the term actor works with.
 pub(crate) struct Parts<S, R> {
     pub seat: TermSeat,
@@ -57,6 +61,7 @@ pub(crate) struct Parts<S, R> {
     pub index: Arc<BlockIndex>,
     pub finalized: Finalized,
     pub blocks: Blocks,
+    pub history_floor: HistoryFloor,
     pub modules: SharedModuleState,
     pub status: NodeState,
     pub network: (S, R),
@@ -78,6 +83,7 @@ struct Actor<S, R> {
     index: Arc<BlockIndex>,
     finalized: Finalized,
     blocks: Blocks,
+    history_floor: HistoryFloor,
     modules: SharedModuleState,
     status: NodeState,
     sender: S,
@@ -115,6 +121,7 @@ where
         index: parts.index,
         finalized: parts.finalized,
         blocks: parts.blocks,
+        history_floor: parts.history_floor,
         modules: parts.modules,
         status: parts.status,
         sender: parts.network.0,

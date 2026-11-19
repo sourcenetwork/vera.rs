@@ -38,7 +38,8 @@ pub(super) struct Import {
 }
 
 impl FinalizedHistory {
-    /// Serve a bounded chunk from a durable snapshot, excluding unpublished imports.
+    /// Serve a bounded chunk from a durable snapshot, excluding unpublished
+    /// imports. A height below the floor fails with [`HistoryPruned`].
     pub fn record_chunk(&self, height: u64, offset: u64, maximum: usize) -> Result<HistoryChunk> {
         ensure!(
             maximum > 0 && maximum <= HISTORY_CHUNK_BYTES,
@@ -60,6 +61,7 @@ impl FinalizedHistory {
     }
 
     /// Fail unless `height` is retained and not behind an unpublished import.
+    /// A height below the floor fails with [`HistoryPruned`].
     pub(super) fn check_published(&self, height: u64) -> Result<()> {
         check_published(&self.db.snapshot(), height)
     }
@@ -213,7 +215,10 @@ fn check_published(snapshot: &regolith_store::Snapshot, height: u64) -> Result<(
     let (head, _): (u64, [u8; 32]) =
         borsh::from_slice(&snapshot.get(HEAD)?.context("missing history head")?)?;
     ensure!(height > 0 && height <= head, "history height unavailable");
-    Ok(())
+    check_retained(
+        height,
+        floor::floor_height(snapshot.get(FLOOR)?.as_deref())?,
+    )
 }
 
 fn vector<'a>(input: &mut &'a [u8]) -> Result<&'a [u8]> {

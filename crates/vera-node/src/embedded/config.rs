@@ -59,8 +59,19 @@ pub struct EmbeddedConfig {
     pub timeout_retry: Duration,
     /// Retention of consensus archives and state journals. `None` retains all of both.
     ///
-    /// Finalized history, which serves receipts, is kept in full either way.
+    /// Finalized history, which serves receipts, has its own retention:
+    /// [`Self::history_retention`].
     pub pruning: Option<PruningConfig>,
+    /// Finalized revisions of execution history kept below the head. `None`,
+    /// the default, keeps all of it.
+    ///
+    /// Older receipts, revisions and their proofs are no longer served; the
+    /// records of epoch boundaries stay. The value must be at least
+    /// [`crate::minimum_history_retention`] for the deployment's epoch
+    /// length, or the start fails with [`crate::EmbedError::HistoryRetention`].
+    /// A node whose history is pruned cannot serve it to a device that
+    /// catches up from its start: that device's catch-up fails.
+    pub history_retention: Option<u64>,
     /// Proposal pacing for the lone validator. `None` keeps the daemon's cadence.
     pub pacing: Option<SoloPacing>,
     /// Async worker threads of the node's runtime. `None` uses the runtime default.
@@ -118,6 +129,7 @@ impl EmbeddedConfig {
             certification_timeout: Duration::from_secs(13),
             timeout_retry: Duration::from_millis(500),
             pruning: Some(Self::RETENTION),
+            history_retention: None,
             pacing: Some(SoloPacing {
                 idle: Self::HEARTBEAT,
                 batch: SoloPacing::BATCH,
@@ -224,6 +236,7 @@ impl EmbeddedConfig {
                 ..NetworkConfig::default()
             },
             pruning: self.pruning.clone(),
+            history_retention: self.history_retention,
             // A backup starts from the active device's state, not from genesis.
             snapshot: matches!(self.role, DeviceRole::Backup(_)).then(|| SnapshotConfig {
                 initialization_timeout_ms: self
@@ -279,5 +292,6 @@ mod tests {
         assert_eq!(config.network.listen_addr, "127.0.0.1:0");
         assert_eq!(config.network.discovery, DiscoveryConfig::local());
         assert_eq!(config.pruning, Some(EmbeddedConfig::RETENTION));
+        assert_eq!(config.history_retention, None);
     }
 }

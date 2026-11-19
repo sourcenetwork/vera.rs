@@ -47,6 +47,7 @@ impl SnapshotHistory {
             selection?;
             while let Some((height, _)) = self.history.import_next()? {
                 let mut imported = Err(anyhow::anyhow!("no history peers available"));
+                let mut pruned = None;
                 for offset in 0..peers.len() {
                     let index = (preferred + offset) % peers.len();
                     let peer = &peers[index];
@@ -57,7 +58,15 @@ impl SnapshotHistory {
                         preferred = index;
                         break;
                     }
-                    tracing::warn!(%peer, height, error = %imported.as_ref().unwrap_err(), "history transfer failed");
+                    let error = imported.as_ref().unwrap_err();
+                    pruned = pruned.or(error.downcast_ref::<HistoryPruned>().copied());
+                    tracing::warn!(%peer, height, %error, "history transfer failed");
+                }
+                // History is imported down to the store's own head, so a peer
+                // that pruned below the selected block cannot complete it.
+                if let (Err(_), Some(pruned)) = (&imported, pruned) {
+                    imported = Err(anyhow::Error::new(pruned)
+                        .context("history peers no longer retain the history this device lacks"));
                 }
                 ensure!(
                     imported.with_context(|| format!("import history at {height}"))?

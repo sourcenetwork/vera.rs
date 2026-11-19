@@ -30,6 +30,9 @@ pub mod codes {
     pub const LIMIT_EXCEEDED: i32 = -32005;
     /// Execution error (revert, out of gas, etc.).
     pub const EXECUTION_ERROR: i32 = -32015;
+    /// The node no longer retains the requested history (EIP-4444's code
+    /// for pruned history). Not retryable on the same node.
+    pub const HISTORY_PRUNED: i32 = 4444;
 }
 
 /// Admission failures before an operation enters the pending queue.
@@ -75,6 +78,14 @@ pub enum RpcError {
     /// All blocking history readers are occupied.
     #[error("history service busy; retry later")]
     HistoryBusy,
+    /// The revision is below the oldest one this node's history retains.
+    #[error("history pruned: revision {height} is below the retained floor {floor}")]
+    HistoryPruned {
+        /// The requested revision.
+        height: u64,
+        /// The oldest revision the node retains.
+        floor: u64,
+    },
     /// No execution simulation slot freed in time, or too many callers are waiting for one.
     #[error("simulation service busy; retry later")]
     SimulationBusy,
@@ -130,6 +141,11 @@ impl From<RpcError> for ErrorObjectOwned {
                 err.to_string(),
                 Some(serde_json::json!({"retryable": true})),
             ),
+            RpcError::HistoryPruned { floor, .. } => ErrorObjectOwned::owned(
+                codes::HISTORY_PRUNED,
+                err.to_string(),
+                Some(serde_json::json!({"retryable": false, "floor": floor})),
+            ),
             RpcError::ExecutionReverted { data } => {
                 ErrorObjectOwned::owned(codes::EXECUTION_ERROR, err.to_string(), Some(data.clone()))
             }
@@ -145,6 +161,7 @@ impl From<RpcError> for ErrorObjectOwned {
                     RpcError::Internal(_) => (codes::INTERNAL_ERROR, err.to_string()),
                     RpcError::NotImplemented => (codes::METHOD_NOT_SUPPORTED, err.to_string()),
                     RpcError::ExecutionReverted { .. }
+                    | RpcError::HistoryPruned { .. }
                     | RpcError::HistoryBusy
                     | RpcError::SimulationBusy => unreachable!(),
                 };
@@ -181,6 +198,19 @@ mod tests {
         let rejected: ErrorObjectOwned = TxSubmitError::Rejected("invalid signature".into()).into();
         assert_eq!(rejected.code(), codes::INVALID_PARAMS);
         assert!(rejected.data().is_none());
+    }
+
+    #[test]
+    fn pruned_history_is_distinct_and_not_retryable() {
+        let error: ErrorObjectOwned = RpcError::HistoryPruned {
+            height: 3,
+            floor: 10,
+        }
+        .into();
+        assert_eq!(error.code(), codes::HISTORY_PRUNED);
+        assert_eq!(codes::HISTORY_PRUNED, 4444);
+        let data: serde_json::Value = serde_json::from_str(error.data().unwrap().get()).unwrap();
+        assert_eq!(data, serde_json::json!({"retryable": false, "floor": 10}));
     }
 
     #[test]
