@@ -44,6 +44,7 @@ pub use floor::HistoryPruned;
 pub(crate) use floor::rpc_error;
 use floor::{FLOOR, check_cut, check_retained};
 mod retention;
+mod sweep;
 pub(crate) use retention::HistoryRetention;
 pub use retention::{
     HISTORY_MAINTENANCE_INTERVAL, RetentionTooShort, check_history_retention,

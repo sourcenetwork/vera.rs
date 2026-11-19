@@ -223,34 +223,100 @@ fn a_pruned_submission_is_not_found_and_never_pending() {
 }
 
 #[tokio::test]
-async fn a_crash_between_prune_batches_leaves_a_floor_matching_the_records() {
+async fn a_crash_after_the_floor_is_raised_leaves_pruned_records_reading_as_pruned() {
     let chain = chain(100);
-    let mut batches = 0;
+    let mut writes = 0;
     let error = chain
         .history
-        .prune_below_with(90, epoch_length(), |db, batch| {
-            batches += 1;
-            ensure!(batches <= 3, "injected crash");
+        .prune_below_with(50, epoch_length(), |db, batch| {
+            writes += 1;
+            ensure!(writes == 1, "injected crash");
             write(db, batch)
         })
         .unwrap_err();
     assert!(error.to_string().contains("injected crash"));
     let chain = chain.reopen();
-    assert_eq!(chain.history.floor_height().unwrap(), 24);
-    assert!(!chain.holds(RECORD, 22) && chain.holds(RECORD, 23));
-    assert!(!chain.holds(CERTIFICATE, 23) && chain.holds(CERTIFICATE, 24));
-    assert_eq!(chain.submission_height(submission(23)), None);
-    assert_eq!(chain.submission_height(submission(24)), Some(24));
+    assert_eq!(chain.history.floor_height().unwrap(), 48);
+    assert!(chain.holds(RECORD, 10) && !chain.holds(CERTIFICATE, 10));
+    // The mapping still names the record, which is below the floor.
+    let error = chain
+        .history
+        .execution_by_submission(submission(10))
+        .unwrap_err();
+    assert_eq!(
+        pruned(&error),
+        Some(HistoryPruned {
+            height: 10,
+            floor: 48
+        })
+    );
+    // The floor's parent lost its mappings with the floor write.
+    assert_eq!(chain.submission_height(submission(47)), None);
+    let head = chain.head().clone();
+    chain.history.db.delete(VALIDATED).unwrap();
+    let chain = chain.reopen();
+    chain.recover(&head).await.unwrap();
+    assert_eq!(chain.history.prune_below(50, epoch_length()).unwrap(), 48);
+    assert!(
+        chain
+            .history
+            .execution_by_submission(submission(10))
+            .unwrap()
+            .is_none()
+    );
+    assert!(!chain.holds(RECORD, 46) && chain.holds(RECORD, 47));
+}
+
+#[tokio::test]
+async fn a_crash_mid_sweep_resumes_from_the_cursor_and_keeps_the_floors_parent() {
+    let chain = chain(1_000);
+    let mut writes = 0;
+    let error = chain
+        .history
+        .prune_below_with(900, epoch_length(), |db, batch| {
+            writes += 1;
+            ensure!(writes <= 2, "injected crash");
+            write(db, batch)
+        })
+        .unwrap_err();
+    assert!(error.to_string().contains("injected crash"));
+    let chain = chain.reopen();
+    assert_eq!(chain.history.floor_height().unwrap(), 896);
+    assert_eq!(chain.history.sweep_cursor().unwrap(), 257);
+    assert!(!chain.holds(RECORD, 256) && chain.holds(RECORD, 257));
+    assert_eq!(chain.submission_height(submission(256)), None);
+    assert_eq!(chain.submission_height(submission(257)), Some(257));
     chain.history.db.delete(VALIDATED).unwrap();
     let chain = chain.reopen();
     let head = chain.head().clone();
     chain.recover(&head).await.unwrap();
-    assert_eq!(chain.history.prune_below(90, epoch_length()).unwrap(), 88);
+    assert_eq!(chain.history.prune_below(900, epoch_length()).unwrap(), 896);
+    assert_eq!(chain.history.sweep_cursor().unwrap(), 895);
+    assert!(!chain.holds(RECORD, 894) && chain.holds(RECORD, 895));
     chain.recover(&head).await.unwrap();
 }
 
 #[test]
-fn a_maintenance_pass_keeps_the_retained_window_and_bounds_its_work() {
+fn a_long_epoch_is_swept_in_bounded_batches() {
+    let chain = chain(4_200);
+    let length = NonZeroU64::new(4_096).unwrap();
+    let mut writes = 0_u64;
+    let floor = chain
+        .history
+        .prune_below_with(4_150, length, |db, batch| {
+            writes += 1;
+            write(db, batch)
+        })
+        .unwrap();
+    assert_eq!(floor, 4_096);
+    // One floor write, then 4,094 heights in batches of at most 256.
+    assert_eq!(writes, 1 + 4_094_u64.div_ceil(256));
+    assert_eq!(chain.history.sweep_cursor().unwrap(), 4_095);
+    assert!(!chain.holds(RECORD, 4_094) && chain.holds(RECORD, 4_095));
+}
+
+#[test]
+fn a_maintenance_pass_keeps_the_retained_window_and_bounds_its_sweep() {
     let chain = chain(1_400);
     let retention = HistoryRetention {
         retained: 100,
@@ -258,9 +324,11 @@ fn a_maintenance_pass_keeps_the_retained_window_and_bounds_its_work() {
         epoch_length: epoch_length(),
     };
     assert!(retention.due(1_400) && !retention.due(1_401));
-    // One pass removes at most 1,024 heights.
-    assert_eq!(chain.history.maintain(&retention).unwrap(), 1_024);
+    // The floor moves at once; one pass sweeps at most 1,024 heights.
     assert_eq!(chain.history.maintain(&retention).unwrap(), 1_296);
+    assert_eq!(chain.history.sweep_cursor().unwrap(), 1_025);
+    assert_eq!(chain.history.maintain(&retention).unwrap(), 1_296);
+    assert_eq!(chain.history.sweep_cursor().unwrap(), 1_295);
     assert_eq!(chain.history.maintain(&retention).unwrap(), 1_296);
 }
 

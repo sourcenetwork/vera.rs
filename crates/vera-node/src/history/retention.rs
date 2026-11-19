@@ -1,26 +1,24 @@
-//! Removing the finalized records below a retained window.
+//! Raising the floor below a retained window.
 //!
 //! The floor is the first block of an epoch, or height 1 while nothing is
-//! pruned. The store holds one contiguous run of records from the block
-//! before the floor through the head. That block, the last of the previous
-//! epoch, is the floor's parent and carries the verifier material of the
-//! floor's epoch, which light-block assembly and a start read. Nothing else
-//! is kept below the floor.
+//! pruned. The store serves the records from the floor through the head, and
+//! keeps the floor's parent, the last block of the previous epoch, which
+//! carries the verifier material of the floor's epoch that light-block
+//! assembly and a start read.
 //!
-//! A prune raises the floor one epoch per batch. Each batch is one atomic
-//! write: it removes the records below the new floor's parent, the
-//! certificates, imported finality and proof blocks below the new floor, and
-//! the hash mappings of every record below it, and stores the new floor. A
-//! crash between batches leaves the floor of the last batch written, which
-//! matches the records present.
+//! Raising the floor is one small atomic write: it stores the new floor,
+//! removes every certificate, imported finality and proof block below it,
+//! and the hash mappings of the new floor's parent. Readers refuse heights
+//! below the floor from then on, and a mapping that still names one reads as
+//! pruned. The records left below the floor's parent, and their mappings, are
+//! removed afterwards in bounded batches (see `sweep`).
 
 use std::num::NonZeroU64;
 
 use super::*;
 
-/// Most heights one maintenance pass removes, rounded up to whole epochs; a
-/// larger backlog is worked off over later passes instead of holding up one
-/// finalization.
+/// Most heights one maintenance pass sweeps; a larger backlog is worked off
+/// over later passes instead of holding up one finalization.
 const PASS: u64 = 1_024;
 
 /// Finalized revisions between maintenance passes when consensus pruning,
@@ -82,26 +80,23 @@ const fn epoch_start(height: u64, epoch_length: NonZeroU64) -> u64 {
 }
 
 impl FinalizedHistory {
-    /// One maintenance pass: raise the floor towards `retained` revisions
-    /// below the head, by a bounded number of epochs. A pending import is
-    /// left alone; the pass returns the floor unchanged.
+    /// One maintenance pass: raise the floor to `retained` revisions below
+    /// the head, then sweep at most a bounded number of heights below it. A
+    /// pending import is left alone; the pass returns the floor unchanged.
     pub(crate) fn maintain(&self, retention: &HistoryRetention) -> Result<u64> {
-        let floor = self.floor_height()?;
         if self.db.get(transfer::IMPORT)?.is_some() {
-            return Ok(floor);
+            return self.floor_height();
         }
-        let Some(target) = self.head_height().checked_sub(retention.retained) else {
-            return Ok(floor);
+        let floor = match self.head_height().checked_sub(retention.retained) {
+            Some(target) => self.raise_floor(target, retention.epoch_length, &mut write)?,
+            None => self.floor_height()?,
         };
-        let pass = PASS.max(retention.epoch_length.get());
-        self.prune_below(
-            target.min(floor.saturating_add(pass)),
-            retention.epoch_length,
-        )
+        self.sweep(PASS, &mut write)?;
+        Ok(floor)
     }
 
     /// Raise the floor to the first block of the epoch holding `target`, so
-    /// at least the revisions from `target` stay, and remove what lies below
+    /// at least the revisions from `target` stay, and remove everything below
     /// the floor's parent. The head's epoch stays, and a target at or below
     /// the floor changes nothing. Returns the floor.
     pub fn prune_below(&self, target: u64, epoch_length: NonZeroU64) -> Result<u64> {
@@ -114,43 +109,57 @@ impl FinalizedHistory {
         epoch_length: NonZeroU64,
         mut persist: impl FnMut(&DB, WriteBatch) -> Result<()>,
     ) -> Result<u64> {
-        loop {
-            // Appends, cuts and recovery rewrite the hash mappings this batch reads.
-            let head = self.head.lock();
-            let floor = self.floor_height()?;
-            let target = epoch_start(target.min(head.0), epoch_length);
-            if target <= floor {
-                return Ok(floor);
-            }
-            ensure!(
-                self.db.get(transfer::IMPORT)?.is_none(),
-                "history import is pending"
-            );
-            let next = epoch_start(floor, epoch_length) + epoch_length.get();
-            let lowest = floor.saturating_sub(1).max(1);
-            let mut batch = WriteBatch::default();
-            for height in lowest..next {
-                let record = self.record(height)?;
-                self.unindex_pruned(&mut batch, height, &record)?;
-            }
-            batch.delete_range(key(RECORD, 0), key(RECORD, next - 1));
-            for prefix in [CERTIFICATE, IMPORTED_FINALITY, PROOF_BLOCK] {
-                batch.delete_range(key(prefix, 0), key(prefix, next));
-            }
-            let id = alloy_primitives::keccak256(&self.record(next)?.block);
-            batch.put(FLOOR, borsh::to_vec(&(next, id.0))?);
-            persist(&self.db, batch)?;
-        }
+        let floor = self.raise_floor(target, epoch_length, &mut persist)?;
+        while !self.sweep(u64::MAX, &mut persist)? {}
+        Ok(floor)
     }
 
-    /// Stage removing the mappings that point at the record at `height`.
+    /// Store the floor for `target` in one write, as described in the module.
+    fn raise_floor(
+        &self,
+        target: u64,
+        epoch_length: NonZeroU64,
+        persist: &mut impl FnMut(&DB, WriteBatch) -> Result<()>,
+    ) -> Result<u64> {
+        // Appends, cuts and recovery rewrite the hash mappings this write reads.
+        let head = self.head.lock();
+        let floor = self.floor_height()?;
+        let target = epoch_start(target.min(head.0), epoch_length);
+        if target <= floor {
+            return Ok(floor);
+        }
+        ensure!(
+            self.db.get(transfer::IMPORT)?.is_none(),
+            "history import is pending"
+        );
+        let mut batch = WriteBatch::default();
+        for prefix in [CERTIFICATE, IMPORTED_FINALITY, PROOF_BLOCK] {
+            batch.delete_range(key(prefix, 0), key(prefix, target));
+        }
+        let parent = self.record(target - 1)?;
+        self.unindex_pruned(&mut batch, target - 1, &parent)?;
+        let id = alloy_primitives::keccak256(&self.record(target)?.block);
+        batch.put(FLOOR, borsh::to_vec(&(target, id.0))?);
+        persist(&self.db, batch)?;
+        Ok(target)
+    }
+
+    /// Stage removing the mappings that point at the record at `height`, and
+    /// return how many there are.
     /// A submission hash a later revision repeats maps to that revision and stays.
-    fn unindex_pruned(&self, batch: &mut WriteBatch, height: u64, record: &Record) -> Result<()> {
+    pub(super) fn unindex_pruned(
+        &self,
+        batch: &mut WriteBatch,
+        height: u64,
+        record: &Record,
+    ) -> Result<usize> {
+        let mut deleted = 0;
         let id = alloy_primitives::keccak256(&record.block);
         let mut unindex = |prefix, hash: &[u8; 32]| -> Result<()> {
             let key = query::hash_key(prefix, hash);
             if self.db.get(key)?.as_deref() == Some(height.to_be_bytes().as_slice()) {
                 batch.delete(key);
+                deleted += 1;
             }
             Ok(())
         };
@@ -158,7 +167,7 @@ impl FinalizedHistory {
         for receipt in &record.receipts {
             unindex(SUBMISSION_HASH, &receipt.hash)?;
         }
-        Ok(())
+        Ok(deleted)
     }
 }
 

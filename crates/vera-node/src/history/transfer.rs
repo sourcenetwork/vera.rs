@@ -236,6 +236,15 @@ impl FinalizedHistory {
             }
             .into());
         }
+        if import.base.0 > 0 {
+            // They cannot be compared with the deployment's history.
+            tracing::warn!(
+                from = self.floor_height()?.saturating_sub(1).max(1),
+                through = import.base.0,
+                floor,
+                "dropping this store's own records below the adopted history floor"
+            );
+        }
         let parent = alloy_primitives::keccak256(&self.record(floor - 1)?.block);
         let id = alloy_primitives::keccak256(&self.record(floor)?.block);
         let mut batch = WriteBatch::default();
@@ -247,6 +256,7 @@ impl FinalizedHistory {
         batch.delete(QUERY_HEAD);
         batch.delete(VALIDATED);
         batch.put(FLOOR, borsh::to_vec(&(floor, id.0))?);
+        batch.put(sweep::SWEEP, (floor - 1).to_be_bytes());
         import.base = (floor - 1, parent.0);
         import.next = import.base;
         batch.put(IMPORT, borsh::to_vec(&import)?);
