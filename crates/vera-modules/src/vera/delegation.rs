@@ -6,6 +6,7 @@ use crate::types::{BlockExecCtx, Timestamp};
 
 impl VeraModule {
     /// Verify a delegation against the authenticated caller and current revocations.
+    /// An operation identity's deadline may lie at most `max_lead` seconds ahead.
     pub fn authorize_delegation(
         &self,
         context: &BlockExecCtx,
@@ -13,6 +14,7 @@ impl VeraModule {
         token: &str,
         scope: DelegationScope,
         operation: [u8; 32],
+        max_lead: u64,
     ) -> Result<JwtClaims> {
         let claims = verify_bearer_token(token).map_err(invalid)?;
         if claims.scope != scope {
@@ -29,7 +31,7 @@ impl VeraModule {
         if let Some(request) = &claims.request {
             request
                 .id
-                .validate(context.timestamp.seconds)
+                .validate(context.timestamp.seconds, max_lead)
                 .map_err(invalid)?;
             if context.genesis_id == [0; 32]
                 || request.genesis_id != context.genesis_id

@@ -52,7 +52,7 @@ async fn pipelined_object_archive_preserves_exact_counts_and_regrants_after_rest
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let expires = issued + vera_crypto::operation::MAX_OPERATION_TTL;
+    let expires = issued + vera_crypto::operation::DEFAULT_OPERATION_LEAD;
     let create_token = vera_client::create_scoped_bearer_token(
         &key,
         worker.did(),

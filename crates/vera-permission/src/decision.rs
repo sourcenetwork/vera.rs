@@ -1,6 +1,6 @@
 use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};
-use vera_crypto::operation::OperationId;
+use vera_crypto::operation::{DEFAULT_OPERATION_LEAD, OperationId};
 use vera_domain::ConsensusPublicKey;
 use vera_modules::acp::{
     delegated_operation::DelegatedOperation,
@@ -129,7 +129,9 @@ impl RecordResponse {
             || outcome.revision.block_height > self.revision.height
             || outcome.revision.seconds == 0
             || outcome.revision.seconds > self.revision.timestamp
-            || id.validate(outcome.revision.seconds).is_err()
+            || id
+                .validate(outcome.revision.seconds, DEFAULT_OPERATION_LEAD)
+                .is_err()
         {
             return Err(PermissionError::Invalid(
                 "decision outcome differs from request or revision",

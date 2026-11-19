@@ -151,7 +151,10 @@ fn decision_scope_and_outcome_budget_fail_without_partial_records() {
         .is_err()
     );
     assert_eq!((acp.store().serialize(), vera.store().serialize()), before);
-    acp.store.put(BUDGET_KEY, 1u64.to_be_bytes().to_vec());
+    acp.store.put(
+        OutcomeClass::Short.budget_key(),
+        1u64.to_be_bytes().to_vec(),
+    );
     let before = (acp.store().serialize(), vera.store().serialize());
     assert!(
         acp.bearer_check_access(&mut vera, &context(100), &worker, &valid, &policy, &request)

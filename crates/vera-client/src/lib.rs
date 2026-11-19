@@ -53,16 +53,19 @@ pub use vera_permission::{
     RECORD_PROOF_BYTES, ReadLimits, RecordProof, RecordResponse, object_owner_prefix,
     verify_permission_proof,
 };
+mod policy_operation;
 mod signer;
 mod subject;
 mod tx;
 mod types;
+pub use policy_operation::{PolicyOperation, PolicyOperationLead};
 mod unsigned_token;
 mod worker;
 pub use worker::NativeWorker;
 
 pub use bearer::{
-    create_bearer_token, create_operation_token, create_relay_token, create_scoped_bearer_token,
+    create_bearer_token, create_operation_token, create_operation_token_with_lead,
+    create_relay_token, create_scoped_bearer_token,
 };
 pub use bls_signer::BlsSigner;
 pub use client::{

@@ -115,6 +115,10 @@ pub enum AdministrativeCommand {
     RevokeRelay(String),
     /// Set the maximum retained encoded operation outcomes, in bytes.
     SetOperationBudget(u64),
+    /// Set the maximum retained encoded long-lived operation outcomes, in bytes.
+    SetLongOperationBudget(u64),
+    /// Set the longest lead, in seconds, an operation identity on a policy command may carry.
+    SetPolicyOperationLead(u64),
 }
 
 /// The exact administrative request covered by each operator signature.
@@ -250,6 +254,12 @@ impl VeraModule {
         }
         if let AdministrativeCommand::SetOperationBudget(bytes) = &request.command {
             acp.set_operation_budget(*bytes).map_err(invalid)?;
+        }
+        if let AdministrativeCommand::SetLongOperationBudget(bytes) = &request.command {
+            acp.set_long_operation_budget(*bytes).map_err(invalid)?;
+        }
+        if let AdministrativeCommand::SetPolicyOperationLead(seconds) = &request.command {
+            acp.set_policy_operation_lead(*seconds).map_err(invalid)?;
         }
         self.store.put(STATE_KEY, encoded_state);
         Ok(())

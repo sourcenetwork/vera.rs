@@ -131,6 +131,9 @@ sol! {
 
         function bearerPolicyCmd(string bearerToken, bytes32 policyId, bytes cmd) external returns (bytes);
 
+        /// `commands` is a JSON array of `[policyId, cmd]` pairs, applied in order, all or none.
+        function bearerPolicyCmds(string bearerToken, bytes commands) external returns (bytes);
+
         // ── Read methods (map to Cosmos Queries) ────────────────────────
 
         function hasRelationship(

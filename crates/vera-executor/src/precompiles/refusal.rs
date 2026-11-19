@@ -62,7 +62,9 @@ impl Refuse for AcpError {
         match self {
             Self::PolicyNotFound { .. } | Self::CommitmentNotFound { .. } => RefusalKind::NotFound,
             Self::InvalidPolicy { .. } => RefusalKind::InvalidPolicy,
-            Self::InvalidAccessRequest { .. } => RefusalKind::InvalidArgument,
+            Self::InvalidAccessRequest { .. } | Self::InvalidCommandList { .. } => {
+                RefusalKind::InvalidArgument
+            }
             Self::ObjectNotRegistered { .. } => RefusalKind::ObjectNotRegistered,
             Self::ObjectAlreadyRegistered { .. } => RefusalKind::AlreadyExists,
             Self::CommitmentExpired { .. } => RefusalKind::Expired,

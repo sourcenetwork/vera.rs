@@ -15,6 +15,9 @@ pub enum AcpError {
     #[error("invalid access request: {reason}")]
     InvalidAccessRequest { reason: String },
 
+    #[error("invalid command list: {reason}")]
+    InvalidCommandList { reason: String },
+
     #[error("object not registered: {resource}/{object_id}")]
     ObjectNotRegistered { resource: String, object_id: String },
 

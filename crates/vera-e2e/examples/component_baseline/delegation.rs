@@ -3,7 +3,7 @@ use vera_client::Secp256k1SigningKey as SigningKey;
 use vera_client::{BlsSigner, create_operation_token};
 use vera_crypto::{
     jwt::{DelegationScope, JwtClaims},
-    operation::{OperationClaim, OperationId},
+    operation::{DEFAULT_OPERATION_LEAD as LEAD, OperationClaim, OperationId},
 };
 use vera_identity::Did;
 use vera_modules::{
@@ -133,15 +133,15 @@ pub(super) fn run() {
     assert_eq!(base.store().serialize(), base_bytes);
     let scope = DelegationScope::PolicyCommands;
     let authorized = vera
-        .authorize_delegation(&context, &worker, &token, scope, digest)
+        .authorize_delegation(&context, &worker, &token, scope, digest, LEAD)
         .unwrap();
     assert_eq!(authorized.iss, actor.as_str());
     assert!(
-        vera.authorize_delegation(&context, &other_worker, &token, scope, digest)
+        vera.authorize_delegation(&context, &other_worker, &token, scope, digest, LEAD)
             .is_err()
     );
     assert!(
-        vera.authorize_delegation(&context, &worker, &token, scope, [0; 32])
+        vera.authorize_delegation(&context, &worker, &token, scope, [0; 32], LEAD)
             .is_err()
     );
     let mut revoked = vera.clone();
@@ -178,6 +178,7 @@ pub(super) fn run() {
                 black_box(&token),
                 scope,
                 digest,
+                LEAD,
             )
             .unwrap()
         },

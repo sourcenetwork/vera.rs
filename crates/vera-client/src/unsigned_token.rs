@@ -3,6 +3,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use vera_crypto::jwt::{DelegationScope, JwtClaims};
+use vera_crypto::operation::{DEFAULT_OPERATION_LEAD, MAX_OPERATION_LEAD};
 
 use crate::error::ClientError;
 
@@ -61,11 +62,27 @@ impl UnsignedToken {
     }
 
     /// One exact caller operation, bound to its ID, digest and genesis identity.
+    /// The ID's deadline lies at most the default 600 seconds after `iat`.
     pub fn operation(claims: &JwtClaims) -> Result<Self, ClientError> {
+        Self::operation_with_lead(claims, DEFAULT_OPERATION_LEAD)
+    }
+
+    /// One exact caller operation whose deadline lies at most `max_lead` seconds
+    /// after `iat`. A lead beyond the default is for policy commands only, and
+    /// executes only where the deployment's operators allow at least that lead.
+    pub fn operation_with_lead(claims: &JwtClaims, max_lead: u64) -> Result<Self, ClientError> {
         let request = claims
             .request
             .as_ref()
             .ok_or_else(|| ClientError::Signing("operation claim required".into()))?;
+        if max_lead > MAX_OPERATION_LEAD
+            || (max_lead > DEFAULT_OPERATION_LEAD
+                && claims.scope != DelegationScope::PolicyCommands)
+        {
+            return Err(ClientError::Signing(
+                "a lead beyond the default applies to policy commands within the ceiling".into(),
+            ));
+        }
         if claims.relay.is_some()
             || claims.nbf != claims.iat
             || claims.iat >= claims.exp
@@ -78,7 +95,7 @@ impl UnsignedToken {
         }
         request
             .id
-            .validate(claims.iat)
+            .validate(claims.iat, max_lead)
             .map_err(|e| ClientError::Signing(e.to_string()))?;
         Self::new(
             &claims.iss,

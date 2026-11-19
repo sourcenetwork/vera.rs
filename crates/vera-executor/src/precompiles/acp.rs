@@ -6,6 +6,9 @@ mod batch_results;
 mod batch_tests;
 #[cfg(test)]
 mod command_budget_tests;
+mod command_list;
+#[cfg(test)]
+mod command_list_tests;
 mod commands;
 mod creation;
 #[cfg(test)]
