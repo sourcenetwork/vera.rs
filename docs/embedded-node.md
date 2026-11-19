@@ -567,8 +567,20 @@ consensus archives (two epochs) and 256 of state journals, pruned every 64
 revisions. `None` keeps everything, as the daemon does without a `[pruning]`
 section. A lone validator has no peer that needs older consensus data from it.
 
-Finalized history, which serves receipts and historical lookups, is not
-pruned by this setting or any other. It is what still grows.
+Finalized history, which serves receipts and historical lookups, has its own
+setting. `EmbeddedConfig::history_retention` names how many revisions below the
+head it keeps; `None`, the default, keeps all of it, and then it is what still
+grows. With a retention, the node removes older records on the same cadence as
+consensus pruning, keeping two records an epoch at the epoch boundaries, and
+stops serving receipts, revisions and proofs below the oldest retained revision
+(`vera_getReceiptProof` returns `null` for such a submission, and height-based
+reads fail with JSON-RPC code `4444`). The value must be at least
+`minimum_history_retention` for the deployment, 2,560 revisions with 256-block
+epochs, or `start` fails with `EmbedError::HistoryRetention`. A backup started
+on an empty directory imports the whole history behind the active device's
+newest block, so it cannot catch up from an active device that pruned: the
+catch-up fails with the active device's floor. See
+[retention and the floor](history-storage.md#retention-and-the-floor).
 
 Its length does not lengthen a start: a start rereads the newest 1,024
 revisions and at most 128 epoch boundaries, which took about 15 ms of history
@@ -761,8 +773,10 @@ are not a capacity or multi-validator measurement.
   cannot reach each other, and without `switching` for as long as both run;
   see [A second device](#a-second-device).
 - An idle deployment still produces a heartbeat block about every 10 s, and
-  finalized history has no retention, so the directory grows without bound;
-  see [Disk](#disk).
+  finalized history is kept in full by default, so the directory grows without
+  bound unless `history_retention` is set; see [Disk](#disk).
+- A backup cannot catch up on an empty directory from an active device whose
+  history is pruned; see [Disk](#disk).
 - Memory was measured for short workloads on one machine; see
   [Memory](#memory). Growth over hours, larger states and Linux are not
   measured, and the embedded page cache has not been measured against a state

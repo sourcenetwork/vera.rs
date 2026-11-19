@@ -14,18 +14,14 @@ cargo build --frozen -p verad
 History always uses Regolith; there is no backend-selection feature.
 Authenticated module state uses Commonware QMDB.
 
-The [node manifest](../crates/vera-node/Cargo.toml) pins merged Regolith revision
-`e844baefe838f3af76403afd46c4b42f1a0b98a5`, including the compaction-cache fix in
-[Regolith #285](https://github.com/sourcenetwork/regolith/pull/285). The engine uses
-its current commit pipeline, read views and block cache, together with atomic
-compaction-manifest edit batches and crash-aware WAL recovery. Compaction scans
-bypass the foreground cache.
+The [node manifest](../crates/vera-node/Cargo.toml) requires Regolith `0.2` from
+crates.io, and `Cargo.lock` pins release `0.2.5`. The engine uses its commit
+pipeline, read views and block cache, together with atomic compaction-manifest
+edit batches and crash-aware WAL recovery. Compaction scans bypass the
+foreground cache.
 
-This Git revision includes API and storage-format changes that are newer than
-the published `v0.1.9` release, despite sharing its crate version. Opening an older
-Regolith store rewrites its WAL in format 2; the previous engine cannot reopen
-that store. Keep backups paired with their node build and do not downgrade a
-written history directory. Vera releases continue to start with fresh state.
+Keep backups paired with their node build and do not downgrade a written
+history directory. Vera releases start with fresh state.
 
 History writes explicitly request synchronous WAL persistence; they do not use
 Regolith's default eventual durability. Execution, certificate and query-index
@@ -224,6 +220,67 @@ settings are unchanged. This checks history recovery after reported I/O
 failures; it does not verify live consensus certificates or simulate a physical
 power cut across the validator's other stores.
 
+## Retention and the floor
+
+By default history keeps every finalized record. `history_retention` in
+`config.toml`, or `EmbeddedConfig::history_retention`, names how many revisions
+below the head it keeps. After each finalized revision that the maintenance
+interval selects (`pruning.maintenance_interval`, or every 64 revisions when
+consensus pruning is not configured), the node raises the floor towards that
+many revisions below the head, at most 1,024 heights in one pass, on the
+blocking pool after the revision is published. A failed prune stops the node
+the way a failed append does: a store that refuses that write would refuse the
+next append.
+
+The `floor` key holds the height and block hash of the oldest record kept in
+sequence; every record from it through the head is present. Without the key the
+floor is height 1. A prune works in batches of 256 heights. Each batch is one
+atomic write that removes the records below the new floor, their certificates,
+imported finality and proof blocks, the block-hash mappings and the submission
+mappings that still point at them, and stores the new floor with its block's
+hash. A submission hash that a retained revision repeats keeps its mapping. A
+crash between batches leaves the floor of the last batch written.
+
+Below the floor the records of epoch boundaries stay: the last block of each
+epoch, whose artifact carries the next epoch's verifier material and roster, and
+the first block of the next epoch, which a start reads to check the boundary.
+Light-block assembly reads the former for an epoch whose material is not cached,
+the participant provider reads it for an older epoch's roster, and a start reads
+both to restore the epoch cache. They cost two records an epoch. No reader serves
+them as revisions.
+
+The node refuses a retention below the windows it reads under its head: the
+1,024 revisions of the execution index, the 1,024-revision suffix a recovery
+rewinds and two epochs (`minimum_history_retention`, 2,560 revisions for a solo
+deployment's 256-revision epochs). The daemon fails to start; an embedded start
+fails with `EmbedError::HistoryRetention`.
+
+Reads below the floor fail with the `HistoryPruned` error, which names the
+floor:
+
+| Read | Below the floor |
+| --- | --- |
+| Point lookup by height (`execution_bounded`), light block, history chunk or proof served to a peer | `HistoryPruned`; over JSON-RPC code `4444` with `{"retryable": false, "floor": F}` |
+| Lookup by block or submission hash | not found once the mapping is removed; a mapping that still names a pruned revision fails with `HistoryPruned` |
+| Log range (`eth_getLogs`) reaching below the floor | fails with `4444` at the first pruned revision; results are never skipped |
+| Receipt (`vera_getTransactionReceipt`, `vera_getReceiptProof`) | `null` for a pruned submission, as for an unknown one; it does not become available later. `4444` when a stale mapping names a pruned revision |
+| Cut back to a block (`standing`, `rewind_to`) or a recovery anchor | `HistoryPruned`; nothing is removed |
+| Term ancestry search | starts from the block at the floor; a device whose history left the holder's at or below its floor refuses with `TermRefusal::Pruned` instead of reporting a shared block |
+
+Code `4444` is the code Ethereum clients return for pruned history. It is not
+retryable on the same node. A client polling for the receipt of a submission
+older than the retained window sees `null` until its own deadline: the node
+cannot tell a pruned submission from one it never received once the mapping is
+gone. The Rust client's `wait_for_receipt` then returns `ReceiptTimeout`, and
+returns `ReceiptUnavailable` at once for a `4444` reply.
+
+A node whose history is pruned cannot serve it to a device that imports history
+down to its own head: the producer answers a request below its floor with a
+refusal naming the floor, and the importer fails with `HistoryPruned` once every
+peer has refused or failed, instead of waiting out its deadline. The snapshot
+handoff then fails and the joining node stops with that error. Importing from a
+pruned peer is not supported.
+
 ## Recovery of recent execution indexes
 
 Startup rebuilds the resident caches from the most recent 1,024 revisions: it
@@ -243,9 +300,9 @@ independently.
 ### The validated head
 
 The `validated` key holds a height and block hash. It states that every record
-from genesis through that block decodes, matches its receipt commitment and
-names its predecessor as parent. Only a batch that establishes the statement
-writes it:
+from the floor through that block decodes, matches its receipt commitment and
+names its predecessor as parent, and that the record at the floor is the block
+the floor names. Only a batch that establishes the statement writes it:
 
 | Write | Validated head |
 | --- | --- |
@@ -254,6 +311,7 @@ writes it:
 | Recovery | its anchor, after checking the chain through it, in the batch that sets the history head |
 | Cut back to a block of the chain it covers | that block, in the batch that removes the later records |
 | Import | unchanged, at or below the committed prefix the import builds on |
+| Prune | unchanged; removing records from the start of the claim leaves it true |
 
 The key shares its batch with the records and head it describes, so a write that
 fails or is torn leaves both or neither. An import therefore leaves the
@@ -264,14 +322,16 @@ A start rereads only the resident window when all of these hold: the query
 mappings are current, or only lose a discarded suffix that carried no
 submissions; no import is pending; and the validated head equals the durable
 history head, lies at or above the recovery anchor and names the block stored
-at its height. Before the window it reads the last block of each of the 128
+at its height. The window starts no lower than the floor. Before the window it
+reads the last block of each of the 128
 newest epochs, by height from the fixed epoch length, so the epoch cache holds
 what a walk of every record would leave. The window's records are decoded,
 checked against their receipt commitments, chained to one another and to the
 anchor.
 
 Otherwise startup decodes every retained record and checks receipt commitments
-and ancestry from genesis through the anchor: when the validated head is absent,
+and ancestry from the floor through the anchor, the first record against the
+block the floor names, after reading the epoch boundaries below the floor: when the validated head is absent,
 malformed, or names another block or height than the durable head; when the
 mappings need a rebuild; when an import is being published; and when a
 discarded suffix carried submissions, whose earlier mappings are found again by
