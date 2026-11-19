@@ -221,8 +221,8 @@ where
             // A partial answer would read as a fork to the asking device;
             // without an answer it records nothing.
             Some(Message::Ancestry { heights }) => match self.held_blocks(&heights) {
-                Ok(blocks) => {
-                    let blocks = Message::Blocks { blocks };
+                Ok((floor, blocks)) => {
+                    let blocks = Message::Blocks { floor, blocks };
                     let _ = self
                         .sender
                         .send(Recipients::One(peer), blocks.encode(), true);

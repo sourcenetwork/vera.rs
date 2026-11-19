@@ -21,8 +21,13 @@ pub(crate) enum Message {
     Status(Status),
     /// Asks for the identifiers of the sender's finalized blocks at these heights.
     Ancestry { heights: Vec<u64> },
-    /// The identifiers asked for, at the heights the sender holds a block.
-    Blocks { blocks: Vec<(u64, B256)> },
+    /// The identifiers asked for, at the heights the sender holds a block,
+    /// and the oldest block the sender's history retains: it leaves out the
+    /// heights below it.
+    Blocks {
+        floor: u64,
+        blocks: Vec<(u64, B256)>,
+    },
 }
 
 /// The newest block a device has and the newest term it holds.
@@ -74,6 +79,7 @@ mod tests {
                 heights: vec![1, 5],
             },
             Message::Blocks {
+                floor: 1,
                 blocks: vec![(5, B256::repeat_byte(2))],
             },
         ] {

@@ -35,7 +35,7 @@ fn locate(
     holder: impl Fn(u64) -> Result<Option<B256>, UnreadBlock>,
 ) -> Result<Option<TermCut>, TermRefusal> {
     let ask = |heights: Vec<u64>| {
-        let blocks = answer(&heights, &holder).ok();
+        let blocks = answer(&heights, 1, &holder).ok();
         async move { blocks }
     };
     block_on(search(HEAD, HEAD, 1, own, ask))
@@ -43,7 +43,8 @@ fn locate(
 
 #[test]
 fn the_holder_answers_with_the_blocks_it_holds() {
-    let blocks = answer(&[4, 7, HEAD + 1], history(1, None)).unwrap();
+    let (floor, blocks) = answer(&[4, 7, HEAD + 1], 1, history(1, None)).unwrap();
+    assert_eq!(floor, 1);
     assert_eq!(
         blocks.iter().map(|(height, _)| *height).collect::<Vec<_>>(),
         [4, 7]
@@ -52,7 +53,7 @@ fn the_holder_answers_with_the_blocks_it_holds() {
 
 #[test]
 fn a_holder_that_fails_to_read_a_requested_block_does_not_answer() {
-    let unanswered = answer(&[2, 4, 6], history(1, Some(4))).unwrap_err();
+    let unanswered = answer(&[2, 4, 6], 1, history(1, Some(4))).unwrap_err();
     assert_eq!(unanswered.height, 4);
 }
 
