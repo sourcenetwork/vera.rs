@@ -36,11 +36,11 @@ use crate::{
 
 /// Durable light-block lookup, executed outside the asynchronous RPC worker.
 /// `Ok(None)` means the revision has no finalization certificate yet.
-pub type LightBlockLookup = Arc<dyn Fn(u64) -> Result<Option<LightBlock>, String> + Send + Sync>;
+pub type LightBlockLookup = Arc<dyn Fn(u64) -> Result<Option<LightBlock>, RpcError> + Send + Sync>;
 
 /// Durable receipt evidence lookup, executed on a bounded blocking worker.
 pub type ReceiptProofLookup =
-    Arc<dyn Fn(B256) -> Result<Option<vera_domain::ReceiptResponse>, String> + Send + Sync>;
+    Arc<dyn Fn(B256) -> Result<Option<vera_domain::ReceiptResponse>, RpcError> + Send + Sync>;
 
 /// Vera-specific JSON-RPC API trait.
 ///

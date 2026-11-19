@@ -99,7 +99,7 @@ async fn cancelled_lookup_keeps_its_permit_until_blocking_work_finishes() {
                 .unwrap()
                 .recv_timeout(Duration::from_secs(5))
                 .unwrap();
-            Err("finished".into())
+            Err(RpcError::Internal("finished".into()))
         })),
     );
     let running = api.clone();
@@ -191,7 +191,9 @@ async fn receipt_poll_does_not_wait_for_a_missing_certificate() {
     assert_eq!(busy.data().unwrap().get(), r#"{"retryable":true}"#);
     assert_eq!(lookups.load(Ordering::Relaxed), 1);
     drop(permits);
-    api.light_block_lookup = Some(Arc::new(|_| Err("corrupt certificate".into())));
+    api.light_block_lookup = Some(Arc::new(|_| {
+        Err(RpcError::Internal("corrupt certificate".into()))
+    }));
     assert!(
         api.get_receipt_proof(hash)
             .await
@@ -348,7 +350,7 @@ async fn evidence_deadline_is_a_retryable_error() {
             .unwrap()
             .recv_timeout(Duration::from_secs(10))
             .unwrap();
-        Err("finished".into())
+        Err(RpcError::Internal("finished".into()))
     }));
     api.index = Some(index);
     let started = std::time::Instant::now();

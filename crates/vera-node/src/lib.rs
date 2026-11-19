@@ -41,8 +41,9 @@ pub use finalize::{index_finalized_block, subscription_data};
 
 mod history;
 pub use history::{
-    DiscardedSubmission, FinalizedHistory, HISTORY_CHUNK_BYTES, HistoricalExecution, HistoryChunk,
-    HistoryLimits, HistoryMemory, HistoryPeer, start_history_peer,
+    DiscardedSubmission, FinalizedHistory, HISTORY_CHUNK_BYTES, HISTORY_MAINTENANCE_INTERVAL,
+    HistoricalExecution, HistoryChunk, HistoryLimits, HistoryMemory, HistoryPeer, HistoryPruned,
+    RetentionTooShort, check_history_retention, minimum_history_retention, start_history_peer,
 };
 
 #[cfg(feature = "fault-injection")]

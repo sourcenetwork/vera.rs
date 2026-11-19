@@ -27,7 +27,10 @@ impl FinalizedHistory {
     }
 
     /// The block at `height`, or `None` when the store does not hold it.
+    /// A height below the floor fails with [`HistoryPruned`]: the block was
+    /// held, and is not known to differ from anyone's.
     pub(crate) fn stored_block(&self, height: u64) -> Result<Option<Block>> {
+        check_retained(height, self.floor_height()?)?;
         let Some(bytes) = self.db.get(key(RECORD, height))? else {
             return Ok(None);
         };

@@ -201,6 +201,25 @@ async fn run_node_with_elector<
             })
         })
         .transpose()?;
+    let history_retention = config
+        .history_retention
+        .map(|retained| {
+            crate::check_history_retention(retained, blocks_per_epoch)?;
+            let interval =
+                config
+                    .pruning
+                    .as_ref()
+                    .map_or(crate::HISTORY_MAINTENANCE_INTERVAL, |pruning| {
+                        std::num::NonZeroU64::new(pruning.maintenance_interval.get() as u64)
+                            .expect("nonzero maintenance interval")
+                    });
+            Ok::<_, anyhow::Error>(crate::history::HistoryRetention {
+                retained,
+                interval,
+                epoch_length: blocks_per_epoch,
+            })
+        })
+        .transpose()?;
     // A validator's network identity is its consensus identity: peers accept
     // its votes and its replies to the epoch probe by that key. A backup is in
     // no committee and runs under a key of its own.
@@ -770,7 +789,8 @@ async fn run_node_with_elector<
         mempool: mempool.clone(),
         validator: validator.clone(),
     })
-    .with_metrics(finalization_metrics);
+    .with_metrics(finalization_metrics)
+    .with_history_retention(history_retention);
     #[cfg(feature = "fault-injection")]
     let sink = sink.with_crash_directory(config.data_dir.clone());
     hold.attach({
@@ -1272,7 +1292,7 @@ async fn run_node_with_elector<
                         if error.downcast_ref::<vera_indexer::IndexerError>().is_some() {
                             vera_jsonrpc::RpcError::LimitExceeded(error.to_string())
                         } else {
-                            vera_jsonrpc::RpcError::StateError(error.to_string())
+                            crate::history::rpc_error(&error, vera_jsonrpc::RpcError::StateError)
                         }
                     })?
             else {
@@ -1351,6 +1371,10 @@ async fn run_node_with_elector<
                 let history = history.clone();
                 Arc::new(move |height| Ok(history.stored_block(height)?.map(|block| block.id().0)))
             },
+            history_floor: {
+                let history = history.clone();
+                Arc::new(move || history.floor_height())
+            },
             modules: modules.clone(),
             status: node_state.clone(),
             network: term_network,
@@ -1388,9 +1412,9 @@ async fn run_node_with_elector<
             let history = history.clone();
             let epochs = light_block_index.clone();
             Arc::new(move |hash| {
-                history
-                    .receipt_proof(hash, &epochs)
-                    .map_err(|error| error.to_string())
+                history.receipt_proof(hash, &epochs).map_err(|error| {
+                    crate::history::rpc_error(&error, vera_jsonrpc::RpcError::Internal)
+                })
             })
         })
         .with_vera_light_block_lookup({
@@ -1398,7 +1422,9 @@ async fn run_node_with_elector<
             Arc::new(move |height| {
                 history
                     .certified_light_block(height, &epochs)
-                    .map_err(|error| error.to_string())
+                    .map_err(|error| {
+                        crate::history::rpc_error(&error, vera_jsonrpc::RpcError::Internal)
+                    })
             })
         })
         .with_vera_light_block_index(light_block_index);

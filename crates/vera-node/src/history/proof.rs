@@ -92,7 +92,23 @@ impl FinalizedHistory {
     }
 
     /// Assemble a bounded ancestry proof from one durable history snapshot.
+    /// A revision below the floor fails with [`HistoryPruned`].
     pub fn light_block(&self, height: u64, epochs: &LightBlockIndex) -> Result<LightBlock> {
+        self.proof_from(height, epochs, 0)
+    }
+
+    /// As [`Self::light_block`], also proving the floor's parent, which a
+    /// peer importing history fetches to adopt the same floor.
+    pub(super) fn light_block_for_import(
+        &self,
+        height: u64,
+        epochs: &LightBlockIndex,
+    ) -> Result<LightBlock> {
+        self.proof_from(height, epochs, 1)
+    }
+
+    /// `below` is how far under the floor a height may be.
+    fn proof_from(&self, height: u64, epochs: &LightBlockIndex, below: u64) -> Result<LightBlock> {
         let snapshot = self.db.snapshot();
         ensure!(
             snapshot.get(transfer::IMPORT)?.is_none(),
@@ -104,6 +120,10 @@ impl FinalizedHistory {
             height > 0 && height <= head,
             "block not found at height {height}"
         );
+        let floor = floor::floor_height(snapshot.get(FLOOR)?.as_deref())?;
+        if height.saturating_add(below) < floor {
+            return Err(HistoryPruned { height, floor }.into());
+        }
         let last = height.saturating_add(LIGHT_BLOCK_MAX_DESCENDANTS as u64);
         let mut blocks = Vec::new();
         let mut remaining = LIGHT_BLOCK_MAX_ARTIFACT_BYTES;

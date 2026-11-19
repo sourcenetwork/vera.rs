@@ -59,8 +59,18 @@ pub struct EmbeddedConfig {
     pub timeout_retry: Duration,
     /// Retention of consensus archives and state journals. `None` retains all of both.
     ///
-    /// Finalized history, which serves receipts, is kept in full either way.
+    /// Finalized history, which serves receipts, has its own retention:
+    /// [`Self::history_retention`].
     pub pruning: Option<PruningConfig>,
+    /// Finalized revisions of execution history kept below the head, by
+    /// default [`Self::HISTORY_RETENTION`]. `None` keeps all of it.
+    ///
+    /// The oldest revision kept is the first of its epoch. Receipts,
+    /// revisions and proofs below it are no longer served, on this device or
+    /// on a backup that catches up from it. The value must be at least
+    /// [`crate::minimum_history_retention`] for the deployment's epoch
+    /// length, or the start fails with [`crate::EmbedError::HistoryRetention`].
+    pub history_retention: Option<u64>,
     /// Proposal pacing for the lone validator. `None` keeps the daemon's cadence.
     pub pacing: Option<SoloPacing>,
     /// Async worker threads of the node's runtime. `None` uses the runtime default.
@@ -98,6 +108,16 @@ impl EmbeddedConfig {
         retained_state_revisions: 256,
     };
 
+    /// Default finalized-history retention: 16,384 revisions, 64 epochs of
+    /// 256 blocks, or 45.5 hours of heartbeats at [`Self::HEARTBEAT`].
+    ///
+    /// It bounds the history store, the part of the directory that otherwise
+    /// grows for as long as the deployment runs. With idle revisions the
+    /// store measured between 9.6 MB and 25.5 MB once the window was full,
+    /// on an Apple M5 Max with a release build; revisions that carry
+    /// requests are larger.
+    pub const HISTORY_RETENTION: u64 = 16_384;
+
     /// Defaults for a lone validator: quiet when idle, with timeouts ordered below the genesis stall timeout.
     #[must_use]
     pub fn new(data_dir: impl Into<PathBuf>, genesis: SoloGenesis, p2p_listen: SocketAddr) -> Self {
@@ -118,6 +138,7 @@ impl EmbeddedConfig {
             certification_timeout: Duration::from_secs(13),
             timeout_retry: Duration::from_millis(500),
             pruning: Some(Self::RETENTION),
+            history_retention: Some(Self::HISTORY_RETENTION),
             pacing: Some(SoloPacing {
                 idle: Self::HEARTBEAT,
                 batch: SoloPacing::BATCH,
@@ -224,6 +245,7 @@ impl EmbeddedConfig {
                 ..NetworkConfig::default()
             },
             pruning: self.pruning.clone(),
+            history_retention: self.history_retention,
             // A backup starts from the active device's state, not from genesis.
             snapshot: matches!(self.role, DeviceRole::Backup(_)).then(|| SnapshotConfig {
                 initialization_timeout_ms: self
@@ -279,5 +301,9 @@ mod tests {
         assert_eq!(config.network.listen_addr, "127.0.0.1:0");
         assert_eq!(config.network.discovery, DiscoveryConfig::local());
         assert_eq!(config.pruning, Some(EmbeddedConfig::RETENTION));
+        assert_eq!(
+            config.history_retention,
+            Some(EmbeddedConfig::HISTORY_RETENTION)
+        );
     }
 }

@@ -41,7 +41,7 @@ pub(crate) fn rewind(
     }
     let history = directory.join("history");
     if let (Some(change), true) = (record.change().copied(), history.is_dir()) {
-        let failed = |error: anyhow::Error| TermRefusal::History(format!("{error:#}"));
+        let failed = |error: anyhow::Error| TermRefusal::history(&error);
         let stored = FinalizedHistory::open_stored(&history, &change.genesis_id, Some(memory))
             .map_err(failed)?;
         // A history that left the holder's below the cut is cut back to the

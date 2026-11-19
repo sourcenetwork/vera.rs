@@ -177,7 +177,7 @@ fn synchronized_permission_rpc_verifies_native_evidence_and_subsequent_denial() 
                             entered.send(()).unwrap();
                             release
                                 .recv_timeout(Duration::from_secs(2))
-                                .map_err(|e| e.to_string())?;
+                                .map_err(|e| vera_jsonrpc::RpcError::Internal(e.to_string()))?;
                         }
                         lookup
                             .read()
@@ -185,7 +185,9 @@ fn synchronized_permission_rpc_verifies_native_evidence_and_subsequent_denial() 
                             .get(&height)
                             .cloned()
                             .map(Some)
-                            .ok_or_else(|| "revision unavailable".into())
+                            .ok_or_else(|| {
+                                vera_jsonrpc::RpcError::Internal("revision unavailable".into())
+                            })
                     }))
                     .start_with_local(None)
                     .unwrap();

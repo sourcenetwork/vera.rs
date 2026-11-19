@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use super::*;
 
 /// Longest discarded suffix unindexed in place; a longer one rebuilds every mapping.
-const MAX_SUFFIX: u64 = 1_024;
+pub(super) const MAX_SUFFIX: u64 = 1_024;
 
 /// Deletions that unindex a discarded suffix, applied with the head rewind.
 #[derive(Default)]

@@ -22,7 +22,7 @@ use vera_backend::VeraStateSet;
 use crate::{
     CommittedState, FinalizedHistory,
     finalize::{index_finalized_block, subscription_data},
-    history::restore_epoch,
+    history::{HistoryRetention, restore_epoch},
     tx_gossip::{SharedValidator, recheck, release},
 };
 
@@ -63,6 +63,7 @@ pub struct NodeSink {
     validator: SharedValidator,
     state: Arc<OnceLock<VeraStateSet>>,
     metrics: Option<Arc<crate::finalization_metrics::FinalizationMetrics>>,
+    retention: Option<HistoryRetention>,
     #[cfg(feature = "fault-injection")]
     crash_directory: Option<std::path::PathBuf>,
 }
@@ -127,6 +128,16 @@ impl NodeSink {
         self
     }
 
+    /// Remove finalized history below a retained window after the revisions
+    /// the retention's interval selects. `None` keeps all of it.
+    pub(crate) const fn with_history_retention(
+        mut self,
+        retention: Option<HistoryRetention>,
+    ) -> Self {
+        self.retention = retention;
+        self
+    }
+
     /// Build the sink from its parts.
     pub fn new(parts: SinkParts) -> Self {
         Self {
@@ -146,6 +157,7 @@ impl NodeSink {
             validator: parts.validator,
             state: Arc::new(OnceLock::new()),
             metrics: None,
+            retention: None,
             #[cfg(feature = "fault-injection")]
             crash_directory: None,
         }
@@ -294,6 +306,14 @@ impl FinalizedSink for NodeSink {
             trace!(height, "no direct finalization certificate in marshal");
         }
         self.node_state.notify_proof_progress();
+        if let Some(retention) = self.retention.filter(|retention| retention.due(height)) {
+            let history = self.history.clone();
+            // A store that fails this write would fail the next append too.
+            ::tokio::task::spawn_blocking(move || history.maintain(&retention))
+                .await
+                .expect("finalized history pruner stopped")
+                .expect("prune finalized history below the retained window");
+        }
 
         let Some(set) = self.state.get() else {
             completed();

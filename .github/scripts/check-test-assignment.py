@@ -40,6 +40,7 @@ IGNORED_CASES = {
     'embedded_backup_busy_profile::profile_backup_catch_up_from_a_busy_active_device': (
         'measurement, run explicitly in release mode'
     ),
+    'embedded_history_disk::history_disk_use_as_the_window_fills_and_moves': 'measurement, run explicitly',
 }
 
 IGNORE = re.compile(r'#\[ignore\b[^\]]*\]')

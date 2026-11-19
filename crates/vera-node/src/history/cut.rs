@@ -50,11 +50,13 @@ impl FinalizedHistory {
     ///
     /// A term never decreases along a chain, so the first record above the
     /// cut tells whether the rest belong to the term or were voided by it.
+    /// A cut below the floor fails with [`HistoryPruned`].
     pub(crate) fn standing(&self, height: u64, cut: &B256, term: u64) -> Result<Standing> {
         let head = *self.head.lock();
         if head.0 < height {
             return Ok(Standing::Within);
         }
+        check_cut(height, self.floor_height()?)?;
         let held = if head.0 == height {
             head.1.0
         } else if height == 0 {
@@ -71,7 +73,7 @@ impl FinalizedHistory {
         Ok(Standing::Within)
     }
 
-    fn record(&self, height: u64) -> Result<Record> {
+    pub(super) fn record(&self, height: u64) -> Result<Record> {
         let bytes = self
             .db
             .get(key(RECORD, height))?
@@ -89,6 +91,9 @@ impl FinalizedHistory {
     /// Every submission finalized above `height`, in execution order.
     pub(crate) fn submissions_above(&self, height: u64) -> Result<Vec<DiscardedSubmission>> {
         let head = self.head.lock().0;
+        if head > height {
+            check_cut(height, self.floor_height()?)?;
+        }
         let mut submissions = Vec::new();
         for height in height.saturating_add(1)..=head {
             let record = self.record(height)?;
@@ -113,12 +118,14 @@ impl FinalizedHistory {
     }
 
     /// Drop every record above `height`. The query mappings are dropped with
-    /// them and rebuilt by the next recovery.
+    /// them and rebuilt by the next recovery. A cut below the floor fails
+    /// with [`HistoryPruned`] and changes nothing.
     pub(crate) fn rewind_to(&self, height: u64) -> Result<()> {
         let mut head = self.head.lock();
         if head.0 <= height {
             return Ok(());
         }
+        check_cut(height, self.floor_height()?)?;
         let id = if height == 0 {
             B256::from_slice(&self.db.get(GENESIS)?.context("missing history genesis")?)
         } else {

@@ -1,3 +1,5 @@
+use std::num::NonZeroU64;
+
 use super::*;
 use commonware_codec::DecodeExt as _;
 use vera_domain::{ConsensusPublicKey, LightBlock, verify_finalized_block};
@@ -38,7 +40,9 @@ pub(super) struct Import {
 }
 
 impl FinalizedHistory {
-    /// Serve a bounded chunk from a durable snapshot, excluding unpublished imports.
+    /// Serve a bounded chunk from a durable snapshot, excluding unpublished
+    /// imports. The floor's parent is served, so that an importer can adopt
+    /// the same floor; a lower height fails with [`HistoryPruned`].
     pub fn record_chunk(&self, height: u64, offset: u64, maximum: usize) -> Result<HistoryChunk> {
         ensure!(
             maximum > 0 && maximum <= HISTORY_CHUNK_BYTES,
@@ -60,6 +64,7 @@ impl FinalizedHistory {
     }
 
     /// Fail unless `height` is retained and not behind an unpublished import.
+    /// A height below the floor's parent fails with [`HistoryPruned`].
     pub(super) fn check_published(&self, height: u64) -> Result<()> {
         check_published(&self.db.snapshot(), height)
     }
@@ -192,6 +197,75 @@ impl FinalizedHistory {
         Ok(())
     }
 
+    /// Finish an import whose next record no peer serves at a floor of this
+    /// store's own: the lowest epoch start whose parent is already imported,
+    /// so the records from the floor's parent through the anchor are one run
+    /// authenticated by ancestry from the certified anchor. Peers' floors
+    /// are not consulted.
+    ///
+    /// The floor must not be above the first block of the anchor's epoch:
+    /// recovery at the anchor and the anchor epoch's verifier material need
+    /// that much. Otherwise, or before the anchor's epoch has begun, this
+    /// fails with [`HistoryPruned`] and changes nothing.
+    ///
+    /// One atomic write removes everything below the floor's parent, this
+    /// store's own older records included, with their certificates, imported
+    /// finality and every hash mapping, which the recovery that publishes the
+    /// import rebuilds. It stores the floor and the anchor as head, and
+    /// completes the import at the floor's parent. Returns the floor.
+    pub(crate) fn finish_import_at_floor(&self, epoch_length: NonZeroU64) -> Result<u64> {
+        let mut head = self.head.lock();
+        let mut import: Import =
+            borsh::from_slice(&self.db.get(IMPORT)?.context("no history import")?)?;
+        let missing = import.next.0;
+        ensure!(missing > import.base.0, "history import already staged");
+        let anchor = Block::decode_cfg(
+            commonware_codec::Copying(import.anchor.as_slice()),
+            &crate::node::block_cfg(),
+        )?;
+        let length = epoch_length.get();
+        let floor = missing
+            .saturating_add(2)
+            .div_ceil(length)
+            .saturating_mul(length);
+        let anchor_epoch = anchor.height - anchor.height % length;
+        if floor > anchor_epoch {
+            return Err(HistoryPruned {
+                height: missing,
+                floor,
+            }
+            .into());
+        }
+        if import.base.0 > 0 {
+            // They cannot be compared with the deployment's history.
+            tracing::warn!(
+                from = self.floor_height()?.saturating_sub(1).max(1),
+                through = import.base.0,
+                floor,
+                "dropping this store's own records below the adopted history floor"
+            );
+        }
+        let parent = alloy_primitives::keccak256(&self.record(floor - 1)?.block);
+        let id = alloy_primitives::keccak256(&self.record(floor)?.block);
+        let mut batch = WriteBatch::default();
+        batch.delete_range(key(RECORD, 0), key(RECORD, floor - 1));
+        for prefix in [CERTIFICATE, IMPORTED_FINALITY, PROOF_BLOCK] {
+            batch.delete_range(key(prefix, 0), key(prefix, floor));
+        }
+        batch.delete_range([BLOCK_HASH], [SUBMISSION_HASH + 1]);
+        batch.delete(QUERY_HEAD);
+        batch.delete(VALIDATED);
+        batch.put(FLOOR, borsh::to_vec(&(floor, id.0))?);
+        batch.put(sweep::SWEEP, (floor - 1).to_be_bytes());
+        import.base = (floor - 1, parent.0);
+        import.next = import.base;
+        batch.put(IMPORT, borsh::to_vec(&import)?);
+        batch.put(HEAD, borsh::to_vec(&(anchor.height, anchor.id().0.0))?);
+        write(&self.db, batch)?;
+        *head = (anchor.height, anchor.id());
+        Ok(floor)
+    }
+
     pub(super) fn check_import_recovery(&self, anchor: &Block) -> Result<()> {
         if let Some(bytes) = self.db.get(IMPORT)? {
             let import: Import = borsh::from_slice(&bytes)?;
@@ -213,6 +287,11 @@ fn check_published(snapshot: &regolith_store::Snapshot, height: u64) -> Result<(
     let (head, _): (u64, [u8; 32]) =
         borsh::from_slice(&snapshot.get(HEAD)?.context("missing history head")?)?;
     ensure!(height > 0 && height <= head, "history height unavailable");
+    let floor = floor::floor_height(snapshot.get(FLOOR)?.as_deref())?;
+    // An importer adopting this floor needs the floor's parent too.
+    if height + 1 < floor {
+        return Err(HistoryPruned { height, floor }.into());
+    }
     Ok(())
 }
 

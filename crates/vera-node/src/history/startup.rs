@@ -47,6 +47,7 @@ impl SnapshotHistory {
             selection?;
             while let Some((height, _)) = self.history.import_next()? {
                 let mut imported = Err(anyhow::anyhow!("no history peers available"));
+                let mut pruned = None;
                 for offset in 0..peers.len() {
                     let index = (preferred + offset) % peers.len();
                     let peer = &peers[index];
@@ -57,7 +58,22 @@ impl SnapshotHistory {
                         preferred = index;
                         break;
                     }
-                    tracing::warn!(%peer, height, error = %imported.as_ref().unwrap_err(), "history transfer failed");
+                    let error = imported.as_ref().unwrap_err();
+                    pruned = pruned.or(error.downcast_ref::<HistoryPruned>().copied());
+                    tracing::warn!(%peer, height, %error, "history transfer failed");
+                }
+                // No peer retains the next record: the import ends at a floor
+                // of this store's own, or fails when that floor would be too high.
+                if let (Err(_), Some(pruned)) = (&imported, pruned) {
+                    let floor = self
+                        .history
+                        .finish_import_at_floor(self.epochs.epoch_length())
+                        .with_context(|| {
+                            format!("history peers retain history only from {}", pruned.floor)
+                        })
+                        .with_context(|| format!("import history at {height}"))?;
+                    tracing::info!(floor, height, "history import finished at a floor");
+                    break;
                 }
                 ensure!(
                     imported.with_context(|| format!("import history at {height}"))?

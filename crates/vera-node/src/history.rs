@@ -39,6 +39,17 @@ const HEAD: &[u8] = b"head";
 mod cut;
 pub use cut::DiscardedSubmission;
 pub(crate) use cut::Standing;
+mod floor;
+pub use floor::HistoryPruned;
+pub(crate) use floor::rpc_error;
+use floor::{FLOOR, check_cut, check_retained};
+mod retention;
+mod sweep;
+pub(crate) use retention::HistoryRetention;
+pub use retention::{
+    HISTORY_MAINTENANCE_INTERVAL, RetentionTooShort, check_history_retention,
+    minimum_history_retention,
+};
 mod membership;
 pub(crate) use membership::roster_from_boundary;
 mod query;
@@ -390,7 +401,9 @@ impl FinalizedHistory {
     ///
     /// When the query mappings need no rebuild and the stored chain was
     /// validated through the anchor, only the resident window is reread, with
-    /// the epoch boundaries before it. Otherwise every record is checked.
+    /// the epoch boundaries before it. Otherwise every record from the floor
+    /// is checked, the first against the block the floor names. An anchor
+    /// below the floor fails with [`HistoryPruned`].
     pub async fn recover(
         &self,
         genesis: &Block,
@@ -400,6 +413,9 @@ impl FinalizedHistory {
         lookup: &FinalizationLookup,
     ) -> Result<()> {
         self.check_import_recovery(anchor)?;
+        let floor = self.floor()?;
+        let floor_height = floor.map_or(1, |(height, _)| height);
+        check_cut(anchor.height, floor_height)?;
         let anchor_id = anchor.id();
         let anchor_bytes = borsh::to_vec(&(anchor.height, anchor_id.0.0))?;
         let indexed = self.db.get(QUERY_HEAD)?;
@@ -425,18 +441,23 @@ impl FinalizedHistory {
         let finality_start = anchor
             .height
             .saturating_sub(MAX_CACHED_FINALIZATIONS as u64 - 1);
-        let window_start = cache_start.min(finality_start).max(1);
+        let window_start = cache_start.min(finality_start).max(floor_height);
         let validated = !rebuild_queries
             && displaced.is_empty()
             && self.validated_through(genesis, anchor.height)?;
         let start = if validated {
-            self.restore_epochs_before(window_start, light)?;
             window_start
         } else {
-            1
+            floor_height
         };
+        // A walk from genesis caches the epochs it passes; one from above
+        // genesis reads them from the boundaries below its start.
+        if start > 1 {
+            self.restore_epochs_before(start, light)?;
+        }
         tracing::info!(
             anchor = anchor.height,
+            floor = floor_height,
             from = start,
             validated,
             "checking finalized history"
@@ -455,6 +476,14 @@ impl FinalizedHistory {
                 "finalized history ancestry mismatch"
             );
             let id = block.id();
+            if let Some((floor_height, floor_id)) = floor
+                && height == floor_height
+            {
+                ensure!(
+                    id.0 == floor_id,
+                    "finalized history does not match its floor"
+                );
+            }
             if height == anchor.height {
                 ensure!(
                     id == anchor_id,

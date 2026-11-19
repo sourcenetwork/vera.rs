@@ -1,4 +1,6 @@
 use alloy_primitives::{B256, Log};
+
+use crate::RpcError;
 use jsonrpsee::core::RpcResult;
 use vera_domain::{ExecutionReceipt, RECEIPT_RESPONSE_BYTES, ReceiptResponse};
 use vera_permission::encoded_size;
@@ -91,7 +93,10 @@ impl VeraApiImpl {
         let permit = self.state.light_lookup_permit()?;
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            let response = lookup(hash).map_err(error)?;
+            let response = lookup(hash).map_err(|failure| match failure {
+                RpcError::Internal(message) => error(message),
+                failure => failure.into(),
+            })?;
             if let Some(response) = &response {
                 // History commits before the live query state is published.
                 if response.revision.height > index.head_block_number() {

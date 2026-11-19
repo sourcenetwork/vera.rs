@@ -98,7 +98,9 @@ impl ParticipantsProvider for RegistryParticipants {
             return self
                 .history
                 .consensus_roster(epoch, self.epoch_length)
-                .expect("historical consensus roster must be readable")
+                // Rosters are asked for epoch E + 2 while epoch E's last block,
+                // the boundary read here, is derived: always inside the retained window.
+                .expect("the roster boundary is the current epoch's last block, inside retained history")
                 .expect("future consensus roster must have been finalized in the previous epoch");
         };
         assert!(

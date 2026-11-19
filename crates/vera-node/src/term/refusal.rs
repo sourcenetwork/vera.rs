@@ -101,6 +101,16 @@ pub enum TermRefusal {
     /// Finalized history could not be read or cut back.
     #[error("finalized history: {0}")]
     History(String),
+    /// Where this device's history left the holder's, or the block a cut
+    /// goes back to, is below the oldest block its history retains. The
+    /// directory cannot follow; a backup started in an empty one can.
+    #[error(
+        "this device's history is retained from block {floor}, above where it left the deployment's"
+    )]
+    Pruned {
+        /// The oldest block this device's history retains.
+        floor: u64,
+    },
     /// The archive of finalization certificates could not be rebuilt.
     #[error("finalization archive: {0}")]
     Archive(String),
@@ -126,4 +136,16 @@ pub enum TermRefusal {
     /// The node stopped before it answered.
     #[error("the node stopped")]
     Stopped,
+}
+
+impl TermRefusal {
+    /// The refusal for finalized history that could not be read or cut back.
+    pub(crate) fn history(error: &anyhow::Error) -> Self {
+        error.downcast_ref::<crate::HistoryPruned>().map_or_else(
+            || Self::History(format!("{error:#}")),
+            |pruned| Self::Pruned {
+                floor: pruned.floor,
+            },
+        )
+    }
 }

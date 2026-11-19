@@ -51,11 +51,50 @@ impl Heartbeats {
     }
 }
 
-/// An idle deployment: empty native revisions, each stored with its
-/// finalization through `append_finalized`, and the epoch artifact on the
-/// last revision of every epoch. Hashes and certificates are pseudo-random so
-/// that they compress like real ones. Writes skip the WAL sync; reopening
-/// reads back what they wrote.
+/// The idle revision at `height` after `parent`: an empty native revision
+/// with its finalization, and the epoch artifact on the last revision of
+/// every epoch. Hashes and certificates are pseudo-random so that they
+/// compress like real ones.
+pub(super) fn heartbeat(
+    height: u64,
+    parent: &Block,
+    info: &crate::GenesisEpochInfo,
+    epoch_length: u64,
+) -> (Block, FinalizationArtifacts) {
+    let noise =
+        |salt: u8| alloy_primitives::keccak256([&height.to_be_bytes()[..], &[salt]].concat());
+    let mut next = block(height, parent.id());
+    next.state_root = StateRoot(noise(0));
+    next.module_state_root = noise(1);
+    next.prevrandao = noise(2);
+    next.native_targets = Some([vera_domain::DbTarget::default(); 4]);
+    next.receipt_commitment = Some(vera_executor::receipt_commitment(100, &[]));
+    if (height + 1).is_multiple_of(epoch_length) {
+        let mut info = info.clone();
+        info.epoch = Epoch::new((height + 1) / epoch_length);
+        next.payload = Some(Payload::EpochInfo(info));
+    }
+    let artifacts = FinalizationArtifacts {
+        epoch: height / epoch_length,
+        finalization: (0..FINALIZATION_BYTES.div_ceil(32) as u8)
+            .flat_map(|salt| noise(salt.wrapping_add(3)).0)
+            .take(FINALIZATION_BYTES)
+            .collect(),
+        certificate: Vec::new(),
+    };
+    (next, artifacts)
+}
+
+/// The signer's epoch artifact the idle fixtures carry.
+pub(super) fn heartbeat_info() -> crate::GenesisEpochInfo {
+    crate::trusted_setup(7, [ed25519::PrivateKey::from_seed(7).public_key()])
+        .unwrap()
+        .0
+}
+
+/// An idle deployment of [`heartbeat`] revisions, each stored through
+/// `append_finalized`. Writes skip the WAL sync; reopening reads back what
+/// they wrote.
 pub(super) fn heartbeats(revisions: u64, epoch_length: u64) -> Heartbeats {
     let directory = tempfile::tempdir().unwrap();
     let genesis = block(0, BlockId(B256::ZERO));
@@ -63,31 +102,10 @@ pub(super) fn heartbeats(revisions: u64, epoch_length: u64) -> Heartbeats {
         FinalizedHistory::open_with(directory.path(), &genesis, Some(HistoryMemory::EMBEDDED))
             .unwrap();
     history.db.skip_sync_for_test();
-    let (info, _) =
-        crate::trusted_setup(7, [ed25519::PrivateKey::from_seed(7).public_key()]).unwrap();
+    let info = heartbeat_info();
     let mut parent = genesis.clone();
     for height in 1..=revisions {
-        let noise =
-            |salt: u8| alloy_primitives::keccak256([&height.to_be_bytes()[..], &[salt]].concat());
-        let mut next = block(height, parent.id());
-        next.state_root = StateRoot(noise(0));
-        next.module_state_root = noise(1);
-        next.prevrandao = noise(2);
-        next.native_targets = Some([vera_domain::DbTarget::default(); 4]);
-        next.receipt_commitment = Some(vera_executor::receipt_commitment(100, &[]));
-        if (height + 1) % epoch_length == 0 {
-            let mut info = info.clone();
-            info.epoch = Epoch::new((height + 1) / epoch_length);
-            next.payload = Some(Payload::EpochInfo(info));
-        }
-        let artifacts = FinalizationArtifacts {
-            epoch: height / epoch_length,
-            finalization: (0..FINALIZATION_BYTES.div_ceil(32) as u8)
-                .flat_map(|salt| noise(salt.wrapping_add(3)).0)
-                .take(FINALIZATION_BYTES)
-                .collect(),
-            certificate: Vec::new(),
-        };
+        let (next, artifacts) = heartbeat(height, &parent, &info, epoch_length);
         history
             .append_finalized(&next, &[], 100, Some(&artifacts))
             .unwrap();
@@ -102,7 +120,7 @@ pub(super) fn heartbeats(revisions: u64, epoch_length: u64) -> Heartbeats {
     }
 }
 
-fn directory_bytes(path: &std::path::Path) -> u64 {
+pub(super) fn directory_bytes(path: &std::path::Path) -> u64 {
     std::fs::read_dir(path)
         .unwrap()
         .map(|entry| {

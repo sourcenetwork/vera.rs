@@ -327,8 +327,9 @@ on any node, against its own state.
   reconnects, and a device lost before then takes the request with it.
 - The first start needs the active device. A backup cannot be created from
   another backup.
-- The first start imports the deployment's whole finalized history, one block
-  at a time, and its cost grows with the deployment's age. On one
+- The first start imports the deployment's finalized history, one block
+  at a time, down to the active device's floor, and its cost grows with the
+  deployment's age until that history is pruned. On one
   Apple-silicon laptop, with both nodes in one process on loopback and a
   release build, a backup started on an empty directory was serving after
   13.8 s behind a deployment of 401 blocks and after 118 s behind one of
@@ -567,8 +568,21 @@ consensus archives (two epochs) and 256 of state journals, pruned every 64
 revisions. `None` keeps everything, as the daemon does without a `[pruning]`
 section. A lone validator has no peer that needs older consensus data from it.
 
-Finalized history, which serves receipts and historical lookups, is not
-pruned by this setting or any other. It is what still grows.
+Finalized history, which serves receipts and historical lookups, has its own
+setting. `EmbeddedConfig::history_retention` names how many revisions below the
+head it keeps: by default `EmbeddedConfig::HISTORY_RETENTION`, 16,384 revisions,
+64 epochs of 256 blocks, or 45.5 hours of heartbeats at the default 10 s.
+`None` keeps all of it, and then it is what still grows. The node removes older
+records on the same cadence as consensus pruning; the oldest revision it keeps
+is the first of its epoch. Receipts and light blocks below it are unavailable on
+every device of the account: `vera_getReceiptProof` returns `null` for such a
+submission, as for an unknown one, and height-based reads fail with JSON-RPC
+code `4444`. The value must be at least `minimum_history_retention` for the
+deployment, 2,560 revisions with 256-block epochs, or `start` fails with
+`EmbedError::HistoryRetention`. A backup started on an empty directory imports
+the history behind the active device's newest block down to the active device's
+floor and keeps the same window. See
+[retention and the floor](history-storage.md#retention-and-the-floor).
 
 Its length does not lengthen a start: a start rereads the newest 1,024
 revisions and at most 128 epoch boundaries, which took about 15 ms of history
@@ -594,6 +608,42 @@ of it finalized history. Both figures are computed from the per-revision
 growth above, not measured at this cadence; the retention window takes about
 85 minutes of idling to fill, and until then the node grows at the first
 rate. Revisions that carry requests are larger.
+
+The history store itself, measured on the same Apple M5 Max with a debug
+build, one run: a solo deployment at the daemon cadence (about 5.7 revisions a
+second in this build) with `history_retention` at its minimum of 2,560.
+
+| Revisions | History directory | Per revision |
+| --- | --- | --- |
+| 100 to 1,495, idle | 0.11 MB to 1.69 MB | 1.13 kB |
+| 1,501 to 1,702, 100 policy writes | 1.70 MB to 2.01 MB | 1.9 kB a revision carrying one write, after the idle growth of the other 101 |
+
+All of it was still in the write-ahead log, below the 4 MiB write buffer. Once
+the floor began to move, near revision 2,816, the directory reached 3.63 MB,
+fell to 2.61 MB at revision 3,321 when the write buffer was flushed and
+compacted, and grew again to 4.38 MB at revision 4,817, where the run ended.
+
+Whether the directory stops growing was measured with the release-build cost
+fixture (`retention_cost_against_a_moving_floor` in `vera-node`), which appends
+idle revisions under the embedded history budgets with a maintenance pass every
+64 revisions; its records grow the log by 1.23 kB a revision, close to the
+node's 1.13 kB. Regolith's background compaction reclaims the swept records
+without help: the directory rises and falls but does not trend upward.
+
+| Retention | Revisions | Directory once the floor moves | After a full compaction |
+| --- | --- | --- | --- |
+| 2,560 | 20,000 | between 2.5 MB and 8.5 MB | 1.21 MB |
+| 16,384 (default) | 80,000 | between 9.6 MB and 25.5 MB; 11 MB to 19 MB over the last 20,000 | 7.68 MB |
+
+The falls come with the store's own flushes and compactions, about every
+12,000 revisions with the default retention: 33 hours of heartbeats, or about
+30 minutes at the daemon cadence. Until then the swept records still occupy
+the directory.
+
+A maintenance pass, with synced writes in the same fixture: about 3 µs when
+the floor does not move; 7.4 ms on average and 11.9 ms at most over 68 passes
+that raised the floor by an epoch and swept its 256 heights; 19 ms for a first
+pass that raised the floor by four epochs and swept 1,024 heights.
 
 ## Memory
 
@@ -760,9 +810,10 @@ are not a capacity or multi-validator measurement.
 - Running a second device as validator forks the deployment while the two
   cannot reach each other, and without `switching` for as long as both run;
   see [A second device](#a-second-device).
-- An idle deployment still produces a heartbeat block about every 10 s, and
-  finalized history has no retention, so the directory grows without bound;
-  see [Disk](#disk).
+- An idle deployment still produces a heartbeat block about every 10 s. With
+  the default history retention the history store stops growing once it holds
+  16,384 revisions; receipts and light blocks older than that are unavailable
+  on every device. See [Disk](#disk).
 - Memory was measured for short workloads on one machine; see
   [Memory](#memory). Growth over hours, larger states and Linux are not
   measured, and the embedded page cache has not been measured against a state

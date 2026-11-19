@@ -11,7 +11,7 @@ use tokio::sync::Semaphore;
 use vera_domain::{LIGHT_BLOCK_RESPONSE_BYTES, LightBlock, PublicKey};
 use vera_indexer::LightBlockIndex;
 
-use super::{FinalizedHistory, HISTORY_CHUNK_BYTES, HistoryChunk, HistoryLimits};
+use super::{FinalizedHistory, HISTORY_CHUNK_BYTES, HistoryChunk, HistoryLimits, HistoryPruned};
 
 type Key = FixedBytes<17>;
 type Mailbox = p2p::Mailbox<Key, PublicKey>;
@@ -38,15 +38,20 @@ impl Consumer for DeliverySlot {
             let _ = verdict.send(Outcome::Ignored);
             return receiver;
         };
+        let height = u64::from_be_bytes(delivery.key[1..9].try_into().expect("fixed key"));
         let offset = u64::from_be_bytes(delivery.key[9..].try_into().expect("fixed key"));
-        let Ok(chunk) = decode_chunk(&value, offset) else {
-            let _ = verdict.send(Outcome::Invalid);
-            return receiver;
-        };
-        let result = if chunk.total > waiting.maximum as u64 {
-            Err(anyhow::anyhow!("history record exceeds assembly limit"))
+        let result = if let Some(pruned) = decode_pruned(&value, height) {
+            Err(pruned.into())
         } else {
-            Ok(chunk)
+            let Ok(chunk) = decode_chunk(&value, offset) else {
+                let _ = verdict.send(Outcome::Invalid);
+                return receiver;
+            };
+            if chunk.total > waiting.maximum as u64 {
+                Err(anyhow::anyhow!("history record exceeds assembly limit"))
+            } else {
+                Ok(chunk)
+            }
         };
         let waiting = slot.take().expect("matching delivery slot");
         let _ = waiting.answer.send(result);
@@ -116,7 +121,7 @@ impl HistoryProducer {
         if let Some(bytes) = cached {
             return Ok(bytes);
         }
-        let proof = self.history.light_block(height, &self.epochs)?;
+        let proof = self.history.light_block_for_import(height, &self.epochs)?;
         let bytes = Arc::new(serde_json::to_vec(&proof)?);
         ensure!(
             bytes.len() <= LIGHT_BLOCK_RESPONSE_BYTES,
@@ -153,12 +158,19 @@ impl p2p::Producer for HistoryProducer {
             let _production = production;
             let height = u64::from_be_bytes(key[1..9].try_into().expect("fixed key"));
             let offset = u64::from_be_bytes(key[9..].try_into().expect("fixed key"));
-            if let Ok(chunk) = producer.chunk(key[0], height, offset) {
-                let mut response = Vec::with_capacity(16 + chunk.bytes.len());
-                response.extend_from_slice(&chunk.total.to_be_bytes());
-                response.extend_from_slice(&chunk.offset.to_be_bytes());
-                response.extend_from_slice(&chunk.bytes);
-                let _ = answer.send(response.into());
+            match producer.chunk(key[0], height, offset) {
+                Ok(chunk) => {
+                    let mut response = Vec::with_capacity(16 + chunk.bytes.len());
+                    response.extend_from_slice(&chunk.total.to_be_bytes());
+                    response.extend_from_slice(&chunk.offset.to_be_bytes());
+                    response.extend_from_slice(&chunk.bytes);
+                    let _ = answer.send(response.into());
+                }
+                Err(error) => {
+                    if let Some(pruned) = error.downcast_ref::<HistoryPruned>() {
+                        let _ = answer.send(encode_pruned(pruned.floor).into());
+                    }
+                }
             }
         });
         receiver
@@ -348,6 +360,26 @@ fn request_key(kind: u8, height: u64, offset: u64) -> Key {
     Key::new(key)
 }
 
+/// The total that marks a refusal of a height below the producer's floor.
+/// A refusal carries the floor in place of the offset and no bytes, which
+/// no chunk does.
+const PRUNED: u64 = u64::MAX;
+
+fn encode_pruned(floor: u64) -> Vec<u8> {
+    [PRUNED.to_be_bytes(), floor.to_be_bytes()].concat()
+}
+
+/// The refusal in `value` of the record or proof at `height`, if it is one.
+/// It is the producer's claim: the importer only tries another peer.
+fn decode_pruned(value: &[u8], height: u64) -> Option<HistoryPruned> {
+    let (total, floor) = value.split_first_chunk::<8>()?;
+    let floor: [u8; 8] = floor.try_into().ok()?;
+    (u64::from_be_bytes(*total) == PRUNED).then(|| HistoryPruned {
+        height,
+        floor: u64::from_be_bytes(floor),
+    })
+}
+
 fn decode_chunk(value: &[u8], expected_offset: u64) -> Result<HistoryChunk> {
     ensure!(
         (17..=16 + HISTORY_CHUNK_BYTES).contains(&value.len()),
@@ -373,3 +405,7 @@ fn decode_chunk(value: &[u8], expected_offset: u64) -> Result<HistoryChunk> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "peer/pruned_tests.rs"]
+mod pruned_tests;
