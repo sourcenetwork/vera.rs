@@ -63,6 +63,7 @@ pub mod error;
 /// Key prefixes and builders for ACP KV storage.
 pub mod keys;
 pub mod operation;
+mod operation_budget;
 mod operation_lead;
 pub use operation_lead::POLICY_OPERATION_LEAD_KEY;
 pub mod read_capture;

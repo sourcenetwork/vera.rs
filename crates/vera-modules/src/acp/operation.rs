@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use vera_crypto::{jwt::canonical_actor, operation::OperationId};
 
+pub use super::operation_budget::{DEFAULT_OPERATION_BYTES, OutcomeClass};
 use super::{AcpError, AcpModule, Result};
 use crate::{kv_store::ModuleKvStore as _, types::Timestamp};
 
@@ -12,10 +13,6 @@ mod tests;
 
 const RECORD_PREFIX: &[u8] = b"operation/v1/";
 const EXPIRY_PREFIX: &[u8] = b"operation-expiry/v1/";
-const BYTES_KEY: &[u8] = b"operation-bytes/v1";
-const BUDGET_KEY: &[u8] = b"operation-budget/v1";
-/// Default encoded outcome budget, adjustable through operator approvals.
-pub const DEFAULT_OPERATION_BYTES: u64 = 64 << 20;
 /// Maximum encoded outcome size, matching the native value limit.
 pub const MAX_OPERATION_RECORD_BYTES: usize = 1 << 20;
 /// Maximum expired references removed during one finalized block.
@@ -66,28 +63,6 @@ fn expiry_key(id: OperationId, key: &[u8]) -> Vec<u8> {
 }
 
 impl AcpModule {
-    /// Operator-selected encoded outcome budget, or the default before configuration.
-    pub fn operation_budget(&self) -> Result<u64> {
-        self.store
-            .get_ref(BUDGET_KEY)
-            .map_or(Ok(DEFAULT_OPERATION_BYTES), |bytes| {
-                bytes
-                    .try_into()
-                    .map(u64::from_be_bytes)
-                    .map_err(|_| AcpError::State("invalid operation storage budget".into()))
-            })
-    }
-
-    pub(crate) fn set_operation_budget(&mut self, bytes: u64) -> Result<()> {
-        if bytes < MAX_OPERATION_RECORD_BYTES as u64 || bytes < self.operation_bytes()? {
-            return Err(AcpError::State(
-                "operation budget is below the record limit or retained usage".into(),
-            ));
-        }
-        self.store.put(BUDGET_KEY, bytes.to_be_bytes().to_vec());
-        Ok(())
-    }
-
     /// Read a retained outcome. Inclusion does not authorize a retry.
     pub fn operation(&self, actor: &str, id: OperationId) -> Result<Option<OperationRecord>> {
         self.store
@@ -116,43 +91,38 @@ impl AcpModule {
                 "operation outcome exceeds the record limit".into(),
             ));
         }
+        let class = OutcomeClass::of(record.id, record.revision.seconds);
         if let Some(budget) = budget {
-            budget.read(BYTES_KEY, self.store.get_ref(BYTES_KEY))?;
-            budget.read(BUDGET_KEY, self.store.get_ref(BUDGET_KEY))?;
+            budget.read(class.bytes_key(), self.store.get_ref(class.bytes_key()))?;
+            budget.read(class.budget_key(), self.store.get_ref(class.budget_key()))?;
         }
         let retained = self
-            .operation_bytes()?
+            .operation_bytes(class)?
             .checked_add(bytes.len() as u64)
             .ok_or_else(|| AcpError::State("operation storage counter overflow".into()))?;
-        if retained > self.operation_budget()? {
+        if retained > self.class_budget(class)? {
             return Err(AcpError::State(
                 "operation outcome storage budget reached".into(),
             ));
         }
         let expiry = expiry_key(record.id, &key);
+        let mut index = key.clone();
+        index.push(class.tag());
         if let Some(budget) = budget {
-            budget.write(&expiry, Some(&key))?;
-            budget.write(BYTES_KEY, Some(&retained.to_be_bytes()))?;
+            budget.write(&expiry, Some(&index))?;
+            budget.write(class.bytes_key(), Some(&retained.to_be_bytes()))?;
         }
         self.store.put(&key, bytes);
-        self.store.put(&expiry, key);
-        self.store.put(BYTES_KEY, retained.to_be_bytes().to_vec());
+        self.store.put(&expiry, index);
+        self.store
+            .put(class.bytes_key(), retained.to_be_bytes().to_vec());
         Ok(())
-    }
-
-    fn operation_bytes(&self) -> Result<u64> {
-        self.store.get_ref(BYTES_KEY).map_or(Ok(0), |bytes| {
-            bytes
-                .try_into()
-                .map(u64::from_be_bytes)
-                .map_err(|_| AcpError::State("invalid operation storage counter".into()))
-        })
     }
 
     pub(super) fn prune_operations(&mut self, now: u64) -> Result<()> {
         let mut expired = Vec::new();
-        let mut removed = 0u64;
-        for (index, key) in self
+        let mut removed = [0u64; 2];
+        for (index, value) in self
             .store
             .prefix_iter(EXPIRY_PREFIX)
             .take(OPERATION_PRUNE_LIMIT)
@@ -163,6 +133,9 @@ impl AcpModule {
             if expiry > now.to_be_bytes().as_slice() {
                 break;
             }
+            let (key, tag) = value
+                .split_last_chunk::<1>()
+                .ok_or_else(|| AcpError::State("invalid operation expiry entry".into()))?;
             if index.len() != EXPIRY_PREFIX.len() + 72
                 || key.len() != RECORD_PREFIX.len() + 64
                 || !key.starts_with(RECORD_PREFIX)
@@ -171,26 +144,34 @@ impl AcpModule {
             {
                 return Err(AcpError::State("invalid operation expiry entry".into()));
             }
+            let class = OutcomeClass::from_tag(tag[0])?;
             let record = self.store.get_ref(key).ok_or_else(|| {
                 AcpError::State("operation outcome missing from expiry index".into())
             })?;
-            removed = removed
+            let total = &mut removed[usize::from(class.tag())];
+            *total = total
                 .checked_add(record.len() as u64)
                 .ok_or_else(|| AcpError::State("operation storage counter overflow".into()))?;
             expired.push((index.to_vec(), key.to_vec()));
         }
-        if expired.is_empty() {
-            return Ok(());
+        let mut counters = Vec::new();
+        for class in [OutcomeClass::Short, OutcomeClass::Long] {
+            let bytes = removed[usize::from(class.tag())];
+            if bytes != 0 {
+                let retained = self
+                    .operation_bytes(class)?
+                    .checked_sub(bytes)
+                    .ok_or_else(|| AcpError::State("operation storage counter underflow".into()))?;
+                counters.push((class.bytes_key(), retained));
+            }
         }
-        let retained = self
-            .operation_bytes()?
-            .checked_sub(removed)
-            .ok_or_else(|| AcpError::State("operation storage counter underflow".into()))?;
         for (index, key) in expired {
             self.store.delete(&key);
             self.store.delete(&index);
         }
-        self.store.put(BYTES_KEY, retained.to_be_bytes().to_vec());
+        for (key, retained) in counters {
+            self.store.put(key, retained.to_be_bytes().to_vec());
+        }
         Ok(())
     }
 }

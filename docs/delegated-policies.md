@@ -246,7 +246,8 @@ Caller operation IDs add bounded cross-worker idempotency to these delegated
 methods. The signed request claim binds the exact operation and genesis, and
 retries return the original successful outcome. Graph commands and command lists
 may carry identities up to the deployment's policy-command lead, but a relay
-assertion still lasts at most 600 seconds. See
+assertion still lasts at most 600 seconds: a relayed (`did:opk`) owed command
+needs a fresh relay assertion with the same claim when it is submitted. See
 [operation-identities.md](operation-identities.md) for deadlines, resource
 budgets, verification and recovery semantics.
 

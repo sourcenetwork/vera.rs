@@ -1,3 +1,5 @@
+#[path = "budget_class_tests.rs"]
+mod budget_classes;
 #[path = "decision_tests.rs"]
 mod decisions;
 #[path = "key_type_tests.rs"]
@@ -290,7 +292,7 @@ fn request_binding_and_expiry_precede_effects_and_survive_pruning() {
     );
     acp.end_blocker(&context(200)).unwrap();
     assert!(acp.operation(&issuer(), identity).unwrap().is_none());
-    assert_eq!(acp.operation_bytes().unwrap(), 0);
+    assert_eq!(acp.operation_bytes(OutcomeClass::Short).unwrap(), 0);
     let before = acp.store().serialize();
     assert!(
         acp.bearer_create_policy(&mut vera, &context(200), &worker, &signed, POLICY, FORMAT)
@@ -419,8 +421,10 @@ fn failed_or_over_budget_execution_does_not_reserve_an_operation() {
     let operation_id = id(1, 200);
     for (policy, full) in [("invalid: [", false), (POLICY, true)] {
         if full {
-            acp.store
-                .put(BYTES_KEY, DEFAULT_OPERATION_BYTES.to_be_bytes().to_vec());
+            acp.store.put(
+                OutcomeClass::Short.bytes_key(),
+                DEFAULT_OPERATION_BYTES.to_be_bytes().to_vec(),
+            );
             let before = acp.store().serialize();
             assert!(
                 acp.set_operation_budget(DEFAULT_OPERATION_BYTES - 1)
@@ -460,22 +464,24 @@ fn cleanup_is_bounded_and_record_limits_leave_storage_unchanged() {
         record.id = id(u8::try_from(entropy).unwrap(), 200);
         acp.complete_operation(&actor, &record, None).unwrap();
     }
-    let retained = acp.operation_bytes().unwrap();
+    let retained = acp.operation_bytes(OutcomeClass::Short).unwrap();
     let key = operation_key(&actor, record.id).unwrap();
     let mut premature = expiry_key(record.id, &key);
     premature[EXPIRY_PREFIX.len()..EXPIRY_PREFIX.len() + 8].copy_from_slice(&100u64.to_be_bytes());
-    acp.store.put(&premature, key);
+    let mut index = key;
+    index.push(OutcomeClass::Short.tag());
+    acp.store.put(&premature, index);
     let before = acp.store().serialize();
     assert!(acp.prune_operations(100).is_err());
     assert_eq!(acp.store().serialize(), before);
     acp.store.delete(&premature);
     acp.prune_operations(199).unwrap();
-    assert_eq!(acp.operation_bytes().unwrap(), retained);
+    assert_eq!(acp.operation_bytes(OutcomeClass::Short).unwrap(), retained);
     acp.prune_operations(200).unwrap();
     assert_eq!(acp.store.prefix_iter(EXPIRY_PREFIX).count(), 1);
-    assert!(acp.operation_bytes().unwrap() > 0);
+    assert!(acp.operation_bytes(OutcomeClass::Short).unwrap() > 0);
     acp.prune_operations(200).unwrap();
-    assert_eq!(acp.operation_bytes().unwrap(), 0);
+    assert_eq!(acp.operation_bytes(OutcomeClass::Short).unwrap(), 0);
     let before = acp.store().serialize();
     record.result = serde_json::Value::String("x".repeat(MAX_OPERATION_RECORD_BYTES));
     assert!(acp.complete_operation(&actor, &record, None).is_err());

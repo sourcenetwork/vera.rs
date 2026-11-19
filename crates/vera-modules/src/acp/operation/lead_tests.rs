@@ -119,7 +119,7 @@ fn a_raised_lead_lets_a_policy_command_run_hours_after_signing_exactly_once() {
     let deadline = context(identity.expires_at());
     acp.end_blocker(&deadline).unwrap();
     assert!(acp.operation(&issuer(), identity).unwrap().is_none());
-    assert_eq!(acp.operation_bytes().unwrap(), 0);
+    assert_eq!(acp.operation_bytes(OutcomeClass::Long).unwrap(), 0);
     let before = state(&acp, &vera);
     assert!(
         acp.bearer_policy_cmd(&mut vera, &deadline, &first, &signed, &policy, command)
@@ -280,7 +280,9 @@ fn lowering_the_lead_reopens_no_identity_and_strands_no_record() {
     acp.end_blocker(&deadline).unwrap();
     assert!(acp.operation(&issuer(), claimed).unwrap().is_none());
     assert!(acp.operation(&issuer(), pending).unwrap().is_none());
-    assert_eq!(acp.operation_bytes().unwrap(), 0);
+    for class in [OutcomeClass::Short, OutcomeClass::Long] {
+        assert_eq!(acp.operation_bytes(class).unwrap(), 0);
+    }
     for (token, command) in [
         (&claimed_token, claimed_command),
         (&pending_token, pending_command),
@@ -302,8 +304,9 @@ fn long_deadlines_stay_within_the_budget_and_the_cleanup_bound() {
     let worker = submission(7);
     acp.set_policy_operation_lead(MAX_OPERATION_LEAD).unwrap();
     let floor = MAX_OPERATION_RECORD_BYTES as u64;
-    acp.set_operation_budget(floor).unwrap();
-    acp.store.put(BYTES_KEY, floor.to_be_bytes().to_vec());
+    acp.set_long_operation_budget(floor).unwrap();
+    acp.store
+        .put(OutcomeClass::Long.bytes_key(), floor.to_be_bytes().to_vec());
     let command = register("full");
     let call = DelegatedOperation::PolicyCommand(&policy, &command);
     let longest = id(1, SIGNED + MAX_OPERATION_LEAD);
@@ -320,7 +323,8 @@ fn long_deadlines_stay_within_the_budget_and_the_cleanup_bound() {
         .is_err()
     );
     assert_eq!(state(&acp, &vera), before);
-    acp.store.put(BYTES_KEY, 0u64.to_be_bytes().to_vec());
+    acp.store
+        .put(OutcomeClass::Long.bytes_key(), 0u64.to_be_bytes().to_vec());
 
     let actor = issuer();
     let mut record = OperationRecord {
@@ -350,5 +354,7 @@ fn long_deadlines_stay_within_the_budget_and_the_cleanup_bound() {
     assert_eq!(acp.store.prefix_iter(EXPIRY_PREFIX).count(), 1);
     acp.prune_operations(long_deadline).unwrap();
     assert_eq!(acp.store.prefix_iter(EXPIRY_PREFIX).count(), 0);
-    assert_eq!(acp.operation_bytes().unwrap(), 0);
+    for class in [OutcomeClass::Short, OutcomeClass::Long] {
+        assert_eq!(acp.operation_bytes(class).unwrap(), 0);
+    }
 }

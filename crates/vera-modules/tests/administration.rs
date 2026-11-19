@@ -282,3 +282,6 @@ fn exhausted_sequence_cannot_change_parameters() {
 
 #[path = "support/operation_lead_administration.rs"]
 mod operation_lead;
+
+#[path = "support/long_operation_budget_administration.rs"]
+mod long_operation_budget;
