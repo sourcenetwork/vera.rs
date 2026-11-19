@@ -102,6 +102,13 @@ pub struct NodeConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pruning: Option<PruningConfig>,
 
+    /// Finalized revisions of execution history kept below the head; older
+    /// records are removed, apart from epoch boundaries. Omission keeps all
+    /// of it. The node refuses a value below the minimum its epoch length
+    /// allows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_retention: Option<u64>,
+
     /// Fail the process after this many seconds without a new finalization
     /// while connected to enough peers for a voting quorum, so supervision can
     /// attempt rejoin. Fewer or unobserved connections leave it unarmed. Zero
@@ -126,6 +133,7 @@ impl Default for NodeConfig {
             rpc: RpcConfig::default(),
             snapshot: None,
             pruning: None,
+            history_retention: None,
             watchdog_stall_seconds: DEFAULT_WATCHDOG_STALL_SECONDS,
         }
     }
@@ -301,6 +309,18 @@ mod tests {
         assert!(pruning.validate(epoch_length).is_err());
         pruning.retained_consensus_revisions = usize::MAX;
         assert!(pruning.validate(epoch_length).is_err());
+    }
+
+    #[test]
+    fn history_retention_is_opt_in_and_round_trips() {
+        let config = NodeConfig::from_toml("").unwrap();
+        assert!(config.history_retention.is_none());
+        let config = NodeConfig::from_toml("history_retention = 4096").unwrap();
+        assert_eq!(config.history_retention, Some(4096));
+        assert_eq!(
+            NodeConfig::from_toml(&config.to_toml().unwrap()).unwrap(),
+            config
+        );
     }
 
     #[test]
