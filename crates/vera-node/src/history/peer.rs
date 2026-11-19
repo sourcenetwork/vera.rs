@@ -121,7 +121,7 @@ impl HistoryProducer {
         if let Some(bytes) = cached {
             return Ok(bytes);
         }
-        let proof = self.history.light_block(height, &self.epochs)?;
+        let proof = self.history.light_block_for_import(height, &self.epochs)?;
         let bytes = Arc::new(serde_json::to_vec(&proof)?);
         ensure!(
             bytes.len() <= LIGHT_BLOCK_RESPONSE_BYTES,

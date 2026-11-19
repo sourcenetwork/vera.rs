@@ -35,7 +35,7 @@ fn records_and_proofs_below_the_floor_are_refused_as_pruned() {
         history.append(&next, &receipts, 100).unwrap();
         parent = next.id();
     }
-    let epoch_length = std::num::NonZeroU64::new(20).unwrap();
+    let epoch_length = std::num::NonZeroU64::new(4).unwrap();
     history.prune_below(4, epoch_length).unwrap();
     let producer = HistoryProducer::new(history, Arc::new(LightBlockIndex::new(epoch_length)));
     for kind in [0, 1] {
@@ -49,5 +49,7 @@ fn records_and_proofs_below_the_floor_are_refused_as_pruned() {
             "resource {kind}"
         );
     }
+    // The floor's parent is served, so that an importer can adopt the floor.
+    assert!(producer.chunk(0, 3, 0).is_ok());
     assert!(producer.chunk(0, 4, 0).is_ok());
 }

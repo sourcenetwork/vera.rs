@@ -84,7 +84,9 @@ impl FinalizedHistory {
 
     /// Restore the epoch material that a walk of the records below `end`
     /// would have left in the cache: the newest epochs' artifacts, read from
-    /// the last block of each preceding epoch.
+    /// the last block of each preceding epoch that the store retains. Below
+    /// the floor that is only the floor's parent, so a walk from the floor
+    /// caches the floor's epoch and the ones it passes.
     ///
     /// A boundary is not reread as part of the chain, so each is checked on
     /// its own before its material is cached: the next record names it as
@@ -92,7 +94,11 @@ impl FinalizedHistory {
     pub(super) fn restore_epochs_before(&self, end: u64, light: &LightBlockIndex) -> Result<()> {
         let length = light.epoch_length().get();
         let last = end / length;
-        let first = last.saturating_sub(MAX_CACHED_EPOCHS as u64 - 1).max(1);
+        let floor = self.floor_height()?;
+        let retained = if floor > 1 { floor / length } else { 1 };
+        let first = last
+            .saturating_sub(MAX_CACHED_EPOCHS as u64 - 1)
+            .max(retained);
         // Genesis is the boundary before epoch one when an epoch is one block long.
         for height in (first..=last)
             .map(|epoch| epoch * length - 1)

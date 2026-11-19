@@ -62,11 +62,18 @@ impl SnapshotHistory {
                     pruned = pruned.or(error.downcast_ref::<HistoryPruned>().copied());
                     tracing::warn!(%peer, height, %error, "history transfer failed");
                 }
-                // History is imported down to the store's own head, so a peer
-                // that pruned below the selected block cannot complete it.
+                // No peer retains the next record: the import ends at a floor
+                // of this store's own, or fails when that floor would be too high.
                 if let (Err(_), Some(pruned)) = (&imported, pruned) {
-                    imported = Err(anyhow::Error::new(pruned)
-                        .context("history peers no longer retain the history this device lacks"));
+                    let floor = self
+                        .history
+                        .finish_import_at_floor(self.epochs.epoch_length())
+                        .with_context(|| {
+                            format!("history peers retain history only from {}", pruned.floor)
+                        })
+                        .with_context(|| format!("import history at {height}"))?;
+                    tracing::info!(floor, height, "history import finished at a floor");
+                    break;
                 }
                 ensure!(
                     imported.with_context(|| format!("import history at {height}"))?

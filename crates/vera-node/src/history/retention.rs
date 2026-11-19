@@ -1,27 +1,27 @@
 //! Removing the finalized records below a retained window.
 //!
-//! A prune moves the floor up in batches. Each batch is one atomic write: it
-//! removes the records below the new floor, the certificates and imported
-//! finality stored with them and the hash mappings they own, and stores the
-//! new floor. A crash between batches leaves the floor of the last batch
-//! written, which matches the records present.
+//! The floor is the first block of an epoch, or height 1 while nothing is
+//! pruned. The store holds one contiguous run of records from the block
+//! before the floor through the head. That block, the last of the previous
+//! epoch, is the floor's parent and carries the verifier material of the
+//! floor's epoch, which light-block assembly and a start read. Nothing else
+//! is kept below the floor.
 //!
-//! The records of epoch boundaries stay below the floor: the last block of
-//! each epoch, whose artifact carries the next epoch's verifier material and
-//! roster, and the first block of the next epoch, which a start reads to
-//! check the boundary it follows. Light-block assembly reads the former for
-//! an epoch whose material is not cached, `consensus_roster` reads it for an
-//! older epoch's roster, and `restore_epochs_before` reads both.
+//! A prune raises the floor one epoch per batch. Each batch is one atomic
+//! write: it removes the records below the new floor's parent, the
+//! certificates, imported finality and proof blocks below the new floor, and
+//! the hash mappings of every record below it, and stores the new floor. A
+//! crash between batches leaves the floor of the last batch written, which
+//! matches the records present.
 
 use std::num::NonZeroU64;
 
 use super::*;
 
-/// Heights one batch removes.
-const BATCH: u64 = 256;
-/// Most heights one maintenance pass removes; a larger backlog is worked off
-/// over later passes instead of holding up one finalization.
-const PASS: u64 = 4 * BATCH;
+/// Most heights one maintenance pass removes, rounded up to whole epochs; a
+/// larger backlog is worked off over later passes instead of holding up one
+/// finalization.
+const PASS: u64 = 1_024;
 
 /// Finalized revisions between maintenance passes when consensus pruning,
 /// whose interval history otherwise shares, is not configured.
@@ -76,29 +76,34 @@ impl HistoryRetention {
     }
 }
 
-/// Whether the record at `height` stays when the floor rises above it.
-pub(super) const fn kept_below_floor(height: u64, epoch_length: NonZeroU64) -> bool {
-    let length = epoch_length.get();
-    height.is_multiple_of(length) || (height + 1).is_multiple_of(length)
+/// The first block of the epoch holding `height`; 0 for the genesis epoch.
+const fn epoch_start(height: u64, epoch_length: NonZeroU64) -> u64 {
+    height - height % epoch_length.get()
 }
 
 impl FinalizedHistory {
     /// One maintenance pass: raise the floor towards `retained` revisions
-    /// below the head, by at most a bounded number of heights.
+    /// below the head, by a bounded number of epochs. A pending import is
+    /// left alone; the pass returns the floor unchanged.
     pub(crate) fn maintain(&self, retention: &HistoryRetention) -> Result<u64> {
         let floor = self.floor_height()?;
+        if self.db.get(transfer::IMPORT)?.is_some() {
+            return Ok(floor);
+        }
         let Some(target) = self.head_height().checked_sub(retention.retained) else {
             return Ok(floor);
         };
+        let pass = PASS.max(retention.epoch_length.get());
         self.prune_below(
-            target.min(floor.saturating_add(PASS)),
+            target.min(floor.saturating_add(pass)),
             retention.epoch_length,
         )
     }
 
-    /// Remove the records below `target`, which becomes the floor, keeping
-    /// the epoch boundaries. The head is never removed, and a target at or
-    /// below the floor changes nothing. Returns the floor.
+    /// Raise the floor to the first block of the epoch holding `target`, so
+    /// at least the revisions from `target` stay, and remove what lies below
+    /// the floor's parent. The head's epoch stays, and a target at or below
+    /// the floor changes nothing. Returns the floor.
     pub fn prune_below(&self, target: u64, epoch_length: NonZeroU64) -> Result<u64> {
         self.prune_below_with(target, epoch_length, write)
     }
@@ -113,7 +118,7 @@ impl FinalizedHistory {
             // Appends, cuts and recovery rewrite the hash mappings this batch reads.
             let head = self.head.lock();
             let floor = self.floor_height()?;
-            let target = target.min(head.0);
+            let target = epoch_start(target.min(head.0), epoch_length);
             if target <= floor {
                 return Ok(floor);
             }
@@ -121,25 +126,16 @@ impl FinalizedHistory {
                 self.db.get(transfer::IMPORT)?.is_none(),
                 "history import is pending"
             );
-            let next = target.min(floor.saturating_add(BATCH));
+            let next = epoch_start(floor, epoch_length) + epoch_length.get();
+            let lowest = floor.saturating_sub(1).max(1);
             let mut batch = WriteBatch::default();
-            let mut removed = None;
-            for height in floor..next {
+            for height in lowest..next {
                 let record = self.record(height)?;
                 self.unindex_pruned(&mut batch, height, &record)?;
-                if kept_below_floor(height, epoch_length) {
-                    if let Some(start) = removed.take() {
-                        batch.delete_range(key(RECORD, start), key(RECORD, height));
-                    }
-                } else {
-                    removed.get_or_insert(height);
-                }
             }
-            if let Some(start) = removed {
-                batch.delete_range(key(RECORD, start), key(RECORD, next));
-            }
+            batch.delete_range(key(RECORD, 0), key(RECORD, next - 1));
             for prefix in [CERTIFICATE, IMPORTED_FINALITY, PROOF_BLOCK] {
-                batch.delete_range(key(prefix, floor), key(prefix, next));
+                batch.delete_range(key(prefix, 0), key(prefix, next));
             }
             let id = alloy_primitives::keccak256(&self.record(next)?.block);
             batch.put(FLOOR, borsh::to_vec(&(next, id.0))?);
@@ -167,5 +163,13 @@ impl FinalizedHistory {
 }
 
 #[cfg(test)]
+#[path = "retention_fixture.rs"]
+pub(super) mod fixture;
+
+#[cfg(test)]
 #[path = "retention_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "import_floor_tests.rs"]
+mod import_tests;

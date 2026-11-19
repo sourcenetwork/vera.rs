@@ -1,13 +1,15 @@
 //! The oldest revision finalized history retains.
 //!
-//! The `floor` key holds a height and block hash: every record from that
-//! block through the head is present. Absent, the floor is the first block
-//! after genesis. Only the batch that removes the records below a new floor
-//! writes it, so the key always matches what the store holds.
+//! The `floor` key holds a height and block hash: the first block of an
+//! epoch, whose record and every later one through the head are present.
+//! Absent, the floor is the first block after genesis. Only the batch that
+//! removes the records below a new floor writes it, so the key always
+//! matches what the store holds.
 //!
-//! Below the floor the store keeps only the records of epoch boundaries
-//! (see `retention`). They serve the epoch material and rosters read with
-//! them; no reader serves them as revisions.
+//! Below the floor the store keeps one record, the floor's parent, which
+//! carries the floor epoch's verifier material (see `retention`). Readers do
+//! not serve it as a revision; a peer importing history may fetch it, so
+//! that the importer can adopt the same floor.
 
 use super::*;
 

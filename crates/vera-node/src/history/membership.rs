@@ -8,6 +8,11 @@ use vera_domain::PublicKey;
 
 impl FinalizedHistory {
     /// Read an older selection after history has been reconciled with execution.
+    ///
+    /// The participant provider asks for epoch `E + 2` while the last block
+    /// of the current epoch `E` is derived, so the boundary it reads is that
+    /// block, inside any retained window. A boundary below the floor's
+    /// parent fails with [`HistoryPruned`].
     pub(crate) fn consensus_roster(
         &self,
         epoch: Epoch,
@@ -29,6 +34,11 @@ impl FinalizedHistory {
             borsh::from_slice(&snapshot.get(HEAD)?.context("missing history head")?)?;
         if height > head {
             return Ok(None);
+        }
+        let floor = floor::floor_height(snapshot.get(FLOOR)?.as_deref())?;
+        // The floor's parent is the oldest boundary the store holds.
+        if floor > 1 && height < floor - 1 {
+            return Err(HistoryPruned { height, floor }.into());
         }
         let record = snapshot
             .get_pinned(key(RECORD, height))?

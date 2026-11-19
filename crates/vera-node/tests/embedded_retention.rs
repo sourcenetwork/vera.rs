@@ -84,7 +84,6 @@ fn a_history_retention_below_the_minimum_is_refused() {
 }
 
 #[test]
-#[ignore = "finalizes past the minimum history retention, about ten minutes at the daemon cadence"]
 fn a_write_below_the_retained_history_is_pruned_and_a_restart_recovers_from_the_floor() {
     let directory = tempfile::tempdir().unwrap();
     let chain_id = 9420;
@@ -103,7 +102,11 @@ fn a_write_below_the_retained_history_is_pruned_and_a_restart_recovers_from_the_
     let early = finalize_a_write(&node, &BlsSigner::new(42u64.into(), chain_id).unwrap());
     let written_at = height(&node);
     let deadline = Instant::now() + Duration::from_secs(1_500);
-    while height(&node) < written_at + retained + 64 {
+    // The floor is the first block of an epoch: it passes the write once the
+    // retained window starts in a later epoch than the write's.
+    let length = epoch_length.get();
+    let past = written_at - written_at % length + length + retained;
+    while height(&node) < past + 1 {
         assert!(Instant::now() < deadline, "history retention deadline");
         std::thread::sleep(Duration::from_millis(500));
     }
@@ -124,6 +127,17 @@ fn a_write_below_the_retained_history_is_pruned_and_a_restart_recovers_from_the_
             "{refused}"
         );
     };
+    // The pass that raises the floor runs after the revision is published.
+    let settle = Instant::now() + Duration::from_secs(30);
+    while block_on(node.rpc().request::<serde_json::Value>(
+        "vera_getLightBlock",
+        vec![serde_json::json!(format!("{written_at:#x}"))],
+    ))
+    .is_ok()
+    {
+        assert!(Instant::now() < settle, "the floor did not pass the write");
+        std::thread::sleep(Duration::from_millis(100));
+    }
     pruned(&node);
     block_on(node.stop()).unwrap();
 
