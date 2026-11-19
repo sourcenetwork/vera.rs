@@ -62,15 +62,14 @@ pub struct EmbeddedConfig {
     /// Finalized history, which serves receipts, has its own retention:
     /// [`Self::history_retention`].
     pub pruning: Option<PruningConfig>,
-    /// Finalized revisions of execution history kept below the head. `None`,
-    /// the default, keeps all of it.
+    /// Finalized revisions of execution history kept below the head, by
+    /// default [`Self::HISTORY_RETENTION`]. `None` keeps all of it.
     ///
-    /// Older receipts, revisions and their proofs are no longer served; the
-    /// records of epoch boundaries stay. The value must be at least
+    /// The oldest revision kept is the first of its epoch. Receipts,
+    /// revisions and proofs below it are no longer served, on this device or
+    /// on a backup that catches up from it. The value must be at least
     /// [`crate::minimum_history_retention`] for the deployment's epoch
     /// length, or the start fails with [`crate::EmbedError::HistoryRetention`].
-    /// A node whose history is pruned cannot serve it to a device that
-    /// catches up from its start: that device's catch-up fails.
     pub history_retention: Option<u64>,
     /// Proposal pacing for the lone validator. `None` keeps the daemon's cadence.
     pub pacing: Option<SoloPacing>,
@@ -109,6 +108,14 @@ impl EmbeddedConfig {
         retained_state_revisions: 256,
     };
 
+    /// Default finalized-history retention: 16,384 revisions, about 45 hours
+    /// of an idle deployment's heartbeats, or 64 epochs of 256 blocks.
+    ///
+    /// It bounds the history store, the part of the directory that otherwise
+    /// grows for as long as the deployment runs, to about 17 MB of idle
+    /// revisions; revisions that carry requests are larger.
+    pub const HISTORY_RETENTION: u64 = 16_384;
+
     /// Defaults for a lone validator: quiet when idle, with timeouts ordered below the genesis stall timeout.
     #[must_use]
     pub fn new(data_dir: impl Into<PathBuf>, genesis: SoloGenesis, p2p_listen: SocketAddr) -> Self {
@@ -129,7 +136,7 @@ impl EmbeddedConfig {
             certification_timeout: Duration::from_secs(13),
             timeout_retry: Duration::from_millis(500),
             pruning: Some(Self::RETENTION),
-            history_retention: None,
+            history_retention: Some(Self::HISTORY_RETENTION),
             pacing: Some(SoloPacing {
                 idle: Self::HEARTBEAT,
                 batch: SoloPacing::BATCH,
@@ -292,6 +299,9 @@ mod tests {
         assert_eq!(config.network.listen_addr, "127.0.0.1:0");
         assert_eq!(config.network.discovery, DiscoveryConfig::local());
         assert_eq!(config.pruning, Some(EmbeddedConfig::RETENTION));
-        assert_eq!(config.history_retention, None);
+        assert_eq!(
+            config.history_retention,
+            Some(EmbeddedConfig::HISTORY_RETENTION)
+        );
     }
 }
