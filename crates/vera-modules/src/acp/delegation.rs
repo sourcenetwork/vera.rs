@@ -17,6 +17,7 @@ use crate::vera::VeraModule;
 
 impl AcpModule {
     /// Create a policy owned by the actor authorizing the submitting worker.
+    #[allow(clippy::too_many_arguments)]
     pub fn bearer_create_policy(
         &mut self,
         vera: &mut VeraModule,

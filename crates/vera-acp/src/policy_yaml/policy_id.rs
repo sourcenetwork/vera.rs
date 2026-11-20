@@ -259,9 +259,10 @@ fn decode_hex(text: &str) -> std::result::Result<[u8; HASH_LEN], HexError> {
         return Err(HexError);
     }
     let mut bytes = [0; HASH_LEN];
-    for (byte, pair) in bytes.iter_mut().zip(text.chunks_exact(2)) {
+    let (pairs, _) = text.as_chunks::<2>();
+    for (byte, [high, low]) in bytes.iter_mut().zip(pairs) {
         let digit = |c: u8| char::from(c).to_digit(16).ok_or(HexError);
-        *byte = (digit(pair[0])? << 4 | digit(pair[1])?) as u8;
+        *byte = (digit(*high)? << 4 | digit(*low)?) as u8;
     }
     Ok(bytes)
 }
