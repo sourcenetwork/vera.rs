@@ -10,6 +10,8 @@
 pub mod administration;
 /// Certified ownership-amendment history.
 pub mod amendments;
+/// Anchors in another deployment and policy snapshots verified against them.
+pub mod anchoring;
 mod bearer;
 mod bls_signer;
 /// Certified bulletin records and bounded listings.
@@ -69,8 +71,8 @@ pub use bearer::{
 };
 pub use bls_signer::BlsSigner;
 pub use client::{
-    ACP_ADDRESS, BULLETIN_ADDRESS, VALIDATOR_REGISTRY_ADDRESS, VERA_ADDRESS, VeraClient,
-    parse_policy_id,
+    ACP_ADDRESS, ANCHOR_ADDRESS, BULLETIN_ADDRESS, VALIDATOR_REGISTRY_ADDRESS, VERA_ADDRESS,
+    VeraClient, parse_policy_id,
 };
 pub use error::ClientError;
 /// Signing key for native service and authorization requests.

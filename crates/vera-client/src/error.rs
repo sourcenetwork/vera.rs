@@ -113,6 +113,10 @@ pub enum ClientError {
     #[error(transparent)]
     Permission(#[from] vera_permission::PermissionError),
 
+    /// Anchoring, an anchored snapshot or its freshness check failed.
+    #[error(transparent)]
+    Anchoring(#[from] crate::anchoring::AnchoringError),
+
     /// Finalization could not be verified against configured trust.
     #[error(transparent)]
     Finalization(#[from] vera_domain::LightBlockError),
