@@ -42,7 +42,14 @@ pub use prefix::{PrefixProof, PrefixResponse};
 mod record;
 pub use record::{RECORD_PROOF_BYTES, RECORD_RESPONSE_BYTES, RecordProof, RecordResponse};
 mod response;
+mod snapshot;
+mod snapshot_state;
 pub use response::{PERMISSION_RESPONSE_BYTES, PermissionResponse};
+pub use snapshot::{
+    POLICY_SNAPSHOT_RESPONSE_BYTES, PolicySnapshotProof, PolicySnapshotResponse,
+    policy_snapshot_prefixes,
+};
+pub use snapshot_state::PolicyState;
 mod term;
 pub use term::verify_term_certificate;
 

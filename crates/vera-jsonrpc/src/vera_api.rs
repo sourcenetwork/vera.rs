@@ -19,11 +19,13 @@ mod receipt;
 #[cfg(test)]
 mod receipt_tests;
 mod record;
+mod snapshot;
 use vera_executor::SharedModuleState;
 use vera_indexer::{BlockIndex, LightBlockIndex};
 use vera_permission::{
     AccessRequest, PermissionProof, PermissionResponse, PolicyPrefixPageResponse,
-    PolicyPrefixResponse, PrefixPageRequest, PrefixPageResponse, PrefixResponse, RecordResponse,
+    PolicyPrefixResponse, PolicySnapshotResponse, PrefixPageRequest, PrefixPageResponse,
+    PrefixResponse, RecordResponse,
 };
 
 use crate::{
@@ -159,6 +161,15 @@ pub trait VeraApi {
         request: PrefixPageRequest,
         minimum_height: U64,
     ) -> RpcResult<PolicyPrefixPageResponse>;
+
+    /// Capture a policy record and every relationship, index and object record
+    /// of the policy at one finalized revision: the state a snapshot anchors.
+    #[method(name = "getCurrentPolicySnapshot")]
+    async fn get_current_policy_snapshot(
+        &self,
+        policy: String,
+        minimum_height: U64,
+    ) -> RpcResult<PolicySnapshotResponse>;
 
     /// Returns a light block at the given height.
     ///
@@ -482,6 +493,16 @@ impl VeraApiServer for VeraApiImpl {
     ) -> RpcResult<PolicyPrefixPageResponse> {
         let _request = self.state.permission_read_permit()?;
         self.current_policy_prefix_page_proof(&policy, &request, minimum_height.to())
+            .await
+    }
+
+    async fn get_current_policy_snapshot(
+        &self,
+        policy: String,
+        minimum_height: U64,
+    ) -> RpcResult<PolicySnapshotResponse> {
+        let _request = self.state.permission_read_permit()?;
+        self.current_policy_snapshot(&policy, minimum_height.to())
             .await
     }
 
