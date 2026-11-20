@@ -199,14 +199,14 @@ impl Fixture {
         let reader = Did::new("did:key:lifecycle-reader").unwrap();
         let mut module = AcpModule::new();
         let policy = module
-            .create_policy(&creator, POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&creator, POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap()
             .policy
             .id;
         let registrations = populate(&mut module, &policy, objects, &creator, &claimant, &reader);
         let before_unrelated = module.clone();
         let other = module
-            .create_policy(&creator, POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&creator, POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap()
             .policy
             .id;

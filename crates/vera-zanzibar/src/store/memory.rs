@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 use parking_lot::RwLock;
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::did::Did;
 
@@ -19,7 +18,6 @@ type Relations = BTreeMap<RelationKey, BTreeMap<SubjectKey, Subject>>;
 pub struct MemoryZanzibarStore {
     policies: RwLock<BTreeMap<String, Policy>>,
     relationships: RwLock<BTreeMap<String, Relations>>,
-    policy_counter: AtomicU64,
 }
 
 impl MemoryZanzibarStore {
@@ -27,7 +25,6 @@ impl MemoryZanzibarStore {
         Self {
             policies: RwLock::new(BTreeMap::new()),
             relationships: RwLock::new(BTreeMap::new()),
-            policy_counter: AtomicU64::new(0),
         }
     }
 
@@ -75,10 +72,6 @@ impl ZanzibarStore for MemoryZanzibarStore {
 
     async fn get_policy(&self, policy_id: &str) -> Result<Option<Policy>> {
         Ok(self.policies.read().get(policy_id).cloned())
-    }
-
-    async fn next_policy_counter(&self) -> Result<u64> {
-        Ok(self.policy_counter.fetch_add(1, Ordering::SeqCst) + 1)
     }
 
     async fn list_policies(&self) -> Result<Vec<Policy>> {

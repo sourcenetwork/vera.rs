@@ -11,7 +11,7 @@ fn fixture() -> (InMemoryKvStore, String, RelationshipRecord) {
         .create_policy(
             &owner,
             "name: objects\nresources:\n  - name: file\n    relations:\n      - name: reader\n",
-            PolicyMarshalingType::ShortYaml,
+            PolicyMarshalingType::ShortYaml, Default::default(),
         )
         .unwrap();
     let relationship = Relationship::with_entity("file", "report/child", "reader", owner);

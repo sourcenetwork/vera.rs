@@ -6,7 +6,7 @@ use crate::precompiles::refusal::{Refuse, Stated, kind_of};
 use vera_domain::RefusalKind;
 use vera_modules::acp::{
     PolicyCreateBudget,
-    types::{PolicyCreation, PolicyRecord},
+    types::{PolicyCreation, PolicyNonce, PolicyRecord},
 };
 
 pub(super) const fn handles(selector: [u8; 4]) -> bool {
@@ -156,6 +156,7 @@ fn create(
                     &call.bearerToken,
                     policy,
                     marshal_type_from_u8(call.marshalType),
+                    PolicyNonce(call.nonce.0),
                     budget,
                 )
                 .map_err(refused)
@@ -171,6 +172,7 @@ fn create(
                     ))
                 })?,
                 marshal_type: marshal_type_from_u8(call.marshalType),
+                nonce: PolicyNonce(call.nonce.0),
                 required_specification: None,
                 metadata: Default::default(),
             };

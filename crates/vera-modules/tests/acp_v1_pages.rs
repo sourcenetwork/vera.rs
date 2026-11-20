@@ -17,7 +17,7 @@ fn enumeration_resumes_without_duplicates_and_bounds_empty_filtered_pages() {
     let mut module = AcpModule::new();
     for _ in 0..130 {
         module
-            .create_policy(&owner, POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&owner, POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap();
     }
     let first = module.query_policies_page(None).unwrap();

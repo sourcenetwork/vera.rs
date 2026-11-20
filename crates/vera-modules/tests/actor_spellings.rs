@@ -197,7 +197,7 @@ fn reader(subject: Subject) -> Relationship {
 fn fixture(owner: &Key) -> (AcpModule, String) {
     let mut acp = AcpModule::new();
     let owner = &owner.dids()[0];
-    let policy = acp.create_policy(owner, POLICY, FORMAT).unwrap().policy.id;
+    let policy = acp.create_policy(owner, POLICY, FORMAT, Default::default()).unwrap().policy.id;
     acp.direct_policy_cmd(owner, &policy, PolicyCmd::RegisterObject(file("report")))
         .unwrap();
     (acp, policy)

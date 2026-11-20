@@ -155,6 +155,7 @@ async fn light_client_proof_verification() {
     let create_calldata = IAcp::createPolicyCall {
         policy: TEST_POLICY_YAML.as_bytes().to_vec().into(),
         marshalType: 1,
+        nonce: Default::default(),
     }
     .abi_encode();
     let create_receipt =

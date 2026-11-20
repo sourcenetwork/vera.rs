@@ -12,20 +12,26 @@ impl AcpModule {
                 "unsupported relationship namespace; fresh deployment required".into(),
             ));
         }
-        let retired_count = self.validate_retirement_state()?;
+        self.validate_retirement_state()?;
         for (key, _) in self.store.prefix_iter(keys::POLICY_PREFIX) {
             let id = std::str::from_utf8(&key[keys::POLICY_PREFIX.len()..])
                 .map_err(|_| AcpError::State("invalid policy key".into()))?;
             let record = self
                 .get_policy_record(id)?
                 .ok_or_else(|| AcpError::State("restored policy record is missing".into()))?;
-            let mut compiled = Self::compile_policy(
+            let (mut compiled, _) = Self::compile_policy(
                 &record.raw_policy,
                 &record.marshal_type,
-                0,
                 Some(record.policy.specification),
             )
             .map_err(|error| AcpError::State(format!("invalid restored policy: {error}")))?;
+            if policy_yaml::policy_id(&record.policy_hash, &record.nonce, &record.metadata.owner_did)
+                != id
+            {
+                return Err(AcpError::State(
+                    "restored policy id differs from its origin".into(),
+                ));
+            }
             compiled.id = id.to_owned();
             let encode = |policy: &Policy| {
                 serde_json::to_vec(policy).map_err(|error| AcpError::State(error.to_string()))
@@ -45,12 +51,6 @@ impl AcpModule {
         }
         self.decision_cleanup_cursor()?;
         self.get_params()?;
-        self.validate_counter(
-            keys::POLICY_COUNTER_KEY,
-            (self.zanzibar_policies.len() as u64)
-                .checked_add(retired_count)
-                .ok_or_else(|| AcpError::State("policy count overflow".into()))?,
-        )?;
         for (prefix, counter_key) in [
             (
                 [keys::COMMITMENT_PREFIX, keys::OBJS_SUBPREFIX].concat(),
@@ -113,7 +113,7 @@ mod tests {
                 .create_policy(
                     &owner,
                     &format!("name: original\n{specification}{resources}"),
-                    PolicyMarshalingType::ShortYaml,
+                    PolicyMarshalingType::ShortYaml, Default::default(),
                 )
                 .unwrap();
             let id = record.policy.id;
@@ -255,7 +255,7 @@ mod tests {
         let actor = Did::new("did:key:owner").unwrap();
         let definition = "name: counter\nresources:\n  - name: file\n";
         let policy = module
-            .create_policy(&actor, definition, PolicyMarshalingType::ShortYaml)
+            .create_policy(&actor, definition, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap()
             .policy
             .id;
@@ -291,7 +291,6 @@ mod tests {
         check_record_indexes(&module, &commitment, &event);
         let original = module.store.clone();
         for key in [
-            keys::POLICY_COUNTER_KEY.to_vec(),
             keys::commitment_counter_key(),
             keys::amendment_event_counter_key(),
         ] {
@@ -312,7 +311,7 @@ mod tests {
         let before = module.store.serialize();
         assert!(
             module
-                .create_policy(&actor, definition, PolicyMarshalingType::ShortYaml)
+                .create_policy(&actor, definition, PolicyMarshalingType::ShortYaml, Default::default())
                 .is_err()
         );
         assert_eq!(module.store.serialize(), before);
@@ -330,7 +329,7 @@ mod tests {
             .create_policy(
                 &owner,
                 "name: restored\nresources:\n  - name: file\n",
-                PolicyMarshalingType::ShortYaml,
+                PolicyMarshalingType::ShortYaml, Default::default(),
             )
             .unwrap()
             .policy

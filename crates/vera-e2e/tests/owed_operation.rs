@@ -55,7 +55,7 @@ async fn an_owed_list_runs_under_the_raised_lead_once_and_only_as_signed() {
     let other = BlsSigner::new(8u64.into(), deployment).unwrap();
     let operator = BlsSigner::new(9u64.into(), deployment).unwrap();
     let created = client
-        .native_create_policy(&worker, b"name: owed\nresources:\n  - name: file\n", 1)
+        .native_create_policy(&worker, b"name: owed\nresources:\n  - name: file\n", 1, Default::default())
         .await
         .unwrap();
     let policy = client

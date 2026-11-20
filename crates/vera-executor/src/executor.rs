@@ -638,7 +638,7 @@ mod tests {
             .create_policy(
                 &issuer,
                 "name: cleanup\nresources:\n  - name: file\n",
-                PolicyMarshalingType::ShortYaml,
+                PolicyMarshalingType::ShortYaml, Default::default(),
             )
             .unwrap()
             .policy
@@ -1256,7 +1256,7 @@ mod tests {
         let creator = bls::did_from_bls_pubkey(&pubkey).unwrap();
         let actor = creator.parse().unwrap();
         let mut acp = AcpModule::new();
-        let policy = acp.create_policy(&actor, "name: decisions\nresources:\n  - name: file\n    permissions:\n      - name: read\n", PolicyMarshalingType::ShortYaml).unwrap().policy.id;
+        let policy = acp.create_policy(&actor, "name: decisions\nresources:\n  - name: file\n    permissions:\n      - name: read\n", PolicyMarshalingType::ShortYaml, Default::default()).unwrap().policy.id;
         let object = Object {
             resource: "file".into(),
             id: "report".into(),

@@ -25,15 +25,16 @@ pub struct VeraGenesis {
     /// Initial operator approval policy. Omission disables administrative writes.
     #[serde(default)]
     pub operators: Option<vera_modules::vera::administration::OperatorPolicy>,
-    /// ACP policies seeded with caller-assigned counters (1, 2, ... in list
-    /// order), bypassing the live creation counter -- lets a deployment (or
-    /// test harness) know a policy's id before genesis exists, the same way
-    /// `operators` is seeded directly rather than through a live tx.
+    /// ACP policies seeded under `vera_modules::acp::GENESIS_POLICY_CREATOR`,
+    /// each with its own nonce -- lets a deployment (or test harness) know a
+    /// policy's id before genesis exists (`AcpModule::predict_policy_id`),
+    /// the same way `operators` is seeded directly rather than through a
+    /// live tx.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub policies: Vec<vera_modules::acp::PolicySeed>,
-    /// ACP policies seeded under counters and owners the deployment chooses,
-    /// so a host that already names a policy by its identifier finds it there.
-    /// Not combined with `policies`.
+    /// ACP policies seeded under owners and nonces the deployment chooses; a
+    /// host computes their ids before the deployment exists. Not combined
+    /// with `policies`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub placed_policies: Vec<vera_modules::acp::PlacedPolicy>,
     /// Orbis node-demerit scores seeded directly, bypassing the normal
@@ -433,12 +434,16 @@ mod tests {
             value[section] = serde_json::Value::Array(vec![entry]);
             value
         };
-        let policy =
-            serde_json::json!({ "definition": "name: seeded", "marshal_type": "ShortYaml" });
+        let nonce = "00".repeat(32);
+        let policy = serde_json::json!({
+            "definition": "name: seeded",
+            "marshal_type": "ShortYaml",
+            "nonce": nonce,
+        });
         let placed = serde_json::json!({
             "definition": "name: seeded",
             "marshal_type": "ShortYaml",
-            "counter": 1,
+            "nonce": nonce,
             "owner": "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
         });
         let demerit = serde_json::json!({

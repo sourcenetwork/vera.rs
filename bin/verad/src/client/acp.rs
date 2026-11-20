@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::Subcommand;
+use vera_client::PolicyNonce;
 
 use super::{context::ClientContext, parse::bytes_to_json};
 
@@ -16,6 +17,11 @@ pub(crate) enum AcpCommand {
         /// Path to YAML policy file.
         #[arg(long)]
         file: Option<PathBuf>,
+        /// The creator's nonce (64 hex characters): the policy id binds the
+        /// policy, the signer and this value, so creating one policy again
+        /// takes another nonce.
+        #[arg(long, default_value_t = PolicyNonce::default())]
+        nonce: PolicyNonce,
     },
     /// Fetch a policy by ID.
     GetPolicy {
@@ -144,15 +150,17 @@ impl AcpCommand {
     #[allow(clippy::too_many_lines)]
     pub(super) async fn run(self, ctx: &ClientContext) -> eyre::Result<()> {
         match self {
-            Self::CreatePolicy { yaml, file } => {
+            Self::CreatePolicy { yaml, file, nonce } => {
                 let policy_bytes = read_policy_input(yaml, file)?;
                 let receipt = if let Some(bls) = ctx.bls_signer.as_ref() {
                     ctx.client
-                        .native_create_policy(bls, &policy_bytes, 1)
+                        .native_create_policy(bls, &policy_bytes, 1, nonce)
                         .await?
                 } else {
                     let signer = ctx.require_evm_signer()?;
-                    ctx.client.create_policy(&signer, &policy_bytes, 1).await?
+                    ctx.client
+                        .create_policy(&signer, &policy_bytes, 1, nonce)
+                        .await?
                 };
                 ctx.print_json(&receipt)?;
             }

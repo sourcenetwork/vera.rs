@@ -119,7 +119,7 @@ mod tests {
             .create_policy(
                 &"did:key:owner".parse().unwrap(),
                 "name: policy\nresources:\n  - name: file\n",
-                PolicyMarshalingType::ShortYaml,
+                PolicyMarshalingType::ShortYaml, Default::default(),
             )
             .unwrap();
         let key = keys::policy_key(&record.policy.id);

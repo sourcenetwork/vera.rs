@@ -96,6 +96,7 @@ fn create(name: &str) -> Vec<u8> {
             .into_bytes()
             .into(),
         marshalType: 1,
+        nonce: Default::default(),
     }
     .abi_encode()
 }
@@ -366,6 +367,7 @@ fn large_policy_read(fixture: &mut Fixture) -> (Vec<u8>, usize, u64) {
     let call = IAcp::createPolicyCall {
         policy: policy.into_bytes().into(),
         marshalType: 1,
+        nonce: Default::default(),
     }
     .abi_encode();
     let result = fixture.dispatch(&call, 1_000_000).unwrap();
@@ -463,10 +465,15 @@ fn large_policy_listing(fixture: &mut Fixture, count: usize) -> Vec<u8> {
         "name: listing\nresources:\n  - name: file\n# {}\n",
         "x".repeat(60 << 10),
     );
-    for _ in 0..count {
+    for index in 0..count {
         fixture
             .acp
-            .create_policy(&actor, &policy, PolicyMarshalingType::ShortYaml)
+            .create_policy(
+                &actor,
+                &policy,
+                PolicyMarshalingType::ShortYaml,
+                vera_modules::acp::types::PolicyNonce([index as u8; 32]),
+            )
             .unwrap();
     }
     IAcp::getPolicyIdsCall {}.abi_encode()

@@ -670,6 +670,7 @@ resources:
         let calldata = IAcp::createPolicyCall {
             policy: TEST_POLICY_YAML.as_bytes().to_vec().into(),
             marshalType: 1,
+            nonce: Default::default(),
         }
         .abi_encode();
 
@@ -715,12 +716,14 @@ resources:
                 IAcp::createPolicyCall {
                     policy: TEST_POLICY_YAML.as_bytes().to_vec().into(),
                     marshalType: 1,
+                    nonce: Default::default(),
                 }
                 .abi_encode()
                 .into(),
                 IAcp::createPolicyCall {
                     policy: TEST_POLICY_YAML.as_bytes().to_vec().into(),
                     marshalType: 1,
+                    nonce: FixedBytes::repeat_byte(1),
                 }
                 .abi_encode()
                 .into(),
@@ -775,7 +778,7 @@ resources:
         let creator = did_from_signer(&tx_ctx.signer).unwrap();
         let mut module = AcpModule::new();
         let record = module
-            .create_policy(&creator, TEST_POLICY_YAML, PolicyMarshalingType::ShortYaml)
+            .create_policy(&creator, TEST_POLICY_YAML, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap();
         let policy_id = FixedBytes::from_slice(&hex::decode(&record.policy.id).unwrap());
 
@@ -956,7 +959,7 @@ resources:
         let creator = Did::new(ALICE_DID).unwrap();
 
         let record = module
-            .create_policy(&creator, CROSS_POLICY_YAML, PolicyMarshalingType::ShortYaml)
+            .create_policy(&creator, CROSS_POLICY_YAML, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap();
         let policy_id = record.policy.id;
         module

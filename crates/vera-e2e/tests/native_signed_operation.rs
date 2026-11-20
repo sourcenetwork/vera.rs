@@ -98,6 +98,7 @@ async fn actor_signed_command_rejects_substitution_and_deduplicates_across_worke
                 .to_vec()
                 .into(),
             marshalType: 1,
+            nonce: Default::default(),
         },
         true,
     )

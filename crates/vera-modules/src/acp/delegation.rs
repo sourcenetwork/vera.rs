@@ -9,7 +9,8 @@ use super::{
     Result,
 };
 use crate::acp::types::{
-    AccessDecision, AccessRequest, PolicyCmd, PolicyCmdResult, PolicyMarshalingType, PolicyRecord,
+    AccessDecision, AccessRequest, PolicyCmd, PolicyCmdResult, PolicyMarshalingType, PolicyNonce,
+    PolicyRecord,
     RecordMetadata,
 };
 use crate::types::{BlockExecCtx, Timestamp, TxExecCtx};
@@ -25,6 +26,7 @@ impl AcpModule {
         token: &str,
         policy: &str,
         marshal_type: PolicyMarshalingType,
+        nonce: PolicyNonce,
     ) -> Result<PolicyRecord> {
         self.bearer_create_policy_with_budget(
             vera,
@@ -33,6 +35,7 @@ impl AcpModule {
             token,
             policy,
             marshal_type,
+            nonce,
             &PolicyCreateBudget::new(u64::MAX),
         )
     }
@@ -47,6 +50,7 @@ impl AcpModule {
         token: &str,
         policy: &str,
         marshal_type: PolicyMarshalingType,
+        nonce: PolicyNonce,
         budget: &PolicyCreateBudget,
     ) -> Result<PolicyRecord> {
         if submission.tx_hash.len() != 32 {
@@ -67,7 +71,7 @@ impl AcpModule {
             token,
             (
                 DelegationScope::CreatePolicy,
-                DelegatedOperation::CreatePolicy(policy, &marshal_type).digest()?,
+                DelegatedOperation::CreatePolicy(policy, &marshal_type, &nonce).digest()?,
             ),
             Some(&budget.records),
             |module, _hub, actor| {
@@ -81,6 +85,7 @@ impl AcpModule {
                 module.create_policy_with_options_and_budget(
                     policy,
                     marshal_type,
+                    nonce,
                     RecordMetadata {
                         creation_ts: context.timestamp.clone(),
                         tx_hash: submission.tx_hash.clone(),

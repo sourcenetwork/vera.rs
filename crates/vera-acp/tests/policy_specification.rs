@@ -14,11 +14,9 @@ fn defra_requires_read_and_write_permissions() {
         let definition = format!(
             "spec: defra\nname: files\nresources:\n  - name: file\n    permissions:\n      - name: {permission}\n"
         );
-        assert!(build_policy(&parse_policy_yaml(&definition).unwrap(), 1).is_err());
+        assert!(build_policy(&parse_policy_yaml(&definition).unwrap(), "policy".into()).is_err());
         assert!(build_policy(
-            &parse_policy_yaml(&definition.replace("spec: defra\n", "")).unwrap(),
-            1
-        )
+            &parse_policy_yaml(&definition.replace("spec: defra\n", "")).unwrap(), "policy".into())
         .is_ok());
     }
 }
@@ -29,7 +27,7 @@ async fn defra_write_grants_read_after_record_roundtrip() {
     let stranger = Did::new("did:key:stranger").unwrap();
     for spec in ["none", "defra", "DeFrA"] {
         let definition = format!("spec: {spec}\n{DEFINITION}");
-        let built = build_policy(&parse_policy_yaml(&definition).unwrap(), 1).unwrap();
+        let built = build_policy(&parse_policy_yaml(&definition).unwrap(), "policy".into()).unwrap();
         let encoded = serde_json::to_value(&built).unwrap();
         if spec == "none" {
             assert!(encoded.get("specification").is_none());

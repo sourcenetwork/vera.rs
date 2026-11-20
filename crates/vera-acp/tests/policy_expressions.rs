@@ -75,7 +75,7 @@ resources:
 "#;
 
 fn build(definition: &str) -> vera_acp::Result<Policy> {
-    build_policy(&parse_policy_yaml(definition).unwrap(), 1)
+    build_policy(&parse_policy_yaml(definition).unwrap(), "policy".into())
 }
 
 #[test]

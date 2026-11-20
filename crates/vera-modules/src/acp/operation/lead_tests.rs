@@ -8,7 +8,7 @@ const SIGNED: u64 = 100;
 const HOUR: u64 = 3600;
 
 fn policy(acp: &mut AcpModule) -> String {
-    acp.create_policy(&vera_identity::Did::new(issuer()).unwrap(), POLICY, FORMAT)
+    acp.create_policy(&vera_identity::Did::new(issuer()).unwrap(), POLICY, FORMAT, Default::default())
         .unwrap()
         .policy
         .id
@@ -134,7 +134,7 @@ fn a_raised_lead_leaves_other_operations_at_the_default() {
     let mut vera = VeraModule::new();
     acp.set_policy_operation_lead(MAX_OPERATION_LEAD).unwrap();
     let worker = submission(7);
-    let create = DelegatedOperation::CreatePolicy(POLICY, &FORMAT);
+    let create = DelegatedOperation::CreatePolicy(POLICY, &FORMAT, &Default::default());
     let far = id(1, SIGNED + DEFAULT_OPERATION_LEAD + 1);
     let before = state(&acp, &vera);
     assert!(
@@ -145,7 +145,7 @@ fn a_raised_lead_leaves_other_operations_at_the_default() {
             &token(&worker, far, &create),
             POLICY,
             FORMAT
-        )
+        , Default::default())
         .is_err()
     );
     assert_eq!(state(&acp, &vera), before);

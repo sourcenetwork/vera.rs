@@ -54,7 +54,7 @@ fn restore(module: &AcpModule) -> AcpModule {
 fn setup() -> (AcpModule, String) {
     let mut module = AcpModule::new();
     let policy = module
-        .create_policy(&owner(), POLICY, PolicyMarshalingType::ShortYaml)
+        .create_policy(&owner(), POLICY, PolicyMarshalingType::ShortYaml, Default::default())
         .unwrap();
     module
         .direct_policy_cmd(
@@ -200,7 +200,7 @@ fn edit_and_read_policy_guards_reject_without_side_effects() {
 
     let mut module = AcpModule::new();
     let policy_id = module
-        .create_policy(&owner(), POLICY, PolicyMarshalingType::ShortYaml)
+        .create_policy(&owner(), POLICY, PolicyMarshalingType::ShortYaml, Default::default())
         .unwrap()
         .policy
         .id;
@@ -383,7 +383,7 @@ fn archived_objects_remain_reserved_after_restore() {
 fn revocation_survives_restore_and_stays_within_its_policy() {
     let (mut module, policy_id) = setup();
     let other_policy = module
-        .create_policy(&owner(), POLICY, PolicyMarshalingType::ShortYaml)
+        .create_policy(&owner(), POLICY, PolicyMarshalingType::ShortYaml, Default::default())
         .unwrap()
         .policy
         .id;
@@ -470,7 +470,7 @@ fn delegated_management_is_limited_to_declared_relations() {
 fn commitment_opening_cannot_reactivate_an_archived_object() {
     let mut module = AcpModule::new();
     let policy_id = module
-        .create_policy(&owner(), POLICY, PolicyMarshalingType::ShortYaml)
+        .create_policy(&owner(), POLICY, PolicyMarshalingType::ShortYaml, Default::default())
         .unwrap()
         .policy
         .id;
@@ -529,7 +529,7 @@ fn policy_edits_preserve_defra_specification_across_restore() {
         .create_policy(
             &owner(),
             &format!("spec: defra\n{definition}"),
-            PolicyMarshalingType::ShortYaml,
+            PolicyMarshalingType::ShortYaml, Default::default(),
         )
         .unwrap()
         .policy
@@ -579,7 +579,7 @@ fn actor_roles_require_management_authority_without_object_registration() {
     let mut module = AcpModule::new();
     let definition = "name: files\nactor:\n  relations:\n    - name: member\n      types: [actor]\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor->member]\n    permissions:\n      - name: read\n        expr: reader\n";
     let policy = module
-        .create_policy(&owner(), definition, PolicyMarshalingType::ShortYaml)
+        .create_policy(&owner(), definition, PolicyMarshalingType::ShortYaml, Default::default())
         .unwrap()
         .policy
         .id;
@@ -845,7 +845,7 @@ fn cyclic_exclusions_cannot_create_successful_access_decisions() {
     let policy = module.create_policy(
         &owner(),
         "name: exclusions\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n    permissions:\n      - name: read\n        expr: reader - excluded\n      - name: excluded\n        expr: read\n",
-        PolicyMarshalingType::ShortYaml,
+        PolicyMarshalingType::ShortYaml, Default::default(),
     ).unwrap();
     let id = policy.policy.id;
     for command in [

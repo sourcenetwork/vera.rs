@@ -166,6 +166,7 @@ async fn single_endpoint_submission_has_cross_endpoint_certified_receipts() {
                         .into_bytes()
                         .into(),
                     marshalType: 1,
+                    nonce: Default::default(),
                 }
                 .abi_encode()
                 .into(),

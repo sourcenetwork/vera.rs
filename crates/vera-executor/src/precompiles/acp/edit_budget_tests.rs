@@ -26,7 +26,7 @@ impl Fixture {
     fn new() -> Self {
         let actor = Did::new(issuer()).unwrap();
         let mut acp = AcpModule::new();
-        let policy = acp.create_policy(&actor, POLICY, FORMAT).unwrap().policy.id;
+        let policy = acp.create_policy(&actor, POLICY, FORMAT, Default::default()).unwrap().policy.id;
         for command in [
             PolicyCmd::RegisterObject(Object {
                 resource: "file".into(),
@@ -146,6 +146,7 @@ fn earlier_write() -> Vec<u8> {
     IAcp::createPolicyCall {
         policy: Bytes::from_static(b"name: preceding\nresources:\n  - name: file\n"),
         marshalType: 1,
+        nonce: Default::default(),
     }
     .abi_encode()
 }

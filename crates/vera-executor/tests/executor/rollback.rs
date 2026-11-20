@@ -17,6 +17,7 @@ pub(super) fn policy(name: &str) -> Bytes {
             .into_bytes()
             .into(),
         marshalType: 1,
+        nonce: Default::default(),
     }
     .abi_encode()
     .into()

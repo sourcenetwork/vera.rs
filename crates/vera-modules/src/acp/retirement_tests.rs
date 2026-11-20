@@ -19,7 +19,7 @@ fn block(height: u64) -> BlockExecCtx {
 
 fn policy(module: &mut AcpModule) -> String {
     module
-        .create_policy(&actor("creator"), POLICY, PolicyMarshalingType::ShortYaml)
+        .create_policy(&actor("creator"), POLICY, PolicyMarshalingType::ShortYaml, Default::default())
         .unwrap()
         .policy
         .id

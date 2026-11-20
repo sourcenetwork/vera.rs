@@ -279,7 +279,7 @@ async fn recover_replica_from(
     let signer = BlsSigner::new(7u64.into(), deployment).unwrap();
     let mut receipts = vec![
         origin
-            .native_create_policy(&signer, POLICY, 1)
+            .native_create_policy(&signer, POLICY, 1, Default::default())
             .await
             .unwrap(),
     ];
@@ -539,7 +539,7 @@ async fn recover_replica_from(
         .native_create_policy(
             &signer,
             b"name: after-replay\nresources:\n  - name: file\n",
-            1,
+            1, Default::default(),
         )
         .await
         .unwrap();

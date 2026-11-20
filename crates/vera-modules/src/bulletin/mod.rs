@@ -501,6 +501,7 @@ impl BulletinModule {
                 &module_did,
                 BULLETIN_POLICY_YAML,
                 PolicyMarshalingType::ShortYaml,
+                Default::default(),
             )
             .map_err(|e| BulletinError::PolicyInitFailed(e.to_string()))?;
 

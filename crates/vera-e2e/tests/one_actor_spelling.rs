@@ -114,6 +114,7 @@ async fn workers_under_different_spellings_act_for_one_owner() {
             bearerToken: delegation(&uncompressed, DelegationScope::CreatePolicy),
             policy: POLICY.as_bytes().to_vec().into(),
             marshalType: 1,
+            nonce: Default::default(),
         },
     )
     .await;

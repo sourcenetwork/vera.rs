@@ -11,7 +11,7 @@ fn owner() -> Did {
 fn fixture(count: usize) -> (AcpModule, String, RelationshipRecord) {
     let mut module = AcpModule::new();
     let policy = module
-        .create_policy(&owner(), POLICY, PolicyMarshalingType::ShortYaml)
+        .create_policy(&owner(), POLICY, PolicyMarshalingType::ShortYaml, Default::default())
         .unwrap()
         .policy
         .id;

@@ -28,7 +28,7 @@ mod object_pairs;
 pub mod object_state;
 pub mod pages;
 mod policy_create;
-pub use policy_create::{PlacedPolicy, PolicySeed};
+pub use policy_create::{GENESIS_POLICY_CREATOR, PlacedPolicy, PolicySeed};
 mod policy_create_budget;
 pub use policy_create_budget::PolicyCreateBudget;
 mod policy_edit;
@@ -93,7 +93,8 @@ use crate::types::{BlockExecCtx, Duration, Timestamp, TxExecCtx};
 use types::{
     AccessDecision, AccessRequest, AcpParams, Actor, AmendmentEvent, DecisionParams,
     GenerateCommitmentResult, Object, ObjectSelector, PolicyCmd, PolicyCmdResult,
-    PolicyMarshalingType, PolicyRecord, RecordMetadata, RegistrationProof, RegistrationsCommitment,
+    PolicyHash, PolicyMarshalingType, PolicyNonce, PolicyRecord, RecordMetadata, RegistrationProof,
+    RegistrationsCommitment,
     RelationGenerations, RelationPair, RelationSelector, RelationshipRecord, RelationshipSelector,
     SubjectSelector, SuppliedMetadata,
 };
@@ -113,7 +114,6 @@ pub const MAX_POLICY_DEFINITION_BYTES: usize = 64 << 10;
 ///
 /// ```text
 /// "policy/objs/" + policy_id                           → PolicyRecord (serde_json)
-/// "policy/counter/id"                                  → u64 BE
 /// "policy/retired/" + policy_id                         → RetiredPolicy (Borsh)
 /// "policy/cleanup/queue/" + BE(sequence)                → policy_id
 /// "policy/cleanup/counter"                             → u64 BE
@@ -464,15 +464,16 @@ impl AcpModule {
         policy: &str,
         marshal_type: PolicyMarshalingType,
     ) -> Result<Policy> {
-        Self::compile_policy(policy, &marshal_type, 0, None)
+        Self::compile_policy(policy, &marshal_type, None).map(|(policy, _)| policy)
     }
 
+    /// Compiles a definition and returns it with its policy hash. The
+    /// policy's id is the hash in hex until the caller names it.
     fn compile_policy(
         policy: &str,
         marshal_type: &PolicyMarshalingType,
-        counter: u64,
         original_specification: Option<PolicySpecification>,
-    ) -> Result<Policy> {
+    ) -> Result<(Policy, PolicyHash)> {
         if policy.len() > MAX_POLICY_DEFINITION_BYTES {
             return Err(AcpError::InvalidPolicy {
                 reason: "policy definition exceeds 64 KiB".into(),
@@ -502,15 +503,15 @@ impl AcpModule {
             }
             parsed.spec = specification;
         }
-        let built = policy_yaml::build_policy(&parsed, counter).map_err(|error| {
-            AcpError::InvalidPolicy {
-                reason: error.to_string(),
-            }
-        })?;
+        let invalid = |error: vera_acp::Error| AcpError::InvalidPolicy {
+            reason: error.to_string(),
+        };
+        let hash = policy_yaml::policy_hash(&parsed).map_err(invalid)?;
+        let built = policy_yaml::build_policy(&parsed, hash.to_string()).map_err(invalid)?;
         built.validate().map_err(|error| AcpError::InvalidPolicy {
             reason: error.to_string(),
         })?;
-        Ok(built)
+        Ok((built, hash))
     }
 
     /// Fetch a previously recorded access decision by ID.
@@ -632,22 +633,6 @@ impl AcpModule {
     fn set_policy_record(&mut self, id: &str, record: &PolicyRecord) {
         let bytes = serde_json::to_vec(record).expect("serialize PolicyRecord");
         self.store.put(&keys::policy_key(id), bytes);
-    }
-
-    fn next_policy_counter(&self) -> Result<u64> {
-        let counter = self
-            .store
-            .get(keys::POLICY_COUNTER_KEY)
-            .map(|bytes| {
-                bytes.try_into().map(u64::from_be_bytes).map_err(|_| {
-                    AcpError::State("policy counter must contain exactly 8 bytes".into())
-                })
-            })
-            .transpose()?
-            .unwrap_or(0);
-        counter
-            .checked_add(1)
-            .ok_or_else(|| AcpError::State("policy counter exhausted".into()))
     }
 
     // ── Storage — Relationships ──────────────────────────────────────────
@@ -1452,7 +1437,7 @@ resources:
         let creator = alice();
 
         let record = module
-            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap();
 
         assert!(!record.policy.id.is_empty());
@@ -1469,7 +1454,7 @@ resources:
         let creator = alice();
 
         let r1 = module
-            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap();
 
         let second_policy = r#"
@@ -1483,7 +1468,7 @@ resources:
         expr: reader
 "#;
         let r2 = module
-            .create_policy(&creator, second_policy, PolicyMarshalingType::ShortYaml)
+            .create_policy(&creator, second_policy, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap();
 
         let ids = module.query_policy_ids().unwrap();
@@ -1503,7 +1488,7 @@ resources:
     fn relationship_keys_isolate_path_fields() {
         let mut module = AcpModule::new();
         let policy = module
-            .create_policy(&alice(), SIMPLE_POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&alice(), SIMPLE_POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap()
             .policy
             .id;
@@ -1548,7 +1533,7 @@ resources:
         let reader = bob();
 
         let record = module
-            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap();
         let policy_id = &record.policy.id;
 
@@ -1593,7 +1578,7 @@ resources:
         let creator = alice();
 
         let record = module
-            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap();
         let policy_id = &record.policy.id;
 
@@ -1620,7 +1605,7 @@ resources:
         let creator = alice();
 
         let record = module
-            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap();
         let policy_id = &record.policy.id;
 
@@ -1662,7 +1647,7 @@ resources:
         let mut module = AcpModule::new();
         let creator = alice();
         let policy = module
-            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap();
         let relationship =
             Relationship::with_entity("document", "large", "reader", creator.clone());
@@ -1738,7 +1723,7 @@ resources:
         let creator = alice();
 
         let record = module
-            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap();
         let policy_id = &record.policy.id;
 
@@ -1808,7 +1793,7 @@ resources:
         let reader = bob();
 
         let record = module
-            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap();
         let policy_id = &record.policy.id;
 
@@ -1847,7 +1832,7 @@ resources:
         let stranger = bob();
 
         let record = module
-            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap();
         let policy_id = &record.policy.id;
 
@@ -1886,7 +1871,7 @@ resources:
 
         // Create a policy to hold the commitment.
         let record = module
-            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap();
         let policy_id = &record.policy.id;
 
@@ -1958,7 +1943,7 @@ resources:
         let creator = alice();
 
         let record = module
-            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap();
         let policy_id = &record.policy.id;
 
@@ -2025,7 +2010,7 @@ resources:
         let creator = alice();
 
         let record = module
-            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap();
         let policy_id = &record.policy.id;
 
@@ -2088,7 +2073,7 @@ resources:
         let mut module = AcpModule::new();
         let creator = alice();
         let record = module
-            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap();
         let policy_id = &record.policy.id;
         // `reader` is declared (unrestricted), but the EntitySet references
@@ -2116,7 +2101,7 @@ resources:
             .create_policy(
                 &creator,
                 ACTOR_RESTRICTED_POLICY,
-                PolicyMarshalingType::ShortYaml,
+                PolicyMarshalingType::ShortYaml, Default::default(),
             )
             .unwrap();
         let policy_id = &record.policy.id;
@@ -2161,7 +2146,7 @@ resources:
         let mut module = AcpModule::new();
         let creator = alice();
         let record = module
-            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&creator, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap();
         let policy_id = &record.policy.id;
         module
@@ -2178,7 +2163,7 @@ resources:
     fn policy_with_grant(module: &mut AcpModule) -> String {
         let owner = alice();
         let record = module
-            .create_policy(&owner, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&owner, SIMPLE_POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap();
         let policy_id = record.policy.id;
         module

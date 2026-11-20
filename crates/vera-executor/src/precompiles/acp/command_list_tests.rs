@@ -25,7 +25,7 @@ impl Fixture {
         let actor = Did::new(issuer()).unwrap();
         let mut acp = AcpModule::new();
         let policy = acp
-            .create_policy(&actor, READERS, PolicyMarshalingType::ShortYaml)
+            .create_policy(&actor, READERS, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap()
             .policy
             .id;

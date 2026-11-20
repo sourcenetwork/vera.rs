@@ -52,6 +52,7 @@ async fn create_policy(node: &EmbeddedNode, signer: &BlsSigner, name: &str) -> B
     let call = IAcp::createPolicyCall {
         policy: POLICY.replace("embedded", name).into_bytes().into(),
         marshalType: 1,
+        nonce: Default::default(),
     };
     let wire = signer
         .sign_native_tx(ACP_ADDRESS, call.abi_encode().into())

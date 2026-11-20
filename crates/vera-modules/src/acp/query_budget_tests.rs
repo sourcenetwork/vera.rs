@@ -8,7 +8,7 @@ fn fixture(rows: usize, metadata_bytes: usize) -> (AcpModule, String) {
         .create_policy(
             &owner,
             "name: queries\nresources:\n  - name: file\n    relations:\n      - name: reader\n",
-            PolicyMarshalingType::ShortYaml,
+            PolicyMarshalingType::ShortYaml, Default::default(),
         )
         .unwrap();
     for index in 0..rows {

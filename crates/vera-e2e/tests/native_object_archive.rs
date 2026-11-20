@@ -82,6 +82,7 @@ async fn pipelined_object_archive_preserves_exact_counts_and_regrants_after_rest
             bearerToken: create_token,
             policy: POLICY.as_bytes().to_vec().into(),
             marshalType: 1,
+            nonce: Default::default(),
         },
     )
     .await;

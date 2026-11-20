@@ -79,7 +79,7 @@ fn main() {
     let reader = Did::new("did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH").unwrap();
     let mut module = AcpModule::new();
     let policy_id = module
-        .create_policy(&owner, POLICY, PolicyMarshalingType::ShortYaml)
+        .create_policy(&owner, POLICY, PolicyMarshalingType::ShortYaml, Default::default())
         .unwrap()
         .policy
         .id;

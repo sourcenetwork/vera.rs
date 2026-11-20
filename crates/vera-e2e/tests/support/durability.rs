@@ -29,6 +29,7 @@ pub(super) async fn create_policy(
                     .into_bytes()
                     .into(),
                 marshalType: 1,
+                nonce: Default::default(),
             }
             .abi_encode()
             .into(),

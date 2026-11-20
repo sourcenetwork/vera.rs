@@ -49,7 +49,7 @@ pub struct SoloGenesis {
     pub operators: OperatorPolicy,
     /// Genesis timestamp in Unix seconds, used only when the deployment is first created.
     pub timestamp: u64,
-    /// ACP policies the deployment starts with, under the counters and owners given.
+    /// ACP policies the deployment starts with, under the owners and nonces given.
     pub policies: Vec<vera_modules::acp::PlacedPolicy>,
 }
 

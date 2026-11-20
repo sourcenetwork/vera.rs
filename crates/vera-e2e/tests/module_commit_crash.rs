@@ -27,6 +27,7 @@ async fn create_policy(client: &VeraClient, signer: &BlsSigner, name: &str) -> T
                     .into_bytes()
                     .into(),
                 marshalType: 1,
+                nonce: Default::default(),
             }
             .abi_encode()
             .into(),

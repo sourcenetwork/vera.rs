@@ -81,6 +81,7 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
         IAcp::createPolicyCall {
             policy: Bytes::from_static(b"name: delegation\nresources:\n  - name: file\n"),
             marshalType: 1,
+            nonce: Default::default(),
         }
         .abi_encode(),
     )

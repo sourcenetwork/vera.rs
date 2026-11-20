@@ -108,7 +108,7 @@ resources:
 
 fn fs_policy() -> Policy {
     let parsed = parse_policy_yaml(FS_POLICY).unwrap();
-    build_policy(&parsed, 1).unwrap()
+    build_policy(&parsed, "policy".into()).unwrap()
 }
 
 #[test]
@@ -194,7 +194,7 @@ resources:
 
 fn union_policy() -> Policy {
     let parsed = parse_policy_yaml(UNION_POLICY).unwrap();
-    build_policy(&parsed, 1).unwrap()
+    build_policy(&parsed, "policy".into()).unwrap()
 }
 
 #[test]

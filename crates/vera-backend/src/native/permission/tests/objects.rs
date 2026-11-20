@@ -15,7 +15,7 @@ fn object_retirement_is_proven_without_reviving_grants_or_losing_page_continuati
             let owner = "did:key:owner".parse().unwrap();
             let actor = Actor("did:key:reader".parse().unwrap());
             let mut state = ModuleState::default();
-            let policy = state.acp.create_policy(&owner, POLICY, PolicyMarshalingType::ShortYaml).unwrap();
+            let policy = state.acp.create_policy(&owner, POLICY, PolicyMarshalingType::ShortYaml, Default::default()).unwrap();
             let id = &policy.policy.id;
             let object = Object { resource: "document".into(), id: "report".into() };
             let relation = Relationship::with_entity("document", "report", "reader", actor.0.clone());

@@ -47,6 +47,8 @@ impl Fixture {
             raw_policy: String::new(),
             marshal_type: PolicyMarshalingType::ShortYaml,
             metadata: metadata(),
+            nonce: Default::default(),
+            policy_hash: vera_acp::policy_yaml::PolicyHash([0; 32]),
         };
         let mut fixture = Self {
             store: InMemoryKvStore::default(),

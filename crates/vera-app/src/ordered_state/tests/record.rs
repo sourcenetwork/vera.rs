@@ -30,6 +30,7 @@ fn native_record_rpc_keeps_the_captured_revision_across_finalization() {
                             IAcp::createPolicyCall {
                                 policy: POLICY.as_bytes().to_vec().into(),
                                 marshalType: 1,
+                                nonce: Default::default(),
                             },
                         ),
                     )

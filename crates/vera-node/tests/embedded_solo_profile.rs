@@ -113,6 +113,7 @@ async fn certified_write(node: &EmbeddedNode, signer: &BlsSigner, index: usize) 
         .into_bytes()
         .into(),
         marshalType: 1,
+        nonce: Default::default(),
     };
     let wire = signer
         .sign_native_tx(ACP_ADDRESS, call.abi_encode().into())

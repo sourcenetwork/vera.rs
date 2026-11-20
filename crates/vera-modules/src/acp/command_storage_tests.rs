@@ -12,7 +12,7 @@ fn object() -> Object {
 }
 fn fixture() -> (AcpModule, String) {
     let mut module = AcpModule::new();
-    let policy = module.create_policy(&did("owner"), "name: storage\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n", PolicyMarshalingType::ShortYaml).unwrap().policy.id;
+    let policy = module.create_policy(&did("owner"), "name: storage\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n", PolicyMarshalingType::ShortYaml, Default::default()).unwrap().policy.id;
     module
         .direct_policy_cmd(&did("owner"), &policy, PolicyCmd::RegisterObject(object()))
         .unwrap();

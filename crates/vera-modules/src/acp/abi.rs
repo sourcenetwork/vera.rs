@@ -38,9 +38,9 @@ sol! {
         function checkManagementAuthority(bytes32 policyId, string resource, string objectId, string relation, string actor) external view returns (bool);
 
         function batchCalls(bytes[] calldata calls) external returns (bytes[] results);
-        function createPolicy(bytes calldata policy, uint8 marshalType) external returns (bytes);
+        function createPolicy(bytes calldata policy, uint8 marshalType, bytes32 nonce) external returns (bytes);
         function editPolicy(bytes32 policyId, bytes calldata policy, uint8 marshalType) external returns (uint64 relationshipsRemoved, bytes record);
-        function bearerCreatePolicy(string bearerToken, bytes calldata policy, uint8 marshalType) external returns (bytes);
+        function bearerCreatePolicy(string bearerToken, bytes calldata policy, uint8 marshalType, bytes32 nonce) external returns (bytes);
         function bearerEditPolicy(string bearerToken, bytes32 policyId, bytes calldata policy, uint8 marshalType) external returns (uint64 relationshipsRemoved, bytes record);
 
         function setRelationship(

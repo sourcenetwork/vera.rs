@@ -26,7 +26,7 @@ fn authorized_actor(did: vera_identity::Did) -> (MockStateDb, VeraExecutor) {
     let mut modules = ModuleState::default();
     let policy = modules.acp.create_policy(&did,
         "name: membership\nresources:\n  - name: registry\n    relations:\n      - name: admin\n    permissions:\n      - name: manage\n        expr: admin\n",
-        PolicyMarshalingType::ShortYaml,
+        PolicyMarshalingType::ShortYaml, Default::default(),
     ).unwrap().policy.id;
     modules
         .acp

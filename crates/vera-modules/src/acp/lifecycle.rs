@@ -46,6 +46,7 @@ impl AcpModule {
         let result = self.create_policy_with_options_and_budget(
             &request.policy,
             request.marshal_type.clone(),
+            request.nonce,
             RecordMetadata {
                 creation_ts: block.timestamp.clone(),
                 tx_hash: submission.tx_hash.clone(),

@@ -100,10 +100,10 @@ pub(super) async fn load_or_create(
         modules.vera.initialize_administration(policy.clone())?;
     }
     if !genesis.policies.is_empty() {
-        // Attribution only -- nothing checks this DID against anything; the
+        // Attribution and the policy ids: nothing else checks this DID; the
         // live `ring_policy` object/`creator` relation a ring actually needs
-        // is granted separately, after boot, same as today.
-        let creator = vera_identity::Did::new("did:key:zVeraGenesisSeed")?;
+        // is granted separately, after boot.
+        let creator = vera_identity::Did::new(vera_modules::acp::GENESIS_POLICY_CREATOR)?;
         modules
             .acp
             .initialize_policies(&creator, &genesis.policies)?;
@@ -111,7 +111,7 @@ pub(super) async fn load_or_create(
     if !genesis.placed_policies.is_empty() {
         ensure!(
             genesis.policies.is_empty(),
-            "genesis seeds policies by position or under chosen counters, not both"
+            "genesis seeds policies under the genesis creator or under chosen owners, not both"
         );
         modules
             .acp

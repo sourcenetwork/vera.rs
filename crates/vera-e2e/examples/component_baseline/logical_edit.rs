@@ -44,7 +44,7 @@ impl Fixture {
         let owner = Did::new("did:key:logical-edit-owner").unwrap();
         let reader = Did::new("did:key:logical-edit-reader").unwrap();
         let policy = module
-            .create_policy(&owner, ORIGINAL, PolicyMarshalingType::ShortYaml)
+            .create_policy(&owner, ORIGINAL, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap()
             .policy
             .id;

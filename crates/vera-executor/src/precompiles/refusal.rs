@@ -66,7 +66,9 @@ impl Refuse for AcpError {
                 RefusalKind::InvalidArgument
             }
             Self::ObjectNotRegistered { .. } => RefusalKind::ObjectNotRegistered,
-            Self::ObjectAlreadyRegistered { .. } => RefusalKind::AlreadyExists,
+            Self::ObjectAlreadyRegistered { .. } | Self::PolicyAlreadyExists { .. } => {
+                RefusalKind::AlreadyExists
+            }
             Self::CommitmentExpired { .. } => RefusalKind::Expired,
             Self::InvalidProof { .. } => RefusalKind::InvalidProof,
             Self::Unauthorized { .. } => RefusalKind::Unauthorized,

@@ -78,7 +78,7 @@ fn a_managers_transfer_marks_the_owner_it_moved_the_object_from() {
         .create_policy(
             &first,
             "name: managed\nresources:\n  - name: file\n    relations:\n      - name: admin\n        types: [actor]\n        manages: [owner]\n",
-            PolicyMarshalingType::ShortYaml,
+            PolicyMarshalingType::ShortYaml, Default::default(),
         )
         .unwrap()
         .policy

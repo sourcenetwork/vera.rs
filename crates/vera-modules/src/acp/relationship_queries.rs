@@ -327,7 +327,7 @@ mod tests {
             .create_policy(
                 &Did::new("did:key:owner").unwrap(),
                 "name: query\nresources:\n  - name: file\n",
-                PolicyMarshalingType::ShortYaml,
+                PolicyMarshalingType::ShortYaml, Default::default(),
             )
             .unwrap()
             .policy
@@ -374,7 +374,7 @@ mod tests {
             .create_policy(
                 &Did::new("did:key:owner").unwrap(),
                 "name: query\nresources:\n  - name: file\n",
-                PolicyMarshalingType::ShortYaml,
+                PolicyMarshalingType::ShortYaml, Default::default(),
             )
             .unwrap()
             .policy
@@ -423,7 +423,7 @@ mod tests {
             .create_policy(
                 &Did::new("did:key:owner").unwrap(),
                 &source,
-                PolicyMarshalingType::ShortYaml,
+                PolicyMarshalingType::ShortYaml, Default::default(),
             )
             .unwrap()
             .policy

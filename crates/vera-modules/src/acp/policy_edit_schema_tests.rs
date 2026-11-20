@@ -52,7 +52,7 @@ fn reordered_schema_keeps_resource_identities_and_recreated_relations_revoked() 
         .create_policy(
             &owner,
             &definition(false, false),
-            PolicyMarshalingType::ShortYaml,
+            PolicyMarshalingType::ShortYaml, Default::default(),
         )
         .unwrap()
         .policy

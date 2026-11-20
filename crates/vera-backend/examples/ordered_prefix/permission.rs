@@ -140,7 +140,7 @@ fn permission_evaluation_requires_complete_proofs_at_one_root() {
             .unwrap();
         let mut module = AcpModule::new();
         let policy_id = module
-            .create_policy(&owner, POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(&owner, POLICY, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap()
             .policy
             .id;

@@ -40,7 +40,7 @@ fn module() -> (AcpModule, String) {
         .create_policy(
             &did(&spellings(1)[0]),
             DEFINITION,
-            PolicyMarshalingType::ShortYaml,
+            PolicyMarshalingType::ShortYaml, Default::default(),
         )
         .unwrap()
         .policy

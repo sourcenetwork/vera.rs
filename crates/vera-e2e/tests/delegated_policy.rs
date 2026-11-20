@@ -71,6 +71,7 @@ fn create(token: &str) -> IAcp::bearerCreatePolicyCall {
         bearerToken: token.into(),
         policy: POLICY.as_bytes().to_vec().into(),
         marshalType: 1,
+        nonce: Default::default(),
     }
 }
 
@@ -441,7 +442,7 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
                     grant_sequence: sequence,
                     operation: DelegatedOperation::CreatePolicy(
                         POLICY,
-                        &PolicyMarshalingType::ShortYaml,
+                        &PolicyMarshalingType::ShortYaml, &Default::default(),
                     )
                     .digest()
                     .unwrap(),

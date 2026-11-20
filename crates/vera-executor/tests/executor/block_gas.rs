@@ -21,6 +21,7 @@ fn policy(valid: bool) -> Vec<u8> {
             Bytes::from_static(b"invalid")
         },
         marshalType: 1,
+        nonce: Default::default(),
     }
     .abi_encode()
 }

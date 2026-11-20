@@ -116,7 +116,7 @@ async fn native_go_workflow(pipelined: bool) {
             serde_json::json!({
                 "definition": value,
                 "operation": hex::encode(DelegatedOperation::CreatePolicy(
-                    value, &PolicyMarshalingType::ShortYaml,
+                    value, &PolicyMarshalingType::ShortYaml, &Default::default(),
                 ).digest().unwrap()),
             })
         })
@@ -301,6 +301,7 @@ async fn native_go_policy_pages() {
                 .into_bytes()
                 .into(),
             marshalType: 1,
+            nonce: Default::default(),
         }
         .abi_encode();
         let wire = signer.sign_native_tx(ACP_ADDRESS, data.into()).unwrap();

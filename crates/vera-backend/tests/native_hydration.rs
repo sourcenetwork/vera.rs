@@ -213,7 +213,7 @@ resources:
             let mut modules = ModuleState::default();
             modules
                 .acp
-                .create_policy(&owner, POLICY, PolicyMarshalingType::ShortYaml)
+                .create_policy(&owner, POLICY, PolicyMarshalingType::ShortYaml, Default::default())
                 .unwrap();
             let policy_id = modules.acp.query_policy_ids().unwrap().remove(0);
             // The edited definition omits the original Defra specification; restoration supplies it.

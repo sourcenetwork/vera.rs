@@ -138,13 +138,13 @@ fn create(
     acp: &mut AcpModule,
     token: &str,
 ) -> Result<vera_modules::acp::types::PolicyRecord, vera_modules::acp::error::AcpError> {
-    acp.bearer_create_policy(vera, &context(), &submission(), token, POLICY, FORMAT)
+    acp.bearer_create_policy(vera, &context(), &submission(), token, POLICY, FORMAT, Default::default())
 }
 
 #[test]
 fn relay_preserves_actor_in_create_edit_and_registration() {
     let (mut vera, mut acp) = modules();
-    let token = sign(&claims(&DelegatedOperation::CreatePolicy(POLICY, &FORMAT)));
+    let token = sign(&claims(&DelegatedOperation::CreatePolicy(POLICY, &FORMAT, &Default::default())));
     let created = create(&mut vera, &mut acp, &token).unwrap();
     assert_eq!(created.metadata.owner_did, actor());
     assert_eq!(created.metadata.tx_signer, submission().signer);
@@ -225,7 +225,7 @@ fn relay_preserves_actor_in_create_edit_and_registration() {
 
 #[test]
 fn relay_assertions_fail_closed_without_mutations() {
-    let base = claims(&DelegatedOperation::CreatePolicy(POLICY, &FORMAT));
+    let base = claims(&DelegatedOperation::CreatePolicy(POLICY, &FORMAT, &Default::default()));
     let (vera, acp) = modules();
     let mut cases = Vec::new();
     for field in ["sub", "aud", "iss"] {
@@ -301,7 +301,7 @@ fn relay_assertions_fail_closed_without_mutations() {
 #[test]
 fn relay_and_assertion_revocations_survive_reopen_and_regrant() {
     let (mut vera, mut acp) = modules();
-    let mut claims = claims(&DelegatedOperation::CreatePolicy(POLICY, &FORMAT));
+    let mut claims = claims(&DelegatedOperation::CreatePolicy(POLICY, &FORMAT, &Default::default()));
     let token = sign(&claims);
     let worker = Did::new(&claims.sub).unwrap();
     assert!(
@@ -379,7 +379,7 @@ fn operation_commitments_match_independent_json_vectors() {
         id: "report".into(),
     });
     let operations = [
-        DelegatedOperation::CreatePolicy(POLICY, &FORMAT),
+        DelegatedOperation::CreatePolicy(POLICY, &FORMAT, &Default::default()),
         DelegatedOperation::EditPolicy("policy-id", POLICY, &FORMAT),
         DelegatedOperation::PolicyCommand("policy-id", &command),
     ];
@@ -411,7 +411,7 @@ fn recording_decisions_requires_its_own_relay_grant_even_for_retries() {
         .create_policy(
             &owner,
             "name: decisions\nresources:\n  - name: file\n    permissions:\n      - name: read\n",
-            FORMAT,
+            FORMAT, Default::default(),
         )
         .unwrap()
         .policy

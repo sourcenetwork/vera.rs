@@ -17,7 +17,7 @@ impl Fixture {
     fn new() -> Self {
         let mut acp = AcpModule::new();
         let policy = acp
-            .create_policy(&vera_identity::Did::new(issuer()).unwrap(), POLICY, FORMAT)
+            .create_policy(&vera_identity::Did::new(issuer()).unwrap(), POLICY, FORMAT, Default::default())
             .unwrap()
             .policy
             .id;

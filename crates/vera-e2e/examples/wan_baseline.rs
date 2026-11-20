@@ -86,6 +86,7 @@ async fn run(args: Vec<String>) {
                     .to_vec()
                     .into(),
                 marshalType: 1,
+                nonce: Default::default(),
             }
             .abi_encode()
             .into(),

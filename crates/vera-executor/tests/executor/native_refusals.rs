@@ -83,6 +83,7 @@ fn policy(definition: &str) -> Vec<u8> {
     IAcp::createPolicyCall {
         policy: definition.as_bytes().to_vec().into(),
         marshalType: 2,
+        nonce: Default::default(),
     }
     .abi_encode()
 }

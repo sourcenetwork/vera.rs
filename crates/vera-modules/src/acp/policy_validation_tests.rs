@@ -15,11 +15,11 @@ fn validation_and_execution_reject_undeclared_references() {
     );
     assert!(
         module
-            .create_policy(&owner, UNDECLARED, PolicyMarshalingType::ShortYaml)
+            .create_policy(&owner, UNDECLARED, PolicyMarshalingType::ShortYaml, Default::default())
             .is_err()
     );
     let policy = module
-        .create_policy(&owner, VALID, PolicyMarshalingType::ShortYaml)
+        .create_policy(&owner, VALID, PolicyMarshalingType::ShortYaml, Default::default())
         .unwrap()
         .policy
         .id;
@@ -40,16 +40,16 @@ fn failed_policy_construction_does_not_consume_a_counter() {
     let invalid = VALID.replace("expr: reader", "expr: reader ^ writer");
     assert!(
         module
-            .create_policy(&owner, &invalid, PolicyMarshalingType::ShortYaml)
+            .create_policy(&owner, &invalid, PolicyMarshalingType::ShortYaml, Default::default())
             .is_err()
     );
     assert_eq!(module.store.serialize(), before);
     let expected = AcpModule::new()
-        .create_policy(&owner, VALID, PolicyMarshalingType::ShortYaml)
+        .create_policy(&owner, VALID, PolicyMarshalingType::ShortYaml, Default::default())
         .unwrap();
     assert_eq!(
         module
-            .create_policy(&owner, VALID, PolicyMarshalingType::ShortYaml)
+            .create_policy(&owner, VALID, PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap()
             .policy
             .id,
@@ -69,27 +69,6 @@ fn validation_respects_the_requested_format() {
 }
 
 #[test]
-fn creation_rejects_invalid_counter_state_without_mutation() {
-    let owner = Did::new("did:key:owner").unwrap();
-    for counter in [
-        Vec::new(),
-        vec![0; 7],
-        vec![0; 9],
-        u64::MAX.to_be_bytes().to_vec(),
-    ] {
-        let mut module = AcpModule::new();
-        module.store.put(keys::POLICY_COUNTER_KEY, counter);
-        let before = module.store.serialize();
-        assert!(matches!(
-            module.create_policy(&owner, VALID, PolicyMarshalingType::ShortYaml),
-            Err(AcpError::State(_))
-        ));
-        assert_eq!(module.store.serialize(), before);
-        assert!(module.zanzibar_policies.is_empty());
-    }
-}
-
-#[test]
 fn json_policy_uses_shared_semantics_for_creation_and_editing() {
     let json = r#"{"name":"files","resources":[{"name":"file","relations":[{"name":"reader"}],"permissions":[{"name":"read","expr":"reader"}]}]}"#;
     let yaml_policy =
@@ -103,7 +82,7 @@ fn json_policy_uses_shared_semantics_for_creation_and_editing() {
     let owner = Did::new("did:key:owner").unwrap();
     let mut module = AcpModule::new();
     let record = module
-        .create_policy(&owner, json, PolicyMarshalingType::ShortJson)
+        .create_policy(&owner, json, PolicyMarshalingType::ShortJson, Default::default())
         .unwrap();
     assert_eq!(record.marshal_type, PolicyMarshalingType::ShortJson);
     let id = record.policy.id;
@@ -147,7 +126,7 @@ fn policy_id_listing_is_bounded_and_rejects_invalid_keys() {
         .create_policy(
             &Did::new("did:key:owner").unwrap(),
             VALID,
-            PolicyMarshalingType::ShortYaml,
+            PolicyMarshalingType::ShortYaml, Default::default(),
         )
         .unwrap();
     module.store.delete(&keys::policy_key(&record.policy.id));
@@ -182,7 +161,7 @@ fn policy_id_listing_rejects_corrupt_records_after_restore() {
         .create_policy(
             &Did::new("did:key:owner").unwrap(),
             VALID,
-            PolicyMarshalingType::ShortYaml,
+            PolicyMarshalingType::ShortYaml, Default::default(),
         )
         .unwrap();
     let id = record.policy.id.clone();
@@ -220,7 +199,7 @@ fn exact_byte_listing() -> AcpModule {
         .create_policy(
             &Did::new("did:key:owner").unwrap(),
             VALID,
-            PolicyMarshalingType::ShortYaml,
+            PolicyMarshalingType::ShortYaml, Default::default(),
         )
         .unwrap();
     module.store.delete(&keys::policy_key(&record.policy.id));
@@ -344,7 +323,7 @@ fn the_deepest_accepted_expression_survives_restoration() {
         let deepest = MAX_EXPRESSION_DEPTH - wrappers;
         let mut module = AcpModule::new();
         let policy = module
-            .create_policy(&owner, &with(deepest), PolicyMarshalingType::ShortYaml)
+            .create_policy(&owner, &with(deepest), PolicyMarshalingType::ShortYaml, Default::default())
             .unwrap()
             .policy
             .id;
@@ -353,7 +332,7 @@ fn the_deepest_accepted_expression_survives_restoration() {
             let rejected = with(subtractions);
             assert!(
                 module
-                    .create_policy(&owner, &rejected, PolicyMarshalingType::ShortYaml)
+                    .create_policy(&owner, &rejected, PolicyMarshalingType::ShortYaml, Default::default())
                     .is_err()
             );
             assert!(

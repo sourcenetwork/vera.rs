@@ -6,7 +6,10 @@
 use std::path::Path;
 
 use serde::Serialize;
-use vera_modules::acp::{PolicySeed, types::PolicyMarshalingType};
+use vera_modules::acp::{
+    PolicySeed,
+    types::{PolicyMarshalingType, PolicyNonce},
+};
 use vera_modules::vera::administration::OperatorPolicy;
 use vera_modules::vera::rings::reports::NodeDemeritSeed;
 
@@ -165,18 +168,20 @@ impl GenesisBuilder {
         self
     }
 
-    /// Seed one ACP policy at genesis, assigned the next counter in list
-    /// order (1-based). Predict its resulting id with
-    /// `AcpModule::predict_policy_id` before calling `build`/`build_and_write`.
+    /// Seed one ACP policy at genesis under `GENESIS_POLICY_CREATOR` and
+    /// `nonce`. Predict its resulting id with `AcpModule::predict_policy_id`
+    /// before calling `build`/`build_and_write`.
     #[must_use]
     pub fn policy(
         mut self,
         definition: impl Into<String>,
         marshal_type: PolicyMarshalingType,
+        nonce: PolicyNonce,
     ) -> Self {
         self.policies.push(PolicySeed {
             definition: definition.into(),
             marshal_type,
+            nonce,
         });
         self
     }

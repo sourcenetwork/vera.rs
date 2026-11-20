@@ -160,6 +160,7 @@ async fn run(config: Config, counts: Arc<Counts>) -> Result<()> {
             IAcp::createPolicyCall {
                 policy: POLICY.as_bytes().to_vec().into(),
                 marshalType: 1,
+                nonce: Default::default(),
             }
             .abi_encode()
             .into(),

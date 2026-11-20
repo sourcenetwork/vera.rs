@@ -59,7 +59,7 @@ fn put_row(module: &mut AcpModule, policy: &str, index: usize) -> Vec<u8> {
 }
 fn setup(module: &mut AcpModule, count: usize) -> String {
     let policy = module
-        .create_policy(&actor(), ORIGINAL, PolicyMarshalingType::ShortYaml)
+        .create_policy(&actor(), ORIGINAL, PolicyMarshalingType::ShortYaml, Default::default())
         .unwrap()
         .policy
         .id;
