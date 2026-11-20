@@ -25,7 +25,12 @@ fn object() -> Object {
 fn setup() -> (AcpModule, String) {
     let mut module = AcpModule::new();
     let policy = module
-        .create_policy(&did("creator"), POLICY, PolicyMarshalingType::ShortYaml)
+        .create_policy(
+            &did("creator"),
+            POLICY,
+            PolicyMarshalingType::ShortYaml,
+            vera_modules::acp::types::PolicyNonce([1; 32]),
+        )
         .unwrap()
         .policy
         .id;
@@ -239,7 +244,12 @@ fn transfer_command_has_a_typed_result() {
 fn policy_deletion_removes_only_its_registration_indexes() {
     let (mut module, policy) = setup();
     let other = module
-        .create_policy(&did("creator"), POLICY, PolicyMarshalingType::ShortYaml)
+        .create_policy(
+            &did("creator"),
+            POLICY,
+            PolicyMarshalingType::ShortYaml,
+            vera_modules::acp::types::PolicyNonce([2; 32]),
+        )
         .unwrap()
         .policy
         .id;

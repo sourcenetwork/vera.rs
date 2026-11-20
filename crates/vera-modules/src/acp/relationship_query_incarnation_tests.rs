@@ -3,7 +3,7 @@ use super::*;
 fn fixture() -> (AcpModule, Did, String, Object) {
     let mut module = AcpModule::new();
     let owner = Did::new("did:key:owner").unwrap();
-    let policy = module.create_policy(&owner, "name: incarnations\nresources:\n  - name: file\n    relations:\n      - name: reader\n", PolicyMarshalingType::ShortYaml).unwrap().policy.id;
+    let policy = module.create_policy(&owner, "name: incarnations\nresources:\n  - name: file\n    relations:\n      - name: reader\n", PolicyMarshalingType::ShortYaml, Default::default()).unwrap().policy.id;
     let object = Object {
         resource: "file".into(),
         id: "report".into(),

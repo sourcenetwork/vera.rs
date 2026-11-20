@@ -202,6 +202,7 @@ async fn validator_bootstrap() {
     let calldata = IAcp::createPolicyCall {
         policy: REGISTRY_POLICY_YAML.as_bytes().to_vec().into(),
         marshalType: 1,
+        nonce: vera_client::random_policy_nonce().0.into(),
     }
     .abi_encode();
     let receipt = broadcast_evm_tx(&cluster, &client, &admin_signer, ACP_ADDRESS, calldata).await;
@@ -560,6 +561,7 @@ async fn validator_registry_adversarial() {
     let calldata = IAcp::createPolicyCall {
         policy: REGISTRY_POLICY_YAML.as_bytes().to_vec().into(),
         marshalType: 1,
+        nonce: vera_client::random_policy_nonce().0.into(),
     }
     .abi_encode();
     let receipt = broadcast_evm_tx(&cluster, &client, &admin_signer, ACP_ADDRESS, calldata).await;

@@ -135,7 +135,12 @@ fn permission_evidence_replays_deny_and_revocation_at_one_revision() {
         let mut state = ModuleState::default();
         let policy = state
             .acp
-            .create_policy(&owner, POLICY, PolicyMarshalingType::ShortYaml)
+            .create_policy(
+                &owner,
+                POLICY,
+                PolicyMarshalingType::ShortYaml,
+                Default::default(),
+            )
             .unwrap()
             .policy
             .id;

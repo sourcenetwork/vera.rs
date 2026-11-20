@@ -15,7 +15,12 @@ fn fixture(grants: usize) -> (AcpModule, Did, String) {
     let mut module = AcpModule::new();
     let owner = Did::new("did:key:owner").unwrap();
     let policy = module
-        .create_policy(&owner, ORIGINAL, PolicyMarshalingType::ShortYaml)
+        .create_policy(
+            &owner,
+            ORIGINAL,
+            PolicyMarshalingType::ShortYaml,
+            Default::default(),
+        )
         .unwrap()
         .policy
         .id;
@@ -206,7 +211,12 @@ fn budgeted_edit_counts_target_and_userset_invalidation_once() {
     let reader = Did::new("did:key:reader").unwrap();
     let mut module = AcpModule::new();
     let policy = module
-        .create_policy(&owner, definition, PolicyMarshalingType::ShortYaml)
+        .create_policy(
+            &owner,
+            definition,
+            PolicyMarshalingType::ShortYaml,
+            Default::default(),
+        )
         .unwrap()
         .policy
         .id;

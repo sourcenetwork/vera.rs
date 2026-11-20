@@ -133,6 +133,7 @@ async fn ed25519_and_p256_actors_own_policies_and_objects() {
             bearerToken: token,
             policy: policy_source.clone().into_bytes().into(),
             marshalType: 1,
+            nonce: Default::default(),
         };
 
         let mut wrong_algorithm = actor.sign(delegation.clone());

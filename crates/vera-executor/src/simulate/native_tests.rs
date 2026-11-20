@@ -106,6 +106,7 @@ fn committed() -> (ModuleState, B256) {
         IAcp::createPolicyCall {
             policy: POLICY.as_bytes().to_vec().into(),
             marshalType: 1,
+            nonce: Default::default(),
         }
         .abi_encode(),
         0,

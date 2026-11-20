@@ -20,6 +20,7 @@ fn a_policy_has_one_owner_whichever_spelling_issues_its_tokens() {
                 &key.token(&issuer, &worker, DelegationScope::CreatePolicy),
                 POLICY,
                 FORMAT,
+                Default::default(),
             )
             .unwrap();
         assert_eq!(created.metadata.owner_did, key.canonical());
@@ -292,7 +293,7 @@ fn direct_calls_record_the_canonical_actor() {
     for written in 0..4 {
         let mut acp = AcpModule::new();
         let created = acp
-            .create_policy(&owner.dids()[written], POLICY, FORMAT)
+            .create_policy(&owner.dids()[written], POLICY, FORMAT, Default::default())
             .unwrap();
         assert_eq!(created.metadata.owner_did, owner.canonical());
         let policy = created.policy.id;

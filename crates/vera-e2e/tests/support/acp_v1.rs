@@ -16,6 +16,7 @@ pub(super) async fn lifecycle(
     let mut receipts = vec![client.native_create_policy_with_options(owner, &PolicyCreation {
         policy: "name: acp-v1-e2e\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n    permissions:\n      - name: read\n        expr: reader\n".into(),
         marshal_type: PolicyMarshalingType::ShortYaml, required_specification: None, metadata: metadata.clone(),
+        nonce: Default::default(),
     }).await.unwrap()];
     assert_eq!(receipts[0].status, 1);
     let record = client

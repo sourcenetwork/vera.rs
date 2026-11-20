@@ -88,7 +88,7 @@ async fn registration_workflow(pruning: bool) {
     assert!(empty.continuation.is_none());
     let first = BlsSigner::new(7u64.into(), deployment).unwrap();
     let second = BlsSigner::new(8u64.into(), deployment).unwrap();
-    let created = client.native_create_policy(&first, br#"{"name":"registrations","resources":[{"name":"file","permissions":[{"name":"read","expr":"owner"}]}]}"#, 2).await.unwrap();
+    let created = client.native_create_policy(&first, br#"{"name":"registrations","resources":[{"name":"file","permissions":[{"name":"read","expr":"owner"}]}]}"#, 2, Default::default()).await.unwrap();
     let page = client
         .read_policy_page(None, 1, created.block_number, &trusted)
         .await
@@ -129,6 +129,7 @@ resources:
   - name: file
 ",
             1,
+            Default::default(),
         )
         .await
         .unwrap();

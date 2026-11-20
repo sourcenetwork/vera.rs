@@ -75,6 +75,7 @@ mod tests {
                         &Did::new("did:key:owner").unwrap(),
                         "name: commitments\nresources:\n  - name: file\n",
                         PolicyMarshalingType::ShortYaml,
+                        Default::default(),
                     )
                     .unwrap()
                     .policy

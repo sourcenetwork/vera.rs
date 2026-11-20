@@ -148,7 +148,7 @@ async fn admit_member(interrupt: bool, crash_share: bool, pipelined: bool) {
         .unwrap();
     let origin = VeraClient::new(cluster.node(0).rpc_url());
     let signer = BlsSigner::new(7u64.into(), deployment).unwrap();
-    let created = origin.native_create_policy(&signer, b"name: native_membership\nresources:\n  - name: registry\n    relations:\n      - name: admin\n    permissions:\n      - name: manage\n        expr: admin\n", 1).await.unwrap();
+    let created = origin.native_create_policy(&signer, b"name: native_membership\nresources:\n  - name: registry\n    relations:\n      - name: admin\n    permissions:\n      - name: manage\n        expr: admin\n", 1, Default::default()).await.unwrap();
     receipt(&origin, created.transaction_hash, &trusted).await;
     let policy = origin.get_policy_ids().await.unwrap().pop().unwrap();
     let policy_id = B256::from_slice(&hex::decode(&policy).unwrap());

@@ -123,7 +123,7 @@ fn main() {
     let mut module = AcpModule::new();
     let policy = module.create_policy(&owner,
         "name: benchmark\nresources:\n  - name: file\n    permissions:\n      - name: read\n        expr: owner\n",
-        PolicyMarshalingType::ShortYaml).unwrap();
+        PolicyMarshalingType::ShortYaml, Default::default()).unwrap();
     let object = Object {
         resource: "file".into(),
         id: "report".into(),

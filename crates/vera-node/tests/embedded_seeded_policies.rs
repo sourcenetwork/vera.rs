@@ -1,4 +1,4 @@
-//! Policies a solo deployment starts with, under the identifiers its host chose.
+//! Policies a solo deployment starts with, under ids its host computes beforehand.
 
 mod support;
 
@@ -9,7 +9,7 @@ use support::{block_on, config, finalize_a_write};
 use vera_client::{BlsSigner, ModuleId, RECORD_PROOF_BYTES, RecordResponse};
 use vera_modules::acp::{
     AcpModule, PlacedPolicy, keys,
-    types::{PolicyMarshalingType, PolicyRecord},
+    types::{PolicyMarshalingType, PolicyNonce, PolicyRecord},
 };
 use vera_node::{EmbedError, EmbeddedConfig, EmbeddedNode, SoloError};
 
@@ -24,7 +24,7 @@ fn seeded(directory: &std::path::Path, definitions: &[&str]) -> EmbeddedConfig {
         .map(|definition| PlacedPolicy {
             definition: (*definition).to_string(),
             marshal_type: PolicyMarshalingType::ShortYaml,
-            counter: 0,
+            nonce: PolicyNonce::default(),
             owner: OWNER.into(),
         })
         .collect();
@@ -74,13 +74,15 @@ fn a_deployment_starts_with_its_policies_under_the_chosen_identifiers() {
     )))
     .unwrap();
     for definition in [NOTES, TASKS] {
-        let id = AcpModule::predict_policy_id(definition, &yaml, 0).unwrap();
+        let id = AcpModule::predict_policy_id(definition, &yaml, &PolicyNonce::default(), OWNER)
+            .unwrap();
         let record = stored_policy(&node, &id).expect("seeded policy");
         assert_eq!(record.policy.id, id);
         assert_eq!(record.raw_policy, definition);
         assert_eq!(record.metadata.owner_did, OWNER);
     }
-    let unseeded = AcpModule::predict_policy_id(NOTES, &yaml, 1).unwrap();
+    let unseeded =
+        AcpModule::predict_policy_id(NOTES, &yaml, &PolicyNonce([1; 32]), OWNER).unwrap();
     assert!(stored_policy(&node, &unseeded).is_none());
     finalize_a_write(&node, &BlsSigner::new(7u64.into(), 9_301).unwrap());
     block_on(node.stop()).unwrap();
@@ -90,7 +92,7 @@ fn a_deployment_starts_with_its_policies_under_the_chosen_identifiers() {
         &[NOTES, TASKS],
     )))
     .unwrap();
-    let id = AcpModule::predict_policy_id(TASKS, &yaml, 0).unwrap();
+    let id = AcpModule::predict_policy_id(TASKS, &yaml, &PolicyNonce::default(), OWNER).unwrap();
     assert!(stored_policy(&reopened, &id).is_some());
     block_on(reopened.stop()).unwrap();
 
@@ -118,7 +120,13 @@ fn a_refused_seed_stores_nothing_so_a_corrected_one_starts_in_the_same_directory
     ));
 
     let node = block_on(EmbeddedNode::start(seeded(directory.path(), &[NOTES]))).unwrap();
-    let id = AcpModule::predict_policy_id(NOTES, &PolicyMarshalingType::ShortYaml, 0).unwrap();
+    let id = AcpModule::predict_policy_id(
+        NOTES,
+        &PolicyMarshalingType::ShortYaml,
+        &PolicyNonce::default(),
+        OWNER,
+    )
+    .unwrap();
     assert!(stored_policy(&node, &id).is_some());
     block_on(node.stop()).unwrap();
 }

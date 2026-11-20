@@ -103,6 +103,7 @@ async fn setup_acp_policy(cluster: &TestCluster, client: &VeraClient, admin: &Ev
     let calldata = IAcp::createPolicyCall {
         policy: REGISTRY_POLICY_YAML.as_bytes().to_vec().into(),
         marshalType: 1,
+        nonce: vera_client::random_policy_nonce().0.into(),
     }
     .abi_encode();
     let receipt = broadcast_evm_tx(cluster, client, admin, ACP_ADDRESS, calldata).await;

@@ -68,9 +68,13 @@ impl Fixture {
             request: Some(OperationClaim {
                 id: OperationId(id),
                 genesis_id: self.block.genesis_id,
-                digest: DelegatedOperation::CreatePolicy(POLICY, &PolicyMarshalingType::ShortYaml)
-                    .digest()
-                    .unwrap(),
+                digest: DelegatedOperation::CreatePolicy(
+                    POLICY,
+                    &PolicyMarshalingType::ShortYaml,
+                    &Default::default(),
+                )
+                .digest()
+                .unwrap(),
             }),
         };
         let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"ES256K","typ":"vera-delegation-v1+jwt"}"#);
@@ -83,6 +87,7 @@ impl Fixture {
             bearerToken: format!("{message}.{}", URL_SAFE_NO_PAD.encode(signature.to_bytes())),
             policy: POLICY.as_bytes().to_vec().into(),
             marshalType: 1,
+            nonce: Default::default(),
         }
         .abi_encode()
     }
@@ -100,6 +105,7 @@ fn direct(policy: &str) -> Vec<u8> {
     IAcp::createPolicyCall {
         policy: policy.as_bytes().to_vec().into(),
         marshalType: 1,
+        nonce: Default::default(),
     }
     .abi_encode()
 }
@@ -113,6 +119,7 @@ fn options() -> Vec<u8> {
                 attributes: [("note".into(), "x".repeat(60 << 10))].into(),
                 ..Default::default()
             },
+            nonce: vera_modules::acp::types::PolicyNonce([1; 32]),
         })
         .unwrap()
         .into(),
@@ -164,6 +171,7 @@ fn options_decode_charges_whitespace_and_malformed_json_before_allocation() {
         marshal_type: PolicyMarshalingType::ShortYaml,
         required_specification: None,
         metadata: Default::default(),
+        nonce: Default::default(),
     })
     .unwrap();
     let mut padded = vec![b' '; 128 << 10];
@@ -222,8 +230,19 @@ fn nested_and_repeated_creation_share_remaining_work_and_roll_back_allocations()
         Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
     ));
     assert_eq!(short.state(), fixture.state());
-    let large = direct(&format!("{POLICY}# {}", "x".repeat(60 << 10)));
-    let repeated = batch(vec![large; 32]);
+    let large = format!("{POLICY}# {}", "x".repeat(60 << 10));
+    let repeated = batch(
+        (0..32u8)
+            .map(|index| {
+                IAcp::createPolicyCall {
+                    policy: large.as_bytes().to_vec().into(),
+                    marshalType: 1,
+                    nonce: [index; 32].into(),
+                }
+                .abi_encode()
+            })
+            .collect(),
+    );
     batch::validate(&repeated).unwrap();
     assert!(matches!(
         short.dispatch(&repeated, 1_000_000),
@@ -287,6 +306,7 @@ fn creation_preflight_preserves_definition_and_token_limits() {
             bearerToken: "x".repeat((16 << 10) + 1),
             policy: POLICY.as_bytes().to_vec().into(),
             marshalType: 1,
+            nonce: Default::default(),
         }
         .abi_encode(),
     ] {
@@ -299,6 +319,7 @@ fn creation_preflight_preserves_definition_and_token_limits() {
     let input = IAcp::createPolicyCall {
         policy: bytes.into(),
         marshalType: 1,
+        nonce: Default::default(),
     }
     .abi_encode();
     let mut budget = vera_domain::MAX_TX_BYTES;

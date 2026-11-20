@@ -1,0 +1,88 @@
+{
+  "format": 1,
+  "about": "Policy hash and policy id vectors (acp wiki/acp/policy-id.md). Each vector: a policy text in the YAML schema (JSON reads as YAML), the creator's 32-byte nonce in hex, the creator's DID in the host's canonical spelling, and the expected policy hash and policy id, both lowercase hex. Every engine that derives policy ids must reproduce every vector.",
+  "hash_domain": "acp/policy-hash/v1",
+  "id_domain": "acp/policy-id/v2",
+  "vectors": [
+    {
+      "name": "docs",
+      "policy": "{\"name\": \"docs\", \"resources\": [{\"name\": \"doc\", \"relations\": [{\"name\": \"reader\", \"types\": [\"actor\"]}], \"permissions\": [{\"name\": \"read\", \"expr\": \"reader\"}]}]}",
+      "nonce": "0000000000000000000000000000000000000000000000000000000000000000",
+      "creator": "did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp",
+      "policy_hash": "be8e80e54d3b5b355abb5e5575467b36a57f6d4cdb71ab6af36ba78bbf19932b",
+      "id": "07882f5b8f69b2a95b6409bee9f3981c8aeae8d6135292e07f9f9a641eb75d0b"
+    },
+    {
+      "name": "docs, another nonce",
+      "policy": "{\"name\": \"docs\", \"resources\": [{\"name\": \"doc\", \"relations\": [{\"name\": \"reader\", \"types\": [\"actor\"]}], \"permissions\": [{\"name\": \"read\", \"expr\": \"reader\"}]}]}",
+      "nonce": "0101010101010101010101010101010101010101010101010101010101010101",
+      "creator": "did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp",
+      "policy_hash": "be8e80e54d3b5b355abb5e5575467b36a57f6d4cdb71ab6af36ba78bbf19932b",
+      "id": "d7fd01d0a9c5b7b5eac5f4f08a4c9f16b783b269b247b033038f93aa8f53988a"
+    },
+    {
+      "name": "docs, another creator",
+      "policy": "{\"name\": \"docs\", \"resources\": [{\"name\": \"doc\", \"relations\": [{\"name\": \"reader\", \"types\": [\"actor\"]}], \"permissions\": [{\"name\": \"read\", \"expr\": \"reader\"}]}]}",
+      "nonce": "0000000000000000000000000000000000000000000000000000000000000000",
+      "creator": "did:key:zDnaerx9CtbPJ1q36T5Ln5wYt3MQYeGRG5ehnPAmxcf5mDZpv",
+      "policy_hash": "be8e80e54d3b5b355abb5e5575467b36a57f6d4cdb71ab6af36ba78bbf19932b",
+      "id": "24f873232da6e66ff14e581417a2ff46998a19c78f57d3c7c7b9e2ae8610b88b"
+    },
+    {
+      "name": "docs, nonce of every byte value pattern",
+      "policy": "{\"name\": \"docs\", \"resources\": [{\"name\": \"doc\", \"relations\": [{\"name\": \"reader\", \"types\": [\"actor\"]}], \"permissions\": [{\"name\": \"read\", \"expr\": \"reader\"}]}]}",
+      "nonce": "0008101820283038404850586068707880889098a0a8b0b8c0c8d0d8e0e8f0f8",
+      "creator": "did:key:zDnaerx9CtbPJ1q36T5Ln5wYt3MQYeGRG5ehnPAmxcf5mDZpv",
+      "policy_hash": "be8e80e54d3b5b355abb5e5575467b36a57f6d4cdb71ab6af36ba78bbf19932b",
+      "id": "0a0de6d01a33fb748457d9d2c4e540273e77da7d531591d57429bc55ec220673"
+    },
+    {
+      "name": "every construct",
+      "policy": "{\"name\": \"files\", \"description\": \"every construct\", \"meta\": {\"team\": \"storage\", \"tier\": \"1\"}, \"resources\": [{\"name\": \"file\", \"description\": \"a file\", \"relations\": [{\"name\": \"admin\", \"doc\": \"administers\", \"manages\": [\"reader\", \"parent\"], \"types\": [\"actor\"]}, {\"name\": \"parent\", \"types\": [\"dir\"]}, {\"name\": \"reader\", \"doc\": \"may read\", \"types\": [\"actor\", \"group->member\"]}, {\"name\": \"banned\", \"types\": [\"actor\"]}], \"permissions\": [{\"name\": \"read\", \"doc\": \"read it\", \"expr\": \"reader + admin + parent->read - banned\"}, {\"name\": \"edit\", \"expr\": \"(admin & reader) + parent->edit\"}, {\"name\": \"delete\"}]}, {\"name\": \"dir\", \"relations\": [{\"name\": \"viewer\", \"types\": [\"actor\"]}], \"permissions\": [{\"name\": \"read\", \"expr\": \"viewer\"}, {\"name\": \"edit\"}]}, {\"name\": \"group\", \"relations\": [{\"name\": \"member\", \"types\": [\"actor\", \"group->member\"]}]}]}",
+      "nonce": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "creator": "did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp",
+      "policy_hash": "2c80494b55154f1fe4426a61142986b8fe2881b9fb8337ad8ab8889fcc5d37c0",
+      "id": "a0c9cda242310d142bf570e564a0837fd9be847ad85e8ab0054a626ff9cbab8a"
+    },
+    {
+      "name": "every construct, declared in another order",
+      "policy": "{\"meta\": {\"tier\": \"1\", \"team\": \"storage\"}, \"resources\": [{\"name\": \"group\", \"relations\": [{\"name\": \"member\", \"types\": [\"group->member\", \"actor\"]}]}, {\"name\": \"dir\", \"permissions\": [{\"name\": \"edit\"}, {\"name\": \"read\", \"expr\": \"viewer\"}], \"relations\": [{\"name\": \"viewer\", \"types\": [\"actor\"]}]}, {\"name\": \"file\", \"description\": \"a file\", \"permissions\": [{\"name\": \"delete\"}, {\"name\": \"edit\", \"expr\": \"parent->edit + (reader & admin)\"}, {\"name\": \"read\", \"doc\": \"read it\", \"expr\": \"(parent->read + (admin + reader)) - banned\"}], \"relations\": [{\"name\": \"banned\", \"types\": [\"actor\"]}, {\"name\": \"reader\", \"doc\": \"may read\", \"types\": [\"group->member\", \"actor\"]}, {\"name\": \"parent\", \"types\": [\"dir\"]}, {\"name\": \"admin\", \"doc\": \"administers\", \"manages\": [\"parent\", \"reader\"], \"types\": [\"actor\"]}]}], \"description\": \"every construct\", \"name\": \"files\"}",
+      "nonce": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "creator": "did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp",
+      "policy_hash": "2c80494b55154f1fe4426a61142986b8fe2881b9fb8337ad8ab8889fcc5d37c0",
+      "id": "a0c9cda242310d142bf570e564a0837fd9be847ad85e8ab0054a626ff9cbab8a"
+    },
+    {
+      "name": "every construct, as block YAML",
+      "policy": "name: files\ndescription: every construct\nmeta:\n  team: storage\n  tier: \"1\"\nresources:\n  - name: file\n    description: a file\n    relations:\n      - name: admin\n        doc: administers\n        manages:\n          - reader\n          - parent\n        types: [actor]\n      - name: parent\n        types: [dir]\n      - name: reader\n        doc: may read\n        types:\n          - actor\n          - group->member\n      - name: banned\n        types: [actor]\n    permissions:\n      - name: read\n        doc: read it\n        expr: reader+admin+parent->read-banned\n      - name: edit\n        expr: (admin & reader) + parent->edit\n      - name: delete\n  - name: dir\n    relations:\n      - name: viewer\n        types: [actor]\n    permissions:\n      - name: read\n        expr: viewer\n      - name: edit\n  - name: group\n    relations:\n      - name: member\n        types: [actor, group->member]\n",
+      "nonce": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "creator": "did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp",
+      "policy_hash": "2c80494b55154f1fe4426a61142986b8fe2881b9fb8337ad8ab8889fcc5d37c0",
+      "id": "a0c9cda242310d142bf570e564a0837fd9be847ad85e8ab0054a626ff9cbab8a"
+    },
+    {
+      "name": "every construct, difference operands swapped",
+      "policy": "{\"name\": \"files\", \"description\": \"every construct\", \"meta\": {\"team\": \"storage\", \"tier\": \"1\"}, \"resources\": [{\"name\": \"file\", \"description\": \"a file\", \"relations\": [{\"name\": \"admin\", \"doc\": \"administers\", \"manages\": [\"reader\", \"parent\"], \"types\": [\"actor\"]}, {\"name\": \"parent\", \"types\": [\"dir\"]}, {\"name\": \"reader\", \"doc\": \"may read\", \"types\": [\"actor\", \"group->member\"]}, {\"name\": \"banned\", \"types\": [\"actor\"]}], \"permissions\": [{\"name\": \"read\", \"doc\": \"read it\", \"expr\": \"banned - (reader + admin + parent->read)\"}, {\"name\": \"edit\", \"expr\": \"(admin & reader) + parent->edit\"}, {\"name\": \"delete\"}]}, {\"name\": \"dir\", \"relations\": [{\"name\": \"viewer\", \"types\": [\"actor\"]}], \"permissions\": [{\"name\": \"read\", \"expr\": \"viewer\"}, {\"name\": \"edit\"}]}, {\"name\": \"group\", \"relations\": [{\"name\": \"member\", \"types\": [\"actor\", \"group->member\"]}]}]}",
+      "nonce": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "creator": "did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp",
+      "policy_hash": "6ddea09e680eb70c04a654b5c3381ca435920be8000916e5085d60a70ff56e58",
+      "id": "f664b32c098975dcd935ec44b7fcf566736250e0ddb4cd72665c85012e452454"
+    },
+    {
+      "name": "defra specification",
+      "policy": "{\"name\": \"documents\", \"spec\": \"defra\", \"resources\": [{\"name\": \"document\", \"relations\": [{\"name\": \"editor\", \"types\": [\"actor\"]}, {\"name\": \"viewer\", \"types\": [\"actor\"]}], \"permissions\": [{\"name\": \"read\", \"expr\": \"viewer\"}, {\"name\": \"write\", \"expr\": \"editor\"}, {\"name\": \"update\", \"expr\": \"editor\"}, {\"name\": \"delete\"}]}]}",
+      "nonce": "0000000000000000000000000000000000000000000000000000000000000000",
+      "creator": "did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp",
+      "policy_hash": "4c0987f2e3dc5974b55008a56c3e1cb6ea6b6cadfc16adfc651c0672279d6c7e",
+      "id": "8dae3b395042cdc08e28de9b61450c03bfcbb15d7687cb9630dbd6d9e4cd24fc"
+    },
+    {
+      "name": "defra permissions without the specification",
+      "policy": "{\"name\": \"documents\", \"resources\": [{\"name\": \"document\", \"relations\": [{\"name\": \"editor\", \"types\": [\"actor\"]}, {\"name\": \"viewer\", \"types\": [\"actor\"]}], \"permissions\": [{\"name\": \"read\", \"expr\": \"viewer\"}, {\"name\": \"write\", \"expr\": \"editor\"}, {\"name\": \"update\", \"expr\": \"editor\"}, {\"name\": \"delete\"}]}]}",
+      "nonce": "0000000000000000000000000000000000000000000000000000000000000000",
+      "creator": "did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp",
+      "policy_hash": "d1a5deaa03cfd5ec51f3d4d68dfbf5f2b904de8ed7fd215cf21c812b8ef4b045",
+      "id": "17f9bb0f6aacfd91ce18672293f12e8937a3ba7c860e4f84ce66bd37f0c52579"
+    }
+  ]
+}

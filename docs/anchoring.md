@@ -111,7 +111,10 @@ captured under the four partition read locks at that revision:
 
 The prefixes share one budget of 4,096 records and 1 MiB of keys and values,
 and the proofs 4 MiB; a larger policy is refused with the request limit error.
-The policy identifier is a 64-character lowercase hex string.
+The policy identifier is a 64-character lowercase hex string. The record carries
+its creator's nonce and creation hash, and verification checks that the
+identifier derives from them and the record's owner
+([policy-ids.md](policy-ids.md)), so a snapshot shows who created the policy.
 
 An `AnchoredSnapshot` (in `vera-client`) is that response plus the anchor's
 evidence from S:

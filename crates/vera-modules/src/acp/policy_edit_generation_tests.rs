@@ -24,6 +24,7 @@ fn fixture() -> (AcpModule, Did, String) {
             &owner,
             &definition(true, true),
             PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap()
         .policy

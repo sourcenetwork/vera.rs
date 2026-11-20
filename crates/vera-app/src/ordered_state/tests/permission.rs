@@ -87,6 +87,7 @@ fn synchronized_permission_rpc_verifies_native_evidence_and_subsequent_denial() 
                             IAcp::createPolicyCall {
                                 policy: POLICY.as_bytes().to_vec().into(),
                                 marshalType: 1,
+                                nonce: Default::default(),
                             },
                         ),
                     )

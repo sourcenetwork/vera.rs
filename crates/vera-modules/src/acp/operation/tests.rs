@@ -99,7 +99,7 @@ fn workers_recover_the_original_outcome_after_edit_and_reopen() {
     let first = submission(7);
     let second = submission(8);
     let operation_id = id(1, 200);
-    let create = DelegatedOperation::CreatePolicy(POLICY, &FORMAT);
+    let create = DelegatedOperation::CreatePolicy(POLICY, &FORMAT, &Default::default());
     let first_token = token(&first, operation_id, &create);
     let created = acp
         .bearer_create_policy(
@@ -109,6 +109,7 @@ fn workers_recover_the_original_outcome_after_edit_and_reopen() {
             &first_token,
             POLICY,
             FORMAT,
+            Default::default(),
         )
         .unwrap();
     let original = acp.operation(&issuer(), operation_id).unwrap().unwrap();
@@ -134,6 +135,7 @@ fn workers_recover_the_original_outcome_after_edit_and_reopen() {
             &retry_token,
             POLICY,
             FORMAT,
+            Default::default(),
         )
         .unwrap();
     assert_eq!(
@@ -158,6 +160,7 @@ fn workers_recover_the_original_outcome_after_edit_and_reopen() {
             &sign(&alternate),
             POLICY,
             FORMAT,
+            Default::default(),
         )
         .unwrap();
     assert_eq!(
@@ -168,11 +171,19 @@ fn workers_recover_the_original_outcome_after_edit_and_reopen() {
     let conflict = token(
         &second,
         operation_id,
-        &DelegatedOperation::CreatePolicy(edited, &FORMAT),
+        &DelegatedOperation::CreatePolicy(edited, &FORMAT, &Default::default()),
     );
     assert!(
         reopened
-            .bearer_create_policy(&mut vera, &context(101), &second, &conflict, edited, FORMAT)
+            .bearer_create_policy(
+                &mut vera,
+                &context(101),
+                &second,
+                &conflict,
+                edited,
+                FORMAT,
+                Default::default()
+            )
             .is_err()
     );
     assert_eq!(reopened.store().serialize(), before);
@@ -190,7 +201,8 @@ fn workers_recover_the_original_outcome_after_edit_and_reopen() {
                 &second,
                 &retry_token,
                 POLICY,
-                FORMAT
+                FORMAT,
+                Default::default()
             )
             .is_err()
     );
@@ -245,7 +257,7 @@ fn request_binding_and_expiry_precede_effects_and_survive_pruning() {
     let mut acp = AcpModule::new();
     let mut vera = VeraModule::new();
     let worker = submission(7);
-    let operation = DelegatedOperation::CreatePolicy(POLICY, &FORMAT);
+    let operation = DelegatedOperation::CreatePolicy(POLICY, &FORMAT, &Default::default());
     let identity = id(1, 200);
     let signed = token(&worker, identity, &operation);
     let valid = vera_crypto::jwt::verify_bearer_token(&signed).unwrap();
@@ -267,7 +279,8 @@ fn request_binding_and_expiry_precede_effects_and_survive_pruning() {
                 &worker,
                 &sign(&claims),
                 POLICY,
-                FORMAT
+                FORMAT,
+                Default::default()
             )
             .is_err()
         );
@@ -284,19 +297,43 @@ fn request_binding_and_expiry_precede_effects_and_survive_pruning() {
             assert_eq!(before, (acp.store().serialize(), vera.store().serialize()));
         }
     }
-    acp.bearer_create_policy(&mut vera, &context(100), &worker, &signed, POLICY, FORMAT)
-        .unwrap();
+    acp.bearer_create_policy(
+        &mut vera,
+        &context(100),
+        &worker,
+        &signed,
+        POLICY,
+        FORMAT,
+        Default::default(),
+    )
+    .unwrap();
     assert!(
-        acp.bearer_create_policy(&mut vera, &context(200), &worker, &signed, POLICY, FORMAT)
-            .is_err()
+        acp.bearer_create_policy(
+            &mut vera,
+            &context(200),
+            &worker,
+            &signed,
+            POLICY,
+            FORMAT,
+            Default::default()
+        )
+        .is_err()
     );
     acp.end_blocker(&context(200)).unwrap();
     assert!(acp.operation(&issuer(), identity).unwrap().is_none());
     assert_eq!(acp.operation_bytes(OutcomeClass::Short).unwrap(), 0);
     let before = acp.store().serialize();
     assert!(
-        acp.bearer_create_policy(&mut vera, &context(200), &worker, &signed, POLICY, FORMAT)
-            .is_err()
+        acp.bearer_create_policy(
+            &mut vera,
+            &context(200),
+            &worker,
+            &signed,
+            POLICY,
+            FORMAT,
+            Default::default()
+        )
+        .is_err()
     );
     assert_eq!(acp.store().serialize(), before);
 }
@@ -310,17 +347,25 @@ fn an_operation_identity_cannot_be_reused_for_different_arguments() {
     let original = token(
         &worker,
         operation_id,
-        &DelegatedOperation::CreatePolicy(POLICY, &FORMAT),
+        &DelegatedOperation::CreatePolicy(POLICY, &FORMAT, &Default::default()),
     );
     let created = acp
-        .bearer_create_policy(&mut vera, &context(100), &worker, &original, POLICY, FORMAT)
+        .bearer_create_policy(
+            &mut vera,
+            &context(100),
+            &worker,
+            &original,
+            POLICY,
+            FORMAT,
+            Default::default(),
+        )
         .unwrap();
     let retained = acp.operation(&issuer(), operation_id).unwrap().unwrap();
     let conflicting = "name: other\nresources:\n  - name: file\n";
     let reused = token(
         &worker,
         operation_id,
-        &DelegatedOperation::CreatePolicy(conflicting, &FORMAT),
+        &DelegatedOperation::CreatePolicy(conflicting, &FORMAT, &Default::default()),
     );
     let before = (acp.store().serialize(), vera.store().serialize());
     let error = acp
@@ -331,6 +376,7 @@ fn an_operation_identity_cannot_be_reused_for_different_arguments() {
             &reused,
             conflicting,
             FORMAT,
+            Default::default(),
         )
         .unwrap_err();
     assert!(
@@ -353,7 +399,7 @@ fn repeated_edit_returns_its_original_count_without_removing_new_relationships()
     let original =
         "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n";
     let policy = acp
-        .create_policy(&owner, original, FORMAT)
+        .create_policy(&owner, original, FORMAT, Default::default())
         .unwrap()
         .policy
         .id;
@@ -435,12 +481,20 @@ fn failed_or_over_budget_execution_does_not_reserve_an_operation() {
         let signed = token(
             &worker,
             operation_id,
-            &DelegatedOperation::CreatePolicy(policy, &FORMAT),
+            &DelegatedOperation::CreatePolicy(policy, &FORMAT, &Default::default()),
         );
         let before = (acp.store().serialize(), vera.store().serialize());
         assert!(
-            acp.bearer_create_policy(&mut vera, &context(100), &worker, &signed, policy, FORMAT)
-                .is_err()
+            acp.bearer_create_policy(
+                &mut vera,
+                &context(100),
+                &worker,
+                &signed,
+                policy,
+                FORMAT,
+                Default::default()
+            )
+            .is_err()
         );
         assert_eq!(before, (acp.store().serialize(), vera.store().serialize()));
         assert!(acp.operation(&issuer(), operation_id).unwrap().is_none());

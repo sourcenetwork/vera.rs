@@ -24,6 +24,7 @@ impl Fixture {
                 &actor,
                 "name: files\nresources:\n  - name: file\n",
                 PolicyMarshalingType::ShortYaml,
+                Default::default(),
             )
             .unwrap()
             .policy
@@ -105,6 +106,7 @@ fn create() -> Vec<u8> {
             .to_vec()
             .into(),
         marshalType: 1,
+        nonce: Default::default(),
     }
     .abi_encode()
 }

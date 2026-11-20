@@ -124,6 +124,7 @@ mod tests {
                 &actor,
                 "name: sample\nresources:\n  - name: file\n",
                 PolicyMarshalingType::ShortYaml,
+                Default::default(),
             )
             .unwrap()
             .policy

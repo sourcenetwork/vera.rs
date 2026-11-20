@@ -254,11 +254,13 @@ async fn canonical_module_test() {
     let a1_calldata = IAcp::createPolicyCall {
         policy: TEST_POLICY_YAML.as_bytes().to_vec().into(),
         marshalType: 1,
+        nonce: vera_client::random_policy_nonce().0.into(),
     }
     .abi_encode();
     let a2_calldata = IAcp::createPolicyCall {
         policy: TEST_POLICY_YAML.as_bytes().to_vec().into(),
         marshalType: 1,
+        nonce: vera_client::random_policy_nonce().0.into(),
     }
     .abi_encode();
 
@@ -1330,6 +1332,7 @@ async fn canonical_module_test() {
     let h2_calldata = IAcp::createPolicyCall {
         policy: TEST_POLICY_YAML.as_bytes().to_vec().into(),
         marshalType: 1,
+        nonce: vera_client::random_policy_nonce().0.into(),
     }
     .abi_encode();
     let h2_receipt =
@@ -1361,6 +1364,7 @@ async fn canonical_module_test() {
     let h3_calldata = IAcp::createPolicyCall {
         policy: TEST_POLICY_YAML.as_bytes().to_vec().into(),
         marshalType: 1,
+        nonce: vera_client::random_policy_nonce().0.into(),
     }
     .abi_encode();
     let h3_receipt =

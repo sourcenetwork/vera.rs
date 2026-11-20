@@ -41,6 +41,7 @@ fn module() -> (AcpModule, String) {
             &did(&spellings(1)[0]),
             DEFINITION,
             PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap()
         .policy

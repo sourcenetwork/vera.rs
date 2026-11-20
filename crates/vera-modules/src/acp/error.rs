@@ -12,6 +12,11 @@ pub enum AcpError {
     #[error("invalid policy: {reason}")]
     InvalidPolicy { reason: String },
 
+    /// The creator already created this policy with this nonce, or a deleted
+    /// policy had this id; the stored or retired policy is kept.
+    #[error("policy already exists: {id}")]
+    PolicyAlreadyExists { id: String },
+
     #[error("invalid access request: {reason}")]
     InvalidAccessRequest { reason: String },
 

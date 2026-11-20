@@ -84,12 +84,8 @@ impl AcpModule {
         }
 
         budget.definition(policy.len())?;
-        let mut new_zanzibar = Self::compile_policy(
-            policy,
-            &marshal_type,
-            0,
-            Some(existing.policy.specification),
-        )?;
+        let (mut new_zanzibar, _) =
+            Self::compile_policy(policy, &marshal_type, Some(existing.policy.specification))?;
 
         let new_resources: std::collections::BTreeSet<_> = new_zanzibar
             .resources
@@ -135,6 +131,8 @@ impl AcpModule {
             raw_policy: policy.to_string(),
             marshal_type,
             metadata: existing.metadata,
+            nonce: existing.nonce,
+            policy_hash: existing.policy_hash,
         };
         let encoded = budget.encode(&policy_key, &new_record)?;
         for (key, value) in changes {

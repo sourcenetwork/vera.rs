@@ -21,7 +21,11 @@ fn a_relay_is_one_issuer_in_every_spelling_of_its_key() {
     let mut policies = Vec::new();
     for (compressed, base64) in [(true, false), (false, false), (true, true), (false, true)] {
         let (mut vera, mut acp) = modules();
-        let mut claims = claims(&DelegatedOperation::CreatePolicy(POLICY, &FORMAT));
+        let mut claims = claims(&DelegatedOperation::CreatePolicy(
+            POLICY,
+            &FORMAT,
+            &Default::default(),
+        ));
         claims.iss = spelled(compressed, base64);
         let token = sign(&claims);
         let created = create(&mut vera, &mut acp, &token).unwrap();

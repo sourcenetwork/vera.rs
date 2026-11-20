@@ -3,6 +3,7 @@
 use alloy_primitives::FixedBytes;
 use alloy_sol_types::SolCall;
 use vera_modules::acp::abi::IAcp;
+use vera_modules::acp::types::PolicyNonce;
 
 use crate::bls_signer::BlsSigner;
 use crate::client::{ACP_ADDRESS, VeraClient};
@@ -17,10 +18,12 @@ impl VeraClient {
         signer: &BlsSigner,
         policy: &[u8],
         marshal_type: u8,
+        nonce: PolicyNonce,
     ) -> Result<TransactionReceipt, ClientError> {
         let calldata = IAcp::createPolicyCall {
             policy: policy.to_vec().into(),
             marshalType: marshal_type,
+            nonce: nonce.0.into(),
         }
         .abi_encode();
         self.send_native_precompile_tx(signer, ACP_ADDRESS, calldata.into())
@@ -238,6 +241,7 @@ mod tests {
         let call = IAcp::createPolicyCall {
             policy: b"name: test".to_vec().into(),
             marshalType: 1,
+            nonce: Default::default(),
         };
         let encoded = call.abi_encode();
         assert_eq!(&encoded[..4], <IAcp::createPolicyCall as SolCall>::SELECTOR);

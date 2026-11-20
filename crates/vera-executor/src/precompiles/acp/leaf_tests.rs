@@ -211,6 +211,7 @@ fn oversized_leaf_arrays_fail_before_standalone_or_nested_mutations() {
         let create = IAcp::createPolicyCall {
             policy: Bytes::from_static(b"name: earlier\nresources:\n  - name: file\n"),
             marshalType: 1,
+            nonce: Default::default(),
         }
         .abi_encode();
         for calldata in [

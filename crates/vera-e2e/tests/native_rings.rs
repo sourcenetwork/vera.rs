@@ -131,6 +131,7 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
             bearerToken: token(DelegationScope::CreatePolicy),
             policy: POLICY.as_bytes().to_vec().into(),
             marshalType: 1,
+            nonce: Default::default(),
         }
         .abi_encode()
         .into(),

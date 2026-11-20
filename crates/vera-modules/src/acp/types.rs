@@ -2,6 +2,7 @@
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
+pub use vera_acp::policy_yaml::{PolicyHash, PolicyNonce};
 use vera_acp::{Policy, Relationship, Subject};
 use vera_identity::Did;
 
@@ -155,6 +156,8 @@ pub struct SuppliedMetadata {
 pub struct PolicyCreation {
     pub policy: String,
     pub marshal_type: PolicyMarshalingType,
+    /// The creator's nonce, part of the policy id.
+    pub nonce: PolicyNonce,
     #[serde(default)]
     pub required_specification: Option<vera_zanzibar::PolicySpecification>,
     #[serde(default)]
@@ -199,6 +202,19 @@ pub struct PolicyRecord {
     pub raw_policy: String,
     pub marshal_type: PolicyMarshalingType,
     pub metadata: RecordMetadata,
+    /// The creator's nonce the id was derived from.
+    pub nonce: PolicyNonce,
+    /// The policy hash at creation, which the id was derived from with the
+    /// nonce and `metadata.owner_did`; edits keep it.
+    pub policy_hash: PolicyHash,
+}
+
+impl PolicyRecord {
+    /// The id derived from the creation hash, the nonce and the owner; a
+    /// well-formed record is stored under it.
+    pub fn derived_id(&self) -> String {
+        vera_acp::policy_yaml::policy_id(&self.policy_hash, &self.nonce, &self.metadata.owner_did)
+    }
 }
 
 /// Proof that an object was included in a registration commitment.

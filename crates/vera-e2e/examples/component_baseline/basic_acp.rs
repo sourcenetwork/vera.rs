@@ -49,6 +49,7 @@ impl Fixture {
                 marshal_type: PolicyMarshalingType::ShortYaml,
                 required_specification: None,
                 metadata: Default::default(),
+                nonce: Default::default(),
             },
             object: Object {
                 resource: "file".into(),

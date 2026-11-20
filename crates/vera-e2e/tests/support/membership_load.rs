@@ -32,7 +32,7 @@ impl Load {
         let reader = BlsSigner::new(74u64.into(), deployment).unwrap();
         let before = client.get_policy_ids().await.unwrap();
         let created = client
-            .native_create_policy(&owner, POLICY, 1)
+            .native_create_policy(&owner, POLICY, 1, Default::default())
             .await
             .unwrap();
         receipt(&client, created.transaction_hash, &trusted).await;

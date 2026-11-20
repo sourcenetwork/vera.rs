@@ -44,6 +44,7 @@ fn required_specification_and_creation_metadata_survive_restore() {
         marshal_type: PolicyMarshalingType::ShortYaml,
         required_specification: Some(vera_zanzibar::PolicySpecification::Defra),
         metadata: SuppliedMetadata { attributes: Default::default(), blob: vec![42] },
+        nonce: Default::default(),
     };
     let block = BlockExecCtx {
         timestamp: Timestamp {

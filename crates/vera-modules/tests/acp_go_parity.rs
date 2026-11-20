@@ -178,6 +178,7 @@ fn go_v082_operations_match_before_and_after_restore() {
             &Did::new("did:key:creator").unwrap(),
             &case.policy,
             PolicyMarshalingType::ShortYaml,
+            Default::default(),
         );
         // Existing Rust syntax permits explicit owner declarations/references. Unknown
         // specifications are rejected instead of silently becoming unrestricted policies.

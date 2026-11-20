@@ -80,7 +80,12 @@ async fn a_relayed_snapshot_verifies_against_the_anchor_and_goes_stale_after_a_r
 
     let author = BlsSigner::new(81u64.into(), owner_chain).unwrap();
     let created = d
-        .native_create_policy(&author, POLICY.as_bytes(), 1)
+        .native_create_policy(
+            &author,
+            POLICY.as_bytes(),
+            1,
+            vera_client::random_policy_nonce(),
+        )
         .await
         .unwrap();
     assert_eq!(created.status, 1);

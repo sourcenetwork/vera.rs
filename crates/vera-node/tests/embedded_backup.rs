@@ -70,6 +70,7 @@ fn a_backup_catches_up_from_empty_follows_across_epochs_and_serves_proofs() {
     let call = IAcp::createPolicyCall {
         policy: b"name: refused".to_vec().into(),
         marshalType: 1,
+        nonce: vera_client::random_policy_nonce().0.into(),
     };
     let wire = signer
         .sign_native_tx(ACP_ADDRESS, call.abi_encode().into())

@@ -179,6 +179,10 @@ separate worker signs the submission. Creation and editing require distinct
 scopes; existing object-command tokens do not authorize either operation.
 Created records bind the owner, worker, signed submission ID and creation
 revision. See `docs/delegated-policies.md` for result verification.
+A policy id is SHA-256 over acp's policy hash, the creator's 32-byte nonce
+and the owner's canonical DID, derived as acp does and checked against acp's
+vectors; creating the same triple twice is refused, and the record keeps the
+nonce and creation hash. See `docs/policy-ids.md`.
 Delegation issuers are secp256k1 (ES256K), Ed25519 (EdDSA) or P-256 (ES256)
 `did:key` actors; the key type fixes the token algorithm. Ed25519 and P-256
 actors have one DID spelling and one signature encoding. Relay issuers remain
@@ -477,8 +481,8 @@ a solo genesis lifts the five-second limit on timestamp steps so an idle or
 paused deployment stays on the clock. `EmbeddedConfig::thread_setup` runs on the node
 thread before its runtime is built, so every node thread is created afterwards
 and, on Linux, inherits the CPU affinity it sets. `SoloGenesis::policies` seeds ACP policies at
-genesis under counters and owners the host chooses, so a host keeps the policy
-identifiers it already uses. `thread_budget()` reports the
+genesis under owners and nonces the host chooses, so a host computes their ids
+beforehand. `thread_budget()` reports the
 node, worker, blocking, verification and history-store thread counts.
 `EmbeddedConfig::history_memory` sets the history store's block-cache and
 write-buffer budgets, 8 MiB and 4 MiB by default; the daemon keeps Regolith's

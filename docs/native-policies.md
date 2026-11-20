@@ -63,9 +63,10 @@ constructor still requires an explicit `validate_restored_state` call when used
 outside native state loading.
 
 Restored ACP counters must contain exactly eight big-endian bytes and cannot be
-below retained record IDs (or the combined live and pending-retirement policy
-count). Missing counters select zero only when no corresponding records remain. Commitment and amendment keys
-must carry nonzero, eight-byte IDs. Creation also rejects an already occupied
+below retained record IDs. Missing counters select zero only when no corresponding records remain. Commitment and amendment keys
+must carry nonzero, eight-byte IDs. A restored policy's ID must equal the one
+derived from its recorded hash, nonce and owner ([policy-ids.md](policy-ids.md)).
+Creation also rejects an already occupied
 policy, commitment or amendment ID before changing stored state. Counter repair
 is an explicit recovery operation; normal execution never resets counters or
 replaces a retained record to resolve a collision.

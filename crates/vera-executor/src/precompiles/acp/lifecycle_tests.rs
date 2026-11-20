@@ -77,6 +77,7 @@ impl Fixture {
                     blob: b"policy".to_vec(),
                     ..Default::default()
                 },
+                nonce: Default::default(),
             })
             .unwrap()
             .into(),

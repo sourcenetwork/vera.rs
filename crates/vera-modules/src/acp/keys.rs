@@ -6,8 +6,6 @@
 
 /// Policy record prefix (string-keyed by policy ID).
 pub const POLICY_PREFIX: &[u8] = b"policy/objs/";
-/// Policy autoincrement counter key.
-pub const POLICY_COUNTER_KEY: &[u8] = b"policy/counter/id";
 /// Current native relationship namespace; older namespaces are not migrated.
 pub const RELATIONSHIP_PREFIX: &[u8] = b"relationship/v5/";
 /// Access decision prefix (string-keyed objects).

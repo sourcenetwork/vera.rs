@@ -23,7 +23,12 @@ fn fixture() -> (AcpModule, String) {
     let mut module = AcpModule::new();
     let owner = did("owner");
     let policy = module
-        .create_policy(&owner, POLICY, PolicyMarshalingType::ShortYaml)
+        .create_policy(
+            &owner,
+            POLICY,
+            PolicyMarshalingType::ShortYaml,
+            Default::default(),
+        )
         .unwrap()
         .policy
         .id;
@@ -246,7 +251,7 @@ fn management_rejects_unpaid_corrupt_policy_before_decode_and_preserves_actor_ro
     ));
     assert_eq!(module.store.serialize(), before);
     let mut module = AcpModule::new();
-    let policy = module.create_policy(&did("owner"), "name: roles\nactor:\n  relations:\n    - name: member\n      types: [actor]\nresources:\n  - name: file\n", PolicyMarshalingType::ShortYaml).unwrap().policy.id;
+    let policy = module.create_policy(&did("owner"), "name: roles\nactor:\n  relations:\n    - name: member\n      types: [actor]\nresources:\n  - name: file\n", PolicyMarshalingType::ShortYaml, Default::default()).unwrap().policy.id;
     let role = Object {
         resource: "actor".into(),
         id: "role".into(),

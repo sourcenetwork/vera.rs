@@ -24,7 +24,7 @@ impl Fixture {
     fn new() -> Self {
         let actor = Did::new(issuer()).unwrap();
         let mut acp = AcpModule::new();
-        let policy = acp.create_policy(&actor, "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n", PolicyMarshalingType::ShortYaml).unwrap().policy.id;
+        let policy = acp.create_policy(&actor, "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n", PolicyMarshalingType::ShortYaml, Default::default()).unwrap().policy.id;
         let block = BlockExecCtx {
             timestamp: Timestamp {
                 seconds: 10,
@@ -175,6 +175,7 @@ fn create() -> Vec<u8> {
             .to_vec()
             .into(),
         marshalType: 1,
+        nonce: Default::default(),
     }
     .abi_encode()
 }

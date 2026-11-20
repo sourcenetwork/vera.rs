@@ -109,7 +109,12 @@ fn policy_deletion_indexes_survive_metadata_updates_expiry_and_restore() {
     );
     let active = registration(&mut module, &policy, "active", 64);
     let other = module
-        .create_policy(&did("creator"), POLICY, PolicyMarshalingType::ShortYaml)
+        .create_policy(
+            &did("creator"),
+            POLICY,
+            PolicyMarshalingType::ShortYaml,
+            vera_modules::acp::types::PolicyNonce([2; 32]),
+        )
         .unwrap()
         .policy
         .id;
@@ -194,7 +199,12 @@ fn indexed_policy_cleanup_rejects_corruption_without_partial_tick_mutation() {
     registration(&mut module, &policy, "first", 2);
     let last = registration(&mut module, &policy, "last", 2);
     let other = module
-        .create_policy(&did("creator"), POLICY, PolicyMarshalingType::ShortYaml)
+        .create_policy(
+            &did("creator"),
+            POLICY,
+            PolicyMarshalingType::ShortYaml,
+            vera_modules::acp::types::PolicyNonce([2; 32]),
+        )
         .unwrap()
         .policy
         .id;

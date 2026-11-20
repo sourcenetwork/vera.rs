@@ -162,6 +162,7 @@ async fn main() {
             IAcp::createPolicyCall {
                 policy: policy.to_vec().into(),
                 marshalType: 1,
+                nonce: Default::default(),
             }
             .abi_encode()
             .into(),

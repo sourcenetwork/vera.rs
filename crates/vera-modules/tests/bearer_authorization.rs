@@ -34,6 +34,7 @@ fn bearer_expiration_uses_execution_time_before_mutating_state() {
             &actor,
             "name: files\nresources:\n  - name: file\n",
             PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap()
         .policy
@@ -103,6 +104,7 @@ fn delegated_scopes_authorize_only_their_operations() {
             &actor,
             "name: files\nresources:\n  - name: file\n",
             PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap()
         .policy
@@ -165,6 +167,7 @@ fn delegated_scopes_authorize_only_their_operations() {
                     &claims("acp:policy"),
                     "name: forged\nresources:\n  - name: file\n",
                     PolicyMarshalingType::ShortYaml,
+                    Default::default(),
                 )
                 .map(|_| ()),
         ),
@@ -258,6 +261,7 @@ fn delegation_binds_caller_deployment_and_revocation() {
             &owner,
             "name: files\nresources:\n  - name: file\n",
             PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap()
         .policy
@@ -454,6 +458,7 @@ fn delegated_policy_lifecycle_preserves_ownership_and_revocation() {
                     &invalid_token,
                     policy,
                     PolicyMarshalingType::ShortYaml,
+                    Default::default(),
                 )
                 .is_err()
         );
@@ -468,6 +473,7 @@ fn delegated_policy_lifecycle_preserves_ownership_and_revocation() {
             &token,
             policy,
             PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap();
     assert_eq!(created.metadata.owner_did, issuer);
@@ -582,6 +588,7 @@ fn delegated_policy_lifecycle_preserves_ownership_and_revocation() {
                 &token,
                 policy,
                 PolicyMarshalingType::ShortYaml,
+                Default::default(),
             )
             .is_err()
     );
@@ -631,6 +638,7 @@ fn delegated_policy_creation_rolls_back_when_usage_cannot_be_recorded() {
         digest: vera_modules::acp::delegated_operation::DelegatedOperation::CreatePolicy(
             policy,
             &PolicyMarshalingType::ShortYaml,
+            &Default::default(),
         )
         .digest()
         .unwrap(),
@@ -688,6 +696,7 @@ fn delegated_policy_creation_rolls_back_when_usage_cannot_be_recorded() {
                 &token,
                 "name: files\nresources:\n  - name: file\n",
                 PolicyMarshalingType::ShortYaml,
+                Default::default(),
             )
             .is_err()
     );

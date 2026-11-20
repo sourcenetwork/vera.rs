@@ -140,7 +140,7 @@ fn main() {
     let owner = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
         .parse()
         .unwrap();
-    let policy = AcpModule::new().create_policy(&owner, "name: documents\nresources:\n  - name: document\n    relations:\n      - name: blocked\n  - name: group\n    relations:\n      - name: member\n", PolicyMarshalingType::ShortYaml).unwrap();
+    let policy = AcpModule::new().create_policy(&owner, "name: documents\nresources:\n  - name: document\n    relations:\n      - name: blocked\n  - name: group\n    relations:\n      - name: member\n", PolicyMarshalingType::ShortYaml, Default::default()).unwrap();
     assert!((1..=100_000).contains(&objects) && (1..=10_000).contains(&samples));
     run(|context| async move {
         let cfg = config(&context);

@@ -1,59 +1,20 @@
 mod bounded_yaml;
 mod parse;
+mod policy_id;
 mod schema;
 
 pub use parse::parse_policy_yaml;
+pub use policy_id::{
+    policy_hash, policy_id, HexError, PolicyHash, PolicyNonce, HASH_LEN, POLICY_HASH_DOMAIN,
+    POLICY_ID_DOMAIN,
+};
 
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 use vera_zanzibar::{
     Policy, PolicySpecification, Relation, RelationExpression, Resource, SubjectRestriction,
 };
-
-/// Generate a Go-compatible policy ID from parsed policy fields.
-///
-/// Matches Go's `acp_core` `IdTransformer.Transform` + `hashPol`:
-/// 1. Inner hash: SHA256(name + sorted resources/relations/permissions)
-/// 2. Outer hash: SHA256(inner_hash_bytes + counter_as_string)
-pub fn generate_policy_id(parsed: &ParsedPolicy, counter: u64) -> String {
-    let inner_hash = hash_policy_fields(parsed);
-
-    let mut outer_hasher = Sha256::new();
-    outer_hasher.update(&inner_hash);
-    outer_hasher.update(format!("{}", counter).as_bytes());
-
-    let hash = outer_hasher.finalize();
-    hash.iter().map(|b| format!("{:02x}", b)).collect()
-}
-
-fn hash_policy_fields(policy: &ParsedPolicy) -> Vec<u8> {
-    let mut hasher = Sha256::new();
-    hasher.update(policy.name.as_bytes());
-
-    let mut resources: Vec<_> = policy.resources.iter().collect();
-    resources.sort_by(|a, b| a.name.cmp(&b.name));
-
-    for resource in resources {
-        hasher.update(resource.name.as_bytes());
-
-        let mut relations: Vec<_> = resource.relations.iter().collect();
-        relations.sort_by(|a, b| a.name.cmp(&b.name));
-        for relation in relations {
-            hasher.update(relation.name.as_bytes());
-        }
-
-        let mut permissions: Vec<_> = resource.permissions.iter().collect();
-        permissions.sort_by(|a, b| a.name.cmp(&b.name));
-        for permission in permissions {
-            hasher.update(permission.name.as_bytes());
-            hasher.update(permission.expr.as_bytes());
-        }
-    }
-
-    hasher.finalize().to_vec()
-}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -192,11 +153,11 @@ impl PolicyResource {
     }
 }
 
-/// Build a Zanzibar Policy from an already-parsed YAML policy.
+/// Build a Zanzibar Policy named `id` from an already-parsed YAML policy.
 ///
-/// The `counter` parameter is a monotonic sequence number used together with
-/// the parsed policy fields to generate Go-compatible policy IDs.
-pub fn build_policy(parsed: &ParsedPolicy, counter: u64) -> crate::error::Result<Policy> {
+/// A created policy's id is [`policy_id`] of its [`policy_hash`], its
+/// creator and the creator's nonce; an edited policy keeps its id.
+pub fn build_policy(parsed: &ParsedPolicy, id: String) -> crate::error::Result<Policy> {
     schema::validate(parsed)?;
     if parsed.spec == PolicySpecification::Defra {
         for resource in &parsed.resources {
@@ -210,8 +171,6 @@ pub fn build_policy(parsed: &ParsedPolicy, counter: u64) -> crate::error::Result
             }
         }
     }
-    let id = generate_policy_id(parsed, counter);
-
     let mut resources = Vec::new();
     for res in &parsed.resources {
         let mut relations = Vec::new();

@@ -97,9 +97,10 @@ fn word(value: usize) -> [u8; 32] {
 /// Committed module values holding one policy `OWNER` created, and its identifier.
 fn committed() -> (SharedModuleState, B256) {
     let mut modules = ModuleState::default();
-    let mut calldata = selector("createPolicy(bytes,uint8)");
-    calldata.extend_from_slice(&word(64));
+    let mut calldata = selector("createPolicy(bytes,uint8,bytes32)");
+    calldata.extend_from_slice(&word(96));
     calldata.extend_from_slice(&word(1));
+    calldata.extend_from_slice(&word(0));
     calldata.extend_from_slice(&word(POLICY.len()));
     calldata.extend_from_slice(POLICY.as_bytes());
     calldata.resize(calldata.len().next_multiple_of(32) + 4, 0);

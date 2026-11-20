@@ -298,6 +298,8 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
             raw_policy: String::new(),
             marshal_type: PolicyMarshalingType::ShortYaml,
             metadata: default_metadata(),
+            nonce: Default::default(),
+            policy_hash: vera_acp::policy_yaml::PolicyHash([0; vera_acp::policy_yaml::HASH_LEN]),
         };
         store.write_record(&keys::policy_key(&policy.id), serde_json::to_vec(&record)?)
     }
@@ -321,27 +323,6 @@ impl<S: RecordStore> ZanzibarStore for QmdbZanzibarStore<S> {
                 Ok(record.policy)
             })
             .collect()
-    }
-
-    async fn next_policy_counter(&self) -> Result<u64> {
-        let mut guard = self.store.write().unwrap();
-        let counter = guard
-            .read_record(keys::POLICY_COUNTER_KEY)?
-            .map(|bytes| -> Result<u64> {
-                let bytes: [u8; 8] = bytes.as_slice().try_into().map_err(|_| {
-                    vera_zanzibar::error::Error::Serialization(
-                        "policy counter must contain 8 bytes".into(),
-                    )
-                })?;
-                Ok(u64::from_be_bytes(bytes))
-            })
-            .transpose()?
-            .unwrap_or(0);
-        let next = counter.checked_add(1).ok_or_else(|| {
-            vera_zanzibar::error::Error::Serialization("policy counter exhausted".into())
-        })?;
-        guard.write_record(keys::POLICY_COUNTER_KEY, next.to_be_bytes().to_vec())?;
-        Ok(next)
     }
 
     async fn delete_policy(&self, policy_id: &str) -> Result<bool> {
@@ -594,6 +575,8 @@ mod tests {
             raw_policy: String::new(),
             marshal_type: PolicyMarshalingType::ShortYaml,
             metadata: default_metadata(),
+            nonce: Default::default(),
+            policy_hash: vera_acp::policy_yaml::PolicyHash([0; 32]),
         };
         store.put(
             &keys::policy_key(&record.policy.id),
@@ -1525,7 +1508,12 @@ mod tests {
             "name: sample\nresources:\n  - name: document\n    relations:\n      - name: reader\n";
         let mut module = AcpModule::new();
         let policy = module
-            .create_policy(&creator, schema, PolicyMarshalingType::ShortYaml)
+            .create_policy(
+                &creator,
+                schema,
+                PolicyMarshalingType::ShortYaml,
+                Default::default(),
+            )
             .unwrap()
             .policy
             .id;

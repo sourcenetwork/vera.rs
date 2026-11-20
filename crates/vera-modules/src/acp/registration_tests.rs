@@ -7,7 +7,7 @@ pub(super) fn setup() -> (AcpModule, Did, Did, String, Object) {
     let policy = module.create_policy(
         &first,
         "name: registrations\nresources:\n  - name: file\n    relations:\n      - name: reader\n    permissions:\n      - name: read\n        expr: owner\n",
-        PolicyMarshalingType::ShortYaml,
+        PolicyMarshalingType::ShortYaml, Default::default(),
     ).unwrap().policy.id;
     (
         module,
@@ -220,6 +220,7 @@ fn reveal_cannot_reassign_a_commitment_to_another_policy() {
             &first,
             "name: other\nresources:\n  - name: file\n",
             PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap()
         .policy
@@ -402,6 +403,7 @@ fn registration_leaf_binds_object_field_boundaries() {
             &first,
             "name: boundaries\nresources:\n  - name: a\n  - name: ab\n",
             PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap()
         .policy

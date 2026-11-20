@@ -8,7 +8,7 @@ fn fixture() -> (AcpModule, VeraModule, String, AccessRequest) {
     let mut acp = AcpModule::new();
     let owner = vera_identity::Did::new(issuer()).unwrap();
     let policy = acp.create_policy(&owner,
-        "name: decisions\nresources:\n  - name: file\n    relations:\n      - name: reader\n    permissions:\n      - name: read\n        expr: reader\n", FORMAT).unwrap().policy.id;
+        "name: decisions\nresources:\n  - name: file\n    relations:\n      - name: reader\n    permissions:\n      - name: read\n        expr: reader\n", FORMAT, Default::default()).unwrap().policy.id;
     let object = Object {
         resource: "file".into(),
         id: "report".into(),

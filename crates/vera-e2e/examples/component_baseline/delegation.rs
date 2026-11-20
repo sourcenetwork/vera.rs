@@ -57,6 +57,7 @@ pub(super) fn run() {
             &actor,
             "name: delegated-component\nresources:\n  - name: file\n",
             PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap()
         .policy

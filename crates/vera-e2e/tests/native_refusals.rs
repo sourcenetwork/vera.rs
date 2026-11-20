@@ -91,7 +91,7 @@ async fn each_module_names_its_refusal_through_the_receipt_proof() {
         .native_create_policy(
             &signer,
             br#"{"name":"registrations","resources":[{"name":"file","permissions":[{"name":"read"}]}]}"#,
-            2,
+            2, Default::default(),
         )
         .await
         .unwrap();
@@ -104,7 +104,7 @@ async fn each_module_names_its_refusal_through_the_receipt_proof() {
             .native_create_policy(
                 &signer,
                 br#"{"name":"registrations","resources":[{"name":"file","permissions":[{"name":"read","expr":"reader"}]}]}"#,
-                2,
+                2, Default::default(),
             )
             .await,
         RefusingModule::Acp,

@@ -66,11 +66,14 @@ async fn submit(
     .unwrap()
 }
 
-fn create(token: &str) -> IAcp::bearerCreatePolicyCall {
+/// A delegated create of `POLICY` with a nonce of `nonce` bytes: the actor
+/// creates it once per nonce.
+fn create(token: &str, nonce: u8) -> IAcp::bearerCreatePolicyCall {
     IAcp::bearerCreatePolicyCall {
         bearerToken: token.into(),
         policy: POLICY.as_bytes().to_vec().into(),
         marshalType: 1,
+        nonce: [nonce; 32].into(),
     }
 }
 
@@ -193,13 +196,19 @@ async fn native_workers_preserve_policy_ownership_results_and_revocation() {
     let commands_token =
         create_bearer_token(&actor_key, first.did(), deployment, now, now + 300).unwrap();
     let (first_receipt, second_receipt) = tokio::join!(
-        submit(&client, &trusted, &first, ACP_ADDRESS, create(&first_token)),
+        submit(
+            &client,
+            &trusted,
+            &first,
+            ACP_ADDRESS,
+            create(&first_token, 1)
+        ),
         submit(
             &client,
             &trusted,
             &second,
             ACP_ADDRESS,
-            create(&second_token)
+            create(&second_token, 2)
         ),
     );
     let first_id = created_id(&first_receipt, &owner);
@@ -241,7 +250,7 @@ async fn native_workers_preserve_policy_ownership_results_and_revocation() {
         &trusted,
         &second,
         ACP_ADDRESS,
-        create(&first_token),
+        create(&first_token, 3),
     )
     .await;
     assert_eq!(wrong_worker.status, 0);
@@ -257,7 +266,7 @@ async fn native_workers_preserve_policy_ownership_results_and_revocation() {
         &trusted,
         &first,
         ACP_ADDRESS,
-        create(&commands_token),
+        create(&commands_token, 4),
     )
     .await;
     assert_eq!(legacy_scope.status, 0);
@@ -328,7 +337,7 @@ async fn native_workers_preserve_policy_ownership_results_and_revocation() {
         &trusted,
         &second,
         ACP_ADDRESS,
-        create(&second_token),
+        create(&second_token, 5),
     )
     .await;
     assert_eq!(rejected.status, 0);
@@ -336,7 +345,14 @@ async fn native_workers_preserve_policy_ownership_results_and_revocation() {
     let record = policy(&replica, &first_id, rejected.block_number, &trusted).await;
     assert_eq!(record.raw_policy, EDITED);
     assert_eq!(record.metadata.owner_did, owner);
-    let still_allowed = submit(&client, &trusted, &first, ACP_ADDRESS, create(&first_token)).await;
+    let still_allowed = submit(
+        &client,
+        &trusted,
+        &first,
+        ACP_ADDRESS,
+        create(&first_token, 6),
+    )
+    .await;
     let third_id = created_id(&still_allowed, &owner);
     assert_ne!(third_id, first_id);
     assert_ne!(third_id, second_id);
@@ -358,7 +374,10 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
     use vera_client::{administration::AdministrativeCommand, create_relay_token};
     use vera_crypto::jwt::{JwtClaims, RelayAssertion};
     use vera_modules::{
-        acp::{delegated_operation::DelegatedOperation, types::PolicyMarshalingType},
+        acp::{
+            delegated_operation::DelegatedOperation,
+            types::{PolicyMarshalingType, PolicyNonce},
+        },
         vera::relay::RelayGrant,
     };
 
@@ -423,7 +442,7 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
     let approved =
         administration_support::approve(&client, AdministrativeCommand::SetRelay(grant.clone()), 0)
             .await;
-    let token = |worker: &BlsSigner, sequence| {
+    let token = |worker: &BlsSigner, sequence, nonce: u8| {
         create_relay_token(
             &key,
             &JwtClaims {
@@ -442,6 +461,7 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
                     operation: DelegatedOperation::CreatePolicy(
                         POLICY,
                         &PolicyMarshalingType::ShortYaml,
+                        &PolicyNonce([nonce; 32]),
                     )
                     .digest()
                     .unwrap(),
@@ -450,9 +470,16 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
         )
         .unwrap()
     };
-    let first_token = token(&first, 0);
-    let second_token = token(&second, 0);
-    let rejected = submit(&client, &trusted, &first, ACP_ADDRESS, create(&first_token)).await;
+    let first_token = token(&first, 0, 1);
+    let second_token = token(&second, 0, 2);
+    let rejected = submit(
+        &client,
+        &trusted,
+        &first,
+        ACP_ADDRESS,
+        create(&first_token, 1),
+    )
+    .await;
     assert_eq!(rejected.status, 0);
     assert!(rejected.logs.is_empty());
     let installed = submit(
@@ -467,13 +494,19 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
     .await;
     assert_eq!(installed.status, 1);
     let (a, b) = tokio::join!(
-        submit(&client, &trusted, &first, ACP_ADDRESS, create(&first_token)),
+        submit(
+            &client,
+            &trusted,
+            &first,
+            ACP_ADDRESS,
+            create(&first_token, 1)
+        ),
         submit(
             &client,
             &trusted,
             &second,
             ACP_ADDRESS,
-            create(&second_token)
+            create(&second_token, 2)
         ),
     );
     let id = created_id(&a, &owner);
@@ -493,11 +526,11 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
         &trusted,
         &first,
         ACP_ADDRESS,
-        create(&second_token),
+        create(&second_token, 2),
     )
     .await;
     assert_eq!(wrong_worker.status, 0);
-    let mut changed = create(&first_token);
+    let mut changed = create(&first_token, 1);
     changed.policy = EDITED.as_bytes().to_vec().into();
     assert_eq!(
         submit(&client, &trusted, &first, ACP_ADDRESS, changed)
@@ -520,9 +553,15 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
         1
     );
     assert_eq!(
-        submit(&client, &trusted, &first, ACP_ADDRESS, create(&first_token))
-            .await
-            .status,
+        submit(
+            &client,
+            &trusted,
+            &first,
+            ACP_ADDRESS,
+            create(&first_token, 1)
+        )
+        .await
+        .status,
         0
     );
     assert_eq!(
@@ -531,7 +570,7 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
             &trusted,
             &second,
             ACP_ADDRESS,
-            create(&second_token)
+            create(&token(&second, 0, 3), 3)
         )
         .await
         .status,
@@ -561,7 +600,7 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
             &trusted,
             &second,
             ACP_ADDRESS,
-            create(&second_token)
+            create(&token(&second, 0, 4), 4)
         )
         .await
         .status,
@@ -580,14 +619,14 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
 
     assert_eq!(state.grant, grant);
     assert_eq!(state.sequence, 1);
-    let replacement_token = token(&second, 1);
+    let replacement_token = token(&second, 1, 5);
     assert_eq!(
         submit(
             &client,
             &trusted,
             &second,
             ACP_ADDRESS,
-            create(&replacement_token)
+            create(&replacement_token, 5)
         )
         .await
         .status,
@@ -657,7 +696,7 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
             &trusted,
             &second,
             ACP_ADDRESS,
-            create(&replacement_token)
+            create(&token(&second, 1, 6), 6)
         )
         .await
         .status,

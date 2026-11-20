@@ -10,6 +10,7 @@ fn fixture() -> (AcpModule, String) {
             &actor("owner"),
             "name: auxiliary\nresources:\n  - name: file\n",
             PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap()
         .policy

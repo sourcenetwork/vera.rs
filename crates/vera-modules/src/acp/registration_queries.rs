@@ -167,6 +167,7 @@ mod tests {
                 &actor,
                 "name: bounded\nresources:\n  - name: file\n",
                 PolicyMarshalingType::ShortYaml,
+                Default::default(),
             )
             .unwrap()
             .policy
@@ -229,7 +230,7 @@ mod tests {
             .create_policy(
                 &actor,
                 "name: reserved\nactor:\n  relations:\n    - name: member\n      types: [actor]\nresources:\n  - name: file\n",
-                PolicyMarshalingType::ShortYaml,
+                PolicyMarshalingType::ShortYaml, Default::default(),
             )
             .unwrap()
             .policy

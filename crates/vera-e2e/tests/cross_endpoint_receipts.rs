@@ -166,6 +166,7 @@ async fn single_endpoint_submission_has_cross_endpoint_certified_receipts() {
                         .into_bytes()
                         .into(),
                     marshalType: 1,
+                    nonce: vera_client::random_policy_nonce().0.into(),
                 }
                 .abi_encode()
                 .into(),

@@ -6,7 +6,12 @@ fn pruning_fixture() -> (AcpModule, Did, String, Relationship) {
         "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n";
     let mut module = AcpModule::new();
     let policy = module
-        .create_policy(&owner, original, PolicyMarshalingType::ShortYaml)
+        .create_policy(
+            &owner,
+            original,
+            PolicyMarshalingType::ShortYaml,
+            Default::default(),
+        )
         .unwrap()
         .policy
         .id;
@@ -170,10 +175,15 @@ fn policy_edits_isolate_forks_and_share_unchanged_definitions() {
     let replacement =
         "name: files\nresources:\n  - name: file\n    relations:\n      - name: writer\n";
     let mut parent = AcpModule::new();
-    let ids: Vec<_> = (0..128)
-        .map(|_| {
+    let ids: Vec<_> = (0..128u8)
+        .map(|index| {
             parent
-                .create_policy(&owner, original, PolicyMarshalingType::ShortYaml)
+                .create_policy(
+                    &owner,
+                    original,
+                    PolicyMarshalingType::ShortYaml,
+                    PolicyNonce([index; 32]),
+                )
                 .unwrap()
                 .policy
                 .id

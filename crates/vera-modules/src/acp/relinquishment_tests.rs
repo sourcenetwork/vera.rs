@@ -247,6 +247,7 @@ fn retirement_removes_a_policys_markers_and_restores_at_every_step() {
             &second,
             "name: kept\nresources:\n  - name: file\n",
             PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap()
         .policy

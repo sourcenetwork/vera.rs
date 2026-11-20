@@ -6,7 +6,7 @@ use vera_crypto::jwt::DelegationScope;
 
 use super::{
     AcpError, Result,
-    types::{AccessRequest, PolicyCmd, PolicyMarshalingType},
+    types::{AccessRequest, PolicyCmd, PolicyMarshalingType, PolicyNonce},
 };
 
 /// Exact semantic arguments authorized by a relay, excluding the assertion itself.
@@ -16,8 +16,8 @@ pub enum DelegatedOperation<'a> {
     StoreThresholdObject(&'a crate::vera::objects::ThresholdObject),
     /// Complete ring command, including all creation parameters.
     RingCommand(&'a crate::vera::rings::RingCommand),
-    /// Policy definition and serialization format.
-    CreatePolicy(&'a str, &'a PolicyMarshalingType),
+    /// Policy definition, serialization format and the creator's nonce.
+    CreatePolicy(&'a str, &'a PolicyMarshalingType, &'a PolicyNonce),
     /// Policy identifier, replacement definition and serialization format.
     EditPolicy(&'a str, &'a str, &'a PolicyMarshalingType),
     /// Policy identifier and the complete graph command.

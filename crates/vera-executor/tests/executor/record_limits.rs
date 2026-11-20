@@ -26,6 +26,7 @@ fn fixture() -> (VeraExecutor, B256) {
             &"did:key:owner".parse().unwrap(),
             "name: bounds\nresources:\n  - name: file\n",
             PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap();
     let policy = record.policy.id.parse().unwrap();

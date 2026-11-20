@@ -55,8 +55,9 @@ edit policies, and an existing command token cannot create or edit them.
 
 Creation, editing and validation compile YAML and JSON through the same policy builder and
 check permission references before accepting a definition. Failed compilation
-leaves the policy counter, stored records and evaluation cache unchanged.
-Malformed or exhausted counter state rejects creation.
+leaves stored records and evaluation cache unchanged. The ID binds the
+definition, the actor and the caller's nonce ([policy-ids.md](policy-ids.md));
+an ID that is stored or awaiting cleanup rejects creation.
 
 Policy definitions use strict YAML or JSON, bounded to 64 KiB. Unknown fields, duplicate
 names, invalid identifiers and unresolved references are rejected. `description`,
@@ -100,11 +101,14 @@ see [operation-identities.md](operation-identities.md).
 The shared ACP interface accepts:
 
 ```text
-bearerCreatePolicy(bearerToken, policy, marshalType)
+bearerCreatePolicy(bearerToken, policy, marshalType, nonce)
 bearerEditPolicy(bearerToken, policyId, policy, marshalType)
 ```
 
-`marshalType = 1` selects YAML; `marshalType = 2` selects JSON with the same policy fields. These calls can be
+`marshalType = 1` selects YAML; `marshalType = 2` selects JSON with the same policy fields.
+`nonce` is the actor's 32-byte value for the policy ID; the relay operation
+commitment covers it (`CreatePolicy(policy, marshalType, nonce)`, the nonce as
+64 lowercase hex characters). These calls can be
 encoded as native submission payloads and sent through `vera_sendNativeTx`.
 Every consensus member must run a version supporting the new calls and scopes
 before operators enable their use.

@@ -101,6 +101,11 @@ fn decode(key: &[u8], value: &[u8]) -> Result<PolicyRecord, ClientError> {
             "policy record differs from selection",
         ));
     }
+    if record.derived_id() != *id {
+        return Err(ClientError::InvalidResponse(
+            "policy id differs from its creator, nonce and hash",
+        ));
+    }
     record.relations.validate(&record.policy).map_err(|_| {
         ClientError::InvalidResponse("policy relation generations differ from definition")
     })?;
@@ -120,6 +125,7 @@ mod tests {
                 &"did:key:owner".parse().unwrap(),
                 "name: policy\nresources:\n  - name: file\n",
                 PolicyMarshalingType::ShortYaml,
+                Default::default(),
             )
             .unwrap();
         let key = keys::policy_key(&record.policy.id);
@@ -136,6 +142,12 @@ mod tests {
         let mut invalid = record.clone();
         invalid.relations.next = 0;
         assert!(decode(&key, &serde_json::to_vec(&invalid).unwrap()).is_err());
+        let mut reowned = record.clone();
+        reowned.metadata.owner_did = "did:key:other".into();
+        assert!(decode(&key, &serde_json::to_vec(&reowned).unwrap()).is_err());
+        let mut renonced = record.clone();
+        renonced.nonce.0[0] = 1;
+        assert!(decode(&key, &serde_json::to_vec(&renonced).unwrap()).is_err());
         record.policy.id = "A".repeat(64);
         assert!(
             decode(

@@ -119,7 +119,12 @@ fn fixture_nodes(policy: &str, nodes: &[u8]) -> (VeraModule, AcpModule, RingConf
     let mut vera = VeraModule::new();
     let mut acp = AcpModule::new();
     let policy_id = acp
-        .create_policy(&actor(), policy, PolicyMarshalingType::ShortYaml)
+        .create_policy(
+            &actor(),
+            policy,
+            PolicyMarshalingType::ShortYaml,
+            Default::default(),
+        )
         .unwrap()
         .policy
         .id;
