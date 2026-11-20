@@ -215,7 +215,7 @@ impl Fixture {
                 &creator,
                 POLICY,
                 PolicyMarshalingType::ShortYaml,
-                Default::default(),
+                vera_modules::acp::types::PolicyNonce([1; 32]),
             )
             .unwrap()
             .policy
