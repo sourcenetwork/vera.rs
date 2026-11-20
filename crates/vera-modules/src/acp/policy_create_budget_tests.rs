@@ -213,7 +213,10 @@ fn placed_policies_take_the_chosen_nonces_and_owners() {
         );
         assert_eq!(record.metadata.owner_did, owner);
     }
-    assert_ne!(records[0].policy.id, records[1].policy.id, "the owner is in the id");
+    assert_ne!(
+        records[0].policy.id, records[1].policy.id,
+        "the owner is in the id"
+    );
 
     let owner = Did::new("did:key:owner").unwrap();
     let live = module
@@ -258,7 +261,12 @@ fn every_spelling_of_a_key_gives_one_id() {
     assert_eq!(ids.len(), 1);
     let mut module = AcpModule::new();
     let created = module
-        .create_policy(&Did::new(&spellings[0]).unwrap(), POLICY, yaml.clone(), nonce(0))
+        .create_policy(
+            &Did::new(&spellings[0]).unwrap(),
+            POLICY,
+            yaml.clone(),
+            nonce(0),
+        )
         .unwrap();
     assert!(ids.contains(&created.policy.id));
     assert!(matches!(

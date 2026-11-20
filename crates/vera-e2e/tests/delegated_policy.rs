@@ -442,7 +442,8 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
                     grant_sequence: sequence,
                     operation: DelegatedOperation::CreatePolicy(
                         POLICY,
-                        &PolicyMarshalingType::ShortYaml, &Default::default(),
+                        &PolicyMarshalingType::ShortYaml,
+                        &Default::default(),
                     )
                     .digest()
                     .unwrap(),

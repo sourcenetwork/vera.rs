@@ -25,8 +25,11 @@ impl AcpModule {
                 Some(record.policy.specification),
             )
             .map_err(|error| AcpError::State(format!("invalid restored policy: {error}")))?;
-            if policy_yaml::policy_id(&record.policy_hash, &record.nonce, &record.metadata.owner_did)
-                != id
+            if policy_yaml::policy_id(
+                &record.policy_hash,
+                &record.nonce,
+                &record.metadata.owner_did,
+            ) != id
             {
                 return Err(AcpError::State(
                     "restored policy id differs from its origin".into(),
@@ -113,7 +116,8 @@ mod tests {
                 .create_policy(
                     &owner,
                     &format!("name: original\n{specification}{resources}"),
-                    PolicyMarshalingType::ShortYaml, Default::default(),
+                    PolicyMarshalingType::ShortYaml,
+                    Default::default(),
                 )
                 .unwrap();
             let id = record.policy.id;
@@ -255,7 +259,12 @@ mod tests {
         let actor = Did::new("did:key:owner").unwrap();
         let definition = "name: counter\nresources:\n  - name: file\n";
         let policy = module
-            .create_policy(&actor, definition, PolicyMarshalingType::ShortYaml, Default::default())
+            .create_policy(
+                &actor,
+                definition,
+                PolicyMarshalingType::ShortYaml,
+                Default::default(),
+            )
             .unwrap()
             .policy
             .id;
@@ -311,7 +320,12 @@ mod tests {
         let before = module.store.serialize();
         assert!(
             module
-                .create_policy(&actor, definition, PolicyMarshalingType::ShortYaml, Default::default())
+                .create_policy(
+                    &actor,
+                    definition,
+                    PolicyMarshalingType::ShortYaml,
+                    Default::default()
+                )
                 .is_err()
         );
         assert_eq!(module.store.serialize(), before);
@@ -329,7 +343,8 @@ mod tests {
             .create_policy(
                 &owner,
                 "name: restored\nresources:\n  - name: file\n",
-                PolicyMarshalingType::ShortYaml, Default::default(),
+                PolicyMarshalingType::ShortYaml,
+                Default::default(),
             )
             .unwrap()
             .policy

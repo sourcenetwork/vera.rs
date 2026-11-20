@@ -88,7 +88,12 @@ fn authorization_survives_forks_restart_and_rewind() {
             let owner = OWNER.parse().unwrap();
             let policy = first_state
                 .acp
-                .create_policy(&owner, POLICY, PolicyMarshalingType::ShortYaml, Default::default())
+                .create_policy(
+                    &owner,
+                    POLICY,
+                    PolicyMarshalingType::ShortYaml,
+                    Default::default(),
+                )
                 .unwrap()
                 .policy
                 .id;

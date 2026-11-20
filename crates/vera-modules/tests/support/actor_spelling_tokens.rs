@@ -12,7 +12,15 @@ fn a_token_is_recorded_and_revoked_under_its_issuers_canonical_did() {
         let token = key.token(&issuer, &worker, DelegationScope::CreatePolicy);
         let hash = hash_jws_token(&token);
         let create = |acp: &mut AcpModule, vera: &mut VeraModule| {
-            acp.bearer_create_policy(vera, &context(100), &worker, &token, DEFINITION, FORMAT, Default::default())
+            acp.bearer_create_policy(
+                vera,
+                &context(100),
+                &worker,
+                &token,
+                DEFINITION,
+                FORMAT,
+                Default::default(),
+            )
         };
 
         let (mut acp, mut vera) = (AcpModule::new(), VeraModule::new());
@@ -77,7 +85,8 @@ fn a_delegation_names_its_worker_in_any_spelling() {
                 &submission,
                 &token,
                 DEFINITION,
-                FORMAT, Default::default(),
+                FORMAT,
+                Default::default(),
             )
             .unwrap();
         assert_eq!(created.metadata.owner_did, key.canonical());
@@ -120,8 +129,9 @@ fn a_delegation_names_its_worker_in_any_spelling() {
                 &submission,
                 &token,
                 DEFINITION,
-                FORMAT
-            , Default::default())
+                FORMAT,
+                Default::default()
+            )
             .is_err()
         );
     }

@@ -26,7 +26,11 @@ impl Fixture {
     fn new() -> Self {
         let actor = Did::new(issuer()).unwrap();
         let mut acp = AcpModule::new();
-        let policy = acp.create_policy(&actor, POLICY, FORMAT, Default::default()).unwrap().policy.id;
+        let policy = acp
+            .create_policy(&actor, POLICY, FORMAT, Default::default())
+            .unwrap()
+            .policy
+            .id;
         for command in [
             PolicyCmd::RegisterObject(Object {
                 resource: "file".into(),

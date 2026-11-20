@@ -90,7 +90,8 @@ fn ed25519_and_p256_actors_own_what_their_workers_create() {
                 &first,
                 &actor.token(&first, 1, &create),
                 POLICY,
-                FORMAT, Default::default(),
+                FORMAT,
+                Default::default(),
             )
             .unwrap();
         assert_eq!(created.metadata.owner_did, actor.did());
@@ -108,7 +109,8 @@ fn ed25519_and_p256_actors_own_what_their_workers_create() {
                 &second,
                 &actor.token(&second, 1, &create),
                 POLICY,
-                FORMAT, Default::default(),
+                FORMAT,
+                Default::default(),
             )
             .unwrap();
         assert_eq!(repeated.policy.id, created.policy.id);
@@ -132,7 +134,8 @@ fn actors_of_different_key_types_keep_separate_operation_outcomes() {
                 &worker,
                 &actor.token(&worker, 1, &create),
                 POLICY,
-                FORMAT, Default::default(),
+                FORMAT,
+                Default::default(),
             )
             .unwrap();
         policies.push((created.policy.id, created.metadata.owner_did));
@@ -157,8 +160,16 @@ fn a_worker_revokes_a_delegation_from_an_ed25519_or_p256_actor() {
             .unwrap();
         assert_eq!(record.issuer_did, actor.did());
         assert!(
-            acp.bearer_create_policy(&mut vera, &context(100), &worker, &token, POLICY, FORMAT, Default::default())
-                .is_err()
+            acp.bearer_create_policy(
+                &mut vera,
+                &context(100),
+                &worker,
+                &token,
+                POLICY,
+                FORMAT,
+                Default::default()
+            )
+            .is_err()
         );
     }
 }

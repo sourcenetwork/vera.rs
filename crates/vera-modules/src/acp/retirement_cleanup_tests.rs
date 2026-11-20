@@ -11,7 +11,12 @@ fn actor() -> Did {
 fn setup(count: usize) -> (AcpModule, String) {
     let mut module = AcpModule::new();
     let policy = module
-        .create_policy(&actor(), POLICY, PolicyMarshalingType::ShortYaml, Default::default())
+        .create_policy(
+            &actor(),
+            POLICY,
+            PolicyMarshalingType::ShortYaml,
+            Default::default(),
+        )
         .unwrap()
         .policy
         .id;

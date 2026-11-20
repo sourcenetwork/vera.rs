@@ -23,7 +23,8 @@ impl Fixture {
             .create_policy(
                 &actor,
                 "name: files\nresources:\n  - name: file\n",
-                PolicyMarshalingType::ShortYaml, Default::default(),
+                PolicyMarshalingType::ShortYaml,
+                Default::default(),
             )
             .unwrap()
             .policy

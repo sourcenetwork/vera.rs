@@ -9,7 +9,8 @@ fn fixture() -> (AcpModule, String) {
         .create_policy(
             &actor("owner"),
             "name: auxiliary\nresources:\n  - name: file\n",
-            PolicyMarshalingType::ShortYaml, Default::default(),
+            PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap()
         .policy

@@ -1508,7 +1508,12 @@ mod tests {
             "name: sample\nresources:\n  - name: document\n    relations:\n      - name: reader\n";
         let mut module = AcpModule::new();
         let policy = module
-            .create_policy(&creator, schema, PolicyMarshalingType::ShortYaml, Default::default())
+            .create_policy(
+                &creator,
+                schema,
+                PolicyMarshalingType::ShortYaml,
+                Default::default(),
+            )
             .unwrap()
             .policy
             .id;

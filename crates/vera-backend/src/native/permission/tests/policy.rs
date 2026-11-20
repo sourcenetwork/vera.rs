@@ -14,7 +14,12 @@ fn policy_evidence_revokes_retained_relationships_at_the_deletion_root() {
             let mut state = ModuleState::default();
             let policy = state
                 .acp
-                .create_policy(&actor, POLICY, PolicyMarshalingType::ShortYaml, Default::default())
+                .create_policy(
+                    &actor,
+                    POLICY,
+                    PolicyMarshalingType::ShortYaml,
+                    Default::default(),
+                )
                 .unwrap()
                 .policy
                 .id;
@@ -219,7 +224,12 @@ resources:
             let mut state = ModuleState::default();
             let policy = state
                 .acp
-                .create_policy(&actor, SCHEMA, PolicyMarshalingType::ShortYaml, Default::default())
+                .create_policy(
+                    &actor,
+                    SCHEMA,
+                    PolicyMarshalingType::ShortYaml,
+                    Default::default(),
+                )
                 .unwrap();
             let id = &policy.policy.id;
             state

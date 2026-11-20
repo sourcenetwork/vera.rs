@@ -219,7 +219,8 @@ fn reveal_cannot_reassign_a_commitment_to_another_policy() {
         .create_policy(
             &first,
             "name: other\nresources:\n  - name: file\n",
-            PolicyMarshalingType::ShortYaml, Default::default(),
+            PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap()
         .policy
@@ -401,7 +402,8 @@ fn registration_leaf_binds_object_field_boundaries() {
         .create_policy(
             &first,
             "name: boundaries\nresources:\n  - name: a\n  - name: ab\n",
-            PolicyMarshalingType::ShortYaml, Default::default(),
+            PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap()
         .policy

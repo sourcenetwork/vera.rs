@@ -74,13 +74,15 @@ fn a_deployment_starts_with_its_policies_under_the_chosen_identifiers() {
     )))
     .unwrap();
     for definition in [NOTES, TASKS] {
-        let id = AcpModule::predict_policy_id(definition, &yaml, &PolicyNonce::default(), OWNER).unwrap();
+        let id = AcpModule::predict_policy_id(definition, &yaml, &PolicyNonce::default(), OWNER)
+            .unwrap();
         let record = stored_policy(&node, &id).expect("seeded policy");
         assert_eq!(record.policy.id, id);
         assert_eq!(record.raw_policy, definition);
         assert_eq!(record.metadata.owner_did, OWNER);
     }
-    let unseeded = AcpModule::predict_policy_id(NOTES, &yaml, &PolicyNonce([1; 32]), OWNER).unwrap();
+    let unseeded =
+        AcpModule::predict_policy_id(NOTES, &yaml, &PolicyNonce([1; 32]), OWNER).unwrap();
     assert!(stored_policy(&node, &unseeded).is_none());
     finalize_a_write(&node, &BlsSigner::new(7u64.into(), 9_301).unwrap());
     block_on(node.stop()).unwrap();
@@ -123,7 +125,8 @@ fn a_refused_seed_stores_nothing_so_a_corrected_one_starts_in_the_same_directory
         &PolicyMarshalingType::ShortYaml,
         &PolicyNonce::default(),
         OWNER,
-    ).unwrap();
+    )
+    .unwrap();
     assert!(stored_policy(&node, &id).is_some());
     block_on(node.stop()).unwrap();
 }

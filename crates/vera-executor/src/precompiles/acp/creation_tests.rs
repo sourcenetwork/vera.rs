@@ -68,9 +68,13 @@ impl Fixture {
             request: Some(OperationClaim {
                 id: OperationId(id),
                 genesis_id: self.block.genesis_id,
-                digest: DelegatedOperation::CreatePolicy(POLICY, &PolicyMarshalingType::ShortYaml, &Default::default())
-                    .digest()
-                    .unwrap(),
+                digest: DelegatedOperation::CreatePolicy(
+                    POLICY,
+                    &PolicyMarshalingType::ShortYaml,
+                    &Default::default(),
+                )
+                .digest()
+                .unwrap(),
             }),
         };
         let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"ES256K","typ":"vera-delegation-v1+jwt"}"#);
@@ -226,8 +230,19 @@ fn nested_and_repeated_creation_share_remaining_work_and_roll_back_allocations()
         Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
     ));
     assert_eq!(short.state(), fixture.state());
-    let large = direct(&format!("{POLICY}# {}", "x".repeat(60 << 10)));
-    let repeated = batch(vec![large; 32]);
+    let large = format!("{POLICY}# {}", "x".repeat(60 << 10));
+    let repeated = batch(
+        (0..32u8)
+            .map(|index| {
+                IAcp::createPolicyCall {
+                    policy: large.as_bytes().to_vec().into(),
+                    marshalType: 1,
+                    nonce: [index; 32].into(),
+                }
+                .abi_encode()
+            })
+            .collect(),
+    );
     batch::validate(&repeated).unwrap();
     assert!(matches!(
         short.dispatch(&repeated, 1_000_000),

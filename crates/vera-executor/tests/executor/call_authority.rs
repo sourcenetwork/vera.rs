@@ -36,7 +36,8 @@ fn signer_policy() -> (VeraExecutor, B256) {
         .create_policy(
             &owner,
             "name: owned\nresources:\n  - name: file\n",
-            PolicyMarshalingType::ShortYaml, Default::default(),
+            PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap();
     let executor = VeraExecutor::new(9001);

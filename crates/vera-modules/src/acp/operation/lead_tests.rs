@@ -8,10 +8,15 @@ const SIGNED: u64 = 100;
 const HOUR: u64 = 3600;
 
 fn policy(acp: &mut AcpModule) -> String {
-    acp.create_policy(&vera_identity::Did::new(issuer()).unwrap(), POLICY, FORMAT, Default::default())
-        .unwrap()
-        .policy
-        .id
+    acp.create_policy(
+        &vera_identity::Did::new(issuer()).unwrap(),
+        POLICY,
+        FORMAT,
+        Default::default(),
+    )
+    .unwrap()
+    .policy
+    .id
 }
 
 fn register(name: &str) -> PolicyCmd {
@@ -144,8 +149,9 @@ fn a_raised_lead_leaves_other_operations_at_the_default() {
             &worker,
             &token(&worker, far, &create),
             POLICY,
-            FORMAT
-        , Default::default())
+            FORMAT,
+            Default::default()
+        )
         .is_err()
     );
     assert_eq!(state(&acp, &vera), before);

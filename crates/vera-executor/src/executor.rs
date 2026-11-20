@@ -638,7 +638,8 @@ mod tests {
             .create_policy(
                 &issuer,
                 "name: cleanup\nresources:\n  - name: file\n",
-                PolicyMarshalingType::ShortYaml, Default::default(),
+                PolicyMarshalingType::ShortYaml,
+                Default::default(),
             )
             .unwrap()
             .policy

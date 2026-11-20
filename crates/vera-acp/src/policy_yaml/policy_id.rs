@@ -128,7 +128,13 @@ impl Encoder {
         for relation in relations {
             self.str(&relation.name);
             self.str(&relation.doc);
-            self.set(relation.manages.iter().map(|name| encoded_str(name)).collect());
+            self.set(
+                relation
+                    .manages
+                    .iter()
+                    .map(|name| encoded_str(name))
+                    .collect(),
+            );
             self.set(relation.types.iter().map(|ty| encoded_type(ty)).collect());
         }
     }
@@ -277,13 +283,18 @@ macro_rules! hex_value {
         }
 
         impl Serialize for $name {
-            fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+            fn serialize<S: Serializer>(
+                &self,
+                serializer: S,
+            ) -> std::result::Result<S::Ok, S::Error> {
                 serializer.collect_str(self)
             }
         }
 
         impl<'de> Deserialize<'de> for $name {
-            fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+            fn deserialize<D: Deserializer<'de>>(
+                deserializer: D,
+            ) -> std::result::Result<Self, D::Error> {
                 String::deserialize(deserializer)?
                     .parse()
                     .map_err(serde::de::Error::custom)

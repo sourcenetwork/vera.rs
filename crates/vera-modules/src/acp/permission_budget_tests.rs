@@ -8,7 +8,8 @@ fn fixture() -> (AcpModule, Did, String, AccessRequest) {
         .create_policy(
             &owner,
             "name: budget\nresources:\n  - name: file\n",
-            PolicyMarshalingType::ShortYaml, Default::default(),
+            PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap()
         .policy
@@ -220,7 +221,12 @@ fn expression_work_is_charged_when_record_reads_are_identical() {
     let actor = Did::new("did:key:reader").unwrap();
     let mut module = AcpModule::new();
     let policy = module
-        .create_policy(&owner, &definition, PolicyMarshalingType::ShortYaml, Default::default())
+        .create_policy(
+            &owner,
+            &definition,
+            PolicyMarshalingType::ShortYaml,
+            Default::default(),
+        )
         .unwrap()
         .policy
         .id;

@@ -170,7 +170,8 @@ mod tests {
             .create_policy(
                 &Did::new("did:key:owner").unwrap(),
                 "name: amendments\nresources:\n  - name: file\n",
-                PolicyMarshalingType::ShortYaml, Default::default(),
+                PolicyMarshalingType::ShortYaml,
+                Default::default(),
             )
             .unwrap()
             .policy

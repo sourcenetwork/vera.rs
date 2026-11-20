@@ -93,7 +93,8 @@ fn rejects_unknown_duplicate_and_ambiguous_schema() {
         assert!(
             parse_policy_yaml(&definition)
                 .map_err(|error| error.to_string())
-                .and_then(|parsed| build_policy(&parsed, "policy".into()).map_err(|error| error.to_string()))
+                .and_then(|parsed| build_policy(&parsed, "policy".into())
+                    .map_err(|error| error.to_string()))
                 .is_err(),
             "accepted {definition}"
         );

@@ -23,7 +23,8 @@ fn fixture() -> (AcpModule, Did, String) {
         .create_policy(
             &owner,
             &definition(true, true),
-            PolicyMarshalingType::ShortYaml, Default::default(),
+            PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap()
         .policy

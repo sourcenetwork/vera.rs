@@ -15,9 +15,14 @@ const POLICY: &str = "name: files\nresources:\n  - name: file\n";
 fn enumeration_resumes_without_duplicates_and_bounds_empty_filtered_pages() {
     let owner = Did::new("did:key:owner").unwrap();
     let mut module = AcpModule::new();
-    for _ in 0..130 {
+    for index in 0..130u8 {
         module
-            .create_policy(&owner, POLICY, PolicyMarshalingType::ShortYaml, Default::default())
+            .create_policy(
+                &owner,
+                POLICY,
+                PolicyMarshalingType::ShortYaml,
+                vera_modules::acp::types::PolicyNonce([index; 32]),
+            )
             .unwrap();
     }
     let first = module.query_policies_page(None).unwrap();

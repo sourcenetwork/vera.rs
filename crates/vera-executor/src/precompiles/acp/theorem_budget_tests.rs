@@ -8,7 +8,12 @@ fn fixture() -> (AcpModule, B256) {
     let owner = Did::new("did:key:owner").unwrap();
     let mut acp = AcpModule::new();
     let policy = acp
-        .create_policy(&owner, POLICY, PolicyMarshalingType::ShortYaml, Default::default())
+        .create_policy(
+            &owner,
+            POLICY,
+            PolicyMarshalingType::ShortYaml,
+            Default::default(),
+        )
         .unwrap()
         .policy
         .id;

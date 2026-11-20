@@ -128,7 +128,8 @@ async fn registration_workflow(pruning: bool) {
 resources:
   - name: file
 ",
-            1, Default::default(),
+            1,
+            Default::default(),
         )
         .await
         .unwrap();

@@ -123,7 +123,8 @@ mod tests {
             .create_policy(
                 &actor,
                 "name: sample\nresources:\n  - name: file\n",
-                PolicyMarshalingType::ShortYaml, Default::default(),
+                PolicyMarshalingType::ShortYaml,
+                Default::default(),
             )
             .unwrap()
             .policy

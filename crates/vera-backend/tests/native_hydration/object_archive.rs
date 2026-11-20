@@ -124,7 +124,12 @@ fn object_incarnation_cleanup_survives_native_reopen_without_reviving_grants() {
             let mut modules = ModuleState::default();
             let policy = modules
                 .acp
-                .create_policy(&owner, POLICY, PolicyMarshalingType::ShortYaml, Default::default())
+                .create_policy(
+                    &owner,
+                    POLICY,
+                    PolicyMarshalingType::ShortYaml,
+                    Default::default(),
+                )
                 .unwrap()
                 .policy
                 .id;

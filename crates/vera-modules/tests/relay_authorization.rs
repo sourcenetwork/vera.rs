@@ -138,13 +138,25 @@ fn create(
     acp: &mut AcpModule,
     token: &str,
 ) -> Result<vera_modules::acp::types::PolicyRecord, vera_modules::acp::error::AcpError> {
-    acp.bearer_create_policy(vera, &context(), &submission(), token, POLICY, FORMAT, Default::default())
+    acp.bearer_create_policy(
+        vera,
+        &context(),
+        &submission(),
+        token,
+        POLICY,
+        FORMAT,
+        Default::default(),
+    )
 }
 
 #[test]
 fn relay_preserves_actor_in_create_edit_and_registration() {
     let (mut vera, mut acp) = modules();
-    let token = sign(&claims(&DelegatedOperation::CreatePolicy(POLICY, &FORMAT, &Default::default())));
+    let token = sign(&claims(&DelegatedOperation::CreatePolicy(
+        POLICY,
+        &FORMAT,
+        &Default::default(),
+    )));
     let created = create(&mut vera, &mut acp, &token).unwrap();
     assert_eq!(created.metadata.owner_did, actor());
     assert_eq!(created.metadata.tx_signer, submission().signer);
@@ -225,7 +237,11 @@ fn relay_preserves_actor_in_create_edit_and_registration() {
 
 #[test]
 fn relay_assertions_fail_closed_without_mutations() {
-    let base = claims(&DelegatedOperation::CreatePolicy(POLICY, &FORMAT, &Default::default()));
+    let base = claims(&DelegatedOperation::CreatePolicy(
+        POLICY,
+        &FORMAT,
+        &Default::default(),
+    ));
     let (vera, acp) = modules();
     let mut cases = Vec::new();
     for field in ["sub", "aud", "iss"] {
@@ -301,7 +317,11 @@ fn relay_assertions_fail_closed_without_mutations() {
 #[test]
 fn relay_and_assertion_revocations_survive_reopen_and_regrant() {
     let (mut vera, mut acp) = modules();
-    let mut claims = claims(&DelegatedOperation::CreatePolicy(POLICY, &FORMAT, &Default::default()));
+    let mut claims = claims(&DelegatedOperation::CreatePolicy(
+        POLICY,
+        &FORMAT,
+        &Default::default(),
+    ));
     let token = sign(&claims);
     let worker = Did::new(&claims.sub).unwrap();
     assert!(
@@ -332,8 +352,20 @@ fn relay_and_assertion_revocations_survive_reopen_and_regrant() {
     )
     .unwrap();
     assert!(create(&mut vera, &mut acp, &unused).is_err());
-    claims.relay.as_mut().unwrap().grant_sequence = 2;
-    create(&mut vera, &mut acp, &sign(&claims)).unwrap();
+    let again = vera_modules::acp::types::PolicyNonce([2; 32]);
+    let mut regranted = self::claims(&DelegatedOperation::CreatePolicy(POLICY, &FORMAT, &again));
+    regranted.exp = claims.exp;
+    regranted.relay.as_mut().unwrap().grant_sequence = 2;
+    acp.bearer_create_policy(
+        &mut vera,
+        &context(),
+        &submission(),
+        &sign(&regranted),
+        POLICY,
+        FORMAT,
+        again,
+    )
+    .unwrap();
     assert!(create(&mut vera, &mut acp, &token).is_err());
 }
 
@@ -384,7 +416,7 @@ fn operation_commitments_match_independent_json_vectors() {
         DelegatedOperation::PolicyCommand("policy-id", &command),
     ];
     let expected = [
-        "d1539d909f3395fb921de0d7c5ac64e85c92b7e9147f0f714e76f45087161ac0",
+        "b03fcd6e6263cace0964e7cfeaef9f9e60149028ea6a06a5766314b79865a7c1",
         "7413ed3d879aebce3ab6f2c4ba0ae03ce8313afb89007c9b97404e6f42a96ee9",
         "43300ea9818bece4ed37a2f9b9e0fdbd8852e547f9b714000aa174d96d9f76f5",
     ];
@@ -411,7 +443,8 @@ fn recording_decisions_requires_its_own_relay_grant_even_for_retries() {
         .create_policy(
             &owner,
             "name: decisions\nresources:\n  - name: file\n    permissions:\n      - name: read\n",
-            FORMAT, Default::default(),
+            FORMAT,
+            Default::default(),
         )
         .unwrap()
         .policy

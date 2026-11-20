@@ -47,7 +47,12 @@ impl Fixture {
         let owner = did_from_signer(&tx.signer).unwrap();
         let mut acp = AcpModule::new();
         let policy = acp
-            .create_policy(&owner, POLICY, PolicyMarshalingType::ShortYaml, Default::default())
+            .create_policy(
+                &owner,
+                POLICY,
+                PolicyMarshalingType::ShortYaml,
+                Default::default(),
+            )
             .unwrap()
             .policy
             .id;

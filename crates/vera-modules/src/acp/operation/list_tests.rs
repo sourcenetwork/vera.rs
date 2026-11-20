@@ -7,10 +7,15 @@ const READERS: &str = "name: files\nresources:\n  - name: file\n    relations:\n
 const DEADLINE: u64 = 200;
 
 fn policy(acp: &mut AcpModule) -> String {
-    acp.create_policy(&vera_identity::Did::new(issuer()).unwrap(), READERS, FORMAT, Default::default())
-        .unwrap()
-        .policy
-        .id
+    acp.create_policy(
+        &vera_identity::Did::new(issuer()).unwrap(),
+        READERS,
+        FORMAT,
+        Default::default(),
+    )
+    .unwrap()
+    .policy
+    .id
 }
 
 fn object(name: &str) -> Object {
@@ -117,7 +122,8 @@ fn policy_with_name(acp: &mut AcpModule) -> String {
     acp.create_policy(
         &vera_identity::Did::new(issuer()).unwrap(),
         "name: notes\nresources:\n  - name: file\n",
-        FORMAT, Default::default(),
+        FORMAT,
+        Default::default(),
     )
     .unwrap()
     .policy

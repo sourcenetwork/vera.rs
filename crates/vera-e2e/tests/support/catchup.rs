@@ -539,7 +539,8 @@ async fn recover_replica_from(
         .native_create_policy(
             &signer,
             b"name: after-replay\nresources:\n  - name: file\n",
-            1, Default::default(),
+            1,
+            Default::default(),
         )
         .await
         .unwrap();

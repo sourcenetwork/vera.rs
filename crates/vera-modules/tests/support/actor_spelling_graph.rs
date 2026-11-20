@@ -19,7 +19,8 @@ fn a_policy_has_one_owner_whichever_spelling_issues_its_tokens() {
                 &worker,
                 &key.token(&issuer, &worker, DelegationScope::CreatePolicy),
                 POLICY,
-                FORMAT, Default::default(),
+                FORMAT,
+                Default::default(),
             )
             .unwrap();
         assert_eq!(created.metadata.owner_did, key.canonical());

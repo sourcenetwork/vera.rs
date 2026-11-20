@@ -10,8 +10,7 @@ use super::{
 };
 use crate::acp::types::{
     AccessDecision, AccessRequest, PolicyCmd, PolicyCmdResult, PolicyMarshalingType, PolicyNonce,
-    PolicyRecord,
-    RecordMetadata,
+    PolicyRecord, RecordMetadata,
 };
 use crate::types::{BlockExecCtx, Timestamp, TxExecCtx};
 use crate::vera::VeraModule;

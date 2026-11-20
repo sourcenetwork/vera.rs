@@ -66,7 +66,13 @@ fn nonces_and_hashes_are_64_hexadecimal_characters() {
         serde_json::to_string(&nonce).unwrap(),
         format!("\"{}\"", "0a".repeat(32))
     );
-    for bad in ["", "0a", &"0g".repeat(32), &"+a".repeat(32), &"0a".repeat(33)] {
+    for bad in [
+        "",
+        "0a",
+        &"0g".repeat(32),
+        &"+a".repeat(32),
+        &"0a".repeat(33),
+    ] {
         assert!(bad.parse::<PolicyNonce>().is_err(), "{bad:?}");
     }
 }

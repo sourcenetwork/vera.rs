@@ -170,7 +170,8 @@ fn generation_fixture() -> (
         .create_policy(
             &"did:key:owner".parse().unwrap(),
             GENERATION_POLICY,
-            PolicyMarshalingType::ShortYaml, Default::default(),
+            PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap();
     let relationship = vera_zanzibar::Relationship::new(
