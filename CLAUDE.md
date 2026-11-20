@@ -166,6 +166,14 @@ Each module is a plain Rust struct. Two thin shims sit on top:
 
 Business logic lives once.
 
+`vera-modules` has no Commonware or `vera-domain` dependency, so clients that
+encode module calls (DefraDB's delegation crate) do not build the consensus
+stack. Verification that needs consensus types, such as an anchor's finality
+certificate, runs in the executor's shim before the module call.
+`.github/scripts/check-light-crate-graph.py` fails CI if `vera-modules`,
+`vera-crypto`, `vera-acp`, `vera-identity` or `vera-zanzibar` resolves
+Commonware's runtime, glue, consensus, p2p or storage crates, or `vera-domain`.
+
 Operator policies list secp256k1 keys in hexadecimal and Ed25519 or P-256 keys
 as `did:key`; every operator signs the same administrative digest. See
 docs/consensus-membership.md#operator-keys.
@@ -521,7 +529,8 @@ once.
 ### Anchored policy snapshots
 
 The anchor precompile records another deployment's finalized revision when its
-certificate verifies against that deployment's consensus key, keeping one
+certificate verifies against that deployment's consensus key (verified in
+`vera-executor`, recorded by `VeraModule::record_anchor`), keeping one
 record per deployment (identifier: SHA-256 of the key) in the identity
 partition. Anchors only move up in height and never down in term; the first
 block anchored at a height wins. `vera_getCurrentPolicySnapshot` captures a
