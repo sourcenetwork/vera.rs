@@ -7,8 +7,8 @@ use vera_domain::{Refusal, RefusalKind, RefusingModule};
 use super::native_dispatch::NATIVE_TX_GAS_LIMIT;
 use crate::ExecutionError;
 use crate::precompiles::{
-    ACP_ADDRESS, BULLETIN_ADDRESS, DispatchReturn, VALIDATOR_REGISTRY_ADDRESS, VERA_ADDRESS,
-    internal_fault_reason, is_out_of_gas, recoverable_message, refusal::kind_of,
+    ACP_ADDRESS, ANCHOR_ADDRESS, BULLETIN_ADDRESS, DispatchReturn, VALIDATOR_REGISTRY_ADDRESS,
+    VERA_ADDRESS, internal_fault_reason, is_out_of_gas, recoverable_message, refusal::kind_of,
 };
 
 /// Least gas a refused native request is charged: the base charge of a module
@@ -92,6 +92,7 @@ fn refusing_module(target: Address) -> RefusingModule {
         BULLETIN_ADDRESS => RefusingModule::Bulletin,
         VERA_ADDRESS => RefusingModule::Vera,
         VALIDATOR_REGISTRY_ADDRESS => RefusingModule::ValidatorRegistry,
+        ANCHOR_ADDRESS => RefusingModule::Anchor,
         _ => unreachable!("native targets are module addresses"),
     }
 }
