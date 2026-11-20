@@ -9,6 +9,11 @@ SCHEMAS = {
     'relationship/v5/': {'relationship_namespace': 'relationship/v5/', 'policy_generations': 'required',
                          'object_incarnation': 'required'},
 }
+# A v5 policy record that names its creator's nonce and creation hash: its id
+# binds them, and creation takes the nonce, so a runner of one cannot drive or
+# verify a node of the other.
+POLICY_ORIGIN = {**SCHEMAS['relationship/v5/'], 'policy_origin': 'required'}
+KNOWN_SCHEMAS = [*SCHEMAS.values(), POLICY_ORIGIN]
 KEYS = 'crates/vera-modules/src/acp/keys.rs'
 TYPES = 'crates/vera-modules/src/acp/types.rs'
 DISCOVERY = 'crates/vera-config/src/discovery.rs'
@@ -45,6 +50,14 @@ def source_schema(source, revision):
         if re.search(r'#\[\s*serde\s*\([^\]]*\b(default|skip|skip_deserializing|deserialize_with|with)\b',
                      attributes + fields[0][0]):
             raise ValueError('ACP relationship incarnation must not default or use custom decoding')
+        origin = [re.findall(rf'^[ \t]*pub\s+{field}\s*:\s*([^,\n]+),', policy, re.MULTILINE)
+                  for policy in re.findall(r'^pub struct PolicyRecord\s*\{(.*?)^\}', types,
+                                           re.MULTILINE | re.DOTALL)
+                  for field in ('nonce', 'policy_hash')]
+        if origin == [['PolicyNonce'], ['PolicyHash']]:
+            return dict(POLICY_ORIGIN)
+        if any(origin):
+            raise ValueError('ACP policy record must name both its nonce and its creation hash')
     return dict(SCHEMAS[namespaces[0]])
 
 
@@ -124,7 +137,7 @@ def baseline_incompatible(identity):
         raise ValueError('incomplete proof schema provenance')
     for side in ('head', 'base'):
         schema = identity[side]['proof_schema']
-        if not isinstance(schema, dict) or schema not in SCHEMAS.values():
+        if not isinstance(schema, dict) or schema not in KNOWN_SCHEMAS:
             raise ValueError(f'{side}: unrecognized proof schema provenance')
     present = ['storage_version' in identity[side] for side in ('head', 'base')]
     if any(present):

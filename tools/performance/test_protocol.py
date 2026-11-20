@@ -2,7 +2,8 @@
 import unittest
 from unittest.mock import patch
 
-from protocol import (BLOCK, DISCOVERY, RECEIPTS, SCHEMAS, baseline_incompatible, discovery_section,
+from protocol import (BLOCK, DISCOVERY, POLICY_ORIGIN, RECEIPTS, SCHEMAS, baseline_incompatible,
+                      discovery_section,
                       incompatibility_reason, source_block_encoding, source_discovery_setting,
                       source_receipt_commitment,
                       source_schema, source_storage_version)
@@ -50,6 +51,26 @@ pub struct RelationshipRecord {
 ''')
         with self.assertRaisesRegex(ValueError, 'relationship record'):
             self.schema('')
+
+    def test_policy_origin_is_recognized_and_cannot_compare_with_plain_v5(self):
+        relationship = 'pub struct RelationshipRecord {\n    pub incarnation: u64,\n}\n'
+        keys = 'pub const RELATIONSHIP_PREFIX: &[u8] = b"relationship/v5/";\n'
+
+        def read(fields):
+            policy = ('pub struct PolicyRecord {\n    pub relations: RelationGenerations,\n'
+                      + fields + '}\n')
+            with patch('protocol.subprocess.check_output', side_effect=[keys, policy + relationship]):
+                return source_schema('.', 'recorded-source')
+
+        origin = '    pub nonce: PolicyNonce,\n    pub policy_hash: PolicyHash,\n'
+        self.assertEqual(read(origin), POLICY_ORIGIN)
+        self.assertEqual(read(''), SCHEMAS['relationship/v5/'])
+        with self.assertRaisesRegex(ValueError, 'nonce'):
+            read('    pub nonce: PolicyNonce,\n')
+        identity = dict(format_version=2, head=dict(proof_schema=dict(POLICY_ORIGIN)),
+                        base=dict(proof_schema=dict(SCHEMAS['relationship/v5/'])))
+        self.assertTrue(baseline_incompatible(identity))
+        self.assertEqual(incompatibility_reason(identity), 'incompatible ACP proof schema')
 
     def test_v5_cannot_compare_with_either_previous_proof_schema(self):
         for namespace in ('relationship/v3/', 'relationship/v4/'):

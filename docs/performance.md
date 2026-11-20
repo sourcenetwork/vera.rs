@@ -628,7 +628,11 @@ Before running workloads, committed ACP source supplies the explicit relationshi
 namespace and matching record schema. Known `relationship/v3/`, `relationship/v4/`
 and `relationship/v5/` schemas are mutually incompatible for permission verification.
 The v5 schema requires relation generations and a mandatory `RelationshipRecord`
-`incarnation: u64` without a deserialization default. For these boundaries,
+`incarnation: u64` without a deserialization default. A v5 `PolicyRecord` that
+names `nonce: PolicyNonce` and `policy_hash: PolicyHash` is a separate schema
+(`policy_origin`): its creation call takes a nonce and its id binds the creator
+([policy-ids.md](policy-ids.md)), so a runner of either cannot drive or verify
+a node of the other. For these boundaries,
 baseline full-stack passes are recorded as **not run** in `unavailable.json`; both head passes still require every correctness and recovery
 gate. Reports show head-only values, no baseline success and no full-stack delta.
 Unknown or inconsistent schemas fail. Other interface errors and failures on a
