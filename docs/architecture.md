@@ -223,6 +223,12 @@ authorization during execution. Stored access decisions have explicit issuance
 and expiry semantics. See [permission proofs](permission-proofs.md) and
 [access decisions](access-decisions.md).
 
+A deployment can anchor a finalized revision in another deployment, which
+verifies its certificate and keeps the latest anchor per deployment in order.
+A policy captured at that revision then travels as a self-contained snapshot
+that a reader verifies with the anchoring deployment's key alone. See
+[anchored policy snapshots](anchoring.md).
+
 ## Pipelined term handoffs
 
 Native deployments use Commonware's scheduled round-robin elector with bounded

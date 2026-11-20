@@ -5,13 +5,16 @@ use vera_crypto::bls;
 use vera_domain::NativeTx;
 
 use crate::ExecutionError;
-use crate::precompiles::{ACP_ADDRESS, BULLETIN_ADDRESS, VALIDATOR_REGISTRY_ADDRESS, VERA_ADDRESS};
+use crate::precompiles::{
+    ACP_ADDRESS, ANCHOR_ADDRESS, BULLETIN_ADDRESS, VALIDATOR_REGISTRY_ADDRESS, VERA_ADDRESS,
+};
 
-const NATIVE_TARGETS: [Address; 4] = [
+const NATIVE_TARGETS: [Address; 5] = [
     ACP_ADDRESS,
     BULLETIN_ADDRESS,
     VERA_ADDRESS,
     VALIDATOR_REGISTRY_ADDRESS,
+    ANCHOR_ADDRESS,
 ];
 
 /// Whether a native request may be addressed to `target`.

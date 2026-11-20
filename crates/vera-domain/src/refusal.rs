@@ -23,6 +23,8 @@ pub enum RefusingModule {
     Vera = 3,
     /// Validator membership (`0x0813`).
     ValidatorRegistry = 4,
+    /// Anchors of other deployments' finalized revisions (`0x0814`).
+    Anchor = 5,
 }
 
 impl RefusingModule {
@@ -38,6 +40,7 @@ impl RefusingModule {
             2 => Self::Bulletin,
             3 => Self::Vera,
             4 => Self::ValidatorRegistry,
+            5 => Self::Anchor,
             _ => return None,
         })
     }
@@ -86,6 +89,8 @@ pub enum RefusalKind {
     StateError = 18,
     /// The module failed while executing the call.
     ModuleFailed = 19,
+    /// The submission is not newer than the record the module holds.
+    NotNewer = 20,
 }
 
 impl RefusalKind {
@@ -116,6 +121,7 @@ impl RefusalKind {
             17 => Self::OutOfGas,
             18 => Self::StateError,
             19 => Self::ModuleFailed,
+            20 => Self::NotNewer,
             _ => return None,
         })
     }
@@ -209,6 +215,7 @@ impl std::fmt::Display for Refusal {
             RefusingModule::Bulletin => "Bulletin",
             RefusingModule::Vera => "Vera",
             RefusingModule::ValidatorRegistry => "ValidatorRegistry",
+            RefusingModule::Anchor => "Anchor",
         };
         write!(f, "{module} refused ({:?}): {}", self.kind, self.message)
     }
@@ -224,12 +231,12 @@ mod tests {
             if let Some(kind) = RefusalKind::from_code(code) {
                 assert_eq!(kind.code(), code);
             } else {
-                assert!(code == 0 || code > 19);
+                assert!(code == 0 || code > 20);
             }
             if let Some(module) = RefusingModule::from_code(code) {
                 assert_eq!(module.code(), code);
             } else {
-                assert!(code == 0 || code > 4);
+                assert!(code == 0 || code > 5);
             }
         }
     }

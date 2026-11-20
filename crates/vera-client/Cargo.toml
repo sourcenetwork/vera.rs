@@ -15,6 +15,7 @@ workspace = true
 [dependencies]
 borsh.workspace = true
 vera-crypto.workspace = true
+commonware-codec.workspace = true
 vera-domain.workspace = true
 vera-permission.workspace = true
 vera-modules.workspace = true
@@ -47,6 +48,7 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+vera-domain = { workspace = true, features = ["testing"] }
 k256.workspace = true
 ed25519-dalek.workspace = true
 p256.workspace = true

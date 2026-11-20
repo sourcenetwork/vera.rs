@@ -156,6 +156,7 @@ subscription channels. Block execution goes through `VeraExecutor`:
 | `0x0811` | Bulletin | Coordination / DKG messages / posts |
 | `0x0812` | Vera | Identity / JWT token lifecycle |
 | `0x0813` | ValidatorRegistry | Validator identity management (feeds resharing) |
+| `0x0814` | Anchor | Latest finalized revision of other deployments (identity partition) |
 
 ### Shared module pattern
 
@@ -512,6 +513,20 @@ node at a point named in its directory's `crash-at` (`crate::crash`), and
 persisted first-boot, adoption, proposal, history, catch-up, handover,
 takeover and rewind step and check the restart keeps every finalized request
 once.
+
+### Anchored policy snapshots
+
+The anchor precompile records another deployment's finalized revision when its
+certificate verifies against that deployment's consensus key, keeping one
+record per deployment (identifier: SHA-256 of the key) in the identity
+partition. Anchors only move up in height and never down in term; the first
+block anchored at a height wins. `vera_getCurrentPolicySnapshot` captures a
+policy record and its relationship, index and object prefixes at one revision.
+`vera_client::anchoring` publishes a snapshot (capture, anchor that revision,
+read the anchor back), verifies a relayed `AnchoredSnapshot` with the
+anchoring deployment's key alone, evaluates access with the shared evaluator,
+and reports a snapshot as stale once a newer anchor is known. No partition or
+block commitment changed. See `docs/anchoring.md`.
 
 ### Terms and the active device
 

@@ -79,6 +79,14 @@ include selection bytes and every point/relationship key and value. Certified
 policy absence returns `None` only after validating the complete evidence;
 invalid or unavailable evidence remains an error.
 
+`vera_getCurrentPolicySnapshot(policy, minimum_height)` returns a
+`PolicySnapshotResponse`: the policy record and complete proofs of its
+relationship, relationship-index and object-incarnation prefixes at one
+revision, under one budget of 4,096 records, 1 MiB data and 4 MiB of proofs.
+`PolicySnapshotProof::verify` returns a `PolicyState` that evaluates any
+access request with the shared evaluator. See
+[anchored policy snapshots](anchoring.md).
+
 Object points use `object_state/{policy}/{resource_hex}/{object_hex}`. A present
 value must be a positive eight-byte big-endian counter; authenticated absence
 means initial zero. Missing coverage is an error. Extra or duplicate witnesses,

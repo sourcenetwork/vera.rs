@@ -4,6 +4,8 @@
 pub mod abi;
 /// Operator approvals and administrative state transitions.
 pub mod administration;
+/// Anchors of other deployments' finalized revisions.
+pub mod anchors;
 mod delegation;
 /// Vera error types.
 pub mod error;
