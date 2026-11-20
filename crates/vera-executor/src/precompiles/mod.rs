@@ -5,8 +5,10 @@
 //! - `0x0811` — Bulletin (coordination / DKG messages)
 //! - `0x0812` — Vera (identity / JWS token lifecycle)
 //! - `0x0813` — ValidatorRegistry (validator identity management)
+//! - `0x0814` — Anchor (finalized revisions of other deployments)
 
 mod acp;
+mod anchor;
 mod bulletin;
 pub(crate) mod refusal;
 pub(crate) mod validator_registry;
@@ -48,6 +50,9 @@ pub const BULLETIN_ADDRESS: Address = address_from_last_two_bytes(0x08, 0x11);
 
 /// Vera precompile address.
 pub const VERA_ADDRESS: Address = address_from_last_two_bytes(0x08, 0x12);
+
+/// Anchor precompile address.
+pub const ANCHOR_ADDRESS: Address = address_from_last_two_bytes(0x08, 0x14);
 
 /// ValidatorRegistry precompile address.
 pub const VALIDATOR_REGISTRY_ADDRESS: Address = vera_modules::validator_registry::layout::ADDRESS;
@@ -258,6 +263,8 @@ pub fn dispatch_to_module(
         Some(vera::dispatch(
             vera, acp, block_ctx, tx_ctx, calldata, gas_limit,
         ))
+    } else if target == ANCHOR_ADDRESS {
+        Some(anchor::dispatch(vera, block_ctx, calldata, gas_limit))
     } else {
         None
     }
@@ -273,6 +280,11 @@ fn new_custom_precompiles() -> Precompiles {
             stub_precompile,
         ),
         Precompile::new(PrecompileId::custom("vera"), VERA_ADDRESS, stub_precompile),
+        Precompile::new(
+            PrecompileId::custom("anchor"),
+            ANCHOR_ADDRESS,
+            stub_precompile,
+        ),
         Precompile::new(
             PrecompileId::custom("validator_registry"),
             VALIDATOR_REGISTRY_ADDRESS,

@@ -41,10 +41,14 @@ pub use native_simulation::{NativeCallRequest, NativeCallSimulation, SimulatedLo
 
 mod light_block;
 pub use light_block::{
-    ConsensusPublicKey, EpochMaterial, LIGHT_BLOCK_MAX_ARTIFACT_BYTES, LIGHT_BLOCK_MAX_DESCENDANTS,
-    LIGHT_BLOCK_MAX_PARTICIPANTS, LIGHT_BLOCK_NAMESPACE, LIGHT_BLOCK_RESPONSE_BYTES, LightBlock,
-    LightBlockError, LightConsensusScheme, verify_finalized_block, verify_light_block,
+    ConsensusPublicKey, EpochMaterial, FinalizedArtifacts, LIGHT_BLOCK_MAX_ARTIFACT_BYTES,
+    LIGHT_BLOCK_MAX_DESCENDANTS, LIGHT_BLOCK_MAX_PARTICIPANTS, LIGHT_BLOCK_NAMESPACE,
+    LIGHT_BLOCK_RESPONSE_BYTES, LightBlock, LightBlockError, LightConsensusScheme,
+    verify_finalized_artifacts, verify_finalized_block, verify_light_block,
 };
+
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 
 mod module_id;
 pub use module_id::ModuleId;

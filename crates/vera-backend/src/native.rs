@@ -42,6 +42,8 @@ pub use policy::{policy_prefix_page_at, policy_prefix_proof_at};
 
 mod permission;
 pub use permission::{permission_proof, permission_proof_at};
+mod snapshot;
+pub use snapshot::policy_snapshot_at;
 
 /// Prefix bytes retained by the index; 64-byte prefixes end inside ACP policy IDs.
 pub const INDEX_PREFIX_BYTES: usize = 256;

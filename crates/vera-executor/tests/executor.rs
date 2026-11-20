@@ -456,3 +456,6 @@ mod record_limits;
 
 #[path = "executor/native_refusals.rs"]
 mod native_refusals;
+
+#[path = "executor/anchors.rs"]
+mod anchors;

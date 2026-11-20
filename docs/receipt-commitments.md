@@ -59,6 +59,7 @@ show the message as that node's explanation.
 | `bulletin` | 2 |
 | `vera` | 3 |
 | `validator_registry` | 4 |
+| `anchor` | 5 |
 
 | Kind | Code | Raised for |
 |---|---|---|
@@ -70,7 +71,7 @@ show the message as that node's explanation.
 | `unauthenticated` | 6 | A method needing a signer called without one |
 | `unauthorized` | 7 | `Unauthorized` errors of every module and Bulletin's non-collaborator |
 | `invalid_token` | 8 | Invalid bearer tokens and JWS, or a token already invalidated |
-| `invalid_proof` | 9 | An ACP proof that does not verify |
+| `invalid_proof` | 9 | An ACP proof, or an anchored revision's finality, that does not verify |
 | `not_found` | 10 | A missing policy, commitment, namespace, post, collaborator, token or validator |
 | `object_not_registered` | 11 | An ACP object that is not registered |
 | `already_exists` | 12 | An existing object, namespace, post, collaborator, validator or consensus key |
@@ -81,6 +82,7 @@ show the message as that node's explanation.
 | `out_of_gas` | 17 | A call that exhausted its allowance, including ACP work allowances carved from it |
 | `state_error` | 18 | Module state the call needed could not be used (`State` errors) |
 | `module_failed` | 19 | A module panic |
+| `not_newer` | 20 | An anchor at or below the height of the deployment's latest anchor, or in a lower term |
 
 The kind follows from the module error's variant, so every node classifies a
 refusal the same way. Codes outside these tables do not decode. Faults of the
