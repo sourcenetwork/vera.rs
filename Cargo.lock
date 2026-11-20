@@ -7039,6 +7039,7 @@ dependencies = [
  "ark-std 0.4.0",
  "base64",
  "borsh",
+ "commonware-codec",
  "ed25519-dalek",
  "hex",
  "k256 0.13.4",
@@ -7329,6 +7330,7 @@ dependencies = [
  "borsh",
  "bs58",
  "bytes",
+ "commonware-codec",
  "ed25519-dalek",
  "futures",
  "group 0.14.0",
@@ -7345,6 +7347,7 @@ dependencies = [
  "thiserror 2.0.18",
  "vera-acp",
  "vera-crypto",
+ "vera-domain",
  "vera-identity",
  "vera-zanzibar",
 ]

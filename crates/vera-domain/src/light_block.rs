@@ -23,6 +23,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Block, BlockCfg, ConsensusDigest, PublicKey, TxCfg};
 
+mod artifacts;
+pub use artifacts::FinalizedArtifacts;
+
 /// Simplex namespace shared with validator nodes.
 pub const LIGHT_BLOCK_NAMESPACE: &[u8] = b"_COMMONWARE_VERA_SIMPLEX";
 /// Maximum participant count accepted from an untrusted light-block response.
@@ -218,6 +221,21 @@ impl LightBlock {
         }
     }
 
+    /// Decode the canonical artifacts after checking their count and size.
+    pub fn artifacts(&self) -> Result<FinalizedArtifacts, LightBlockError> {
+        self.check_artifact_limits()?;
+        Ok(FinalizedArtifacts {
+            block: decode_hex("block", &self.block)?,
+            descendants: self
+                .descendants
+                .iter()
+                .map(|value| decode_hex("descendant", value))
+                .collect::<Result<_, _>>()?,
+            finalization: decode_hex("finalization", &self.finalization)?,
+            epoch_material: decode_hex("epoch_material", &self.epoch_material)?,
+        })
+    }
+
     /// Reject excessive artifact count or size before decoding untrusted hex.
     pub fn check_artifact_limits(&self) -> Result<(), LightBlockError> {
         if self.descendants.len() > LIGHT_BLOCK_MAX_DESCENDANTS {
@@ -340,13 +358,12 @@ pub fn verify_finalized_block(
     light: &LightBlock,
     trusted_key: &ConsensusPublicKey,
 ) -> Result<Block, LightBlockError> {
-    light.check_artifact_limits()?;
+    let artifacts = light.artifacts()?;
     let block_hash = decode_b256("block_hash", &light.block_hash)?;
-    let block_bytes = decode_hex("block", &light.block)?;
-    if keccak256(&block_bytes) != block_hash {
+    if keccak256(&artifacts.block) != block_hash {
         return Err(LightBlockError::BlockHashMismatch);
     }
-    let block = decode_block(&block_bytes)?;
+    let block = decode_block(&artifacts.block)?;
 
     let checks = [
         (
@@ -373,9 +390,32 @@ pub fn verify_finalized_block(
     if let Some((_, field)) = checks.into_iter().find(|(matches, _)| !matches) {
         return Err(LightBlockError::BlockFieldMismatch(field));
     }
+    verify_certified(&block, block_hash, &artifacts, trusted_key)?;
+    Ok(block)
+}
 
-    let material_bytes = decode_hex("epoch_material", &light.epoch_material)?;
-    let material = EpochMaterial::decode_bounded(&material_bytes)?;
+/// Verify canonical finality artifacts and return the requested block with its identifier.
+///
+/// This is [`verify_finalized_block`] over decoded bytes, for callers that
+/// carry the artifacts without the JSON header fields.
+pub fn verify_finalized_artifacts(
+    artifacts: &FinalizedArtifacts,
+    trusted_key: &ConsensusPublicKey,
+) -> Result<(Block, B256), LightBlockError> {
+    artifacts.check_limits()?;
+    let block_hash = keccak256(&artifacts.block);
+    let block = decode_block(&artifacts.block)?;
+    verify_certified(&block, block_hash, artifacts, trusted_key)?;
+    Ok((block, block_hash))
+}
+
+fn verify_certified(
+    block: &Block,
+    block_hash: B256,
+    artifacts: &FinalizedArtifacts,
+    trusted_key: &ConsensusPublicKey,
+) -> Result<(), LightBlockError> {
+    let material = EpochMaterial::decode_bounded(&artifacts.epoch_material)?;
     if material.participants.is_empty()
         || material.sharing.total().get() as usize != material.participants.len()
     {
@@ -388,19 +428,18 @@ pub fn verify_finalized_block(
         return Err(LightBlockError::UntrustedConsensusKey);
     }
 
-    let mut certified_epoch_end = is_epoch_end(&block);
+    let mut certified_epoch_end = is_epoch_end(block);
     let mut certified_context = block.context.clone();
     let mut certified_height = block.height;
     let mut certified_hash = block_hash;
-    for encoded in &light.descendants {
-        let bytes = decode_hex("descendant", encoded)?;
-        let descendant = decode_block(&bytes)?;
+    for bytes in &artifacts.descendants {
+        let descendant = decode_block(bytes)?;
         if descendant.parent.0 != certified_hash
             || certified_height.checked_add(1) != Some(descendant.height)
         {
             return Err(LightBlockError::AncestryMismatch);
         }
-        certified_hash = keccak256(&bytes);
+        certified_hash = keccak256(bytes);
         certified_height = descendant.height;
         certified_epoch_end = is_epoch_end(&descendant);
         certified_context = descendant.context;
@@ -410,9 +449,8 @@ pub fn verify_finalized_block(
         certified_context.parent.0,
         Sha256::hash(&[certified_hash.as_slice()]),
     );
-    let finalization_bytes = decode_hex("finalization", &light.finalization)?;
     let finalization: Finalization<LightConsensusScheme, ConsensusDigest> =
-        Finalization::decode(commonware_codec::Copying(finalization_bytes.as_slice()))?;
+        Finalization::decode(commonware_codec::Copying(artifacts.finalization.as_slice()))?;
     // Commonware may re-propose the same epoch-ending block in a later view.
     // Its signed payload remains the digest of the original canonical block.
     let proposal = &finalization.proposal;
@@ -433,8 +471,7 @@ pub fn verify_finalized_block(
     if !finalization.verify(&mut rng, &verifier, &Sequential) {
         return Err(LightBlockError::InvalidCertificate);
     }
-
-    Ok(block)
+    Ok(())
 }
 
 fn is_epoch_end(block: &Block) -> bool {
