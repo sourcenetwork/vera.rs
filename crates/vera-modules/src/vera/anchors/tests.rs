@@ -1,6 +1,4 @@
 use alloy_primitives::B256;
-use commonware_codec::Encode as _;
-use vera_domain::{LightBlockError, testing::TestDeployment};
 
 use super::*;
 use crate::types::Timestamp;
@@ -15,30 +13,37 @@ fn context(height: u64) -> BlockExecCtx {
     }
 }
 
-fn submission(deployment: &TestDeployment, height: u64, term: u64, root: u8) -> AnchorSubmission {
-    let block = deployment.block(height, B256::repeat_byte(7), term, B256::repeat_byte(root));
-    AnchorSubmission {
-        consensus_key: deployment.key().encode().to_vec(),
-        artifacts: deployment.finalize(&block),
+fn key(seed: u8) -> Vec<u8> {
+    vec![seed; CONSENSUS_KEY_BYTES]
+}
+
+fn revision(height: u64, term: u64, root: u8) -> VerifiedRevision {
+    VerifiedRevision {
+        height,
+        block_hash: B256::repeat_byte(root),
+        term,
+        timestamp: 1_700_000_000 + height,
+        module_state_root: B256::repeat_byte(root),
     }
 }
 
 #[test]
 fn anchors_advance_in_order_and_keep_the_latest_revision() {
-    let deployment = TestDeployment::new(1);
+    let key = key(1);
     let mut module = VeraModule::new();
     let first = module
-        .anchor_revision(&context(5), &submission(&deployment, 10, 0, 1))
+        .record_anchor(&context(5), &key, &revision(10, 0, 1))
         .unwrap();
     assert!(first.recorded);
     assert_eq!(first.record.sequence, 1);
     assert_eq!(first.record.height, 10);
     assert_eq!(first.record.module_state_root, B256::repeat_byte(1));
     assert_eq!(first.record.anchored_at, 5);
-    assert_eq!(first.record.deployment, deployment_id(&deployment.key()));
+    assert_eq!(first.record.deployment, deployment_id(&key));
+    assert_eq!(first.record.consensus_key.as_ref(), key.as_slice());
 
     let second = module
-        .anchor_revision(&context(6), &submission(&deployment, 20, 0, 2))
+        .record_anchor(&context(6), &key, &revision(20, 0, 2))
         .unwrap();
     assert_eq!(second.record.sequence, 2);
     assert_eq!(
@@ -49,13 +54,13 @@ fn anchors_advance_in_order_and_keep_the_latest_revision() {
 
 #[test]
 fn an_anchor_that_goes_backwards_is_refused() {
-    let deployment = TestDeployment::new(2);
+    let key = key(2);
     let mut module = VeraModule::new();
     module
-        .anchor_revision(&context(1), &submission(&deployment, 20, 0, 1))
+        .record_anchor(&context(1), &key, &revision(20, 0, 1))
         .unwrap();
     assert_eq!(
-        module.anchor_revision(&context(2), &submission(&deployment, 19, 0, 1)),
+        module.record_anchor(&context(2), &key, &revision(19, 0, 1)),
         Err(AnchorError::NotNewer {
             latest: 20,
             height: 19
@@ -65,14 +70,13 @@ fn an_anchor_that_goes_backwards_is_refused() {
 
 #[test]
 fn a_second_history_at_an_anchored_height_cannot_displace_the_first() {
-    let deployment = TestDeployment::new(3);
+    let key = key(3);
     let mut module = VeraModule::new();
     let first = module
-        .anchor_revision(&context(1), &submission(&deployment, 20, 0, 1))
+        .record_anchor(&context(1), &key, &revision(20, 0, 1))
         .unwrap();
-    let fork = submission(&deployment, 20, 0, 2);
     assert_eq!(
-        module.anchor_revision(&context(2), &fork),
+        module.record_anchor(&context(2), &key, &revision(20, 0, 2)),
         Err(AnchorError::NotNewer {
             latest: 20,
             height: 20
@@ -84,7 +88,7 @@ fn a_second_history_at_an_anchored_height_cannot_displace_the_first() {
     );
 
     let again = module
-        .anchor_revision(&context(3), &submission(&deployment, 20, 0, 1))
+        .record_anchor(&context(3), &key, &revision(20, 0, 1))
         .unwrap();
     assert!(!again.recorded);
     assert_eq!(again.record, first.record);
@@ -92,95 +96,51 @@ fn a_second_history_at_an_anchored_height_cannot_displace_the_first() {
 
 #[test]
 fn a_lower_term_is_refused() {
-    let deployment = TestDeployment::new(4);
+    let key = key(4);
     let mut module = VeraModule::new();
     module
-        .anchor_revision(&context(1), &submission(&deployment, 20, 2, 1))
+        .record_anchor(&context(1), &key, &revision(20, 2, 1))
         .unwrap();
     assert_eq!(
-        module.anchor_revision(&context(2), &submission(&deployment, 30, 1, 1)),
+        module.record_anchor(&context(2), &key, &revision(30, 1, 1)),
         Err(AnchorError::LowerTerm { latest: 2, term: 1 })
     );
     module
-        .anchor_revision(&context(3), &submission(&deployment, 30, 3, 1))
+        .record_anchor(&context(3), &key, &revision(30, 3, 1))
         .unwrap();
 }
 
 #[test]
-fn a_light_block_of_another_deployment_is_refused() {
-    let deployment = TestDeployment::new(5);
-    let other = TestDeployment::new(50);
+fn deployments_keep_separate_anchors() {
     let mut module = VeraModule::new();
-    let mut foreign = submission(&other, 10, 0, 1);
-    foreign.consensus_key = deployment.key().encode().to_vec();
-    assert_eq!(
-        module.anchor_revision(&context(1), &foreign),
-        Err(AnchorError::Finality(
-            LightBlockError::UntrustedConsensusKey
-        ))
-    );
-
-    // The other deployment's certificate presented with this deployment's material.
-    foreign.artifacts.epoch_material = submission(&deployment, 10, 0, 1).artifacts.epoch_material;
-    assert_eq!(
-        module.anchor_revision(&context(1), &foreign),
-        Err(AnchorError::Finality(LightBlockError::InvalidCertificate))
-    );
-    assert_eq!(
-        module.latest_anchor(&deployment_id(&deployment.key())),
-        Ok(None)
-    );
+    module
+        .record_anchor(&context(1), &key(5), &revision(20, 0, 1))
+        .unwrap();
+    let other = module
+        .record_anchor(&context(2), &key(50), &revision(10, 0, 1))
+        .unwrap();
+    assert!(other.recorded);
+    assert_eq!(other.record.sequence, 1);
+    assert_ne!(deployment_id(&key(5)), deployment_id(&key(50)));
 }
 
 #[test]
-fn a_forged_light_block_is_refused() {
-    let deployment = TestDeployment::new(6);
+fn a_key_of_the_wrong_length_is_refused() {
     let mut module = VeraModule::new();
-    let honest = submission(&deployment, 10, 0, 1);
-
-    let mut altered = honest.clone();
-    let mut block = deployment.block(10, B256::repeat_byte(7), 0, B256::repeat_byte(9));
-    block.height = 10;
-    altered.artifacts.block = block.encode().to_vec();
+    let mut short = key(6);
+    short.truncate(10);
     assert_eq!(
-        module.anchor_revision(&context(1), &altered),
-        Err(AnchorError::Finality(LightBlockError::ProposalMismatch))
-    );
-
-    let mut garbled = honest;
-    let last = garbled.artifacts.finalization.len() - 1;
-    garbled.artifacts.finalization[last] ^= 1;
-    assert!(matches!(
-        module.anchor_revision(&context(1), &garbled),
-        Err(AnchorError::Finality(_))
-    ));
-
-    let mut bad_key = submission(&deployment, 10, 0, 1);
-    bad_key.consensus_key.truncate(10);
-    assert_eq!(
-        module.anchor_revision(&context(1), &bad_key),
+        module.record_anchor(&context(1), &short, &revision(10, 0, 1)),
         Err(AnchorError::InvalidConsensusKey)
     );
-}
-
-#[test]
-fn oversized_artifacts_are_refused_before_verification() {
-    let deployment = TestDeployment::new(7);
-    let mut module = VeraModule::new();
-    let mut large = submission(&deployment, 10, 0, 1);
-    large.artifacts.descendants = vec![vec![0; MAX_ANCHOR_ARTIFACT_BYTES]];
-    assert_eq!(
-        module.anchor_revision(&context(1), &large),
-        Err(AnchorError::TooLarge)
-    );
+    assert_eq!(module.latest_anchor(&deployment_id(&short)), Ok(None));
 }
 
 #[test]
 fn stored_records_must_name_their_deployment() {
-    let deployment = TestDeployment::new(8);
     let mut module = VeraModule::new();
     let anchored = module
-        .anchor_revision(&context(1), &submission(&deployment, 10, 0, 1))
+        .record_anchor(&context(1), &key(8), &revision(10, 0, 1))
         .unwrap();
     let bytes = anchored.record.encode();
     assert_eq!(
@@ -189,6 +149,21 @@ fn stored_records_must_name_their_deployment() {
     );
     assert_eq!(
         AnchorRecord::decode(&B256::repeat_byte(1), &bytes),
+        Err(AnchorError::MalformedRecord)
+    );
+
+    let mut foreign_key = anchored.record.clone();
+    foreign_key.consensus_key = key(9).into();
+    assert_eq!(
+        AnchorRecord::decode(&foreign_key.deployment, &foreign_key.encode()),
+        Err(AnchorError::MalformedRecord)
+    );
+
+    let mut short_key = anchored.record;
+    short_key.consensus_key = vec![8; 10].into();
+    short_key.deployment = deployment_id(&short_key.consensus_key);
+    assert_eq!(
+        AnchorRecord::decode(&short_key.deployment, &short_key.encode()),
         Err(AnchorError::MalformedRecord)
     );
 }

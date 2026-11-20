@@ -1,9 +1,9 @@
 use alloy_primitives::B256;
 use commonware_codec::Encode as _;
 use vera_domain::testing::TestDeployment;
-use vera_modules::vera::anchors::{AnchorRecord, deployment_id};
+use vera_modules::vera::anchors::AnchorRecord;
 
-use super::{AnchoringError, snapshot::ensure_not_superseded};
+use super::{AnchoringError, deployment_id, snapshot::ensure_not_superseded};
 
 fn record(sequence: u64, block: u8) -> AnchorRecord {
     let key = TestDeployment::new(31).key();

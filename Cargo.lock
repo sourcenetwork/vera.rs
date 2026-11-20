@@ -7330,7 +7330,6 @@ dependencies = [
  "borsh",
  "bs58",
  "bytes",
- "commonware-codec",
  "ed25519-dalek",
  "futures",
  "group 0.14.0",
@@ -7347,7 +7346,6 @@ dependencies = [
  "thiserror 2.0.18",
  "vera-acp",
  "vera-crypto",
- "vera-domain",
  "vera-identity",
  "vera-zanzibar",
 ]

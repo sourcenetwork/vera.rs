@@ -12,15 +12,13 @@ readme = "README.md"
 
 [dependencies]
 vera-acp.workspace = true
-vera-domain.workspace = true
 vera-crypto.workspace = true
 vera-identity.workspace = true
 orbis-reporting.workspace = true
 vera-zanzibar.workspace = true
 
 alloy-sol-types.workspace = true
-commonware-codec.workspace = true
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, features = ["serde"] }
 async-trait.workspace = true
 borsh.workspace = true
 bytes.workspace = true
@@ -36,7 +34,6 @@ prost = "0.14"
 thiserror.workspace = true
 
 [dev-dependencies]
-vera-domain = { workspace = true, features = ["testing"] }
 jubjub.workspace = true
 group.workspace = true
 blst = "0.3"

@@ -42,7 +42,8 @@ event RevisionAnchored(bytes32 indexed deployment, uint64 sequence, uint64 heigh
 The byte fields are those of D's `LightBlock` for the revision, decoded from
 hex (`LightBlock::artifacts`). Anyone may submit one: the request's authority is
 D's certificate, not its signer, so D's owner, S's operator or a relay can post
-it. S executes `VeraModule::anchor_revision`:
+it. S's executor verifies the submission and `VeraModule::record_anchor`
+records it:
 
 1. The artifacts together are at most 256 KiB (`MAX_ANCHOR_ARTIFACT_BYTES`).
 2. The key decodes, and `vera_domain::verify_finalized_artifacts` verifies the
@@ -52,6 +53,11 @@ it. S executes `VeraModule::anchor_revision`:
    not below the latest anchor's. Resubmitting the latest anchored block
    succeeds without changing anything or emitting an event.
 4. S stores the new record, numbered one above the previous anchor.
+
+Steps 1 and 2 run in `vera-executor`, which holds the consensus types; the
+module receives the verified block's fields as a `VerifiedRevision` and the
+key's canonical encoding. `vera-modules` keeps no Commonware dependency, so
+clients that encode module calls do not build the consensus stack.
 
 A refused anchor has a failed receipt from module `anchor` (code 5): kind
 `invalid_proof` when the revision is not finalized under the key, `not_newer`
@@ -76,7 +82,8 @@ The record is a constant-size JSON value in S's identity (`vera`) partition at
 Only the latest anchor is kept. Sequence numbers and heights only increase, so
 a reader that holds two records of one deployment can tell which is newer.
 `AnchorRecord::decode` refuses a record that does not name the deployment its
-key belongs to.
+key belongs to or whose key is not 96 bytes long; a reader decodes the key
+itself when it verifies a revision against it.
 
 ### Reading the latest anchor
 
