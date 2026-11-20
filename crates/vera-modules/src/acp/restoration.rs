@@ -25,12 +25,7 @@ impl AcpModule {
                 Some(record.policy.specification),
             )
             .map_err(|error| AcpError::State(format!("invalid restored policy: {error}")))?;
-            if policy_yaml::policy_id(
-                &record.policy_hash,
-                &record.nonce,
-                &record.metadata.owner_did,
-            ) != id
-            {
+            if record.derived_id() != id {
                 return Err(AcpError::State(
                     "restored policy id differs from its origin".into(),
                 ));

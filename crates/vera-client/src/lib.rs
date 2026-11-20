@@ -59,7 +59,7 @@ mod signer;
 mod subject;
 mod tx;
 mod types;
-pub use policy_id::{PolicyMarshalingType, PolicyNonce, predict_policy_id};
+pub use policy_id::{PolicyMarshalingType, PolicyNonce, predict_policy_id, random_policy_nonce};
 pub use policy_operation::{PolicyOperation, PolicyOperationLead};
 mod unsigned_token;
 mod worker;

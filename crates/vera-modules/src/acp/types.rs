@@ -209,6 +209,14 @@ pub struct PolicyRecord {
     pub policy_hash: PolicyHash,
 }
 
+impl PolicyRecord {
+    /// The id derived from the creation hash, the nonce and the owner; a
+    /// well-formed record is stored under it.
+    pub fn derived_id(&self) -> String {
+        vera_acp::policy_yaml::policy_id(&self.policy_hash, &self.nonce, &self.metadata.owner_did)
+    }
+}
+
 /// Proof that an object was included in a registration commitment.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 pub struct RegistrationProof {

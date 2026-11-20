@@ -29,7 +29,7 @@ pub(super) async fn create_policy(
                     .into_bytes()
                     .into(),
                 marshalType: 1,
-                nonce: Default::default(),
+                nonce: vera_client::random_policy_nonce().0.into(),
             }
             .abi_encode()
             .into(),

@@ -301,7 +301,7 @@ async fn native_go_policy_pages() {
                 .into_bytes()
                 .into(),
             marshalType: 1,
-            nonce: Default::default(),
+            nonce: vera_client::random_policy_nonce().0.into(),
         }
         .abi_encode();
         let wire = signer.sign_native_tx(ACP_ADDRESS, data.into()).unwrap();

@@ -165,7 +165,7 @@ async fn permission_lifecycle(pipelined: bool) {
         IAcp::createPolicyCall {
             policy: POLICY.as_bytes().to_vec().into(),
             marshalType: 1,
-            nonce: Default::default(),
+            nonce: vera_client::random_policy_nonce().0.into(),
         },
     )
     .await;

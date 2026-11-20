@@ -19,3 +19,9 @@ pub fn predict_policy_id(
 ) -> Result<String, AcpError> {
     AcpModule::predict_policy_id(policy, marshal_type, nonce, creator)
 }
+
+/// A nonce drawn from the operating system's randomness, for a creator that
+/// does not need to know a policy's id before creating it.
+pub fn random_policy_nonce() -> PolicyNonce {
+    PolicyNonce(rand::random())
+}

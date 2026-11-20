@@ -78,7 +78,7 @@ pub(crate) fn finalize_a_write(node: &EmbeddedNode, signer: &BlsSigner) -> B256 
     let call = IAcp::createPolicyCall {
         policy: POLICY.as_bytes().to_vec().into(),
         marshalType: 1,
-        nonce: Default::default(),
+        nonce: vera_client::random_policy_nonce().0.into(),
     };
     let wire = signer
         .sign_native_tx(ACP_ADDRESS, call.abi_encode().into())

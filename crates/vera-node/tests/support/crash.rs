@@ -225,7 +225,7 @@ pub(crate) fn submit(node: &EmbeddedNode, spec: &Spec, signer: &BlsSigner, label
             .into_bytes()
             .into(),
         marshalType: 1,
-        nonce: Default::default(),
+        nonce: vera_client::random_policy_nonce().0.into(),
     };
     let wire = signer
         .sign_native_tx(ACP_ADDRESS, call.abi_encode().into())
