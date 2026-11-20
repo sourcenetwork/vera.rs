@@ -1,8 +1,9 @@
 //! Why an anchor submission or record is refused.
 
-use vera_domain::LightBlockError;
-
 /// Errors of the anchor module and of anchor records read back.
+///
+/// A revision that is not finalized under the consensus key is refused by the
+/// caller that verifies it, before the module sees it.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum AnchorError {
     /// The finality artifacts exceed the anchor limit.
@@ -11,9 +12,6 @@ pub enum AnchorError {
     /// The consensus key does not decode.
     #[error("consensus key does not decode")]
     InvalidConsensusKey,
-    /// The revision is not finalized under the consensus key.
-    #[error("revision is not finalized under the deployment's key: {0}")]
-    Finality(#[from] LightBlockError),
     /// The revision is not higher than the deployment's latest anchor.
     #[error("revision {height} is not above the latest anchor at {latest}")]
     NotNewer {

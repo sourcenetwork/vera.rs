@@ -102,7 +102,7 @@ impl AnchoredSnapshot {
         if artifacts.encoded_len() > MAX_ANCHOR_ARTIFACT_BYTES {
             return Err(AnchoringError::TooLarge);
         }
-        let block = verify_finalized_block(&self.revision, &anchor.consensus_key()?)?;
+        let block = verify_finalized_block(&self.revision, &super::anchored_key(&anchor)?)?;
         if block.height != anchor.height
             || keccak256(&artifacts.block) != anchor.block_hash
             || block.module_state_root != anchor.module_state_root

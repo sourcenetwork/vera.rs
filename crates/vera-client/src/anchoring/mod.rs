@@ -2,6 +2,7 @@
 //! verified against those anchors. See `docs/anchoring.md`.
 
 mod error;
+mod key;
 mod snapshot;
 #[cfg(test)]
 mod tests;
@@ -12,13 +13,14 @@ use alloy_primitives::{B256, Bytes};
 use alloy_sol_types::SolCall as _;
 use commonware_codec::Encode as _;
 use vera_domain::{ConsensusPublicKey, LightBlock, ModuleId};
-pub use vera_modules::vera::anchors::{AnchorRecord, deployment_id};
+pub use vera_modules::vera::anchors::AnchorRecord;
 use vera_modules::vera::anchors::{MAX_ANCHOR_ARTIFACT_BYTES, abi::IAnchor, anchor_key};
 use vera_permission::{
     POLICY_SNAPSHOT_RESPONSE_BYTES, PolicySnapshotResponse, RECORD_PROOF_BYTES, RecordResponse,
 };
 
 pub use error::AnchoringError;
+pub use key::{anchored_key, deployment_id};
 pub use snapshot::{ANCHORED_SNAPSHOT_BYTES, AnchoredSnapshot, VerifiedSnapshot};
 
 use crate::{BlsSigner, ClientError, VeraClient, client::ANCHOR_ADDRESS};

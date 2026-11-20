@@ -1,13 +1,18 @@
-//! Anchor precompile dispatch: ABI decode of anchor submissions.
+//! Anchor precompile dispatch: ABI decode and finality verification of anchor
+//! submissions, recorded by the identity module.
+
+mod submission;
+#[cfg(test)]
+mod tests;
 
 use alloy_primitives::FixedBytes;
 use alloy_sol_types::SolCall;
 use vera_domain::{FinalizedArtifacts, RefusalKind};
 use vera_modules::types::BlockExecCtx;
 use vera_modules::vera::VeraModule;
-use vera_modules::vera::anchors::{
-    AnchorError, AnchorSubmission, MAX_ANCHOR_ARTIFACT_BYTES, abi::IAnchor,
-};
+use vera_modules::vera::anchors::{AnchorError, MAX_ANCHOR_ARTIFACT_BYTES, abi::IAnchor};
+
+use submission::{AnchorRefusal, AnchorSubmission};
 
 use super::refusal::Refuse;
 use super::{
@@ -23,9 +28,17 @@ impl Refuse for AnchorError {
         match self {
             Self::TooLarge => RefusalKind::ArgumentOutOfBounds,
             Self::InvalidConsensusKey => RefusalKind::UndecodableInput,
-            Self::Finality(_) => RefusalKind::InvalidProof,
             Self::NotNewer { .. } | Self::LowerTerm { .. } => RefusalKind::NotNewer,
             Self::MalformedRecord => RefusalKind::StateError,
+        }
+    }
+}
+
+impl Refuse for AnchorRefusal {
+    fn refusal_kind(&self) -> RefusalKind {
+        match self {
+            Self::Anchor(error) => error.refusal_kind(),
+            Self::Finality(_) => RefusalKind::InvalidProof,
         }
     }
 }
@@ -64,7 +77,12 @@ pub(super) fn dispatch(
             epoch_material: call.epochMaterial.to_vec(),
         },
     };
-    match module.anchor_revision(block_ctx, &submission) {
+    let anchored = submission.verify().and_then(|verified| {
+        module
+            .record_anchor(block_ctx, &verified.consensus_key, &verified.revision)
+            .map_err(AnchorRefusal::from)
+    });
+    match anchored {
         Ok(anchored) => {
             let record = &anchored.record;
             let logs = if anchored.recorded {
@@ -86,7 +104,9 @@ pub(super) fn dispatch(
                 logs,
             ))
         }
-        Err(AnchorError::MalformedRecord) => Err(internal_fault(AnchorError::MalformedRecord)),
+        Err(AnchorRefusal::Anchor(AnchorError::MalformedRecord)) => {
+            Err(internal_fault(AnchorError::MalformedRecord))
+        }
         Err(error) => Ok(err_dispatch(error)),
     }
 }

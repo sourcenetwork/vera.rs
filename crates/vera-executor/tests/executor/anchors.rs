@@ -89,7 +89,10 @@ fn a_native_anchor_is_recorded_and_a_fork_another_deployment_or_a_regression_is_
     let log = &receipts[0].logs()[0];
     assert_eq!(log.address, ANCHOR_ADDRESS);
     let event = IAnchor::RevisionAnchored::decode_log_data(&log.data).unwrap();
-    assert_eq!(event.deployment.0, deployment_id(&deployment.key()).0);
+    assert_eq!(
+        event.deployment.0,
+        deployment_id(&deployment.key().encode()).0
+    );
     assert_eq!((event.sequence, event.height), (1, 20));
 
     let refusals: Vec<_> = receipts[1..]
