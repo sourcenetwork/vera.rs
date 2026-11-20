@@ -150,8 +150,9 @@ branch merging, causal policy pins, or the separate ACP v2 design.
 compiled policy, and enqueues cleanup in one atomic operation. Repeating deletion
 returns `false` without adding another job. Ownership, relationships, commitments,
 amendments and policy commands stop being available through policy-aware APIs at
-that execution revision. Recreating the same definition allocates a new policy ID;
-it cannot recover grants from the deleted policy.
+that execution revision. Recreating the same definition takes another nonce, or
+waits for cleanup to finish, and gets an empty policy; it cannot recover grants
+from the deleted policy ([policy-ids.md](policy-ids.md)).
 
 Cleanup runs deterministically after each block. Policy, relation-generation and
 object-incarnation queues share at most eight visits per tick, each serving up to
@@ -237,11 +238,11 @@ Archive and other module operations have separate resource behavior.
 5,000-unit dispatch base plus a caller-owned creation allowance. Each reserves
 leaf calldata processing at eight units per 16 bytes before owned ABI or JSON
 decoding. The module separately reserves definition processing before compilation,
-borrowed metadata fields before validation/cloning, and policy-counter and
-live/retired-identifier reads before decoding. Record reads and prepared writes
+borrowed metadata fields before validation/cloning, and live/retired-identifier
+reads before decoding. Record reads and prepared writes
 use the [policy edit prices](#policy-edit-work-accounting). The complete encoded
-policy and counter update must fit before either is written or the cache changes.
-A failed creation therefore leaves policy allocation unchanged.
+policy must fit before it is written or the cache changes. A failed creation
+therefore leaves state unchanged.
 
 Bearer creation also charges definition bytes before operation hashing and shares
 the allowance with retained-outcome reads/writes. An authenticated retry can read

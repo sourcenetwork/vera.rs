@@ -456,16 +456,15 @@ uses a process-global proactor and is not covered.
 ## Seeded policies
 
 `SoloGenesis::policies` lists ACP policies the deployment starts with. Each
-entry names its definition, the counter its identifier is derived from and the
-DID recorded as its owner, so a host that already names a policy by an
-identifier, as a content-derived one with a fixed counter, finds it under that
-identifier on a new deployment. Two entries may share a counter when their
-definitions differ. Policies created later take counters above the highest one
-seeded and above the number of policies seeded.
+entry names its definition, the DID recorded as its owner and the owner's
+nonce; the policy ID is derived from the three
+([policy-ids.md](policy-ids.md)), so a host computes it with
+`vera_client::predict_policy_id` before the deployment exists. Two hosts that
+seed one definition under different owner keys get different IDs.
 
 The list is part of the deployment's identity: reopening a directory with a
-different list is refused. A list that does not compile, or names one
-identifier twice, is refused with `SoloError::Policies` before anything is
+different list is refused. A list that does not compile, or yields one
+ID twice, is refused with `SoloError::Policies` before anything is
 stored, so a corrected list starts in the same directory. A seeded policy
 records no creating transaction, worker or creation revision.
 
