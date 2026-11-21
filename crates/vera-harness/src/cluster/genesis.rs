@@ -46,7 +46,7 @@ pub struct VeraGenesis {
     /// Number of blocks in each DKG epoch.
     #[serde(default, skip_serializing_if = "is_default_blocks_per_epoch")]
     pub blocks_per_epoch: u64,
-    /// Pipelined consensus parameters. Omission preserves rotating leaders.
+    /// Pipelined consensus parameters. Omission selects rotating leaders.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub simplex: Option<vera_domain::SimplexParameters>,
 }
@@ -124,7 +124,7 @@ impl Default for GenesisBuilder {
             extra_storage: Vec::new(),
             epoch_info: None,
             blocks_per_epoch: None,
-            simplex: None,
+            simplex: Some(vera_domain::SimplexParameters::default()),
         }
     }
 }
@@ -135,30 +135,9 @@ impl GenesisBuilder {
         Self::default()
     }
 
-    /// Pre-configured for devnet (matches `VeraGenesis::devnet()`).
+    /// Pre-configured for devnet: chain ID 9001 and pipelined consensus.
     pub fn devnet() -> Self {
-        Self {
-            chain_id: 9001,
-            operators: None,
-            policies: Vec::new(),
-            node_demerits: Vec::new(),
-            allocations: vec![
-                GenesisAllocation {
-                    address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
-                    balance: "1000000000000000000000".to_string(),
-                },
-                GenesisAllocation {
-                    address: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8".to_string(),
-                    balance: "1000000000000000000000".to_string(),
-                },
-            ],
-            validators: Vec::new(),
-            contracts: Vec::new(),
-            extra_storage: Vec::new(),
-            epoch_info: None,
-            blocks_per_epoch: None,
-            simplex: None,
-        }
+        Self::default()
     }
 
     /// Set the initial operator approval policy.
@@ -297,9 +276,17 @@ impl GenesisBuilder {
     }
 
     /// Configure bounded stable-leader consensus for this deployment.
-    /// Unless explicitly set, the epoch length becomes 192 blocks.
+    /// Unless explicitly set, the epoch length is 192 blocks.
     pub const fn simplex(mut self, parameters: vera_domain::SimplexParameters) -> Self {
         self.simplex = Some(parameters);
+        self
+    }
+
+    /// Select rotating leaders with per-view VRF seeds instead of pipelined
+    /// consensus. Unless explicitly set, the epoch length is 20 blocks.
+    #[must_use]
+    pub const fn rotating(mut self) -> Self {
+        self.simplex = None;
         self
     }
 
@@ -364,7 +351,11 @@ mod tests {
     fn devnet_genesis() {
         let genesis = GenesisBuilder::devnet().build();
         assert_eq!(genesis.chain_id, 9001);
-        assert_eq!(genesis.allocations.len(), 2);
+        assert!(genesis.allocations.is_empty());
+        assert_eq!(
+            genesis.simplex,
+            Some(vera_domain::SimplexParameters::default())
+        );
     }
 
     #[test]
@@ -408,7 +399,11 @@ mod tests {
     #[test]
     fn pipelined_epoch_default_preserves_explicit_lengths() {
         let parameters = vera_domain::SimplexParameters::default();
-        assert_eq!(GenesisBuilder::devnet().build().blocks_per_epoch, 20);
+        assert_eq!(GenesisBuilder::devnet().build().blocks_per_epoch, 192);
+        assert_eq!(
+            GenesisBuilder::devnet().rotating().build().blocks_per_epoch,
+            20
+        );
         assert_eq!(
             GenesisBuilder::devnet()
                 .simplex(parameters)

@@ -3,22 +3,21 @@ use super::*;
 #[test]
 fn readiness_requires_a_matching_successful_rpc_response() {
     for body in [
-        r#"{"jsonrpc":"2.0","id":1,"result":"0x0"}"#,
-        r#"{"jsonrpc":"2.0","id":1,"result":"0x7a69","error":null}"#,
+        r#"{"jsonrpc":"2.0","id":1,"result":{"chainId":0}}"#,
+        r#"{"jsonrpc":"2.0","id":1,"result":{"chainId":31337,"validatorIndex":2},"error":null}"#,
     ] {
         assert!(valid_response(body.as_bytes()));
     }
     for body in [
         r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"private"}}"#,
-        r#"{"jsonrpc":"2.0","id":2,"result":"0x1"}"#,
-        r#"{"jsonrpc":"1.0","id":1,"result":"0x1"}"#,
-        r#"{"id":1,"result":"0x1"}"#,
-        r#"{"jsonrpc":"2.0","id":1,"result":"not-a-deployment"}"#,
-        r#"{"jsonrpc":"2.0","id":1,"result":"0x"}"#,
-        r#"{"jsonrpc":"2.0","id":1,"result":"0x+1"}"#,
-        r#"{"jsonrpc":"2.0","id":1,"result":"0x10000000000000000"}"#,
-        r#"{"jsonrpc":"2.0","id":1,"result":1}"#,
-        r#"{"jsonrpc":"2.0","id":1,"result":"0x1","error":{"code":-1}}"#,
+        r#"{"jsonrpc":"2.0","id":2,"result":{"chainId":1}}"#,
+        r#"{"jsonrpc":"1.0","id":1,"result":{"chainId":1}}"#,
+        r#"{"id":1,"result":{"chainId":1}}"#,
+        r#"{"jsonrpc":"2.0","id":1,"result":{"chainId":"0x1"}}"#,
+        r#"{"jsonrpc":"2.0","id":1,"result":{"chainId":-1}}"#,
+        r#"{"jsonrpc":"2.0","id":1,"result":{}}"#,
+        r#"{"jsonrpc":"2.0","id":1,"result":"0x1"}"#,
+        r#"{"jsonrpc":"2.0","id":1,"result":{"chainId":1},"error":{"code":-1}}"#,
         "[]",
         "private invalid response",
     ] {

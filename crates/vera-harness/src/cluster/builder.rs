@@ -56,7 +56,7 @@ impl Default for TestClusterBuilder {
             node_count: 1,
             seed: None,
             genesis: None,
-            preset: ConsensusPreset::Fast,
+            preset: ConsensusPreset::Normal,
             consensus_override: None,
             chain_id: 9001,
             rpc_max_connections: std::num::NonZeroU32::new(100).unwrap(),
@@ -98,7 +98,9 @@ impl TestClusterBuilder {
         self
     }
 
-    /// Set the consensus timing preset.
+    /// Set the consensus timing preset. Clusters default to
+    /// [`ConsensusPreset::Normal`]: pipelined leaders nullify most views under
+    /// the sub-second [`ConsensusPreset::Fast`] timeouts.
     #[must_use]
     pub const fn preset(mut self, p: ConsensusPreset) -> Self {
         self.preset = p;

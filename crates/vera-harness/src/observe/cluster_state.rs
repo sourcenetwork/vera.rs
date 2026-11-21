@@ -55,8 +55,7 @@ impl ClusterState {
 
     /// Wait until all healthy nodes reach at least the given block height.
     ///
-    /// Uses observed `finalized_height` from `vera_nodeStatus`, falling back to
-    /// indexed `latest_block_height` when no finalization observation is available.
+    /// Uses the finalized height reported by `vera_nodeStatus`.
     pub async fn wait_for_height(&self, height: u64, timeout: Duration) -> eyre::Result<()> {
         let deadline = tokio::time::Instant::now() + timeout;
 
@@ -77,7 +76,6 @@ impl ClusterState {
                             s.effective_height(),
                             s.finalized_height,
                             s.finalized_count,
-                            s.latest_block_height,
                             s.is_healthy,
                         )
                     })
