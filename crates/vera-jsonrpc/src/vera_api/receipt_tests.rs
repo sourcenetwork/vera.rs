@@ -16,7 +16,6 @@ fn refused_revision(submission: B256, refusal: &Refusal) -> Arc<BlockIndex> {
             gas_limit: 1_000_000,
             gas_used: 5_000,
             base_fee_per_gas: None,
-            prevrandao: B256::ZERO,
             transaction_hashes: vec![submission],
         },
         vec![],

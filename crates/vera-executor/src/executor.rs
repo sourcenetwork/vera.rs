@@ -296,7 +296,7 @@ impl VeraExecutor {
                 blk.beneficiary = context.header.beneficiary;
                 blk.gas_limit = context.header.gas_limit;
                 blk.basefee = context.header.base_fee_per_gas.unwrap_or_default();
-                blk.prevrandao = Some(context.prevrandao);
+                blk.prevrandao = Some(alloy_primitives::B256::ZERO);
             });
 
         let native_started = tracing::enabled!(target: "vera_diagnostics", tracing::Level::DEBUG)
@@ -598,7 +598,7 @@ mod tests {
             base_fee_per_gas: Some(0),
             ..Default::default()
         };
-        let context = BlockContext::new(header, B256::ZERO, B256::ZERO);
+        let context = BlockContext::new(header, B256::ZERO);
         let txs: Vec<Bytes> = vec![];
         let outcome = execute(&executor, &context, &txs).unwrap();
         assert_eq!(outcome.gas_used, 0);
@@ -687,7 +687,6 @@ mod tests {
                     base_fee_per_gas: Some(0),
                     ..Default::default()
                 },
-                B256::ZERO,
                 B256::ZERO,
             );
             let (proposed, next) = executor
@@ -779,7 +778,6 @@ mod tests {
                         ..Default::default()
                     },
                     B256::ZERO,
-                    B256::ZERO,
                 );
                 context.is_verification = verification;
                 let error = executor
@@ -813,7 +811,6 @@ mod tests {
                 gas_limit: 100_000_000,
                 ..Default::default()
             },
-            B256::ZERO,
             B256::ZERO,
         );
         let before = parallel.snapshot().modules.serialize_stores();
@@ -1021,7 +1018,7 @@ mod tests {
             ..Default::default()
         };
         // Building mode (is_verification = false)
-        let context = BlockContext::new(header, B256::ZERO, B256::ZERO);
+        let context = BlockContext::new(header, B256::ZERO);
 
         // Malformed native tx: 0x45 + garbage
         let bad_native = Bytes::from(vec![0x45, 0xFF, 0xFF]);
@@ -1046,7 +1043,7 @@ mod tests {
             base_fee_per_gas: Some(0),
             ..Default::default()
         };
-        let context = BlockContext::new(header, B256::ZERO, B256::ZERO);
+        let context = BlockContext::new(header, B256::ZERO);
         let txs: Vec<Bytes> = vec![];
 
         // Should not panic — end-block hooks are no-ops

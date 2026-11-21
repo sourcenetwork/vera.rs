@@ -162,7 +162,6 @@ pub fn index_finalized_block(
         gas_limit,
         gas_used,
         base_fee_per_gas: Some(0),
-        prevrandao: block.prevrandao,
         transaction_hashes: tx_hashes.clone(),
     };
 
@@ -197,7 +196,7 @@ pub fn subscription_data(
         gas_limit: U64::from(gas_limit),
         gas_used: U64::from(gas_used),
         extra_data: Bytes::new(),
-        mix_hash: block.prevrandao,
+        mix_hash: B256::ZERO,
         nonce: Default::default(),
         base_fee_per_gas: Some(U256::ZERO),
         miner: Address::ZERO,

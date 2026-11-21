@@ -70,7 +70,6 @@ fn block(height: u64) -> BlockContext {
             ..Header::default()
         },
         B256::ZERO,
-        B256::ZERO,
     )
 }
 

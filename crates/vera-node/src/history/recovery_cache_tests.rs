@@ -106,7 +106,6 @@ async fn recent_cache_recovery_matches_full_replay_and_preserves_archived_submis
                 block.gas_limit,
                 block.gas_used,
                 block.base_fee_per_gas,
-                block.prevrandao,
                 block.transaction_hashes,
             )
         })

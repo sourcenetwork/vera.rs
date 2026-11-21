@@ -176,10 +176,9 @@ evidence. A stalled term is abandoned through Commonware's nullification path.
 Terms must contain 2–64 views. Optimistic lookahead may be zero to disable
 optimism, or at most 16 views and strictly less than the term length. The stall
 timeout must be 1–60000 milliseconds. All parameters are included in the genesis
-fingerprint, which the genesis block commits in its `prevrandao` field. Changing
-parameters requires a new deployment; restarting against different parameters is
-rejected.
+fingerprint, which the genesis block names as its parent. Changing parameters
+requires a new deployment; restarting against different parameters is rejected.
 
 Deployments accept native signed requests only. EVM submissions are rejected at
-admission, and proposals containing EVM transactions are invalid. Blocks after
-genesis carry no consensus randomness and a zero `prevrandao`. Threshold signatures and DKG/resharing remain enabled.
+admission, and proposals containing EVM transactions are invalid. Blocks carry
+no consensus randomness. Threshold signatures and DKG/resharing remain enabled.

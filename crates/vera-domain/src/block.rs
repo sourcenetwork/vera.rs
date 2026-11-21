@@ -3,10 +3,7 @@
 use alloy_evm::revm::primitives::{B256, keccak256};
 use bytes::{Buf, BufMut};
 use commonware_codec::{Encode, EncodeSize, Error as CodecError, RangeCfg, Read, ReadExt, Write};
-use commonware_consensus::{
-    simplex::scheme::bls12381_threshold::vrf::Seed,
-    types::{Epoch, Round, View},
-};
+use commonware_consensus::types::{Epoch, Round, View};
 use commonware_cryptography::{
     Committable, Digestible, Hasher as _, Sha256, bls12381::primitives::variant::MinSig, ed25519,
 };
@@ -67,10 +64,6 @@ pub struct Block {
     /// Term of the device that proposed the block. It never decreases along
     /// a chain; a switch of the active device raises it.
     pub term: u64,
-    /// Seed-derived randomness used for future prevrandao.
-    pub prevrandao: B256,
-    /// Authenticated prior-round seed for rotating consensus.
-    pub randomness: Option<Seed<MinSig>>,
     /// State commitment resulting from this block (pre-commit QMDB root).
     pub state_root: StateRoot,
     /// Module state root (combined hash of ACP, Bulletin, Vera, NativeNonce state).
@@ -175,17 +168,10 @@ impl Write for Block {
         self.height.write(buf);
         self.timestamp.write(buf);
         self.term.write(buf);
-        Idents::write_b256(&self.prevrandao, buf);
         self.state_root.write(buf);
         Idents::write_b256(&self.module_state_root, buf);
         self.txs.write(buf);
-        if let Some(seed) = &self.randomness {
-            4_u8.write(buf);
-            self.payload.write(buf);
-            self.native_targets.write(buf);
-            self.receipt_commitment.map(|value| value.0).write(buf);
-            seed.write(buf);
-        } else if let Some(commitment) = &self.receipt_commitment {
+        if let Some(commitment) = &self.receipt_commitment {
             3_u8.write(buf);
             self.payload.write(buf);
             self.native_targets.write(buf);
@@ -208,29 +194,18 @@ impl EncodeSize for Block {
             + self.height.encode_size()
             + self.timestamp.encode_size()
             + self.term.encode_size()
-            + 32
             + self.state_root.encode_size()
             + 32
             + self.txs.encode_size()
-            + self.randomness.as_ref().map_or_else(
-                || {
-                    if self.receipt_commitment.is_some() {
-                        1 + self.payload.encode_size() + self.native_targets.encode_size() + 32
-                    } else {
-                        self.payload.encode_size()
-                            + self
-                                .native_targets
-                                .as_ref()
-                                .map_or(0, |targets| 1 + targets.encode_size())
-                    }
-                },
-                |seed| {
-                    1 + self.payload.encode_size()
-                        + self.native_targets.encode_size()
-                        + self.receipt_commitment.map(|value| value.0).encode_size()
-                        + seed.encode_size()
-                },
-            )
+            + if self.receipt_commitment.is_some() {
+                1 + self.payload.encode_size() + self.native_targets.encode_size() + 32
+            } else {
+                self.payload.encode_size()
+                    + self
+                        .native_targets
+                        .as_ref()
+                        .map_or(0, |targets| 1 + targets.encode_size())
+            }
             + self.db_targets.encode_size()
     }
 }
@@ -245,7 +220,6 @@ impl Read for Block {
         let height = u64::read(buf)?;
         let timestamp = u64::read(buf)?;
         let term = u64::read(buf)?;
-        let prevrandao = Idents::read_b256(buf)?;
         let state_root = StateRoot::read(buf)?;
         let module_state_root = Idents::read_b256(buf)?;
         let txs = Vec::<Tx>::read_cfg(
@@ -256,11 +230,10 @@ impl Read for Block {
             ),
         )?;
         // Tags 0 and 1 retain the original optional DKG payload encoding.
-        let (payload, native_targets, receipt_commitment, randomness) = match u8::read(buf)? {
-            0 => (None, None, None, None),
+        let (payload, native_targets, receipt_commitment) = match u8::read(buf)? {
+            0 => (None, None, None),
             1 => (
                 Some(DkgPayload::read_cfg(buf, &DKG_PAYLOAD_CFG)?),
-                None,
                 None,
                 None,
             ),
@@ -268,19 +241,11 @@ impl Read for Block {
                 Option::<DkgPayload>::read_cfg(buf, &DKG_PAYLOAD_CFG)?,
                 Some(<[DbTarget; 4]>::read(buf)?),
                 None,
-                None,
             ),
             3 => (
                 Option::<DkgPayload>::read_cfg(buf, &DKG_PAYLOAD_CFG)?,
                 Option::<[DbTarget; 4]>::read(buf)?,
                 Some(Idents::read_b256(buf)?),
-                None,
-            ),
-            4 => (
-                Option::<DkgPayload>::read_cfg(buf, &DKG_PAYLOAD_CFG)?,
-                Option::<[DbTarget; 4]>::read(buf)?,
-                Option::<[u8; 32]>::read(buf)?.map(B256::from),
-                Some(Seed::<MinSig>::read(buf)?),
             ),
             _ => return Err(CodecError::Invalid("Block", "unknown commitment encoding")),
         };
@@ -291,8 +256,6 @@ impl Read for Block {
             height,
             timestamp,
             term,
-            prevrandao,
-            randomness,
             state_root,
             module_state_root,
             txs,
@@ -322,8 +285,6 @@ impl fmt::Debug for Block {
             .field("height", &self.height)
             .field("timestamp", &self.timestamp)
             .field("term", &self.term)
-            .field("prevrandao", &self.prevrandao)
-            .field("randomness", &self.randomness)
             .field("state_root", &self.state_root)
             .field("module_state_root", &self.module_state_root)
             .field("txs", &self.txs.len())
@@ -396,8 +357,6 @@ mod tests {
             height: 42,
             timestamp: 1_700_000_000,
             term: 0,
-            prevrandao: B256::repeat_byte(0xab),
-            randomness: None,
             state_root: StateRoot(B256::repeat_byte(0xcd)),
             module_state_root: B256::ZERO,
             txs: vec![Tx::new(Bytes::from_static(&[0xde, 0xad, 0xbe, 0xef]))],
@@ -608,8 +567,6 @@ mod tests {
             height: 0,
             timestamp: 0,
             term: 0,
-            prevrandao: B256::ZERO,
-            randomness: None,
             state_root: StateRoot(B256::ZERO),
             module_state_root: B256::ZERO,
             txs: vec![],

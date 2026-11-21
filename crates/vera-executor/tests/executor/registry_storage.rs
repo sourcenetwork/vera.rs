@@ -157,7 +157,6 @@ fn native_membership_cannot_remove_or_deactivate_the_last_active_member() {
             ..Default::default()
         },
         B256::ZERO,
-        B256::ZERO,
     );
     let (outcome, _) = executor
         .execute_with_modules(&state, &context, &requests, executor.snapshot())
@@ -197,7 +196,6 @@ fn native_membership_changes_share_proposal_storage_and_preserve_parent() {
             gas_limit: 30_000_000,
             ..Default::default()
         },
-        B256::ZERO,
         B256::ZERO,
     );
     let parent = executor.snapshot();
@@ -263,7 +261,6 @@ fn native_membership_storage_failure_aborts_the_proposal(#[case] building: bool)
             ..Default::default()
         },
         B256::ZERO,
-        B256::ZERO,
     );
     context.is_verification = !building;
     let error = executor
@@ -291,7 +288,6 @@ fn native_membership_requires_the_configured_actor_permission() {
             gas_limit: 30_000_000,
             ..Default::default()
         },
-        B256::ZERO,
         B256::ZERO,
     );
     let (outcome, _) = executor
@@ -329,7 +325,6 @@ fn native_membership_bounds_the_full_stored_count(#[case] count: U256, #[case] c
             gas_limit: 30_000_000,
             ..Default::default()
         },
-        B256::ZERO,
         B256::ZERO,
     );
     let result = executor.execute_with_modules(&state, &context, &[request], executor.snapshot());
@@ -374,7 +369,6 @@ fn native_membership_rejects_reusing_an_inactive_consensus_identity() {
             ..Default::default()
         },
         B256::ZERO,
-        B256::ZERO,
     );
     let (outcome, _) = executor
         .execute_with_modules(
@@ -411,7 +405,6 @@ fn native_membership_rejects_truncated_record_fields(#[case] offset: u64, #[case
             gas_limit: 30_000_000,
             ..Default::default()
         },
-        B256::ZERO,
         B256::ZERO,
     );
     let (outcome, parent) = executor
@@ -666,7 +659,6 @@ fn epoch_rosters_capture_the_boundary_branch_and_survive_later_changes() {
             ..Default::default()
         },
         B256::ZERO,
-        B256::ZERO,
     );
     let (_, before) = executor
         .execute_with_modules(
@@ -763,7 +755,6 @@ fn membership_epoch_capacity_rejects_addition_and_both_reactivation_paths(
             gas_limit: 30_000_000,
             ..Default::default()
         },
-        B256::ZERO,
         B256::ZERO,
     );
     let mut backup =
@@ -873,7 +864,6 @@ fn native_membership_account_failure_is_a_local_state_error(#[case] verification
             ..Default::default()
         },
         B256::ZERO,
-        B256::ZERO,
     );
     context.is_verification = verification;
     assert!(matches!(
@@ -897,7 +887,6 @@ fn epoch_roster_storage_failure_is_a_local_state_error() {
             gas_limit: 30_000_000,
             ..Default::default()
         },
-        B256::ZERO,
         B256::ZERO,
     )
     .with_verification();

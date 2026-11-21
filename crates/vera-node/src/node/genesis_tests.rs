@@ -128,7 +128,7 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
                 .await
                 .unwrap();
             assert!(block.native_targets.is_some());
-            assert_eq!(block.prevrandao, fingerprint(genesis).unwrap());
+            assert_eq!(block.parent.0, fingerprint(genesis).unwrap());
             assert!(!directory.join("native-genesis.intent").exists());
             let modules = NativeStateSet::init(
                 context.child("check_modules"),
@@ -360,7 +360,7 @@ fn pipeline_parameters_bind_the_genesis_identity_and_restart() {
                 .await
                 .unwrap()
         });
-        assert_eq!(block.prevrandao, fingerprint(&genesis).unwrap());
+        assert_eq!(block.parent.0, fingerprint(&genesis).unwrap());
         identities.push(block.id());
         genesis.simplex.term_length += 1;
         let configured = &genesis;

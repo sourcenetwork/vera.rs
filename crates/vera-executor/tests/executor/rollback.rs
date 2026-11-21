@@ -148,7 +148,6 @@ pub(super) fn try_execute_with_executor(
             ..Default::default()
         },
         B256::ZERO,
-        B256::ZERO,
     );
     let (outcome, modules) =
         executor.execute_with_modules(state, &context, &[wire], executor.snapshot())?;

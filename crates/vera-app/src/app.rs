@@ -136,7 +136,7 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
             base_fee_per_gas: Some(0),
             ..Default::default()
         };
-        BlockContext::new(header, B256::ZERO, B256::ZERO)
+        BlockContext::new(header, B256::ZERO)
     }
 
     async fn re_execute(
@@ -304,8 +304,6 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             height,
             timestamp,
             term,
-            prevrandao: B256::ZERO,
-            randomness: None,
             state_root: executed.state_root,
             module_state_root: executed.outcome.module_state_root,
             txs,
@@ -384,9 +382,6 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         }
         if block.context != context.1 {
             warn!(?digest, "block consensus context mismatch");
-            return None;
-        }
-        if block.randomness.is_some() || block.prevrandao != B256::ZERO {
             return None;
         }
         if !self.admits_term(&block, &parent) {

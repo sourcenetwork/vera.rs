@@ -56,7 +56,6 @@ pub(super) fn index_block(index: &BlockIndex, block: &vera_domain::Block) {
             gas_limit: 30_000_000,
             gas_used: 0,
             base_fee_per_gas: None,
-            prevrandao: block.prevrandao,
             transaction_hashes: vec![],
         },
         vec![],

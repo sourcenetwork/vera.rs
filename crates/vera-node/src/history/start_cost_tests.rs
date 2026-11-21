@@ -66,7 +66,6 @@ pub(super) fn heartbeat(
     let mut next = block(height, parent.id());
     next.state_root = StateRoot(noise(0));
     next.module_state_root = noise(1);
-    next.prevrandao = noise(2);
     next.native_targets = Some([vera_domain::DbTarget::default(); 4]);
     next.receipt_commitment = Some(vera_executor::receipt_commitment(100, &[]));
     if (height + 1).is_multiple_of(epoch_length) {

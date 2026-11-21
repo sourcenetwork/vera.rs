@@ -131,8 +131,9 @@ pub(super) async fn load_or_create(
     crate::crash::point(data_dir, "native-genesis");
     let mut block = vera_app::genesis_block(root, targets, module_root);
     block.timestamp = genesis.timestamp;
-    // Bind the native schema and consensus parameters into the deployment identity.
-    block.prevrandao = fingerprint;
+    // The genesis block has no parent: its parent field binds the native schema
+    // and consensus parameters into the deployment identity.
+    block.parent = vera_domain::BlockId(fingerprint);
     block.receipt_commitment = Some(vera_executor::receipt_commitment(0, &[]));
     block.native_targets = Some(
         [

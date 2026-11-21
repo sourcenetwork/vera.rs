@@ -12,8 +12,6 @@ pub struct BlockContext {
     pub header: Header,
     /// Parent block hash.
     pub parent_hash: B256,
-    /// Previous block's randomness (prevrandao).
-    pub prevrandao: B256,
     /// True when re-executing a block for verification or finalization
     /// (as opposed to building a new proposal). Executors use this to
     /// decide whether speculative module state should be
@@ -27,11 +25,10 @@ pub struct BlockContext {
 impl BlockContext {
     /// Create a new block context.
     #[must_use]
-    pub const fn new(header: Header, parent_hash: B256, prevrandao: B256) -> Self {
+    pub const fn new(header: Header, parent_hash: B256) -> Self {
         Self {
             header,
             parent_hash,
-            prevrandao,
             is_verification: false,
             expected_module_state_root: None,
         }
@@ -65,9 +62,7 @@ mod tests {
     fn block_context_new() {
         let header = Header::default();
         let parent_hash = B256::repeat_byte(1);
-        let prevrandao = B256::ZERO;
-        let context = BlockContext::new(header, parent_hash, prevrandao);
-        assert_eq!(context.prevrandao, B256::ZERO);
+        let context = BlockContext::new(header, parent_hash);
         assert_eq!(context.parent_hash, parent_hash);
     }
 }

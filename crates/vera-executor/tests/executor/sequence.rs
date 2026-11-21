@@ -69,7 +69,6 @@ fn execute(
             ..Default::default()
         },
         B256::ZERO,
-        B256::ZERO,
     );
     context.is_verification = verify;
     let executor = VeraExecutor::new(9001);

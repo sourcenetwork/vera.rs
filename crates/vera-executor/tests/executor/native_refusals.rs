@@ -45,7 +45,6 @@ fn execute(target: Address, calldata: Vec<u8>) -> ExecutionReceipt {
             ..Default::default()
         },
         B256::ZERO,
-        B256::ZERO,
     );
     let (mut outcome, _) = executor
         .execute_with_modules(

@@ -72,7 +72,7 @@ pub struct RpcBlock {
     pub gas_used: U64,
     /// Extra data.
     pub extra_data: Bytes,
-    /// Mix hash (prevrandao).
+    /// Mix hash; always zero.
     pub mix_hash: B256,
     /// Nonce.
     pub nonce: B64,

@@ -49,7 +49,6 @@ fn execute(calls: Vec<Vec<u8>>) -> Vec<ExecutionReceipt> {
             ..Default::default()
         },
         B256::ZERO,
-        B256::ZERO,
     );
     let txs: Vec<Bytes> = calls
         .into_iter()

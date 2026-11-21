@@ -93,8 +93,6 @@ impl TestDeployment {
             height,
             timestamp: 1_700_000_000 + height,
             term,
-            prevrandao: B256::ZERO,
-            randomness: None,
             state_root: StateRoot(B256::repeat_byte(0x01)),
             module_state_root,
             txs: vec![crate::Tx::new(Bytes::from_static(b"test"))],

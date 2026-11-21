@@ -150,7 +150,7 @@ impl MockStateDb {
 fn test_execute_empty_transactions_returns_empty_outcome(#[case] chain_id: u64) {
     let executor = VeraExecutor::new(chain_id);
     let state = MockStateDb::new();
-    let context = BlockContext::new(Header::default(), B256::ZERO, B256::ZERO);
+    let context = BlockContext::new(Header::default(), B256::ZERO);
 
     let (outcome, _) = executor
         .execute_with_modules(&state, &context, &[], executor.snapshot())
@@ -169,23 +169,11 @@ fn test_execute_empty_transactions_returns_empty_outcome(#[case] chain_id: u64) 
 fn test_block_context_creation_with_defaults() {
     let header = Header::default();
     let parent_hash = B256::repeat_byte(1);
-    let prevrandao = B256::ZERO;
 
-    let context = BlockContext::new(header.clone(), parent_hash, prevrandao);
+    let context = BlockContext::new(header.clone(), parent_hash);
 
-    assert_eq!(context.prevrandao, B256::ZERO);
     assert_eq!(context.parent_hash, parent_hash);
     assert_eq!(context.header.number, header.number);
-}
-
-#[test]
-fn test_block_context_creation_with_custom_prevrandao() {
-    let header = Header::default();
-    let prevrandao = B256::from([0xAB; 32]);
-
-    let context = BlockContext::new(header, B256::ZERO, prevrandao);
-
-    assert_eq!(context.prevrandao, B256::from([0xAB; 32]));
 }
 
 #[rstest]
@@ -199,13 +187,10 @@ fn test_block_context_with_various_header_values(#[case] number: u64, #[case] ga
         gas_limit,
         ..Default::default()
     };
-    let prevrandao = B256::from([number as u8; 32]);
-
-    let context = BlockContext::new(header, B256::ZERO, prevrandao);
+    let context = BlockContext::new(header, B256::ZERO);
 
     assert_eq!(context.header.number, number);
     assert_eq!(context.header.gas_limit, gas_limit);
-    assert_eq!(context.prevrandao, prevrandao);
 }
 
 // ----------------------------------------------------------------------------
@@ -419,7 +404,7 @@ fn test_execute_with_populated_state() {
         },
     );
 
-    let context = BlockContext::new(Header::default(), B256::ZERO, B256::ZERO);
+    let context = BlockContext::new(Header::default(), B256::ZERO);
     let (outcome, _) = executor
         .execute_with_modules(&state, &context, &[], executor.snapshot())
         .expect("execution should succeed");

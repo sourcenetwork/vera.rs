@@ -91,7 +91,6 @@ fn context() -> BlockContext {
             ..Default::default()
         },
         B256::ZERO,
-        B256::ZERO,
     )
 }
 

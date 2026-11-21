@@ -99,7 +99,6 @@ fn context(gas_limit: u64) -> BlockContext {
             ..Default::default()
         },
         B256::ZERO,
-        B256::ZERO,
     )
 }
 

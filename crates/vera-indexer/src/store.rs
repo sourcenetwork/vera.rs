@@ -324,7 +324,6 @@ mod tests {
             gas_limit: 30_000_000,
             gas_used: 21_000,
             base_fee_per_gas: Some(1_000_000_000),
-            prevrandao: B256::ZERO,
             transaction_hashes: vec![],
         }
     }

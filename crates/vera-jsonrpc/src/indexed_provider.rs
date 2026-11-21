@@ -407,7 +407,7 @@ fn indexed_block_to_rpc(block: IndexedBlock) -> RpcBlock {
         gas_limit: U64::from(block.gas_limit),
         gas_used: U64::from(block.gas_used),
         extra_data: Bytes::new(),
-        mix_hash: block.prevrandao,
+        mix_hash: B256::ZERO,
         nonce: Default::default(),
         base_fee_per_gas: block.base_fee_per_gas.map(U256::from),
         miner: Address::ZERO,
@@ -765,7 +765,6 @@ mod tests {
             gas_limit: 30_000_000,
             gas_used: 21_000,
             base_fee_per_gas: Some(1_000_000_000),
-            prevrandao: B256::ZERO,
             transaction_hashes: vec![],
         }
     }
