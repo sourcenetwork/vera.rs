@@ -287,7 +287,9 @@ impl VeraApiImpl {
 #[jsonrpsee::core::async_trait]
 impl VeraApiServer for VeraApiImpl {
     async fn node_status(&self) -> RpcResult<NodeStatus> {
-        Ok(self.state.status())
+        let mut status = self.state.status();
+        status.head_height = self.index.as_ref().map(|index| index.head_block_number());
+        Ok(status)
     }
 
     async fn term_certificate(&self) -> RpcResult<Option<vera_domain::TermCertificate>> {

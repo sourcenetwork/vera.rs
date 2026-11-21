@@ -89,3 +89,18 @@ async fn recent_and_archived_receipts_name_the_same_refusal() {
         })
     );
 }
+
+#[tokio::test]
+async fn node_status_reports_the_execution_index_head_apart_from_finality() {
+    let state = Arc::new(NodeState::new(1, 0, 1));
+    let mut api = VeraApiImpl::new(state.clone(), None);
+    assert_eq!(api.node_status().await.unwrap().head_height, None);
+
+    api.index = Some(refused_revision(
+        B256::repeat_byte(1),
+        &Refusal::new(RefusingModule::Acp, RefusalKind::InvalidPolicy, "refused"),
+    ));
+    let status = api.node_status().await.unwrap();
+    assert_eq!(status.head_height, Some(1));
+    assert_eq!(status.finalized_height, None);
+}

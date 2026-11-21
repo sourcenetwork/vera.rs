@@ -204,6 +204,7 @@ impl NodeState {
             uptime_secs: self.inner.started_at.elapsed().as_secs(),
             current_view: None,
             finalized_height: finalized.map(|progress| progress.height),
+            head_height: None,
             finalized_epoch: finalized.map(|progress| progress.epoch),
             finalized_view: finalized.map(|progress| progress.view),
             finalized_count: self.inner.finalized_count.load(Ordering::Relaxed),
@@ -233,6 +234,9 @@ pub struct NodeStatus {
     pub current_view: Option<u64>,
     /// Latest published finalized execution height, including restored durable history.
     pub finalized_height: Option<u64>,
+    /// Newest revision in the execution index that serves receipt, revision and
+    /// proof reads, or null on a method table without an index.
+    pub head_height: Option<u64>,
     /// Epoch of `finalized_height`; reported together with its view.
     pub finalized_epoch: Option<u64>,
     /// View of `finalized_height`, not the live consensus view.
@@ -279,6 +283,7 @@ mod tests {
             "nullifiedCount",
             "peerCount",
             "finalizedHeight",
+            "headHeight",
             "finalizedEpoch",
             "finalizedView",
         ] {

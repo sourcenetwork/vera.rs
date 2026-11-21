@@ -138,12 +138,16 @@ impl VeraClient {
         parse_hex_u64(&hex)
     }
 
-    /// Return the latest block number (`eth_blockNumber`).
+    /// Return the newest revision in the node's execution index
+    /// (`vera_nodeStatus` `headHeight`): the revision its receipt, revision
+    /// and proof reads have reached.
     pub async fn block_number(&self) -> Result<u64, ClientError> {
-        let hex: String = self
-            .rpc_call_typed("eth_blockNumber", serde_json::json!([]))
-            .await?;
-        parse_hex_u64(&hex)
+        self.node_status()
+            .await?
+            .head_height
+            .ok_or(ClientError::InvalidResponse(
+                "node status has no execution head",
+            ))
     }
 
     /// Return the balance of an address (`eth_getBalance`).

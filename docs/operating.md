@@ -455,6 +455,8 @@ failure coverage alongside the completed-partition recovery matrix.
   durable history. They are null until observed. `snapshotRevision` separately
   records the recovered snapshot floor. Use height changes for progress alarms;
   `finalizedCount` counts callbacks in this process and is not a height.
+  `headHeight` is the newest revision in the execution index that receipt,
+  revision and proof reads are served from; `VeraClient::block_number` returns it.
 - `peerCount` is the number of peers the node holds an authenticated connection
   to, sampled every ten seconds from the network's connection metric. It is null
   before the first sample and on a deployment with one validator. It counts
