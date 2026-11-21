@@ -626,6 +626,7 @@ fn a_backup_that_synchronized_by_snapshot_takes_over_before_another_block() {
     quiet.pacing = Some(vera_node::SoloPacing {
         idle: vera_node::EmbeddedConfig::HEARTBEAT,
         batch: vera_node::SoloPacing::BATCH,
+        settled: vera_node::SoloPacing::SETTLED,
     });
     let laptop = block_on(EmbeddedNode::start(quiet)).unwrap();
     let signer = BlsSigner::new(80u64.into(), chain_id).unwrap();

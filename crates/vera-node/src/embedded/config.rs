@@ -142,6 +142,7 @@ impl EmbeddedConfig {
             pacing: Some(SoloPacing {
                 idle: Self::HEARTBEAT,
                 batch: SoloPacing::BATCH,
+                settled: SoloPacing::SETTLED,
             }),
             worker_threads: None,
             max_blocking_threads: None,

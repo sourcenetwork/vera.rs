@@ -255,6 +255,7 @@ async fn an_idle_node_publishes_each_heartbeat_block_as_it_finalizes() {
     settings.pacing = Some(SoloPacing {
         idle: heartbeat,
         batch: SoloPacing::BATCH,
+        settled: SoloPacing::SETTLED,
     });
     let node = EmbeddedNode::start(settings).await.unwrap();
     let mut headers = node
