@@ -27,9 +27,7 @@ pub(super) async fn load_or_create(
     genesis: &VeraGenesis,
     cache: &CacheRef,
 ) -> anyhow::Result<Block> {
-    if let Some(parameters) = genesis.simplex {
-        parameters.validate().map_err(anyhow::Error::msg)?;
-    }
+    genesis.simplex.validate().map_err(anyhow::Error::msg)?;
     let fingerprint = fingerprint(genesis)?;
     let path = data_dir.join("native-genesis.bin");
     if marker_exists(&path)? {

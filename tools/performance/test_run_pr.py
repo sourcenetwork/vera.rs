@@ -149,7 +149,7 @@ print({help_text!r} if sys.argv[1:] == ['validator', '--help'] else {side!r})
                 row = json.loads((destination / 'workload.jsonl').read_text())
                 self.assertEqual(row, dict(driver='head', node=side, checkout=side,
                                            arguments=['3', '7', '128', '1', 'normal', '100',
-                                                      '192', '0', str(objects), '256', '1', '1', '1']))
+                                                      '192', '0', str(objects), '256', '1', '1']))
                 self.assertEqual(manifest['format_version'], 2)
                 for field in ('source', 'runner_source', 'node_sha256', 'runner_sha256'):
                     self.assertEqual(manifest[field], identity[side][field])

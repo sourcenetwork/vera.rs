@@ -15,10 +15,8 @@ malformed values and inconsistent array/record links are errors.
 
 The active committee is also bounded by the configured epoch length. Commonware
 requires its dealer quorum to fit between the dealing phase and the final epoch
-artifact. With rotating leaders, 20 revisions per epoch permit 13 active members;
-87 permit the protocol maximum of 64. With stable leaders, the inclusion window
-must offer each dealer a proposing term because a proposer supplies only its own
-log. For an epoch length `B` and term length `L`, the window has
+artifact. The inclusion window must offer each dealer a proposing term because
+a proposer supplies only its own log. For an epoch length `B` and term length `L`, the window has
 `S = B - floor(B / 2) - 1` blocks and permits at most `ceil(S / L)` members,
 capped at 64. This assumes contiguous successful views and ready dealer logs.
 Skipped terms or delayed dealing can still fail a ceremony; the previous voting
@@ -144,9 +142,11 @@ also reject malformed configuration before changing state. After an approved
 parameter update, use its certified revision as the minimum for the read.
 
 
-## Pipelined native deployments
+## Pipelined consensus
 
-A new deployment can enable stable leaders and optimistic validation in genesis:
+Every deployment runs Simplex with stable leader terms and optimistic
+validation. Genesis states the parameters; omitting `simplex` selects the values
+below, and omitting `blocks_per_epoch` selects 192:
 
 ```json
 "blocks_per_epoch": 192,
@@ -157,11 +157,10 @@ A new deployment can enable stable leaders and optimistic validation in genesis:
 }
 ```
 
-This configuration permits up to six active members. Omitting `blocks_per_epoch`
-retains the rotating deployment default of 20, which is insufficient for four
-members with 16-view terms and is rejected at startup. The test harness generator
-uses 192 when pipelining is selected without an explicit epoch length; explicitly
-configured lengths are preserved and validated by the node. Longer terms or larger
+This configuration permits up to six active members. An epoch too short for the
+genesis committee, such as 20 blocks for four members with 16-view terms, is
+rejected at startup. The test harness generator also uses 192 unless a test
+states another length. Longer terms or larger
 committees require longer epochs. These settings prevent deterministic capacity
 starvation; they do not guarantee resharing under arbitrary network schedules.
 
@@ -177,15 +176,10 @@ evidence. A stalled term is abandoned through Commonware's nullification path.
 Terms must contain 2–64 views. Optimistic lookahead may be zero to disable
 optimism, or at most 16 views and strictly less than the term length. The stall
 timeout must be 1–60000 milliseconds. All parameters are included in the genesis
-fingerprint and, for all native deployments, committed in the genesis header's
-`prevrandao` field. Changing parameters requires a new deployment or an explicit
-migration; restarting against different parameters is rejected.
+fingerprint, which the genesis block commits in its `prevrandao` field. Changing
+parameters requires a new deployment; restarting against different parameters is
+rejected.
 
-Pipelined deployments accept native signed requests only. EVM submissions are
-rejected at admission, and proposals containing EVM transactions are invalid.
-Subsequent headers carry zero `prevrandao`; this field is not a randomness beacon.
-Native ACP, bulletin, identity and membership operations do not depend on EVM
-randomness. Threshold signatures and DKG/resharing remain enabled.
-
-Omitting `simplex` preserves rotating leaders, EVM execution and the existing
-per-view VRF handling. This preserves the encoding of existing genesis files.
+Deployments accept native signed requests only. EVM submissions are rejected at
+admission, and proposals containing EVM transactions are invalid. Blocks after
+genesis carry no consensus randomness and a zero `prevrandao`. Threshold signatures and DKG/resharing remain enabled.

@@ -386,7 +386,7 @@ def main():
             result = subprocess.run(['python3', 'tools/performance/record.py', '--node', str(launcher),
                                      '--runner', 'target/release/examples/operation_baseline', '--history', args.history,
                                      '--output', str(record), '--timeout-seconds', str(timeout), *arena_arguments,
-                                     str(count), str(rate), '128', '1', 'normal', '100', '192', '0', str(fixed_objects), '256', '1'],
+                                     str(count), str(rate), '128', '1', 'normal', '100', '192', '0', str(fixed_objects), '256'],
                                     env=environment, stdout=subprocess.DEVNULL, stderr=log)
         progress('workload', 'completed', result.returncode)
         records = {}

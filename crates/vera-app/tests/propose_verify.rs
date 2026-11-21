@@ -73,8 +73,7 @@ fn competing_proposals_preserve_receipts() {
             NoopSink,
             100,
             30_000_000,
-        )
-        .with_native_pipeline(true, std::time::Duration::ZERO);
+        );
 
         let consensus_context = Block::genesis_context();
         let proposed = app
@@ -144,8 +143,7 @@ fn competing_proposals_preserve_receipts() {
                 NoopSink,
                 100,
                 30_000_000,
-            )
-            .with_native_pipeline(true, std::time::Duration::ZERO);
+            );
             let mut wrong = candidate.clone();
             wrong.receipt_commitment = Some(alloy_primitives::B256::ZERO);
             assert!(

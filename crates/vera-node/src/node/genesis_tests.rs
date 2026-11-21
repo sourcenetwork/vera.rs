@@ -346,10 +346,10 @@ fn pipeline_parameters_bind_the_genesis_identity_and_restart() {
     for term_length in [8, 16] {
         let directory = tempfile::tempdir().unwrap();
         let mut genesis = configured_genesis();
-        genesis.simplex = Some(vera_domain::SimplexParameters {
+        genesis.simplex = vera_domain::SimplexParameters {
             term_length,
             ..Default::default()
-        });
+        };
         let runtime =
             tokio::Config::new().with_storage_directory(directory.path().join("commonware"));
         let path = directory.path();
@@ -362,7 +362,7 @@ fn pipeline_parameters_bind_the_genesis_identity_and_restart() {
         });
         assert_eq!(block.prevrandao, fingerprint(&genesis).unwrap());
         identities.push(block.id());
-        genesis.simplex.as_mut().unwrap().term_length += 1;
+        genesis.simplex.term_length += 1;
         let configured = &genesis;
         tokio::Runner::new(runtime).start(|context| async move {
             let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));

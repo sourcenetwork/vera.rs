@@ -62,12 +62,12 @@ pub struct VeraGenesis {
     /// (commonware codec `Encode`d bytes), produced by the bootstrap DKG.
     #[serde(default)]
     pub epoch_info: Option<String>,
-    /// Number of blocks in each DKG epoch.
+    /// Number of blocks in each DKG epoch; omission selects 192.
     #[serde(default = "default_blocks_per_epoch")]
     pub blocks_per_epoch: u64,
-    /// Pipelined consensus parameters. Omission preserves rotating leaders.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub simplex: Option<vera_domain::SimplexParameters>,
+    /// Pipelined consensus parameters; omission selects the defaults.
+    #[serde(default)]
+    pub simplex: vera_domain::SimplexParameters,
     /// Limit, in seconds, on how far a block's timestamp may advance past its
     /// parent's; omission keeps the application default. A deployment that
     /// finalizes less often than the limit, or pauses, falls behind the clock.
@@ -76,7 +76,7 @@ pub struct VeraGenesis {
 }
 
 const fn default_blocks_per_epoch() -> u64 {
-    20
+    192
 }
 
 const fn default_timestamp() -> u64 {
@@ -272,8 +272,8 @@ impl VeraGenesis {
             contracts: Vec::new(),
             extra_storage: Vec::new(),
             epoch_info: None,
-            blocks_per_epoch: 20,
-            simplex: None,
+            blocks_per_epoch: default_blocks_per_epoch(),
+            simplex: vera_domain::SimplexParameters::default(),
             timestamp_step_secs: None,
         }
     }
@@ -284,13 +284,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pipeline_parameters_round_trip_without_changing_legacy_encoding() {
+    fn omitted_pipeline_parameters_select_the_defaults() {
         let mut genesis = VeraGenesis::devnet();
-        let legacy = serde_json::to_value(&genesis).unwrap();
-        assert!(legacy.get("simplex").is_none());
-        let decoded: VeraGenesis = serde_json::from_value(legacy).unwrap();
-        assert!(decoded.simplex.is_none());
-        genesis.simplex = Some(vera_domain::SimplexParameters::default());
+        let mut encoded = serde_json::to_value(&genesis).unwrap();
+        encoded.as_object_mut().unwrap().remove("simplex");
+        let decoded: VeraGenesis = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded.simplex, vera_domain::SimplexParameters::default());
+        genesis.simplex.term_length = 8;
         let decoded: VeraGenesis =
             serde_json::from_str(&serde_json::to_string(&genesis).unwrap()).unwrap();
         assert_eq!(decoded.simplex, genesis.simplex);
@@ -345,7 +345,7 @@ mod tests {
             extra_storage: Vec::new(),
             epoch_info: None,
             blocks_per_epoch: 20,
-            simplex: None,
+            simplex: vera_domain::SimplexParameters::default(),
             timestamp_step_secs: None,
         };
         let err = genesis.to_genesis_state().unwrap_err();
@@ -366,7 +366,7 @@ mod tests {
             extra_storage: Vec::new(),
             epoch_info: None,
             blocks_per_epoch: 20,
-            simplex: None,
+            simplex: vera_domain::SimplexParameters::default(),
             timestamp_step_secs: None,
         }
     }
@@ -524,7 +524,7 @@ mod tests {
         use commonware_cryptography::Signer as _;
 
         let genesis = VeraGenesis::devnet();
-        assert_eq!(genesis.blocks_per_epoch, 20);
+        assert_eq!(genesis.blocks_per_epoch, 192);
         assert!(genesis.decode_epoch_info().unwrap().is_none());
 
         let players = commonware_utils::ordered::Set::from_iter_dedup((0..4).map(|seed| {

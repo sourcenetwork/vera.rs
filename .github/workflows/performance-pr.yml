@@ -106,7 +106,7 @@ jobs:
           XDG_CACHE_HOME: ${{ runner.temp }}/vera-cache
         run: |
           "$RUNNER_TEMP/performance-python/bin/python" head/tools/performance/run_pr.py \
-            --head head --base base --binaries binaries --output performance-results --consensus pipelined
+            --head head --base base --binaries binaries --output performance-results
       - name: Render interactive measurements
         if: always()
         shell: bash

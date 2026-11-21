@@ -1,6 +1,6 @@
 # vera.rs
 
-Native Rust implementation of Vera's access control, bulletin, identity and transparency services, using Commonware consensus and storage. Native requests use BLS12-381 signing. Pipelined deployments disable legacy EVM transactions; rotating deployments retain optional compatibility execution.
+Native Rust implementation of Vera's access control, bulletin, identity and transparency services, using Commonware consensus and storage. Native requests use BLS12-381 signing. Every deployment runs pipelined Simplex consensus with bounded leader terms, and blocks carry native requests only.
 
 See [architecture and request flows](docs/architecture.md) for service boundaries,
 operator-managed membership, ACP, storage, threshold services, and recovery limits.
@@ -67,9 +67,9 @@ stops:
   separate hosts. See docs/operating.md#configuration-knobs-operators-own.
 - **Consensus:** the Commonware `marshal` actor (block archive + finalization
   storage) driven by the glue `orchestrator` running Simplex with a
-  `FixedEpocher` over genesis `blocks_per_epoch`. The elector uses bounded leader
-  terms when genesis selects pipelining; rotating deployments alone populate
-  per-view VRF seeds for compatibility execution.
+  `FixedEpocher` over genesis `blocks_per_epoch`. The round-robin elector
+  assigns bounded leader terms from the genesis `simplex` parameters
+  (defaults apply when the section is omitted).
 - **Execution:** the glue `Stateful` actor wrapping `vera-app`'s
   `StatefulVeraApp` (below).
 - **DKG/resharing:** the glue `probe` actor discovers the latest epoch when a
@@ -118,11 +118,6 @@ floor, keeping only the floor's parent below it; reads below it fail with
 Proposal transaction exclusion stops at the published finalized revision, including
 the recovered index head, so it does not fetch pruned finalized ancestors.
 
-The application retires cached proposal randomness for rounds behind finalized
-execution. The finalized round and newer rounds remain available, and late
-elector callbacks cannot reinsert retired seeds. This follows finality progress;
-it does not impose a cap on rounds accumulated while finality is stalled.
-
 ### Execution (`vera-app` + `vera-executor`)
 
 `StatefulVeraApp` implements `commonware_glue::stateful::Application`: it builds
@@ -147,6 +142,9 @@ subscription channels. Block execution goes through `VeraExecutor`:
           v                               v
     module.method(args)  ←— same Rust code —→  module.method(args)
 ```
+
+Admission refuses EVM transactions and block verification rejects a block that
+carries one, so the EVM path runs only for read-only calls such as `eth_call`.
 
 ### Precompile addresses
 
@@ -438,7 +436,7 @@ time out after ten seconds, and socket closure after one second.
 
 | Surface | Methods | Consumer |
 |----------|---------|----------|
-| `eth_*` | `eth_sendRawTransaction`, `eth_call`, `eth_getStorageAt`, `eth_getTransactionReceipt`, … | Optional compatibility clients; legacy submissions are disabled in pipelined mode |
+| `eth_*` | `eth_sendRawTransaction`, `eth_call`, `eth_getStorageAt`, `eth_getTransactionReceipt`, … | Optional compatibility clients; `eth_sendRawTransaction` submissions are refused |
 | `eth_subscribe` | `newHeads`, `logs` | Indexers, light clients |
 | `vera_subscribeHeaders` | `vera_header` notifications; `vera_unsubscribeHeaders` cancellation | Native verified consumers |
 | `vera_*` | `vera_nodeStatus`, `vera_sendNativeTx`, `vera_simulateNativeCall` (unauthenticated dry run), `vera_getTransactionReceipt`, `vera_getNativeNonce`, current permission/record proofs and light blocks | Native Defra, Orbis, Trust and verification clients |

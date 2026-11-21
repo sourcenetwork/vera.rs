@@ -76,7 +76,7 @@ impl<S: StateDbRead> MempoolValidator<S> {
         }
     }
 
-    /// Reject legacy EVM submissions in a native-only deployment.
+    /// Reject EVM submissions; a node always enables this.
     #[must_use]
     pub const fn with_native_only(mut self, enabled: bool) -> Self {
         self.native_only = enabled;
@@ -193,7 +193,7 @@ impl<S: StateDbRead> MempoolValidator<S> {
                 .is_some_and(|byte| NativeTx::is_native_tx(*byte))
         {
             return Err(ExecutionError::InvalidTx(
-                "EVM transactions are disabled in pipelined mode".into(),
+                "EVM transactions are disabled".into(),
             ));
         }
         if tx_bytes.is_empty() {

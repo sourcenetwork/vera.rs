@@ -47,10 +47,10 @@ pub(crate) fn deployment(chain_id: u64, seed: u64) -> SoloDeployment {
         node_demerits: Vec::new(),
         epoch_info: Some(vera_node::epoch_info_hex(&epoch_info)),
         blocks_per_epoch: BLOCKS_PER_EPOCH,
-        simplex: Some(vera_domain::SimplexParameters {
+        simplex: vera_domain::SimplexParameters {
             stall_timeout_ms: SOLO_STALL_TIMEOUT_MS,
             ..Default::default()
-        }),
+        },
         timestamp_step_secs: Some(u64::MAX),
     };
     SoloDeployment::new(

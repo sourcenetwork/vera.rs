@@ -1,9 +1,9 @@
 # Execution limits
 
 `VeraExecutor` enforces one cumulative execution budget for each revision, using
-`Header::gas_limit`. Native requests execute first, followed by optional EVM
-requests. Both paths share the same remaining budget. Pipelined deployments
-accept only native requests.
+`Header::gas_limit`. Native requests execute first, followed by EVM requests;
+both paths share the same remaining budget. Admission and block verification
+accept only native requests, so a node's blocks carry no EVM requests.
 
 ## Admission and accounting
 

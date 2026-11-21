@@ -96,5 +96,4 @@ mod tx_reannouncement;
 pub use tx_admission::Admission;
 pub use tx_gossip::{SharedValidator, TxGossip, spawn_tx_receiver};
 
-mod vrf_elector;
-use vrf_elector::VrfElectorConfig;
+mod term_elector;

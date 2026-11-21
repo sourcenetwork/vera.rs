@@ -231,10 +231,10 @@ fn deal(
         node_demerits: Vec::new(),
         epoch_info: Some(crate::epoch_info_hex(&epoch_info)),
         blocks_per_epoch: SOLO_BLOCKS_PER_EPOCH,
-        simplex: Some(vera_domain::SimplexParameters {
+        simplex: vera_domain::SimplexParameters {
             stall_timeout_ms: SOLO_STALL_TIMEOUT_MS,
             ..Default::default()
-        }),
+        },
         // A lone validator proposes every block from its own clock, and
         // an idle or paused device must not fall behind it.
         timestamp_step_secs: Some(u64::MAX),

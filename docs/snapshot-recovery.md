@@ -141,10 +141,9 @@ their request. When the lower bound advances, requests at or below it are retire
 so the new boundary can be fetched. These retained DKG changes introduce no new
 wire or storage encoding.
 
-Native deployments use scheduled leader election and stage incoming-term
-proposals without voting before their parent certifies. Recovery readiness gates
-both prepared and ordinary proposals. The compatibility execution mode keeps
-certificate-dependent election and declines speculative preparation.
+Deployments use scheduled leader election and stage incoming-term proposals
+without voting before their parent certifies. Recovery readiness gates both
+prepared and ordinary proposals.
 
 Recovery supplies the authenticated target when each database opens. Every
 partition must recover that target before the application verifies the combined

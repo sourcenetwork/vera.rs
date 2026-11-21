@@ -28,7 +28,6 @@ def main():
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--count', type=int, default=600)
     parser.add_argument('--rate', type=int, default=20)
-    parser.add_argument('--consensus', choices=['pipelined', 'classic'], default='pipelined')
     args = parser.parse_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -62,8 +61,6 @@ def main():
     identity['inherit_rpc_listener'] = inherit_rpc_listener
     incompatible = baseline_incompatible(identity)
     (output / 'comparison.json').write_text(json.dumps(identity, indent=2) + '\n')
-    pipelined = args.consensus == 'pipelined'
-    epoch, retained = ('192', '256') if pipelined else ('20', '32')
     failed = False
     for tag in TAGS:
         side = tag.rstrip('12')
@@ -84,8 +81,8 @@ def main():
             command = [sys.executable, str(scripts / 'record.py'), '--node', str(binaries / side / 'verad'),
                        '--runner', str(runner), '--runner-source', str(sources['head']), '--history', 'regolith',
                        '--output', str(destination / f'objects-{objects}'), str(args.count), str(args.rate),
-                       '128', '1', 'normal', '100', epoch, '0', str(objects), retained,
-                       '1' if pipelined else '0', '1' if inherit_rpc_listener else '0',
+                       '128', '1', 'normal', '100', '192', '0', str(objects), '256',
+                       '1' if inherit_rpc_listener else '0',
                        '1' if identity[side]['discovery_setting'] else '0']
             environment = dict(os.environ, VERA_E2E_KEEP='0')
             failed |= subprocess.run(command, cwd=sources[side], env=environment, check=False).returncode != 0

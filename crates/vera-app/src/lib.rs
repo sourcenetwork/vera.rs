@@ -14,9 +14,6 @@ pub use app_state::{ApplicationState, StateExecution};
 mod app;
 pub use app::{MAX_TIMESTAMP_STEP_SECS, StatefulVeraApp};
 
-mod vrf_cache;
-pub use vrf_cache::VrfSeedCache;
-
 mod error;
 pub use error::AppError;
 

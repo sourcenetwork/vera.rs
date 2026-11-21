@@ -656,7 +656,8 @@ fn epoch_rosters_capture_the_boundary_branch_and_survive_later_changes() {
     use std::num::NonZeroU64;
     let (registration, actor) = native_member_call(0, native_registration());
     let (state, executor) = authorized_actor(actor);
-    let executor = executor.with_membership_epochs(NonZeroU64::new(10).unwrap(), NonZeroU64::MIN);
+    let executor =
+        executor.with_membership_epochs(NonZeroU64::new(10).unwrap(), NonZeroU64::new(2).unwrap());
     let parent = executor.snapshot();
     let mut context = BlockContext::new(
         Header {
@@ -740,8 +741,8 @@ fn epoch_rosters_capture_the_boundary_branch_and_survive_later_changes() {
 #[rstest]
 #[case(true, 4, 1, true)]
 #[case(false, 4, 1, true)]
-#[case(true, 20, 1, false)]
-#[case(false, 20, 1, false)]
+#[case(true, 20, 2, false)]
+#[case(false, 20, 2, false)]
 #[case(true, 20, 16, true)]
 #[case(false, 20, 16, true)]
 #[case(true, 192, 16, false)]
@@ -888,7 +889,8 @@ fn epoch_roster_storage_failure_is_a_local_state_error() {
     use std::num::NonZeroU64;
     let (mut state, executor) = authorized_state();
     state.unreadable_storage = Some((VALIDATOR_REGISTRY_ADDRESS, U256::from(1)));
-    let executor = executor.with_membership_epochs(NonZeroU64::new(10).unwrap(), NonZeroU64::MIN);
+    let executor =
+        executor.with_membership_epochs(NonZeroU64::new(10).unwrap(), NonZeroU64::new(2).unwrap());
     let context = BlockContext::new(
         Header {
             number: 9,

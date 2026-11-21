@@ -35,10 +35,10 @@ the JSON-RPC port of that node's `config.toml`.
    This writes `node0..3/` (validator key, BLS share, `config.toml`,
    `genesis.json`) and a shared `peers.json`.
 
-   The template must enable the [native Simplex parameters](consensus-membership.md#pipelined-native-deployments)
-   and use at least 192 revisions per epoch with the default 16-view leader
-   term. The generator supplies the validator keys and epoch-0 public material.
-   It does not modify a template that omits native consensus parameters.
+   The template's [Simplex parameters](consensus-membership.md#pipelined-consensus)
+   need at least 192 revisions per epoch with the default 16-view leader term;
+   omitted parameters select those defaults. The generator supplies the
+   validator keys and epoch-0 public material.
 
 2. Edit each `nodeN/config.toml`: set `network.dialable_addr` to that host's
    reachable `ip:p2p_port`, and delete the `[network.discovery]` section with

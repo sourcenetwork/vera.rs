@@ -44,15 +44,9 @@ pub struct VeraGenesis {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub epoch_info: Option<String>,
     /// Number of blocks in each DKG epoch.
-    #[serde(default, skip_serializing_if = "is_default_blocks_per_epoch")]
     pub blocks_per_epoch: u64,
-    /// Pipelined consensus parameters. Omission selects rotating leaders.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub simplex: Option<vera_domain::SimplexParameters>,
-}
-
-const fn is_default_blocks_per_epoch(value: &u64) -> bool {
-    *value == 20
+    /// Pipelined consensus parameters.
+    pub simplex: vera_domain::SimplexParameters,
 }
 
 /// A pre-funded account allocation.
@@ -108,7 +102,7 @@ pub struct GenesisBuilder {
     extra_storage: Vec<GenesisStorage>,
     epoch_info: Option<String>,
     blocks_per_epoch: Option<u64>,
-    simplex: Option<vera_domain::SimplexParameters>,
+    simplex: vera_domain::SimplexParameters,
 }
 
 impl Default for GenesisBuilder {
@@ -124,7 +118,7 @@ impl Default for GenesisBuilder {
             extra_storage: Vec::new(),
             epoch_info: None,
             blocks_per_epoch: None,
-            simplex: Some(vera_domain::SimplexParameters::default()),
+            simplex: vera_domain::SimplexParameters::default(),
         }
     }
 }
@@ -275,24 +269,16 @@ impl GenesisBuilder {
         self
     }
 
-    /// Configure bounded stable-leader consensus for this deployment.
-    /// Unless explicitly set, the epoch length is 192 blocks.
-    pub const fn simplex(mut self, parameters: vera_domain::SimplexParameters) -> Self {
-        self.simplex = Some(parameters);
-        self
-    }
-
-    /// Select rotating leaders with per-view VRF seeds instead of pipelined
-    /// consensus. Unless explicitly set, the epoch length is 20 blocks.
+    /// Set the pipelined consensus parameters.
     #[must_use]
-    pub const fn rotating(mut self) -> Self {
-        self.simplex = None;
+    pub const fn simplex(mut self, parameters: vera_domain::SimplexParameters) -> Self {
+        self.simplex = parameters;
         self
     }
 
+    /// The epoch length: 192 blocks unless explicitly set.
     fn epoch_length(&self) -> u64 {
-        self.blocks_per_epoch
-            .unwrap_or(if self.simplex.is_some() { 192 } else { 20 })
+        self.blocks_per_epoch.unwrap_or(192)
     }
 
     /// Build the genesis configuration.
@@ -352,10 +338,7 @@ mod tests {
         let genesis = GenesisBuilder::devnet().build();
         assert_eq!(genesis.chain_id, 9001);
         assert!(genesis.allocations.is_empty());
-        assert_eq!(
-            genesis.simplex,
-            Some(vera_domain::SimplexParameters::default())
-        );
+        assert_eq!(genesis.simplex, vera_domain::SimplexParameters::default());
     }
 
     #[test]
@@ -397,13 +380,9 @@ mod tests {
     }
 
     #[test]
-    fn pipelined_epoch_default_preserves_explicit_lengths() {
+    fn epoch_default_preserves_explicit_lengths() {
         let parameters = vera_domain::SimplexParameters::default();
         assert_eq!(GenesisBuilder::devnet().build().blocks_per_epoch, 192);
-        assert_eq!(
-            GenesisBuilder::devnet().rotating().build().blocks_per_epoch,
-            20
-        );
         assert_eq!(
             GenesisBuilder::devnet()
                 .simplex(parameters)

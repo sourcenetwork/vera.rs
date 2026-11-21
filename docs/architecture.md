@@ -231,7 +231,7 @@ that a reader verifies with the anchoring deployment's key alone. See
 
 ## Pipelined term handoffs
 
-Native deployments use Commonware's scheduled round-robin elector with bounded
+Every deployment uses Commonware's scheduled round-robin elector with bounded
 leader terms. The incoming leader may prepare and relay a candidate before its
 parent certifies. Vera returns `Handoff::Stage`, so its notarize vote still waits
 for the parent certificate. Preparing a block uses isolated execution batches;
@@ -239,12 +239,8 @@ its policies, receipts and worker sequences remain unpublished until finalizatio
 
 The startup readiness guard covers both preparation and ordinary proposals. The
 Commonware reshare wrapper leaves epoch boundaries and reserved dealer-log
-inclusion to ordinary proposals. Compatibility execution uses rotating leaders
-and declines speculative preparation. Its blocks carry the prior-round threshold
-seed used for execution randomness. Validators verify that seed against the
-network's consensus public key and check its round before executing the block;
-verification therefore does not depend on a node having participated in the
-original leader election. The public key is retained across reshares.
+inclusion to ordinary proposals. Blocks carry no consensus randomness, so
+verification depends only on the block, its parent and the node's term record.
 
 ## Operator-managed membership (PoA)
 

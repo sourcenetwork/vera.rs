@@ -64,7 +64,7 @@ use crate::{
     DKG_PROBE_CHANNEL, DynamicProvider, FileSecretStore, IO_BUFFER_SIZE, MAILBOX_SIZE,
     MAX_BLOCK_TXS, MAX_PARTICIPANTS, MAX_SUPPORTED_MODE, MAX_TX_BYTES, MEMPOOL_CHANNEL, NAMESPACE,
     NodeOptions, NodeSettings, PAGE_SIZE, RESOLVER_CHANNEL, REVEAL, Registrar,
-    RegistryParticipants, RpcMode, SHARING_MODE, TxGossip, VOTE_CHANNEL, VrfElectorConfig,
+    RegistryParticipants, RpcMode, SHARING_MODE, TxGossip, VOTE_CHANNEL,
     peer_capacity::PeerCapacity,
     rejoin,
     secret_store::{HeldSecretStore, NodeSecretStore, ObserverSecretStore},
@@ -97,25 +97,11 @@ pub async fn run_node_with_options(
     options: NodeOptions,
 ) -> anyhow::Result<()> {
     settings.genesis.validate_timestamp()?;
-    if let Some(parameters) = settings.genesis.simplex {
-        parameters.validate().map_err(anyhow::Error::msg)?;
-        run_node_with_elector(context, settings, options, move |_| {
-            crate::vrf_elector::pipelined_elector(parameters)
-        })
-        .await
-    } else {
-        run_node_with_elector(context, settings, options, VrfElectorConfig::new).await
-    }
-}
-
-async fn run_node_with_elector<
-    L: commonware_consensus::simplex::elector::Config<ConsensusScheme>,
->(
-    context: tokio::Context,
-    settings: NodeSettings,
-    options: NodeOptions,
-    make_elector: impl FnOnce(vera_app::VrfSeedCache) -> L + Send,
-) -> anyhow::Result<()> {
+    settings
+        .genesis
+        .simplex
+        .validate()
+        .map_err(anyhow::Error::msg)?;
     let NodeOptions {
         rpc,
         watchdog,
@@ -152,9 +138,7 @@ async fn run_node_with_elector<
         leader_timeout,
         certification_timeout,
         timeout_retry,
-        genesis
-            .simplex
-            .map(|parameters| Duration::from_millis(parameters.stall_timeout_ms)),
+        Duration::from_millis(genesis.simplex.stall_timeout_ms),
     )
     .map_err(|error| {
         anyhow::anyhow!(
@@ -178,12 +162,8 @@ async fn run_node_with_elector<
             && snapshot.logs > 0,
         "snapshot byte limit, log limit and deadlines must be positive"
     );
-    let term_length = std::num::NonZeroU64::new(
-        genesis
-            .simplex
-            .map_or(1, |parameters| parameters.term_length),
-    )
-    .expect("validated leader term length");
+    let term_length = std::num::NonZeroU64::new(genesis.simplex.term_length)
+        .expect("validated leader term length");
     let blocks_per_epoch = std::num::NonZeroU64::new(genesis.blocks_per_epoch)
         .ok_or_else(|| anyhow::anyhow!("genesis blocks_per_epoch must be non-zero"))?;
     let peer_capacity = PeerCapacity::new(blocks_per_epoch, term_length)?;
@@ -821,21 +801,16 @@ async fn run_node_with_elector<
         gas_limit,
     )
     .with_participant_addresses(participant_addresses)
-    .with_consensus_key(*sharing.public())
-    .with_native_pipeline(
-        genesis.simplex.is_some(),
-        solo_pacing.map_or_else(
-            || (leader_timeout / 4).min(Duration::from_millis(100)),
-            |pacing| pacing.batch,
-        ),
-    )
+    .with_proposal_batch_wait(solo_pacing.map_or_else(
+        || (leader_timeout / 4).min(Duration::from_millis(100)),
+        |pacing| pacing.batch,
+    ))
     .with_timestamp_step(
         genesis
             .timestamp_step_secs
             .unwrap_or(vera_app::MAX_TIMESTAMP_STEP_SECS),
     )
     .with_term(term.clone());
-    let vrf_elector = make_elector(application.vrf_seed_cache());
 
     let snapshot_history = crate::history::SnapshotHistory {
         history: history.clone(),
@@ -986,7 +961,7 @@ async fn run_node_with_elector<
             application: deferred,
             strategy: Sequential,
             simplex: orchestrator::SimplexConfig {
-                elector: vrf_elector,
+                elector: crate::term_elector::term_elector(genesis.simplex),
                 mailbox_size: NZUsize!(3),
                 replay_buffer: IO_BUFFER_SIZE,
                 write_buffer: IO_BUFFER_SIZE,
@@ -1245,7 +1220,7 @@ async fn run_node_with_elector<
         let recovered_modules = modules.read().expect("module state lock poisoned");
         let mut admission =
             MempoolValidator::new(committed_state.clone(), ExecutionConfig::new(chain_id), 0)
-                .with_native_only(genesis.simplex.is_some())
+                .with_native_only(true)
                 .with_block_gas_limit(gas_limit);
         admission.reset(committed_state.clone(), recovered_modules.nonces.clone());
         let _ = validator.set(::tokio::sync::Mutex::new(Admission::new(admission)));

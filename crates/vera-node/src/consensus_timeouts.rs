@@ -32,12 +32,12 @@ impl TimeoutError {
 
 /// Check the timeouts before any actor starts.
 ///
-/// `stall` is the genesis stall timeout of a deployment whose leaders hold terms.
+/// `stall` is the genesis stall timeout of the deployment's leader terms.
 pub(crate) fn validate(
     leader: Duration,
     certification: Duration,
     retry: Duration,
-    stall: Option<Duration>,
+    stall: Duration,
 ) -> Result<(), TimeoutError> {
     if leader.is_zero() {
         return Err(TimeoutError::LeaderZero);
@@ -48,7 +48,7 @@ pub(crate) fn validate(
     if retry.is_zero() {
         return Err(TimeoutError::RetryZero);
     }
-    if stall.is_some_and(|stall| stall <= certification) {
+    if stall <= certification {
         return Err(TimeoutError::StallNotAboveCertification);
     }
     Ok(())
@@ -64,35 +64,31 @@ mod tests {
 
     #[test]
     fn daemon_defaults_pass_with_the_default_stall_timeout() {
-        assert_eq!(
-            validate(ms(1_000), ms(2_000), ms(500), Some(ms(5_000))),
-            Ok(())
-        );
-        assert_eq!(validate(ms(1_000), ms(2_000), ms(500), None), Ok(()));
+        assert_eq!(validate(ms(1_000), ms(2_000), ms(500), ms(5_000)), Ok(()));
     }
 
     #[test]
     fn each_ordering_simplex_asserts_is_rejected() {
         for (leader, certification, retry, stall, expected) in [
-            (0, 2_000, 500, None, TimeoutError::LeaderZero),
+            (0, 2_000, 500, 5_000, TimeoutError::LeaderZero),
             (
                 2_000,
                 2_000,
                 500,
-                None,
+                5_000,
                 TimeoutError::CertificationNotAboveLeader,
             ),
-            (1_000, 2_000, 0, None, TimeoutError::RetryZero),
+            (1_000, 2_000, 0, 5_000, TimeoutError::RetryZero),
             (
                 1_000,
                 5_000,
                 500,
-                Some(5_000),
+                5_000,
                 TimeoutError::StallNotAboveCertification,
             ),
         ] {
             assert_eq!(
-                validate(ms(leader), ms(certification), ms(retry), stall.map(ms)),
+                validate(ms(leader), ms(certification), ms(retry), ms(stall)),
                 Err(expected)
             );
         }

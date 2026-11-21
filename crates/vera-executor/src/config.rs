@@ -7,7 +7,7 @@ use revm::primitives::hardfork::SpecId;
 pub struct ExecutionConfig {
     /// Epoch length for execution-derived membership selection on native nodes.
     pub membership_epoch_length: Option<std::num::NonZeroU64>,
-    /// Consecutive views per leader; one selects rotating leaders.
+    /// Consecutive views per leader.
     pub membership_term_length: std::num::NonZeroU64,
     /// Genesis record identifier used to bind administrative approvals.
     pub genesis_id: [u8; 32],

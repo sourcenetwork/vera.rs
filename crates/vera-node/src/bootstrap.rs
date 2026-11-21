@@ -56,16 +56,13 @@ pub async fn run_bootstrap(
     mut settings: BootstrapSettings,
 ) -> anyhow::Result<GenesisEpochInfo> {
     settings.genesis.validate_timestamp()?;
-    if let Some(parameters) = settings.genesis.simplex {
-        parameters.validate().map_err(anyhow::Error::msg)?;
-    }
-    let term_length = NonZeroU64::new(
-        settings
-            .genesis
-            .simplex
-            .map_or(1, |parameters| parameters.term_length),
-    )
-    .expect("validated leader term length");
+    settings
+        .genesis
+        .simplex
+        .validate()
+        .map_err(anyhow::Error::msg)?;
+    let term_length = NonZeroU64::new(settings.genesis.simplex.term_length)
+        .expect("validated leader term length");
     let blocks_per_epoch = NonZeroU64::new(settings.genesis.blocks_per_epoch)
         .ok_or_else(|| anyhow::anyhow!("genesis blocks_per_epoch must be non-zero"))?;
     let peer_capacity = PeerCapacity::new(blocks_per_epoch, term_length)?;
