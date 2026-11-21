@@ -84,8 +84,6 @@ approvals. `approve_term`, `external_term_approval` and
 - `VeraClient::verify_term_certificate` reads the operator policy from
   certified state, as `read_administration` does, and checks the certificate
   against it. It returns the revision the policy was read at.
-- The C verifier takes a `term_certificate` request; see
-  [the native verifier](native-verifier.md).
 
 The policy must come from state the verifier has authenticated. A verified
 certificate says who may propose from its term on. It does not prove that its

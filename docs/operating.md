@@ -556,12 +556,9 @@ of the RPC endpoint.
 | Service | Native selection | Required deployment material |
 | --- | --- | --- |
 | DefraDB | `--document-acp-type verars --vera-rs-address <url>` | `--vera-consensus-key <key>` and `--vera-deployment-id <id>`, with the configured keyring and persistent worker journal |
-| Go Trust API | Build with `vera_native` and set `native.enabled: true` | `native.trusted_key`, `native.genesis`, `native.deployment`, operator-authorized relay grants, encrypted relay keys and independently provisioned workers |
 | Orbis | Native-only build with `native,redb,iroh` and the selected curve; start with `--vera-config <file>` | `consensus_key`, `deployment_root`, `deployment_id`, controller public key, encrypted node database and persistent native worker journal |
 
-Trust remains a separate service. Its native provisioning uses `init-native-workers`;
-it does not require service-account funding or fee allowances. Each gateway instance
-needs distinct workers and journals. Orbis selects authorization and bulletin adapters
+Orbis selects authorization and bulletin adapters
 through the existing traits; its normal native images exclude diagnostic features.
 
 Vera has not been deployed live. The release starts with a fresh deployment.

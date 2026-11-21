@@ -1,13 +1,13 @@
 # Publishing the first Vera release
 
-The maintainer publishes the nine client/verifier crates from a clean, reviewed
+The maintainer publishes the eight client crates from a clean, reviewed
 commit. CI validates the package boundary and prepares daemon artifacts; it has
 no crates.io upload step or publishing credentials. `verad`, the node internals,
 test harnesses and development tools are not published as crates.
 
 ## SDK access
 
-The client and verifier `0.1.1` crates are published on crates.io. This
+The `0.1.1` crates are published on crates.io. This
 runbook prepares `0.1.2`, which must be published in dependency order before
 consumers can resolve that version. `0.1.2` accepts Ed25519 and P-256 actors and
 operator keys and records one canonical DID per secp256k1 actor, so results can
@@ -34,7 +34,7 @@ Before publishing:
   `vera-zanzibar`, and `vera-acp` declare `Apache-2.0 OR MIT` and include the
   Apache 2.0 text from their Defra source revision as well as the MIT notice.
   The other packages declare `MIT` and include its notice.
-- Confirm ownership and publishing rights for all nine Vera names. Log in to
+- Confirm ownership and publishing rights for all eight Vera names. Log in to
   crates.io locally with the maintainer account. Do not put publishing tokens
   in workflow secrets, release notes or repository files.
 
@@ -108,7 +108,6 @@ for the current graph it is:
 | 6 | `vera-modules` |
 | 7 | `vera-permission` |
 | 8 | `vera-client` |
-| 9 | `vera-verifier` |
 
 For each package, verify its archive before uploading it. Start with:
 
@@ -131,7 +130,6 @@ cargo publish --locked --registry crates-io -p vera-domain
 cargo publish --locked --registry crates-io -p vera-modules
 cargo publish --locked --registry crates-io -p vera-permission
 cargo publish --locked --registry crates-io -p vera-client
-cargo publish --locked --registry crates-io -p vera-verifier
 ```
 
 Run those commands one at a time. Preserve Cargo's package verification; do not
@@ -141,14 +139,14 @@ compare the existing registry version's checksum and source with the recorded
 archive before resuming at the next unpublished package. Never try to replace an
 existing crate version with different contents.
 
-From a clean environment outside this workspace, resolve and compile both SDK
-roots using only registry dependencies:
+From a clean environment outside this workspace, resolve and compile the SDK
+root using only registry dependencies:
 
 ```sh
 VERA_RELEASE_SMOKE=$(mktemp -d)
 cargo init --lib --name vera_release_smoke "$VERA_RELEASE_SMOKE"
-cargo add --manifest-path "$VERA_RELEASE_SMOKE/Cargo.toml" 'vera-client@=0.1.2' 'vera-verifier@=0.1.2'
-printf '%s\n' 'pub use vera_client as client;' 'pub use vera_verifier as verifier;' > "$VERA_RELEASE_SMOKE/src/lib.rs"
+cargo add --manifest-path "$VERA_RELEASE_SMOKE/Cargo.toml" 'vera-client@=0.1.2'
+printf '%s\n' 'pub use vera_client as client;' > "$VERA_RELEASE_SMOKE/src/lib.rs"
 cargo check --locked --manifest-path "$VERA_RELEASE_SMOKE/Cargo.toml"
 cargo metadata --locked --format-version 1 --manifest-path "$VERA_RELEASE_SMOKE/Cargo.toml" > "$VERA_RELEASE_SMOKE/metadata.json"
 ```
@@ -187,7 +185,7 @@ git push origin "refs/tags/$VERA_RELEASE_TAG"
 ```
 
 The workflow rejects a tag pointing to a different source or a version that does
-not match `verad` and the nine public crates. Source must be in `main`'s history.
+not match `verad` and the eight public crates. Source must be in `main`'s history.
 It binds the comparison to the checkout's source tree, lockfile and toolchain
 file. Only the final draft-release job has repository write permission.
 Protect release tags against updates and deletion; do not move an existing tag.

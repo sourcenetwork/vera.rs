@@ -4,7 +4,6 @@ use vera_crypto::operation::{DEFAULT_OPERATION_LEAD, OperationId};
 use vera_domain::ConsensusPublicKey;
 use vera_modules::acp::{
     delegated_operation::DelegatedOperation,
-    keys::access_decision_key,
     operation::{OperationRecord, operation_key},
 };
 
@@ -52,46 +51,6 @@ pub struct DecisionOutcome {
 }
 
 impl RecordResponse {
-    /// Authenticate a decision record's identity and issuance, including an expired record.
-    pub fn verify_access_decision(
-        &self,
-        deployment_id: u64,
-        decision_id: &str,
-        minimum_height: u64,
-        trusted: &ConsensusPublicKey,
-    ) -> Result<Option<DecisionRecord>, PermissionError> {
-        if decision_id.len() != 64
-            || !decision_id
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-        {
-            return Err(PermissionError::Invalid("invalid decision identifier"));
-        }
-        self.verify(
-            ModuleId::Acp,
-            &access_decision_key(decision_id),
-            minimum_height,
-            trusted,
-            RECORD_PROOF_BYTES,
-        )?;
-        let Some(value) = &self.record.value else {
-            return Ok(None);
-        };
-        let decision = AccessDecision::decode_record(value)
-            .map_err(|_| PermissionError::Invalid("invalid decision record"))?;
-        let at = Timestamp {
-            block_height: self.revision.height,
-            seconds: self.revision.timestamp,
-        };
-        let expires_at_revision = decision
-            .verify_issuance(deployment_id, decision_id, &at)
-            .map_err(|_| PermissionError::Invalid("invalid decision issuance"))?;
-        Ok(Some(DecisionRecord {
-            decision,
-            expires_at_revision,
-        }))
-    }
-
     /// Authenticate caller-bound outcome recovery without renewing or requiring an unexpired grant.
     pub fn verify_decision_outcome(
         &self,

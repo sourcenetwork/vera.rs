@@ -7462,20 +7462,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vera-verifier"
-version = "0.1.2"
-dependencies = [
- "alloy-primitives",
- "commonware-codec",
- "hex",
- "serde",
- "serde_json",
- "vera-domain",
- "vera-modules",
- "vera-permission",
-]
-
-[[package]]
 name = "vera-zanzibar"
 version = "0.1.2"
 dependencies = [

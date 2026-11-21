@@ -21,10 +21,10 @@ Related repositories are independent checkouts; discover their paths rather than
 | Repo | Org | Purpose |
 |------|-----|---------|
 | **vera.rs** | sourcenetwork | This repo — SourceHub rewrite on Commonware |
-| **vera** | sourcenetwork | Existing Go service implementation used for behavior comparisons |
+| **vera** | sourcenetwork | Earlier Go service; its `acp_core` engine is the reference behind `tools/acp-oracle` |
 | **orbis-rs** | sourcenetwork | Application threshold signing and encryption, using native authorization, bulletin and ring records |
 | **defradb.rs** | sourcenetwork | Document storage with native signed submissions and verified ACP evidence |
-| **trust-api** | sourcenetwork | Separate Go gateway for authentication, relay workers and native APIs |
+| **trust-api** | sourcenetwork | Separate Go gateway; this repository ships no Go client, C verifier or tests for it |
 | **backbone** | sourcenetwork | Shared Rust clients and verification used by native consumers |
 | **regolith** | sourcenetwork | Defra document storage and Vera finalized-history backend |
 | **bankd-commonware** | mizufinance | Reference: Commonware + REVM chain (infrastructure source for Phase 1) |
@@ -441,7 +441,7 @@ time out after ten seconds, and socket closure after one second.
 | `eth_*` | `eth_sendRawTransaction`, `eth_call`, `eth_getStorageAt`, `eth_getTransactionReceipt`, … | Optional compatibility clients; legacy submissions are disabled in pipelined mode |
 | `eth_subscribe` | `newHeads`, `logs` | Indexers, light clients |
 | `vera_subscribeHeaders` | `vera_header` notifications; `vera_unsubscribeHeaders` cancellation | Native verified consumers |
-| `vera_*` | `vera_nodeStatus`, `vera_sendNativeTx`, `vera_simulateNativeCall` (unauthenticated dry run), `vera_getTransactionReceipt`, `vera_getNativeNonce`, current permission/record proofs and light blocks | Native Defra, Orbis, Trust and verification clients |
+| `vera_*` | `vera_nodeStatus`, `vera_sendNativeTx`, `vera_simulateNativeCall` (unauthenticated dry run), `vera_getTransactionReceipt`, `vera_getNativeNonce`, current permission/record proofs and light blocks | Native Defra, Orbis and verification clients |
 
 ### Light-client material
 
@@ -549,8 +549,7 @@ the active role between an account's devices; the operator policy approves it
 and it changes no key. The node signs none: the host collects approvals.
 `vera-domain` holds the type and digest,
 `vera_permission::verify_term_certificate` checks it against an
-`OperatorPolicy`, and `VeraClient` and the C verifier check it against
-certified state.
+`OperatorPolicy`, and `VeraClient` checks it against certified state.
 
 `EmbeddedConfig::switching` names the account's devices. `hand_over` holds
 proposals, including blocks built ahead of their turn, so nothing finalizes
@@ -638,7 +637,6 @@ vera.rs/
         vera-qmdb/              # EVM change sets, record encodings, combined state root
         vera-traits/            # StateDbRead trait for EVM state reads
         vera-test-infra/            # Shared test primitives: process, ports, logs, binary resolver
-        vera-verifier/          # C shared-library verifier for receipts, records, prefixes and policies
 ```
 
 Native threshold rings retain a main/PET key pair when `requires_pet` is enabled.
@@ -664,7 +662,7 @@ Current backup/recovery support and malformed-state validation remain required.
 
 Use Regolith for finalized history and Commonware QMDB for authenticated state.
 Do not add RocksDB profiling, optimization or backend-selection work. Qualify the
-native core and one compatible Defra, Backbone, Orbis and separate Go Trust set.
+native core and one compatible Defra, Backbone and Orbis set.
 The separate RocksDB/JMT module store and its proof path are removed. Preserve
 native commitments and recovery behavior. Historical measurements retain their
 original backend labels.

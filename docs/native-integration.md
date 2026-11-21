@@ -17,8 +17,8 @@ services remain separate processes. Native fixtures disable legacy EVM execution
 | Trust API | `fd13157503c95c0cb9b62ebfa63ff81040f2bdfe` | Go 1.26.6; `vera_native` and CGo |
 
 Backbone, Defra and Orbis lockfiles resolve one Vera source revision. Orbis also
-pins the listed Backbone and Defra revisions. Trust links the matching Vera
-shared verifier; see [building and loading the verifier](native-verifier.md).
+pins the listed Backbone and Defra revisions. Trust linked the matching Vera
+shared verifier, which Vera has since removed.
 The tested validator executable was built at `ae7b84bf7b`; the listed Vera
 revision adds only the Go gateway test and documentation to that runtime.
 
@@ -63,6 +63,3 @@ VERAD_BINARY=/path/to/verad cargo test --frozen -p orbis-node \
   --test native_startup native_distributed_threshold_workflows -- \
   --ignored --exact --nocapture
 ```
-
-Trust's Go binaries and the Vera harness invocation are described in
-[the verifier integration instructions](native-verifier.md).

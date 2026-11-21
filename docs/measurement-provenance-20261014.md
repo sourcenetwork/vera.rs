@@ -52,7 +52,7 @@ artifacts do not independently record `rustc -Vv` output.
 - Mixed load uses
   [native mixed load](../.github/workflows/native-mixed-load.yml), normal release
   `verad` and `mixed_policy_workload`, with syscall tracing disabled.
-- Go/Rust uses [Go comparison](../.github/workflows/go-comparison.yml). The Go
+- Go/Rust used the Go comparison workflow, since removed. The Go
   manifest records `go version go1.26.2 linux/amd64`; the daemon build uses
   `go build -mod=readonly -p 2 -trimpath`. Go uses LevelDB and a 200 ms batch wait;
   Rust uses Regolith and 100 ms. This comparison includes those implementation

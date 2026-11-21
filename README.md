@@ -12,7 +12,6 @@ services, write and read flows, membership changes, storage, and recovery.
 |---|---|
 | Vera | Rust ACP execution, certified state and history, bulletin, consensus membership |
 | DefraDB | Application documents and queries; consumes Vera authorization |
-| Trust API | Optional separate Go gateway for authentication and managed native requests |
 | Orbis | Separate Rust application threshold signing and encryption services |
 
 The native stack uses Commonware DKG for consensus shares, local Rust ACP crates
