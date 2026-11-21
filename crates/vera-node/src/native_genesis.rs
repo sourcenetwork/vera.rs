@@ -57,11 +57,6 @@ pub(super) async fn load_or_create(
         return Ok(block);
     }
     ensure!(
-        !marker_exists(&data_dir.join("genesis_block.bin"))?
-            && !marker_exists(&data_dir.join("state"))?,
-        "unsupported state layout in node directory"
-    );
-    ensure!(
         !marker_exists(&data_dir.join("history"))?,
         "genesis record missing from a node with finalized history"
     );

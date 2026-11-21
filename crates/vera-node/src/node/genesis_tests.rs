@@ -262,15 +262,12 @@ fn journals_without_initialization_intent_are_preserved() {
 }
 
 #[test]
-fn legacy_state_and_missing_genesis_with_history_require_recovery() {
-    for marker in ["genesis_block.bin", "state", "history"] {
+fn missing_genesis_with_history_requires_recovery() {
+    {
+        let marker = "history";
         let directory = tempfile::tempdir().unwrap();
         let directory = directory.path();
-        if marker.ends_with(".bin") {
-            fs::write(directory.join(marker), b"preserve").unwrap();
-        } else {
-            fs::create_dir(directory.join(marker)).unwrap();
-        }
+        fs::create_dir(directory.join(marker)).unwrap();
         let genesis = configured_genesis();
         let genesis = &genesis;
         vera_cli::write_durable(
@@ -299,13 +296,7 @@ fn legacy_state_and_missing_genesis_with_history_require_recovery() {
 #[cfg(unix)]
 #[test]
 fn inaccessible_genesis_markers_fail_before_initializing_journals() {
-    for marker in [
-        "native-genesis.bin",
-        "native-genesis.intent",
-        "genesis_block.bin",
-        "state",
-        "history",
-    ] {
+    for marker in ["native-genesis.bin", "native-genesis.intent", "history"] {
         for target in [marker, "missing-target"] {
             let directory = tempfile::tempdir().unwrap();
             let directory = directory.path();
