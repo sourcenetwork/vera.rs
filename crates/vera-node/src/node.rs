@@ -829,6 +829,7 @@ async fn run_node_with_elector<
             |pacing| pacing.batch,
         ),
     )
+    .with_settled_batch_wait(solo_pacing.map(|pacing| pacing.settled))
     .with_timestamp_step(
         genesis
             .timestamp_step_secs

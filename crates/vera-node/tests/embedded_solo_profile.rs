@@ -174,7 +174,8 @@ async fn profile_solo_writes_and_idle_cost() {
             .ok()
             .map_or(30, |seconds| seconds.parse().unwrap()),
     );
-    // `PROFILE_IDLE_MS=off` measures the daemon cadence; a number overrides the idle wait.
+    // `PROFILE_IDLE_MS=off` measures the daemon cadence; a number overrides the idle wait,
+    // and `PROFILE_BATCH_MS` and `PROFILE_SETTLED_MS` the two batch windows.
     match std::env::var("PROFILE_IDLE_MS").ok().as_deref() {
         Some("off") => config.pacing = None,
         Some(millis) => {
@@ -184,6 +185,11 @@ async fn profile_solo_writes_and_idle_cost() {
                     .ok()
                     .map_or(SoloPacing::BATCH, |batch| {
                         Duration::from_millis(batch.parse().unwrap())
+                    }),
+                settled: std::env::var("PROFILE_SETTLED_MS")
+                    .ok()
+                    .map_or(SoloPacing::SETTLED, |settled| {
+                        Duration::from_millis(settled.parse().unwrap())
                     }),
             });
         }
@@ -238,6 +244,7 @@ async fn profile_solo_writes_and_idle_cost() {
         json!({
             "idle_wait_ms": pacing.map(|pacing| pacing.idle.as_millis() as u64),
             "batch_ms": pacing.map(|pacing| pacing.batch.as_millis() as u64),
+            "settled_ms": pacing.map(|pacing| pacing.settled.as_millis() as u64),
             "writes": writes,
             "certified_receipt_ms": {
                 "p50": percentile(50), "p95": percentile(95), "max": percentile(100)

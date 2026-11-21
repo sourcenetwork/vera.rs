@@ -763,9 +763,15 @@ default has two parts:
 
   The leader timeout is also how long a lone validator waits before it tries
   again after a proposal it could not build.
-- **Batch window.** Once a request has arrived the proposer collects more for
-  50 ms. An empty heartbeat block is built after the same window, so heartbeats
-  are about 10.05 s apart.
+- **Batch window.** Once a request has arrived the proposer collects more
+  before it builds. While an earlier block is still being finalized it
+  collects for `SoloPacing::batch`, 50 ms by default: the new block cannot
+  finalize before that one, and each block costs about 50 storage syncs, so
+  fewer, fuller blocks finalize sooner. With every earlier block finalized it
+  collects for `SoloPacing::settled`, 8 ms by default, which gathers requests
+  sent together with the first and spares a lone request the longer wait. An
+  empty heartbeat block follows a finalized parent, so heartbeats are about
+  10.01 s apart.
 
 `pacing: None` keeps the standalone daemon's cadence.
 
@@ -796,9 +802,30 @@ pruning at work:
 | 1.5 s | 50 ms | 194 ms | 260 ms | 0.65 | 14.9 MB/h |
 | 10 s (default) | 50 ms | 187 ms | 253 ms | 0.10 | 2.4 MB/h |
 
-No run abandoned a view. Below roughly 25 ms the receipt latency rises again
-on this machine; that point depends on how fast the disk commits, so the
-default leaves margin. These are single-process results on one machine. They
+The settled window was added afterwards; before it every block waited out
+the batch window. Measured with
+`cargo test --release -p vera-node --test embedded_commit_latency -- --ignored --nocapture`
+on an Apple-silicon machine shared with other builds, one writer sending 150
+policy creations one at a time and reading each receipt as the header of its
+block arrived (`LATENCY_WAIT=headers`), settings alternated over two rounds:
+
+| Settled window | Block built | Receipt p50, round 1 | Receipt p50, round 2 |
+| --- | --- | --- | --- |
+| 50 ms (earlier behavior) | 53.6 ms | 182 ms | 280 ms |
+| 8 ms (default) | 11.6 ms | 165 ms | 254 ms |
+
+The block is built 42 ms sooner. The rest of the path waits for storage
+syncs, about 50 per block, which on macOS are `F_FULLFSYNC` drive-cache
+flushes; their cost follows the whole machine's write activity, which is why
+the two rounds differ by about 100 ms. With eight writers sending 40 requests
+each, an 8 ms settled window kept blocks as full as a 50 ms one (41 and 42
+blocks for 320 requests), while no settled window doubled the block count
+(83). Latency and throughput of those runs varied more between runs than
+between settings.
+
+No run abandoned a view. With a batch window below roughly 25 ms the receipt
+latency rises again on this machine; that point depends on how fast the disk
+commits, so the default leaves margin. These are single-process results on one machine. They
 are not a capacity or multi-validator measurement.
 
 ## Limits

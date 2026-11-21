@@ -44,6 +44,7 @@ pub struct StatefulVeraApp<S: FinalizedSink, D: ApplicationState = OrderedState>
     vrf_verifier: Option<ConsensusScheme>,
     native_pipeline: bool,
     proposal_batch_wait: std::time::Duration,
+    settled_batch_wait: Option<std::time::Duration>,
     timestamp_step: u64,
     term: crate::TermGuard,
 }
@@ -84,6 +85,7 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
             vrf_verifier: None,
             native_pipeline: false,
             proposal_batch_wait: std::time::Duration::ZERO,
+            settled_batch_wait: None,
             timestamp_step: MAX_TIMESTAMP_STEP_SECS,
             term: crate::TermGuard::default(),
         }
@@ -118,6 +120,16 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
     ) -> Self {
         self.native_pipeline = enabled;
         self.proposal_batch_wait = batch_wait;
+        self
+    }
+
+    /// Collect requests for `wait` instead of the batch window when the parent is finalized.
+    ///
+    /// For a lone validator, a request that finds every block finalized has
+    /// no block in flight to wait for, only requests sent with it.
+    #[must_use]
+    pub const fn with_settled_batch_wait(mut self, wait: Option<std::time::Duration>) -> Self {
+        self.settled_batch_wait = wait;
         self
     }
 
@@ -296,9 +308,13 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         // The actor processes finalization only between builds, so a proposer
         // that idles waits before its request reaches the actor, not here.
         let mut txs = if self.native_pipeline {
+            let batch_wait = match self.settled_batch_wait {
+                Some(wait) if parent.height <= finalized_height => wait,
+                _ => self.proposal_batch_wait,
+            };
             input
                 .provider
-                .build_block_wait(self.max_txs, &excluded, self.proposal_batch_wait)
+                .build_block_wait(self.max_txs, &excluded, batch_wait)
                 .await
         } else {
             input.provider.build_block(self.max_txs, &excluded)
