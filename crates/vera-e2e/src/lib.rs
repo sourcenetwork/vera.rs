@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-pub use vera_harness::{cluster, contracts, fault, observe, resolve_binary};
+pub use vera_harness::{cluster, contracts, observe, resolve_binary};
 
 /// Receipt polling tuned for CI clusters, where all-validator gossip can take
 /// multiple block intervals before the receipt becomes visible.
