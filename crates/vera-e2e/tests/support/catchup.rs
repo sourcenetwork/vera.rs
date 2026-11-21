@@ -72,8 +72,7 @@ async fn certified_height(
                         assert_eq!(light.height, height);
                         return light;
                     }
-                    Err(vera_client::ClientError::Rpc { message, .. })
-                        if message.contains("finalization certificate not found") => {}
+                    Err(vera_client::ClientError::FinalityPending(_)) => {}
                     Err(error) => panic!("light block fetch failed: {error}"),
                 }
             }

@@ -64,10 +64,7 @@ impl VeraApiImpl {
     }
 }
 
-/// Clients match this text to tell pending finality from a failed lookup.
+/// The retryable answer for a revision whose certificate is not available yet.
 pub(super) fn certificate_not_found(height: u64) -> ErrorObjectOwned {
-    RpcError::Internal(format!(
-        "finalization certificate not found for height {height} within retained proof limits"
-    ))
-    .into()
+    RpcError::FinalityPending(height).into()
 }

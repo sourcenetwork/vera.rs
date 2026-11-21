@@ -69,17 +69,13 @@ pub(super) async fn assert_replicas(
                     serde_json::to_value(receipt).unwrap()
                 );
                 // Receipt publication can precede the marshal certificate callback.
-                let pending = format!(
-                    "internal error: finalization certificate not found for height {} within retained proof limits",
-                    receipt.block_number
-                );
                 let light = loop {
                     match client
                         .read_finalized_revision(receipt.block_number, trusted)
                         .await
                     {
                         Ok(light) => break light,
-                        Err(ClientError::Rpc { code: -32603, message }) if message == pending => {
+                        Err(ClientError::FinalityPending(_)) => {
                             tokio::time::sleep(POLL).await;
                         }
                         Err(error) => panic!(
@@ -114,16 +110,7 @@ fn rpc_failure_kind(error: &ClientError) -> &'static str {
     match error {
         ClientError::ClientCapacityExhausted => "client-capacity",
         ClientError::ResourceBusy(_) => "server-capacity",
-        ClientError::Rpc {
-            code: -32603,
-            message,
-        } if message
-            .strip_prefix("internal error: ")
-            .unwrap_or(message)
-            .starts_with("finalization certificate not found for height ") =>
-        {
-            "finality-unavailable"
-        }
+        ClientError::FinalityPending(_) => "finality-unavailable",
         ClientError::Rpc { code: -32603, .. } => "rpc-internal",
         ClientError::Rpc { .. } => "rpc-rejected",
         ClientError::Transport(error) if error.is_timeout() => "transport-timeout",
@@ -142,17 +129,7 @@ fn recovery_rpc_failure_classes_do_not_export_remote_messages() {
         "server-capacity"
     );
     assert_eq!(
-        rpc_failure_kind(&ClientError::Rpc {
-            code: -32603,
-            message: "finalization certificate not found for height 42".into(),
-        }),
-        "finality-unavailable"
-    );
-    assert_eq!(
-        rpc_failure_kind(&ClientError::Rpc {
-            code: -32603,
-            message: "internal error: finalization certificate not found for height 42 within retained proof limits".into(),
-        }),
+        rpc_failure_kind(&ClientError::FinalityPending("private".into())),
         "finality-unavailable"
     );
     assert_eq!(

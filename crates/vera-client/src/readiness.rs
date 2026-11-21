@@ -87,9 +87,7 @@ impl VeraClient {
             if initial_height < minimum_height {
                 return Err(ReadinessError::BehindCheckpoint);
             }
-            let initial = self
-                .read_finalized_revision(initial_height, trusted_key)
-                .await?;
+            let initial = self.certified_revision(initial_height, trusted_key).await?;
             check_revision(&initial, maximum_age)?;
             loop {
                 tokio::time::sleep(Duration::from_millis(200)).await;
@@ -98,7 +96,7 @@ impl VeraClient {
                     return Err(ReadinessError::Regressed);
                 }
                 if height > initial.height {
-                    let revision = self.read_finalized_revision(height, trusted_key).await?;
+                    let revision = self.certified_revision(height, trusted_key).await?;
                     check_revision(&revision, maximum_age)?;
                     return Ok(VerifiedReadiness {
                         initial_height: initial.height,
@@ -116,7 +114,27 @@ impl VeraClient {
         }
         result
     }
+
+    /// Read a revision's certified light block, waiting while its finality is
+    /// pending: a node publishes a revision before the certificate of a
+    /// descendant that finalizes it arrives. The caller's deadline bounds the wait.
+    async fn certified_revision(
+        &self,
+        height: u64,
+        trusted_key: &ConsensusPublicKey,
+    ) -> Result<LightBlock, ClientError> {
+        loop {
+            match self.read_finalized_revision(height, trusted_key).await {
+                Err(ClientError::FinalityPending(_)) => {
+                    tokio::time::sleep(PENDING_FINALITY_RETRY).await;
+                }
+                result => return result,
+            }
+        }
+    }
 }
+
+const PENDING_FINALITY_RETRY: Duration = Duration::from_millis(200);
 
 #[cfg(test)]
 mod tests {

@@ -24,6 +24,11 @@ pub enum ClientError {
     #[error("RPC service busy: {0}")]
     ResourceBusy(String),
 
+    /// The requested revision has no finalization certificate yet: the node has
+    /// applied it, and a descendant that finalizes it is still to come. Retryable.
+    #[error("finality pending: {0}")]
+    FinalityPending(String),
+
     /// ABI decoding failed on a precompile response.
     #[error("ABI decode error: {0}")]
     AbiDecode(String),
@@ -154,11 +159,12 @@ impl ClientError {
             .and_then(serde_json::Value::as_str)
             .unwrap_or("unknown")
             .to_owned();
-        if code == -32002
-            && error.get("data").and_then(|data| data.get("retryable"))
-                == Some(&serde_json::Value::Bool(true))
-        {
+        let retryable = error.get("data").and_then(|data| data.get("retryable"))
+            == Some(&serde_json::Value::Bool(true));
+        if code == -32002 && retryable {
             Self::ResourceBusy(message)
+        } else if code == -32006 && retryable {
+            Self::FinalityPending(message)
         } else {
             Self::Rpc { code, message }
         }
@@ -168,6 +174,21 @@ impl ClientError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_finality_is_its_own_retryable_error() {
+        let error = ClientError::from_rpc(&serde_json::json!({
+            "code": -32006,
+            "message": "finalization certificate not found for height 7 within retained proof limits",
+            "data": {"retryable": true, "height": 7}
+        }));
+        assert!(matches!(error, ClientError::FinalityPending(_)));
+        assert!(!error.is_throttled());
+        let error = ClientError::from_rpc(&serde_json::json!({
+            "code": -32006, "message": "pending",
+        }));
+        assert!(matches!(error, ClientError::Rpc { code: -32006, .. }));
+    }
 
     #[test]
     fn remote_throttle_cannot_impersonate_local_capacity() {

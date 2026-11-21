@@ -401,6 +401,8 @@ mod tests {
 #[cfg(test)]
 mod permission_transport;
 #[cfg(test)]
+mod readiness_tests;
+#[cfg(test)]
 mod stub;
 #[cfg(test)]
 mod submission_tests;

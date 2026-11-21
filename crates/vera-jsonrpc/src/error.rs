@@ -28,6 +28,9 @@ pub mod codes {
     pub const METHOD_NOT_SUPPORTED: i32 = -32004;
     /// Request limit exceeded.
     pub const LIMIT_EXCEEDED: i32 = -32005;
+    /// The revision has no finalization certificate yet: a descendant that
+    /// finalizes it has not been applied. Retryable.
+    pub const FINALITY_PENDING: i32 = -32006;
     /// Execution error (revert, out of gas, etc.).
     pub const EXECUTION_ERROR: i32 = -32015;
     /// The node no longer retains the requested history (EIP-4444's code
@@ -89,6 +92,9 @@ pub enum RpcError {
     /// No execution simulation slot freed in time, or too many callers are waiting for one.
     #[error("simulation service busy; retry later")]
     SimulationBusy,
+    /// The revision has no finalization certificate within the retained proof limits yet.
+    #[error("finalization certificate not found for height {0} within retained proof limits")]
+    FinalityPending(u64),
     /// Request work or response exceeds the service budget.
     #[error("request limit exceeded: {0}")]
     LimitExceeded(String),
@@ -141,6 +147,11 @@ impl From<RpcError> for ErrorObjectOwned {
                 err.to_string(),
                 Some(serde_json::json!({"retryable": true})),
             ),
+            RpcError::FinalityPending(height) => ErrorObjectOwned::owned(
+                codes::FINALITY_PENDING,
+                err.to_string(),
+                Some(serde_json::json!({"retryable": true, "height": height})),
+            ),
             RpcError::HistoryPruned { floor, .. } => ErrorObjectOwned::owned(
                 codes::HISTORY_PRUNED,
                 err.to_string(),
@@ -162,6 +173,7 @@ impl From<RpcError> for ErrorObjectOwned {
                     RpcError::NotImplemented => (codes::METHOD_NOT_SUPPORTED, err.to_string()),
                     RpcError::ExecutionReverted { .. }
                     | RpcError::HistoryPruned { .. }
+                    | RpcError::FinalityPending(_)
                     | RpcError::HistoryBusy
                     | RpcError::SimulationBusy => unreachable!(),
                 };

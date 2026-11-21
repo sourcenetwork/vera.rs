@@ -306,16 +306,13 @@ async fn assert_observed_revision(
     trusted: &ConsensusPublicKey,
 ) {
     let height = status.finalized_height.expect("observed finalized height");
-    let pending = format!(
-        "finalization certificate not found for height {height} within retained proof limits"
-    );
     let revision = tokio::time::timeout(Duration::from_secs(30), async {
         let mut poll = tokio::time::interval(Duration::from_millis(100));
         loop {
             poll.tick().await;
             match client.read_finalized_revision(height, trusted).await {
                 Ok(revision) => break revision,
-                Err(ClientError::Rpc { message, .. }) if message.ends_with(&pending) => {}
+                Err(ClientError::FinalityPending(_)) => {}
                 Err(error) => panic!("verify indexed finalized revision: {error}"),
             }
         }

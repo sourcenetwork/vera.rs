@@ -17,6 +17,12 @@ revision and ending at the certified block. The `finalization` and
 `epoch_material` fields describe that last block. When the requested revision
 has a direct certificate, `descendants` is omitted.
 
+A node publishes a revision once it is applied, which can be before the
+certificate of the descendant that finalizes it arrives. A request for such a
+revision returns -32006 with `retryable: true` and the `height`;
+`vera-client` reports it as `ClientError::FinalityPending`, and
+`VeraClient::verify_readiness` waits it out within its observation deadline.
+
 All displayed fields, including `height`, `epoch`, `timestamp` and state roots,
 describe the requested revision. Verification checks those fields against its
 canonical bytes, follows contiguous heights and parent hashes, and verifies
