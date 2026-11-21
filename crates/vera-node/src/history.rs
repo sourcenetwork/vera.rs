@@ -33,6 +33,10 @@ const BLOCK_HASH: u8 = 5;
 const SUBMISSION_HASH: u8 = 6;
 const QUERY_HEAD: &[u8] = b"query_head";
 const FORMAT: &[u8] = b"format";
+/// Layout of a store that has only appended its own execution.
+const FORMAT_APPENDED: [u8; 1] = [1];
+/// Layout of a store that has begun importing history; recovery keeps its certified suffix.
+const FORMAT_IMPORTED: [u8; 1] = [3];
 const GENESIS: &[u8] = b"genesis";
 const HEAD: &[u8] = b"head";
 
@@ -219,12 +223,8 @@ impl FinalizedHistory {
         match db.get(FORMAT)? {
             Some(version) => {
                 ensure!(
-                    matches!(version.as_slice(), [1] | [2] | [3]),
+                    version.as_slice() == FORMAT_APPENDED || version.as_slice() == FORMAT_IMPORTED,
                     "unsupported finalized history format"
-                );
-                ensure!(
-                    version.as_slice() != [2] || db.get(transfer::IMPORT)?.is_none(),
-                    "unfinished format 2 history import requires the previous binary"
                 );
                 ensure!(
                     db.get(GENESIS)?.as_deref() == Some(genesis.as_slice()),
@@ -234,7 +234,7 @@ impl FinalizedHistory {
             None => {
                 ensure!(store_is_empty(&db)?, "missing finalized history format");
                 let mut batch = WriteBatch::default();
-                batch.put(FORMAT, [1]);
+                batch.put(FORMAT, FORMAT_APPENDED);
                 batch.put(GENESIS, genesis);
                 let head = borsh::to_vec(&(0u64, genesis.0))?;
                 batch.put(HEAD, &head);

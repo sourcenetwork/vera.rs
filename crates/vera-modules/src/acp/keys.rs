@@ -177,22 +177,6 @@ pub fn amendment_event_counter_key() -> Vec<u8> {
     key
 }
 
-/// Commitment expired-index key: `"commitment/indexes/expired/idx/" + bool_byte + "/" + BE(id)`.
-pub fn commitment_expired_index_key(expired: bool, id: u64) -> Vec<u8> {
-    let mut key = commitment_expired_index_prefix(expired);
-    key.extend_from_slice(&id.to_be_bytes());
-    key
-}
-
-/// Prefix for scanning commitments with a given expired status.
-pub fn commitment_expired_index_prefix(expired: bool) -> Vec<u8> {
-    let mut key = Vec::from(COMMITMENT_PREFIX);
-    key.extend_from_slice(b"indexes/expired/idx/");
-    key.push(u8::from(expired));
-    key.push(b'/');
-    key
-}
-
 /// Commitment-by-root index key: `"commitment/indexes/commitment/idx/" + root_bytes + "/" + BE(id)`.
 pub fn commitment_by_commitment_index_key(root: &[u8], id: u64) -> Vec<u8> {
     let mut key = commitment_by_commitment_index_prefix(root);
