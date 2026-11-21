@@ -1,4 +1,4 @@
-//! Admission for `eth_call`, `eth_estimateGas` and `vera_simulateNativeCall` executions.
+//! Admission for `vera_call` and `vera_simulateNativeCall` executions.
 
 use std::{sync::Arc, time::Duration};
 

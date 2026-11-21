@@ -6,9 +6,7 @@ use alloy_primitives::{Address, B256, Bytes};
 use vera_domain::NativeTx;
 
 use super::VeraClient;
-use crate::{
-    bls_signer::BlsSigner, error::ClientError, signer::EvmSigner, types::TransactionReceipt,
-};
+use crate::{bls_signer::BlsSigner, error::ClientError, types::TransactionReceipt};
 
 const RECEIPT_POLL_INTERVAL: Duration = Duration::from_millis(300);
 /// Native requests reach other validators by gossip, so the helpers poll for two minutes.
@@ -95,33 +93,17 @@ impl VeraClient {
         self.executed(tx_hash).await
     }
 
-    /// Sign and submit a precompile transaction, then poll for the receipt.
-    pub(crate) async fn send_precompile_tx(
-        &self,
-        signer: &EvmSigner,
-        target: Address,
-        calldata: Bytes,
-    ) -> Result<TransactionReceipt, ClientError> {
-        let nonce = self.get_nonce(signer.address()).await?;
-        let raw = signer.sign_tx(target, calldata, nonce)?;
-        let tx_hash = self.send_raw_transaction(&raw).await?;
-        self.executed(tx_hash).await
-    }
-
     pub(super) async fn executed(&self, tx_hash: B256) -> Result<TransactionReceipt, ClientError> {
         let receipt = self
             .wait_for_receipt(tx_hash, RECEIPT_POLL_INTERVAL, RECEIPT_POLL_ATTEMPTS)
             .await?;
-        if receipt.status == 0 {
-            return Err(match receipt.refusal.clone() {
-                Some(refusal) => ClientError::Refused {
-                    refusal,
-                    receipt: Box::new(receipt),
-                },
-                None => ClientError::TxReverted {
-                    status: 0,
-                    receipt: Box::new(receipt),
-                },
+        if !receipt.success {
+            let refusal = receipt.refusal.clone().ok_or(ClientError::InvalidResponse(
+                "failed receipt names no refusal",
+            ))?;
+            return Err(ClientError::Refused {
+                refusal,
+                receipt: Some(Box::new(receipt)),
             });
         }
         Ok(receipt)

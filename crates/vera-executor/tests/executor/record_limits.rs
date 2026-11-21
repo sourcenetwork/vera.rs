@@ -114,11 +114,10 @@ fn oversized_native_registration_rolls_back_and_allows_next_nonce(#[case] batch:
     let (failed, actor) = native(0, input);
     let (healthy, _) = native(1, register(policy, "healthy"));
     let state = MockStateDb::new();
-    let mut validator =
-        MempoolValidator::new(state.clone(), ExecutionConfig::new(9001), 0).with_native_only(true);
+    let mut validator = MempoolValidator::new(ExecutionConfig::new(9001));
     for tx in [&failed, &healthy] {
         assert!(tx.len() < vera_domain::MAX_TX_BYTES);
-        let checked = MempoolValidator::<MockStateDb>::pre_validate_native(9001, tx).unwrap();
+        let checked = MempoolValidator::pre_validate_native(9001, tx).unwrap();
         validator.admit_native(&checked).unwrap();
     }
 
@@ -259,35 +258,4 @@ fn native_batch_that_exhausts_its_allowance_fails_and_commits_nothing(
         serde_json::to_value(verified.receipts).unwrap(),
         serde_json::to_value(outcome.receipts).unwrap()
     );
-}
-
-#[test]
-fn oversized_evm_registration_rolls_back_but_consumes_account_nonce() {
-    let (executor, policy) = fixture();
-    let before = module_state(&executor.snapshot()).serialize_stores();
-    let object = oversized_object(policy);
-    let (outcome, modules) = super::rollback::execute_with_executor(
-        &MockStateDb::new(),
-        alloy_primitives::TxKind::Call(ACP_ADDRESS),
-        register(policy, &object).into(),
-        executor,
-    );
-    assert_eq!(outcome.executed_tx_indices, Some(vec![0]));
-    assert_eq!(outcome.receipts.len(), 1);
-    assert!(!outcome.receipts[0].success());
-    assert!(outcome.receipts[0].logs().is_empty());
-    assert_eq!(outcome.gas_used, NATIVE_LIMIT);
-    let signer: alloy_signer_local::PrivateKeySigner = "42".repeat(32).parse().unwrap();
-    assert_eq!(outcome.changes.accounts[&signer.address()].nonce, 1);
-    assert_eq!(modules.serialize_stores(), before);
-
-    let (executor, policy) = fixture();
-    let (outcome, _) = super::rollback::execute_with_executor(
-        &MockStateDb::new(),
-        alloy_primitives::TxKind::Call(ACP_ADDRESS),
-        register(policy, "healthy").into(),
-        executor,
-    );
-    assert!(outcome.receipts[0].success());
-    assert_eq!(outcome.receipts[0].logs().len(), 1);
 }

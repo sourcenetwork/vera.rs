@@ -1,9 +1,6 @@
 //! Bounded in-memory indexes over finalized revisions.
 
-use crate::{
-    IndexStats, IndexedBlock, IndexedLog, IndexedReceipt, IndexedTransaction, IndexerError,
-    LogFilter, LogQuery,
-};
+use crate::{IndexStats, IndexedBlock, IndexedLog, IndexedReceipt, IndexedTransaction};
 use alloy_primitives::B256;
 use parking_lot::RwLock;
 use std::{
@@ -163,24 +160,6 @@ impl BlockIndex {
         Some(cache.revisions.get(revision)?.receipts[*position].clone())
     }
 
-    /// Capture a receipt and its submission metadata under the same cache lock.
-    pub fn receipt_with_transaction(
-        &self,
-        hash: &B256,
-    ) -> Option<(IndexedReceipt, Option<IndexedTransaction>)> {
-        let cache = self.cache.read();
-        let (owner, position) = cache.receipts.get(hash)?;
-        let revision = cache.revisions.get(owner)?;
-        let receipt = revision.receipts[*position].clone();
-        let tx = cache
-            .transactions
-            .get(hash)
-            .and_then(|(tx_owner, position)| {
-                (*tx_owner == *owner).then(|| revision.transactions[*position].clone())
-            });
-        Some((receipt, tx))
-    }
-
     /// Retain complete execution data across asynchronous proof assembly.
     pub fn receipt_revision(&self, hash: &B256) -> Option<Arc<IndexedRevision>> {
         let cache = self.cache.read();
@@ -196,34 +175,6 @@ impl BlockIndex {
             .numbers
             .last_key_value()
             .map_or(0, |(number, _)| *number)
-    }
-
-    /// Query resident logs with aggregate scan/result limits.
-    pub fn get_logs(&self, filter: &LogFilter) -> Result<Vec<IndexedLog>, IndexerError> {
-        let mut query = LogQuery::new(filter.clone(), self.head_block_number())?;
-        for height in query.from..=query.to {
-            self.collect_revision_logs(height, &mut query)?;
-        }
-        Ok(query.finish())
-    }
-
-    /// Collect a resident revision, returning false when history is needed.
-    pub fn collect_revision_logs(
-        &self,
-        height: u64,
-        query: &mut LogQuery,
-    ) -> Result<bool, IndexerError> {
-        let revision = {
-            let cache = self.cache.read();
-            let Some(hash) = cache.numbers.get(&height) else {
-                return Ok(false);
-            };
-            cache.revisions.get(hash).expect("indexed revision").clone()
-        };
-        for log in revision.receipts.iter().flat_map(|receipt| &receipt.logs) {
-            query.push(log)?;
-        }
-        Ok(true)
     }
 
     /// Number of resident revisions.
@@ -265,7 +216,7 @@ impl IndexedRevision {
             + self
                 .transactions
                 .iter()
-                .map(|tx| tx.input.len() + tx.signer_did.as_ref().map_or(0, String::capacity))
+                .map(|tx| tx.input.len() + tx.signer_did.capacity())
                 .sum::<usize>()
             + self.receipts.capacity() * size_of::<IndexedReceipt>()
             + self
@@ -273,30 +224,11 @@ impl IndexedRevision {
                 .iter()
                 .map(|receipt| {
                     logs_bytes(&receipt.logs)
-                        + receipt.signer_did.as_ref().map_or(0, String::capacity)
+                        + receipt.signer_did.capacity()
                         + receipt.refusal.as_ref().map_or(0, |r| r.message().len())
                 })
                 .sum::<usize>()
     }
-}
-
-pub(crate) fn matches_filter(log: &IndexedLog, filter: &LogFilter) -> bool {
-    if let Some(addresses) = &filter.address
-        && !addresses.contains(&log.address)
-    {
-        return false;
-    }
-
-    for (i, topic_filter) in filter.topics.iter().enumerate() {
-        if let Some(allowed_topics) = topic_filter {
-            match log.topics.get(i) {
-                Some(log_topic) if allowed_topics.contains(log_topic) => {}
-                _ => return false,
-            }
-        }
-    }
-
-    true
 }
 
 #[cfg(test)]
@@ -304,14 +236,6 @@ mod tests {
     use alloy_primitives::{Address, B256, Bytes, U256};
 
     use super::*;
-
-    fn set_logs(index: &BlockIndex, hash: B256, logs: Vec<IndexedLog>) {
-        let mut cache = index.cache.write();
-        let revision = Arc::make_mut(cache.revisions.get_mut(&hash).unwrap());
-        let mut receipt = create_test_receipt(B256::ZERO, hash, revision.block.number);
-        receipt.logs = logs;
-        revision.receipts = vec![receipt];
-    }
 
     fn create_test_block(number: u64, hash: B256) -> IndexedBlock {
         IndexedBlock {
@@ -323,7 +247,6 @@ mod tests {
             timestamp: 1000 + number,
             gas_limit: 30_000_000,
             gas_used: 21_000,
-            base_fee_per_gas: Some(1_000_000_000),
             transaction_hashes: vec![],
         }
     }
@@ -334,14 +257,10 @@ mod tests {
             block_hash,
             block_number,
             transaction_index: 0,
-            from: Address::ZERO,
-            to: Some(Address::ZERO),
-            value: U256::ZERO,
-            gas_limit: 21_000,
-            gas_price: 1_000_000_000,
+            target: Address::ZERO,
             input: Bytes::new(),
             nonce: 0,
-            signer_did: None,
+            signer_did: String::new(),
         }
     }
 
@@ -351,14 +270,13 @@ mod tests {
             block_hash,
             block_number,
             transaction_index: 0,
-            from: Address::ZERO,
-            to: Some(Address::ZERO),
+            target: Address::ZERO,
+            nonce: 0,
             cumulative_gas_used: 21_000,
             gas_used: 21_000,
-            contract_address: None,
             logs: vec![],
             status: true,
-            signer_did: None,
+            signer_did: String::new(),
             refusal: None,
         }
     }
@@ -375,28 +293,23 @@ mod tests {
             block_hash: hash,
             block_number: 1,
             transaction_index: 0,
-            from: Address::ZERO,
-            to: None,
-            value: U256::ZERO,
-            gas_limit: 100,
-            gas_price: 0,
+            target: Address::ZERO,
             input: Bytes::new(),
             nonce: 73,
-            signer_did: Some("owner".into()),
+            signer_did: "owner".into(),
         };
         let receipt = IndexedReceipt {
             transaction_hash: tx_hash,
             block_hash: hash,
             block_number: 1,
             transaction_index: 0,
-            from: Address::ZERO,
-            to: None,
+            target: Address::ZERO,
+            nonce: 0,
             cumulative_gas_used: 0,
             gas_used: 0,
-            contract_address: None,
             logs: vec![],
             status: true,
-            signer_did: Some("owner".into()),
+            signer_did: "owner".into(),
             refusal: None,
         };
         index.insert_block(block, vec![tx], vec![receipt]);
@@ -494,115 +407,6 @@ mod tests {
 
         index.insert_block(create_test_block(10, B256::repeat_byte(10)), vec![], vec![]);
         assert_eq!(index.head_block_number(), 10);
-    }
-
-    #[test]
-    fn test_get_logs_with_filter() {
-        let index = BlockIndex::new();
-        let block_hash = B256::repeat_byte(1);
-        let contract_addr = Address::repeat_byte(0xAB);
-        let topic = B256::repeat_byte(0xCD);
-
-        let log = IndexedLog {
-            address: contract_addr,
-            topics: vec![topic],
-            data: Bytes::new(),
-            log_index: 0,
-            block_hash,
-            block_number: 1,
-            transaction_hash: B256::repeat_byte(2),
-            transaction_index: 0,
-        };
-
-        let receipt = IndexedReceipt {
-            transaction_hash: B256::repeat_byte(2),
-            block_hash,
-            block_number: 1,
-            transaction_index: 0,
-            from: Address::ZERO,
-            to: None,
-            cumulative_gas_used: 21_000,
-            gas_used: 21_000,
-            contract_address: None,
-            logs: vec![log],
-            status: true,
-            signer_did: None,
-            refusal: None,
-        };
-
-        index.insert_block(create_test_block(1, block_hash), vec![], vec![receipt]);
-
-        let filter = LogFilter::new().address(vec![contract_addr]);
-        let logs = index.get_logs(&filter).unwrap();
-        assert_eq!(logs.len(), 1);
-        assert_eq!(logs[0].address, contract_addr);
-
-        let filter = LogFilter::new().topic(0, vec![topic]);
-        let logs = index.get_logs(&filter).unwrap();
-        assert_eq!(logs.len(), 1);
-
-        let filter = LogFilter::new().address(vec![Address::repeat_byte(0xFF)]);
-        let logs = index.get_logs(&filter).unwrap();
-        assert!(logs.is_empty());
-    }
-
-    #[test]
-    fn log_queries_reject_excessive_work_and_results() {
-        let index = BlockIndex::new();
-        assert!(matches!(
-            index.get_logs(&LogFilter::new().to_block(u64::MAX)),
-            Err(IndexerError::LogQueryLimit)
-        ));
-        assert!(matches!(
-            index.get_logs(&LogFilter::new().from_block(2).to_block(1)),
-            Err(IndexerError::InvalidBlockRange { .. })
-        ));
-        assert!(
-            index
-                .get_logs(&LogFilter::new().to_block(9_999))
-                .unwrap()
-                .is_empty()
-        );
-        assert!(matches!(
-            index.get_logs(&LogFilter::new().address(vec![Address::ZERO; 65])),
-            Err(IndexerError::LogQueryLimit)
-        ));
-        assert!(matches!(
-            index.get_logs(&LogFilter::new().topic(0, vec![B256::ZERO; 65])),
-            Err(IndexerError::LogQueryLimit)
-        ));
-        let hash = B256::repeat_byte(1);
-        index.insert_block(create_test_block(1, hash), vec![], vec![]);
-        let mut log = IndexedLog {
-            address: Address::ZERO,
-            topics: vec![],
-            data: Bytes::new(),
-            log_index: 0,
-            block_hash: hash,
-            block_number: 1,
-            transaction_hash: B256::ZERO,
-            transaction_index: 0,
-        };
-        set_logs(&index, hash, vec![log.clone(); 1_000]);
-        assert_eq!(index.get_logs(&LogFilter::new()).unwrap().len(), 1_000);
-        set_logs(&index, hash, vec![log.clone(); 1_001]);
-        assert!(matches!(
-            index.get_logs(&LogFilter::new()),
-            Err(IndexerError::LogQueryLimit)
-        ));
-        set_logs(&index, hash, vec![log.clone(); 10_001]);
-        let unmatched = LogFilter::new().address(vec![Address::repeat_byte(1)]);
-        assert!(matches!(
-            index.get_logs(&unmatched),
-            Err(IndexerError::LogQueryLimit)
-        ));
-        log.data = Bytes::from(vec![0; 1 << 20]);
-        set_logs(&index, hash, vec![log]);
-        assert!(matches!(
-            index.get_logs(&LogFilter::new()),
-            Err(IndexerError::LogQueryLimit)
-        ));
-        assert!(index.get_logs(&unmatched).unwrap().is_empty());
     }
 
     #[test]

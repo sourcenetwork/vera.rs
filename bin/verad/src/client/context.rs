@@ -1,12 +1,12 @@
 //! Client context wrapping `VeraClient` with optional signers.
 
-use vera_client::{BlsSigner, EvmSigner, Secp256k1SigningKey, VeraClient};
+use vera_client::{BlsSigner, Secp256k1SigningKey, VeraClient};
 
 use super::parse;
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum KeyError {
-    #[error("--key is required for write commands")]
+    #[error("--bls-key is required for write commands")]
     Missing,
     #[error("invalid --key hex: {0}")]
     InvalidHex(#[from] hex::FromHexError),
@@ -47,10 +47,9 @@ impl ClientContext {
         })
     }
 
-    /// Require an EVM signer, returning an error if `--key` was not provided.
-    pub(super) fn require_evm_signer(&self) -> Result<EvmSigner, KeyError> {
-        let key = self.signing_key.as_ref().ok_or(KeyError::Missing)?;
-        Ok(EvmSigner::from_native_key(key.clone(), self.chain_id))
+    /// The native signer of a write command; `--bls-key` supplies it.
+    pub(super) fn require_bls_signer(&self) -> Result<&BlsSigner, KeyError> {
+        self.bls_signer.as_ref().ok_or(KeyError::Missing)
     }
 
     /// Print a serializable value as JSON to stdout.
@@ -78,7 +77,7 @@ fn parse_bls_signer(hex_key: &str, chain_id: u64) -> eyre::Result<BlsSigner> {
 #[cfg(test)]
 mod tests {
     use super::{ClientContext, parse_signing_key};
-    use vera_client::{EvmSigner, create_bearer_token};
+    use vera_client::create_bearer_token;
 
     #[test]
     fn parses_native_keys_and_rejects_invalid_input() {
@@ -91,13 +90,17 @@ mod tests {
     }
 
     #[test]
-    fn legacy_signer_preserves_address_and_chain_id() {
+    fn a_write_requires_the_native_key() {
         let hex = hex::encode([7u8; 32]);
-        let ctx = ClientContext::new("http://localhost:8545", Some(&hex), None, 42, false).unwrap();
-        let expected = EvmSigner::from_hex(&hex, 42).unwrap();
-        let signer = ctx.require_evm_signer().unwrap();
-        assert_eq!(signer.address(), expected.address());
-        assert_eq!(signer.chain_id(), 42);
+        let actor_only =
+            ClientContext::new("http://localhost:8545", Some(&hex), None, 42, false).unwrap();
+        assert!(matches!(
+            actor_only.require_bls_signer(),
+            Err(super::KeyError::Missing)
+        ));
+        let native =
+            ClientContext::new("http://localhost:8545", None, Some(&hex), 42, false).unwrap();
+        assert!(native.require_bls_signer().is_ok());
     }
 
     #[test]
@@ -113,7 +116,10 @@ mod tests {
         )
         .unwrap();
         let claims = vera_crypto::jwt::verify_bearer_token(&token).unwrap();
-        assert_eq!(claims.iss, EvmSigner::from_hex(&hex, 42).unwrap().did());
+        assert_eq!(
+            claims.iss,
+            super::super::keys::actor_did(ctx.signing_key.as_ref().unwrap()).unwrap()
+        );
         assert_eq!(claims.sub, "did:example:worker");
         assert_eq!(claims.aud, "vera:42");
         assert_eq!((claims.iat, claims.exp), (100, 200));

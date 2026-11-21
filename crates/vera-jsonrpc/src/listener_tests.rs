@@ -15,11 +15,11 @@ async fn inherited_listener_serves_rpc_without_rebinding() {
             .build(format!("ws://{address}"))
             .await
             .unwrap();
-        let chain: String = client
-            .request("eth_chainId", jsonrpsee::rpc_params![])
+        let status: crate::NodeStatus = client
+            .request("vera_nodeStatus", jsonrpsee::rpc_params![])
             .await
             .unwrap();
-        assert_eq!(chain, "0x1");
+        assert_eq!(status.chain_id, 1);
     })
     .await
     .unwrap();

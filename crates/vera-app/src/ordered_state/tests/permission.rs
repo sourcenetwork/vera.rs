@@ -55,7 +55,6 @@ pub(super) fn index_block(index: &BlockIndex, block: &vera_domain::Block) {
             timestamp: block.timestamp,
             gas_limit: 30_000_000,
             gas_used: 0,
-            base_fee_per_gas: None,
             transaction_hashes: vec![],
         },
         vec![],
@@ -164,7 +163,6 @@ fn synchronized_permission_rpc_verifies_native_evidence_and_subsequent_denial() 
                     let (server, _local) = RpcServer::with_state_provider(
                         NodeState::new(DEPLOYMENT, 0, 4),
                         "127.0.0.1:0".parse().unwrap(),
-                        DEPLOYMENT,
                         vera_jsonrpc::NoopStateProvider,
                     )
                     .with_vera_index_and_modules(index.clone(), replica.executor.modules().clone())

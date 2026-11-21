@@ -269,11 +269,10 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             Some(wait) if parent.height <= finalized_height => wait,
             _ => self.proposal_batch_wait,
         };
-        let mut txs = input
+        let txs = input
             .provider
             .build_block_wait(self.max_txs, &excluded, batch_wait)
             .await;
-        txs.retain(Tx::is_native);
 
         let height = parent.height + 1;
         let term = self.term.term();
@@ -308,7 +307,6 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             .collect();
         if !rejected.is_empty() {
             self.mempool.prune(&rejected);
-            self.sink.rejected().await;
         }
         let txs = match &executed.outcome.executed_tx_indices {
             Some(indices) => indices.iter().map(|&i| txs[i].clone()).collect(),

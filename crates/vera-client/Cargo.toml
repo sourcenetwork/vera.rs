@@ -6,7 +6,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Rust client library for vera (EVM + BLS transaction paths)"
+description = "Rust client library for vera: native submissions, verified reads and typed queries"
 readme = "README.md"
 
 [lints]
@@ -20,11 +20,6 @@ vera-domain.workspace = true
 vera-permission.workspace = true
 vera-modules.workspace = true
 
-vera-acp.workspace = true
-vera-identity.workspace = true
-
-alloy-consensus = { workspace = true, features = ["k256"] }
-alloy-eips.workspace = true
 alloy-primitives = { workspace = true, features = ["serde"] }
 alloy-sol-types.workspace = true
 k256-native = { package = "k256", version = "0.14", features = ["ecdsa"] }

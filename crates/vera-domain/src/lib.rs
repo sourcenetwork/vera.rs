@@ -38,6 +38,8 @@ pub use native_tx::{NATIVE_TX_TYPE, NativeTx, NativeTxPayload};
 
 mod native_simulation;
 pub use native_simulation::{NativeCallRequest, NativeCallSimulation, SimulatedLog};
+mod view_call;
+pub use view_call::ViewCallResult;
 
 mod light_block;
 pub use light_block::{

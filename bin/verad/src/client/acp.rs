@@ -152,16 +152,11 @@ impl AcpCommand {
         match self {
             Self::CreatePolicy { yaml, file, nonce } => {
                 let policy_bytes = read_policy_input(yaml, file)?;
-                let receipt = if let Some(bls) = ctx.bls_signer.as_ref() {
-                    ctx.client
-                        .native_create_policy(bls, &policy_bytes, 1, nonce)
-                        .await?
-                } else {
-                    let signer = ctx.require_evm_signer()?;
-                    ctx.client
-                        .create_policy(&signer, &policy_bytes, 1, nonce)
-                        .await?
-                };
+                let bls = ctx.require_bls_signer()?;
+                let receipt = ctx
+                    .client
+                    .native_create_policy(bls, &policy_bytes, 1, nonce)
+                    .await?;
                 ctx.print_json(&receipt)?;
             }
             Self::GetPolicy { policy_id } => {
@@ -185,16 +180,11 @@ impl AcpCommand {
                 object_id,
             } => {
                 let id = vera_client::parse_policy_id(&policy_id)?;
-                let receipt = if let Some(bls) = ctx.bls_signer.as_ref() {
-                    ctx.client
-                        .native_register_object(bls, id, &object_id, &resource)
-                        .await?
-                } else {
-                    let signer = ctx.require_evm_signer()?;
-                    ctx.client
-                        .register_object(&signer, id, &object_id, &resource)
-                        .await?
-                };
+                let bls = ctx.require_bls_signer()?;
+                let receipt = ctx
+                    .client
+                    .native_register_object(bls, id, &object_id, &resource)
+                    .await?;
                 ctx.print_json(&receipt)?;
             }
             Self::ArchiveObject {
@@ -203,16 +193,11 @@ impl AcpCommand {
                 object_id,
             } => {
                 let id = vera_client::parse_policy_id(&policy_id)?;
-                let receipt = if let Some(bls) = ctx.bls_signer.as_ref() {
-                    ctx.client
-                        .native_archive_object(bls, id, &object_id, &resource)
-                        .await?
-                } else {
-                    let signer = ctx.require_evm_signer()?;
-                    ctx.client
-                        .archive_object(&signer, id, &object_id, &resource)
-                        .await?
-                };
+                let bls = ctx.require_bls_signer()?;
+                let receipt = ctx
+                    .client
+                    .native_archive_object(bls, id, &object_id, &resource)
+                    .await?;
                 ctx.print_json(&receipt)?;
             }
             Self::GetObjectOwner {
@@ -238,16 +223,11 @@ impl AcpCommand {
                 actor,
             } => {
                 let id = vera_client::parse_policy_id(&policy_id)?;
-                let receipt = if let Some(bls) = ctx.bls_signer.as_ref() {
-                    ctx.client
-                        .native_set_relationship(bls, id, &resource, &object_id, &relation, &actor)
-                        .await?
-                } else {
-                    let signer = ctx.require_evm_signer()?;
-                    ctx.client
-                        .set_relationship(&signer, id, &resource, &object_id, &relation, &actor)
-                        .await?
-                };
+                let bls = ctx.require_bls_signer()?;
+                let receipt = ctx
+                    .client
+                    .native_set_relationship(bls, id, &resource, &object_id, &relation, &actor)
+                    .await?;
                 ctx.print_json(&receipt)?;
             }
             Self::DeleteRelationship {
@@ -258,18 +238,11 @@ impl AcpCommand {
                 actor,
             } => {
                 let id = vera_client::parse_policy_id(&policy_id)?;
-                let receipt = if let Some(bls) = ctx.bls_signer.as_ref() {
-                    ctx.client
-                        .native_delete_relationship(
-                            bls, id, &resource, &object_id, &relation, &actor,
-                        )
-                        .await?
-                } else {
-                    let signer = ctx.require_evm_signer()?;
-                    ctx.client
-                        .delete_relationship(&signer, id, &resource, &object_id, &relation, &actor)
-                        .await?
-                };
+                let bls = ctx.require_bls_signer()?;
+                let receipt = ctx
+                    .client
+                    .native_delete_relationship(bls, id, &resource, &object_id, &relation, &actor)
+                    .await?;
                 ctx.print_json(&receipt)?;
             }
             Self::HasRelationship {
@@ -314,30 +287,18 @@ impl AcpCommand {
                 actor,
             } => {
                 let id = vera_client::parse_policy_id(&policy_id)?;
-                let receipt = if let Some(bls) = ctx.bls_signer.as_ref() {
-                    ctx.client
-                        .native_check_access(
-                            bls,
-                            id,
-                            vec![resource],
-                            vec![object_id],
-                            vec![permission],
-                            &actor,
-                        )
-                        .await?
-                } else {
-                    let signer = ctx.require_evm_signer()?;
-                    ctx.client
-                        .check_access(
-                            &signer,
-                            id,
-                            vec![resource],
-                            vec![object_id],
-                            vec![permission],
-                            &actor,
-                        )
-                        .await?
-                };
+                let bls = ctx.require_bls_signer()?;
+                let receipt = ctx
+                    .client
+                    .native_check_access(
+                        bls,
+                        id,
+                        vec![resource],
+                        vec![object_id],
+                        vec![permission],
+                        &actor,
+                    )
+                    .await?;
                 ctx.print_json(&receipt)?;
             }
             Self::FilterRelationships {

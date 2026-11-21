@@ -359,7 +359,7 @@ fn print_config_summary(
 fn check_rpc_health(url: &str) -> bool {
     let body = serde_json::json!({
         "jsonrpc": "2.0",
-        "method": "eth_chainId",
+        "method": "vera_nodeStatus",
         "params": [],
         "id": 1
     });

@@ -1,10 +1,10 @@
 //! Executions that read committed state at the head revision and write nothing.
 
-use alloy_primitives::U64;
-use vera_domain::{NativeCallRequest, NativeCallSimulation, SimulatedLog};
+use alloy_primitives::{Address, Bytes, U64};
+use vera_domain::{NativeCallRequest, NativeCallSimulation, SimulatedLog, ViewCallResult};
 use vera_executor::{
     ExecutionError, ModuleState, NativeSimulateError, NativeSimulateRequest, SimulationContext,
-    simulate_native_call,
+    ViewCall, ViewCallError, simulate_native_call, view_call,
 };
 use vera_traits::StateDbRead;
 
@@ -55,7 +55,7 @@ impl<S: StateDbRead> IndexedStateProvider<S> {
         .map_err(|error| RpcError::ExecutionFailed(error.to_string()))
     }
 
-    /// Dry-run a native module call under the admission `eth_call` shares.
+    /// Dry-run a native module call under the admission view calls share.
     pub(super) async fn simulate_native(
         &self,
         request: NativeCallRequest,
@@ -82,6 +82,27 @@ impl<S: StateDbRead> IndexedStateProvider<S> {
                     data: log.data.data.clone(),
                 })
                 .collect(),
+            block_number: U64::from(context.block_number),
+            timestamp: U64::from(context.timestamp),
+        })
+    }
+
+    /// Evaluate a signerless module call under the admission dry runs share.
+    pub(super) async fn view(
+        &self,
+        target: Address,
+        calldata: Bytes,
+    ) -> Result<ViewCallResult, RpcError> {
+        let call = ViewCall::new(target, calldata)
+            .map_err(|error: ViewCallError| RpcError::InvalidParams(error.to_string()))?;
+        let (result, context) = self
+            .simulate(move |state, context, modules| {
+                view_call(state, context, &call, modules).map(|result| (result, *context))
+            })
+            .await?;
+        Ok(ViewCallResult {
+            output: result.output,
+            refusal: result.refusal,
             block_number: U64::from(context.block_number),
             timestamp: U64::from(context.timestamp),
         })

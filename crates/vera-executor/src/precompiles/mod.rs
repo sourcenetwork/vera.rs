@@ -17,29 +17,12 @@ mod vera;
 use refusal::{Refuse, Stated};
 use vera_domain::RefusalKind;
 
-use std::sync::{Arc, Mutex};
-
-mod journal;
-pub use journal::ModuleInspector;
-use journal::ModuleJournal;
-
-use alloy_primitives::{Address, B256, Bytes, Log};
-use revm::{
-    context::Cfg,
-    context_interface::{Block, ContextTr, JournalTr, Transaction},
-    handler::{EthPrecompiles, PrecompileProvider},
-    interpreter::{CallInputs, InterpreterResult},
-    precompile::{
-        Precompile, PrecompileError, PrecompileHalt, PrecompileId, PrecompileOutput,
-        PrecompileResult, Precompiles,
-    },
-    primitives::hardfork::SpecId,
-    primitives::{AddressSet, TxKind},
-};
+use alloy_primitives::{Address, Bytes, Log};
+use revm::precompile::{PrecompileError, PrecompileHalt, PrecompileOutput};
 use vera_identity::Did;
 use vera_modules::acp::AcpModule;
 use vera_modules::bulletin::BulletinModule;
-use vera_modules::types::{BlockExecCtx, Timestamp, TxExecCtx};
+use vera_modules::types::{BlockExecCtx, TxExecCtx};
 use vera_modules::vera::VeraModule;
 
 /// ACP precompile address.
@@ -65,8 +48,8 @@ const fn address_from_last_two_bytes(hi: u8, lo: u8) -> Address {
 }
 
 pub(super) fn did_from_signer(signer: &str) -> Result<Did, PrecompileError> {
-    // A call that is not the transaction's own has no signer, which is the
-    // caller's doing. A signer the executor derived cannot be malformed.
+    // A view call has no signer, which is the caller's doing. A signer the
+    // executor derived cannot be malformed.
     if signer.is_empty() {
         return Err(refusal::refused(
             RefusalKind::Unauthenticated,
@@ -171,7 +154,7 @@ pub(crate) fn refusal_dispatch(error: &PrecompileError) -> DispatchResult {
 pub struct DispatchResult {
     /// The precompile output (gas, return data, revert status).
     pub precompile: PrecompileOutput,
-    /// EVM-compatible logs emitted during the dispatch.
+    /// Event logs emitted during the dispatch.
     pub logs: Vec<Log>,
     /// What the module refused, for a revert.
     pub refusal: Option<RefusalKind>,
@@ -214,32 +197,7 @@ pub(super) fn event_log<E: alloy_sol_types::SolEvent>(address: Address, event: &
     }
 }
 
-const fn stub_precompile(_input: &[u8], _gas_limit: u64, _reservoir: u64) -> PrecompileResult {
-    Ok(PrecompileOutput::revert(
-        0,
-        revm::primitives::Bytes::new(),
-        0,
-    ))
-}
-
-/// Vera precompile provider that extends standard Ethereum precompiles
-/// with ABI-dispatching precompiles for ACP, Bulletin, and Vera modules.
-#[derive(Debug)]
-pub struct VeraPrecompiles {
-    eth: EthPrecompiles,
-    custom: Precompiles,
-    journal: Arc<Mutex<ModuleJournal>>,
-    warm: AddressSet,
-    current_tx_hash: B256,
-    current_signer_did: String,
-    genesis_id: [u8; 32],
-    max_active_members: u32,
-}
-
-/// Route calldata to the appropriate module based on the target precompile address.
-///
-/// Used by both the EVM precompile path and the native BLS tx path to ensure
-/// both converge on the same module methods.
+/// Route calldata to the module at the target address.
 #[allow(clippy::too_many_arguments)]
 pub fn dispatch_to_module(
     acp: &mut AcpModule,
@@ -270,331 +228,9 @@ pub fn dispatch_to_module(
     }
 }
 
-fn new_custom_precompiles() -> Precompiles {
-    let mut custom = Precompiles::default();
-    custom.extend([
-        Precompile::new(PrecompileId::custom("acp"), ACP_ADDRESS, stub_precompile),
-        Precompile::new(
-            PrecompileId::custom("bulletin"),
-            BULLETIN_ADDRESS,
-            stub_precompile,
-        ),
-        Precompile::new(PrecompileId::custom("vera"), VERA_ADDRESS, stub_precompile),
-        Precompile::new(
-            PrecompileId::custom("anchor"),
-            ANCHOR_ADDRESS,
-            stub_precompile,
-        ),
-        Precompile::new(
-            PrecompileId::custom("validator_registry"),
-            VALIDATOR_REGISTRY_ADDRESS,
-            stub_precompile,
-        ),
-    ]);
-    custom
-}
-
-impl VeraPrecompiles {
-    /// Create a new vera precompile provider for the given spec.
-    pub fn new(spec: SpecId) -> Self {
-        let eth = EthPrecompiles::new(spec);
-        let custom = new_custom_precompiles();
-        let mut warm = AddressSet::default();
-        warm.extend(eth.warm_addresses().iter().copied());
-        warm.extend(custom.addresses().copied());
-        Self {
-            eth,
-            custom,
-            warm,
-            journal: Arc::default(),
-            current_tx_hash: B256::ZERO,
-            current_signer_did: String::new(),
-            genesis_id: [0; 32],
-            max_active_members: vera_domain::MAX_DKG_PARTICIPANTS.get(),
-        }
-    }
-
-    /// Create a vera precompile provider with pre-built module instances.
-    pub fn with_modules(
-        spec: SpecId,
-        acp_module: AcpModule,
-        bulletin_module: BulletinModule,
-        vera_module: VeraModule,
-    ) -> Self {
-        let eth = EthPrecompiles::new(spec);
-        let custom = new_custom_precompiles();
-        let mut warm = AddressSet::default();
-        warm.extend(eth.warm_addresses().iter().copied());
-        warm.extend(custom.addresses().copied());
-        Self {
-            eth,
-            custom,
-            warm,
-            journal: Arc::new(Mutex::new(ModuleJournal::new((
-                acp_module,
-                bulletin_module,
-                vera_module,
-            )))),
-            current_tx_hash: B256::ZERO,
-            current_signer_did: String::new(),
-            genesis_id: [0; 32],
-            max_active_members: vera_domain::MAX_DKG_PARTICIPANTS.get(),
-        }
-    }
-
-    /// Enforce the configured epoch capacity on membership commands.
-    #[must_use]
-    pub const fn with_membership_limit(mut self, limit: u32) -> Self {
-        self.max_active_members = limit;
-        self
-    }
-
-    /// Bind administrative approvals to the deployment genesis record.
-    #[must_use]
-    pub const fn with_genesis_id(mut self, genesis_id: [u8; 32]) -> Self {
-        self.genesis_id = genesis_id;
-        self
-    }
-
-    /// Set the tx hash for the current EVM transaction being executed.
-    pub const fn set_tx_hash(&mut self, tx_hash: B256) {
-        self.current_tx_hash = tx_hash;
-    }
-
-    /// Set the signer DID for the current EVM transaction being executed.
-    pub fn set_signer_did(&mut self, did: String) {
-        self.current_signer_did = did;
-    }
-
-    /// Inspector required to align module mutations with call-frame outcomes.
-    pub fn inspector(&self) -> ModuleInspector {
-        ModuleInspector(self.journal.clone())
-    }
-
-    /// Retain a transaction checkpoint through post-execution validation.
-    pub fn begin_transaction(&self) {
-        self.journal.lock().unwrap().begin();
-    }
-
-    /// Commit or restore module changes after the complete execution result.
-    pub fn finish_transaction(&self, success: bool) {
-        self.journal.lock().unwrap().finish(success);
-    }
-
-    /// Extract module state after block execution.
-    pub fn take_modules(self) -> (AcpModule, BulletinModule, VeraModule) {
-        let mut journal = self.journal.lock().unwrap();
-        journal.finish(true);
-        std::mem::take(&mut journal.modules)
-    }
-}
-
-impl<CTX: ContextTr> PrecompileProvider<CTX> for VeraPrecompiles {
-    type Output = InterpreterResult;
-
-    fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) -> bool {
-        <EthPrecompiles as PrecompileProvider<CTX>>::set_spec(&mut self.eth, spec)
-    }
-
-    fn run(
-        &mut self,
-        context: &mut CTX,
-        inputs: &CallInputs,
-    ) -> Result<Option<Self::Output>, String> {
-        if self.custom.contains(&inputs.bytecode_address) {
-            let block = context.block();
-            let block_ctx = BlockExecCtx {
-                genesis_id: self.genesis_id,
-                deployment_id: context.cfg().chain_id(),
-                timestamp: Timestamp {
-                    seconds: block.timestamp().as_limbs()[0],
-                    block_height: block.number().as_limbs()[0],
-                },
-            };
-            // Only the transaction's own call carries the submitting key's
-            // module authority. DELEGATECALL keeps the caller of the frame
-            // that made it, so the caller address alone does not tell a
-            // contract's call from the signer's.
-            let direct_caller = context.tx().kind() == TxKind::Call(inputs.bytecode_address)
-                && inputs.target_address == inputs.bytecode_address
-                && inputs.caller == context.tx().caller();
-            let tx_ctx = TxExecCtx {
-                sequence: context.tx().nonce(),
-                tx_hash: self.current_tx_hash.to_vec(),
-                signer: if direct_caller {
-                    self.current_signer_did.clone()
-                } else {
-                    String::new()
-                },
-            };
-            let calldata = inputs.input.bytes(context);
-
-            if inputs.bytecode_address == VALIDATOR_REGISTRY_ADDRESS {
-                if !direct_caller && !validator_registry::is_query(&calldata) {
-                    let mut rejected = err_dispatch(Stated(
-                        RefusalKind::Unauthenticated,
-                        "module write requires an authenticated caller",
-                    ));
-                    rejected.precompile.gas_used = inputs.gas_limit;
-                    return Self::dispatch_result_to_interpreter(inputs, Ok(rejected))
-                        .map(|(result, _)| result);
-                }
-                if inputs.is_static && !validator_registry::is_query(&calldata) {
-                    return Ok(Some(Self::static_write_error(inputs)));
-                }
-                let journal = self.journal.lock().unwrap();
-                let dispatch_result = validator_registry::dispatch_with_journal(
-                    context,
-                    &journal.modules.0,
-                    &journal.modules.2,
-                    self.max_active_members,
-                    &tx_ctx,
-                    &calldata,
-                    inputs.gas_limit,
-                );
-                let (result, logs) = Self::dispatch_result_to_interpreter(inputs, dispatch_result)?;
-                for log in logs {
-                    context.journal_mut().log(log);
-                }
-                return Ok(result);
-            }
-
-            let (result, logs) = self.run_custom(inputs, &calldata, &block_ctx, &tx_ctx)?;
-            for log in logs {
-                context.journal_mut().log(log);
-            }
-            return Ok(result);
-        }
-        self.eth.run(context, inputs)
-    }
-
-    fn warm_addresses(&self) -> &AddressSet {
-        &self.warm
-    }
-
-    fn contains(&self, address: &Address) -> bool {
-        self.warm.contains(address)
-    }
-}
-
-impl VeraPrecompiles {
-    fn dispatch_result_to_interpreter(
-        inputs: &CallInputs,
-        dispatch_result: DispatchReturn,
-    ) -> Result<(Option<InterpreterResult>, Vec<Log>), String> {
-        use revm::interpreter::{Gas, InstructionResult};
-
-        let mut result = InterpreterResult {
-            result: InstructionResult::Return,
-            gas: Gas::new(inputs.gas_limit),
-            output: revm::primitives::Bytes::new(),
-        };
-        match dispatch_result {
-            Ok(dr) => {
-                use revm::precompile::PrecompileStatus;
-
-                result.gas.record_refund(dr.precompile.gas_refunded);
-                if !result.gas.record_regular_cost(dr.precompile.gas_used) {
-                    result.result = InstructionResult::PrecompileOOG;
-                    return Ok((Some(result), vec![]));
-                }
-                match dr.precompile.status {
-                    PrecompileStatus::Success => {
-                        result.output = dr.precompile.bytes;
-                        Ok((Some(result), dr.logs))
-                    }
-                    PrecompileStatus::Revert => {
-                        result.result = InstructionResult::Revert;
-                        result.output = dr.precompile.bytes;
-                        Ok((Some(result), vec![]))
-                    }
-                    // The frame returns no gas for a halt, so the whole
-                    // allowance is spent.
-                    PrecompileStatus::Halt(_) => {
-                        result.result = InstructionResult::PrecompileOOG;
-                        Ok((Some(result), vec![]))
-                    }
-                }
-            }
-            Err(error) if is_out_of_gas(&error) => {
-                result.result = InstructionResult::PrecompileOOG;
-                Ok((Some(result), vec![]))
-            }
-            Err(error) => match internal_fault_reason(&error) {
-                Some(fault) => Err(fault),
-                None => {
-                    result.result = InstructionResult::Revert;
-                    result.output = recoverable_message(&error).into_bytes().into();
-                    Ok((Some(result), vec![]))
-                }
-            },
-        }
-    }
-
-    const fn static_write_error(inputs: &CallInputs) -> InterpreterResult {
-        InterpreterResult {
-            result: revm::interpreter::InstructionResult::StateChangeDuringStaticCall,
-            gas: revm::interpreter::Gas::new(inputs.gas_limit),
-            output: Bytes::new(),
-        }
-    }
-
-    fn run_custom(
-        &mut self,
-        inputs: &CallInputs,
-        calldata: &[u8],
-        block_ctx: &BlockExecCtx,
-        tx_ctx: &TxExecCtx,
-    ) -> Result<(Option<InterpreterResult>, Vec<Log>), String> {
-        let mut journal = self.journal.lock().unwrap();
-        journal.checkpoint()?;
-        let (acp, bulletin, vera) = &mut journal.modules;
-        let mut dispatch_result =
-            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                dispatch_to_module(
-                    acp,
-                    bulletin,
-                    vera,
-                    inputs.bytecode_address,
-                    calldata,
-                    block_ctx,
-                    tx_ctx,
-                    inputs.gas_limit,
-                )
-            })) {
-                Ok(Some(result)) => result,
-                Ok(None) => return Ok((None, vec![])),
-                Err(_) => {
-                    tracing::warn!("module call panicked");
-                    Err(internal_fault("module execution failed"))
-                }
-            };
-
-        if inputs.is_static && journal.changed() {
-            return Ok((Some(Self::static_write_error(inputs)), vec![]));
-        }
-        if matches!(&dispatch_result, Ok(result) if result.precompile.status.is_success())
-            && !journal.writes_fit_native_bounds()
-        {
-            // Charge the full allowance: the record cannot be published, so the
-            // writer loses the call the same way an out-of-gas precompile does.
-            dispatch_result = Ok(storage_bounds_dispatch(inputs.gas_limit));
-        }
-        Self::dispatch_result_to_interpreter(inputs, dispatch_result)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use revm::{database::EmptyDB, handler::MainnetContext};
-
-    type TestCtx = MainnetContext<EmptyDB>;
-
-    fn test_precompiles() -> VeraPrecompiles {
-        VeraPrecompiles::new(SpecId::CANCUN)
-    }
-
     #[test]
     fn a_missing_signer_is_a_refusal_and_a_malformed_one_a_fault() {
         let missing = did_from_signer("").unwrap_err();
@@ -655,52 +291,5 @@ mod tests {
                 .parse::<Address>()
                 .unwrap()
         );
-    }
-
-    #[test]
-    fn vera_precompiles_contains_custom() {
-        let precompiles = test_precompiles();
-        assert!(<VeraPrecompiles as PrecompileProvider<TestCtx>>::contains(
-            &precompiles,
-            &ACP_ADDRESS
-        ));
-        assert!(<VeraPrecompiles as PrecompileProvider<TestCtx>>::contains(
-            &precompiles,
-            &BULLETIN_ADDRESS
-        ));
-        assert!(<VeraPrecompiles as PrecompileProvider<TestCtx>>::contains(
-            &precompiles,
-            &VERA_ADDRESS
-        ));
-        assert!(<VeraPrecompiles as PrecompileProvider<TestCtx>>::contains(
-            &precompiles,
-            &VALIDATOR_REGISTRY_ADDRESS
-        ));
-    }
-
-    #[test]
-    fn vera_precompiles_contains_standard() {
-        let ecrecover = "0x0000000000000000000000000000000000000001"
-            .parse::<Address>()
-            .unwrap();
-        let precompiles = test_precompiles();
-        assert!(<VeraPrecompiles as PrecompileProvider<TestCtx>>::contains(
-            &precompiles,
-            &ecrecover
-        ));
-    }
-
-    #[test]
-    fn vera_precompiles_warm_addresses_include_custom() {
-        let precompiles = test_precompiles();
-        let warm: Vec<Address> =
-            <VeraPrecompiles as PrecompileProvider<TestCtx>>::warm_addresses(&precompiles)
-                .iter()
-                .copied()
-                .collect();
-        assert!(warm.contains(&ACP_ADDRESS));
-        assert!(warm.contains(&BULLETIN_ADDRESS));
-        assert!(warm.contains(&VERA_ADDRESS));
-        assert!(warm.contains(&VALIDATOR_REGISTRY_ADDRESS));
     }
 }

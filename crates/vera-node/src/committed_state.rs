@@ -1,11 +1,11 @@
-//! Committed EVM state, for RPC queries and mempool validation.
+//! Committed account and storage state, which holds the registry's storage.
 
 use alloy_primitives::{Address, B256, Bytes, U256};
 use vera_backend::{AccountKey, CodeKey, StorageKey, VeraStateSet};
 use vera_qmdb::{AccountEncoding, StorageKey as StorageSlotKey};
 use vera_traits::{StateDbError, StateDbRead};
 
-/// Committed EVM state read through the shared database set.
+/// Committed account and storage state read through the shared database set.
 #[derive(Clone)]
 pub struct CommittedState {
     set: VeraStateSet,

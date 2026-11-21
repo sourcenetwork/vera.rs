@@ -143,7 +143,7 @@ impl FinalizedHistory {
             .context("missing indexed execution record")?;
         *remaining_bytes = remaining_bytes
             .checked_sub(bytes.len())
-            .ok_or(vera_indexer::IndexerError::LogQueryLimit)?;
+            .ok_or(vera_indexer::IndexerError::ReadLimit)?;
         let record: Record = borsh::from_slice(&bytes)?;
         let (block, receipts) = record.decode()?;
         ensure!(block.height == height, "indexed execution height mismatch");

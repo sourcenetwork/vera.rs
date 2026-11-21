@@ -28,13 +28,6 @@ use super::{
     event_log, internal_fault, json_bytes, ok_dispatch, oog_dispatch,
 };
 
-pub(super) fn is_query(input: &[u8]) -> bool {
-    matches!(input.get(..4), Some(selector) if
-        selector == IValidatorRegistry::getValidatorsCall::SELECTOR
-        || selector == IValidatorRegistry::getValidatorCall::SELECTOR
-        || selector == IValidatorRegistry::getActiveValidatorCountCall::SELECTOR)
-}
-
 const ADD_VALIDATOR_GAS: u64 = 150_000;
 const REMOVE_VALIDATOR_GAS: u64 = 150_000;
 const SET_STATUS_GAS: u64 = 50_000;

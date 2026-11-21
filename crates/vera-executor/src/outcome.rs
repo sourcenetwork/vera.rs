@@ -7,7 +7,7 @@ use vera_qmdb::ChangeSet;
 /// Result of executing a block's transactions.
 #[derive(Clone, Debug, Default)]
 pub struct ExecutionOutcome {
-    /// State changes from execution.
+    /// Registry storage changes from execution.
     pub changes: ChangeSet,
     /// Transaction receipts.
     pub receipts: Vec<ExecutionReceipt>,
@@ -16,19 +16,19 @@ pub struct ExecutionOutcome {
     /// Module state root after execution. The executor leaves it zero:
     /// ordered storage sets it from its authenticated partitions.
     pub module_state_root: B256,
-    /// Indices of input txs that were actually executed.
+    /// Indices of the input requests that were executed.
     ///
-    /// During block building, txs that fail validation (e.g. NonceTooLow) are
-    /// skipped.  The proposer must include only these txs in the block so
-    /// verifiers see a consistent set.  Empty means "all txs were executed"
-    /// (backwards-compatible default for verification mode).
+    /// During block building, requests that fail a check (a sequence that is
+    /// not the signer's next, a signature that does not verify) are skipped.
+    /// The proposer includes only these requests in the block so verifiers
+    /// see a consistent set. `None` when verifying: every request executed.
     pub executed_tx_indices: Option<Vec<usize>>,
-    /// Indices of input EVM txs that block building found invalid on their own.
+    /// Indices of the inputs block building found are not native requests.
     ///
-    /// These do not decode or fail a check that waiting cannot cure, unlike a
-    /// tx deferred by the block gas budget or one whose nonce is still ahead
-    /// of its account. The proposer drops them from its pending pool so they
-    /// cannot occupy every later proposal.
+    /// Waiting cannot cure them, unlike a request deferred by the block gas
+    /// budget or one whose sequence is still ahead of its signer. The
+    /// proposer drops them from its pending pool so they cannot occupy every
+    /// later proposal.
     pub rejected_tx_indices: Vec<usize>,
 }
 

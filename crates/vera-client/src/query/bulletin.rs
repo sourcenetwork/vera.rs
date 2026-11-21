@@ -1,4 +1,4 @@
-//! Bulletin read-only queries via `eth_call` to precompile `0x0811`.
+//! Bulletin typed queries: unauthenticated view calls to the module at `0x0811`.
 
 use alloy_primitives::Bytes;
 use alloy_sol_types::SolCall;
@@ -9,80 +9,87 @@ use crate::error::ClientError;
 
 impl VeraClient {
     /// Fetch a post by namespace and post ID.
+    /// Unauthenticated; the verified read is [`VeraClient::read_bulletin_post`].
     pub async fn get_post(&self, namespace: &str, post_id: &str) -> Result<Bytes, ClientError> {
         let calldata = IBulletin::getPostCall {
             namespace: namespace.into(),
             postId: post_id.into(),
         }
         .abi_encode();
-        let result = self.eth_call(BULLETIN_ADDRESS, calldata.into()).await?;
+        let result = self.view_call(BULLETIN_ADDRESS, calldata.into()).await?;
         let decoded = IBulletin::getPostCall::abi_decode_returns(&result)
             .map_err(|e| ClientError::AbiDecode(e.to_string()))?;
         Ok(decoded)
     }
 
     /// Fetch a namespace by name.
+    /// Unauthenticated; the verified read is [`VeraClient::read_bulletin_namespace`].
     pub async fn get_namespace(&self, namespace: &str) -> Result<Bytes, ClientError> {
         let calldata = IBulletin::getNamespaceCall {
             namespace: namespace.into(),
         }
         .abi_encode();
-        let result = self.eth_call(BULLETIN_ADDRESS, calldata.into()).await?;
+        let result = self.view_call(BULLETIN_ADDRESS, calldata.into()).await?;
         let decoded = IBulletin::getNamespaceCall::abi_decode_returns(&result)
             .map_err(|e| ClientError::AbiDecode(e.to_string()))?;
         Ok(decoded)
     }
 
     /// List all namespaces.
+    /// Unauthenticated; the verified read is [`VeraClient::list_bulletin_namespaces`].
     pub async fn get_namespaces(&self) -> Result<Bytes, ClientError> {
         let calldata = IBulletin::getNamespacesCall {}.abi_encode();
-        let result = self.eth_call(BULLETIN_ADDRESS, calldata.into()).await?;
+        let result = self.view_call(BULLETIN_ADDRESS, calldata.into()).await?;
         let decoded = IBulletin::getNamespacesCall::abi_decode_returns(&result)
             .map_err(|e| ClientError::AbiDecode(e.to_string()))?;
         Ok(decoded)
     }
 
     /// List collaborators for a namespace.
+    /// Unauthenticated; the verified reads are [`VeraClient::list_bulletin_collaborators`] and [`VeraClient::read_bulletin_collaborator`].
     pub async fn get_namespace_collaborators(&self, namespace: &str) -> Result<Bytes, ClientError> {
         let calldata = IBulletin::getNamespaceCollaboratorsCall {
             namespace: namespace.into(),
         }
         .abi_encode();
-        let result = self.eth_call(BULLETIN_ADDRESS, calldata.into()).await?;
+        let result = self.view_call(BULLETIN_ADDRESS, calldata.into()).await?;
         let decoded = IBulletin::getNamespaceCollaboratorsCall::abi_decode_returns(&result)
             .map_err(|e| ClientError::AbiDecode(e.to_string()))?;
         Ok(decoded)
     }
 
     /// List posts in a namespace.
+    /// Unauthenticated; the verified read is [`VeraClient::list_bulletin_posts`].
     pub async fn get_namespace_posts(&self, namespace: &str) -> Result<Bytes, ClientError> {
         let calldata = IBulletin::getNamespacePostsCall {
             namespace: namespace.into(),
         }
         .abi_encode();
-        let result = self.eth_call(BULLETIN_ADDRESS, calldata.into()).await?;
+        let result = self.view_call(BULLETIN_ADDRESS, calldata.into()).await?;
         let decoded = IBulletin::getNamespacePostsCall::abi_decode_returns(&result)
             .map_err(|e| ClientError::AbiDecode(e.to_string()))?;
         Ok(decoded)
     }
 
     /// List all posts across all namespaces.
+    /// Unauthenticated; the verified read is [`VeraClient::read_current_prefix_page`] on the bulletin module.
     pub async fn get_posts(&self) -> Result<Bytes, ClientError> {
         let calldata = IBulletin::getPostsCall {}.abi_encode();
-        let result = self.eth_call(BULLETIN_ADDRESS, calldata.into()).await?;
+        let result = self.view_call(BULLETIN_ADDRESS, calldata.into()).await?;
         let decoded = IBulletin::getPostsCall::abi_decode_returns(&result)
             .map_err(|e| ClientError::AbiDecode(e.to_string()))?;
         Ok(decoded)
     }
 
     /// Query posts matching a glob pattern within a namespace.
+    /// Unauthenticated; the verified read is [`VeraClient::list_bulletin_posts`], filtered locally.
     pub async fn iterate_glob(&self, namespace: &str, glob: &str) -> Result<Bytes, ClientError> {
         let calldata = IBulletin::iterateGlobCall {
             namespace: namespace.into(),
             glob: glob.into(),
         }
         .abi_encode();
-        let result = self.eth_call(BULLETIN_ADDRESS, calldata.into()).await?;
+        let result = self.view_call(BULLETIN_ADDRESS, calldata.into()).await?;
         let decoded = IBulletin::iterateGlobCall::abi_decode_returns(&result)
             .map_err(|e| ClientError::AbiDecode(e.to_string()))?;
         Ok(decoded)

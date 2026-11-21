@@ -1,20 +1,16 @@
-//! VeraExecutor — EVM executor with vera precompiles (ACP, Bulletin, Vera)
-//! and native BLS transaction support.
+//! VeraExecutor — runs a block's native BLS requests against the modules.
 
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::{
     BlockContext, ExecutionConfig, ExecutionError, ExecutionOutcome, ExecutionReceipt,
-    ModuleSnapshot, StateDbAdapter, build_receipt, decode_evm_tx, extract_changes,
+    ModuleSnapshot, StateDbAdapter, extract_changes,
 };
 use alloy_primitives::{Bytes, U256, keccak256};
 use commonware_parallel::{Rayon, Sequential, Strategy};
 use revm::{
-    Context, ExecuteCommitEvm, InspectEvm, Journal, MainBuilder,
-    context::{
-        block::BlockEnv,
-        result::{EVMError, ExecutionResult, InvalidTransaction},
-    },
+    Context, Journal,
+    context::block::BlockEnv,
     context_interface::{ContextTr, JournalTr},
     database::State,
     primitives::hardfork::SpecId,
@@ -31,8 +27,6 @@ use vera_modules::types::{BlockExecCtx, Timestamp, TxExecCtx};
 use vera_modules::vera::VeraModule;
 use vera_traits::StateDbRead;
 
-use crate::precompiles::VeraPrecompiles;
-
 mod gas_budget;
 pub(crate) mod native_authentication;
 pub(crate) mod native_dispatch;
@@ -43,11 +37,11 @@ use native_authentication::{AuthenticatedNativeTx, authenticate_native_tx};
 use native_dispatch::{NATIVE_TX_GAS_LIMIT, NativeCall, dispatch_native_call};
 use native_outcome::native_outcome;
 
-/// Block executor with vera precompiles (ACP, Bulletin, Vera).
+/// Block executor for native BLS requests (BLS12-381), run in block order
+/// against the ACP, Bulletin, Vera and ValidatorRegistry modules.
 ///
-/// Processes both EVM transactions (secp256k1) and native BLS transactions
-/// (BLS12-381) in block order. The first byte of each transaction determines
-/// the path: `0x45` → native BLS, anything else → REVM.
+/// A block carries native requests only: block building drops anything else
+/// from the proposal and verification rejects a block that carries one.
 ///
 /// Shared module state serves committed queries. Consensus execution supplies
 /// an explicit parent snapshot and receives its post-execution state.
@@ -61,7 +55,7 @@ pub struct VeraExecutor {
 }
 
 impl VeraExecutor {
-    /// The EVM specification revision used for execution.
+    /// The revision of the journal that hosts registry storage.
     pub const fn spec_id(&self) -> SpecId {
         self.config.spec_id
     }
@@ -215,6 +209,7 @@ impl VeraExecutor {
                 target: native_tx.target,
                 calldata: &native_tx.calldata,
                 max_active_members: self.config.max_active_members(),
+                gas_limit: NATIVE_TX_GAS_LIMIT,
             },
             block_ctx,
             &tx_ctx,
@@ -284,7 +279,7 @@ impl VeraExecutor {
         let db = State::builder().with_database_ref(adapter).build();
 
         type Db<S> = State<revm::database::WrapDatabaseRef<StateDbAdapter<S>>>;
-        let ctx: Context<BlockEnv, _, _, Db<S>, Journal<Db<S>>, ()> =
+        let ctx: Context<BlockEnv, revm::context::TxEnv, _, Db<S>, Journal<Db<S>>, ()> =
             Context::new(db, self.config.spec_id);
         let mut ctx = ctx
             .modify_cfg_chained(|cfg| {
@@ -295,34 +290,47 @@ impl VeraExecutor {
                 blk.timestamp = U256::from(context.header.timestamp);
                 blk.beneficiary = context.header.beneficiary;
                 blk.gas_limit = context.header.gas_limit;
-                blk.basefee = context.header.base_fee_per_gas.unwrap_or_default();
-                blk.prevrandao = Some(alloy_primitives::B256::ZERO);
             });
 
         let native_started = tracing::enabled!(target: "vera_diagnostics", tracing::Level::DEBUG)
             .then(std::time::Instant::now);
-        let native = txs.iter().enumerate().filter(|(_, bytes)| {
-            bytes
+        let authenticate = |(i, bytes): (usize, &Bytes)| {
+            let authenticated = if bytes
                 .first()
                 .is_some_and(|byte| NativeTx::is_native_tx(*byte))
-        });
-        let authenticate =
-            |(i, bytes): (usize, &Bytes)| (i, authenticate_native_tx(self.config.chain_id, bytes));
+            {
+                authenticate_native_tx(self.config.chain_id, bytes).map(Some)
+            } else {
+                Ok(None)
+            };
+            (i, authenticated)
+        };
         // Retain errors in order: an earlier nonce or dispatch failure must win
         // over a later authentication failure during proposal verification.
+        let requests = txs.iter().enumerate();
         let authenticated = match &self.native_verification {
-            Some(strategy) => strategy.map_collect_vec(native, authenticate),
-            None => Sequential.map_collect_vec(native, authenticate),
+            Some(strategy) => strategy.map_collect_vec(requests, authenticate),
+            None => Sequential.map_collect_vec(requests, authenticate),
         };
         let authentication_elapsed = native_started.map(|started| started.elapsed());
         let native_count = authenticated.len();
         for (i, authenticated) in authenticated {
+            if matches!(authenticated, Ok(None)) {
+                if building {
+                    warn!(tx_hash = %keccak256(&txs[i]), "dropping tx: not a native request");
+                    rejected_indices.push(i);
+                    continue;
+                }
+                return Err(ExecutionError::TxDecode(format!(
+                    "transaction {i} is not a native request"
+                )));
+            }
             if !gas_budget.admit(NATIVE_TX_GAS_LIMIT, building)? {
                 continue;
             }
             let execution = authenticated.and_then(|authenticated| {
                 self.execute_authenticated_native_tx(
-                    authenticated,
+                    authenticated.expect("non-native requests are handled above"),
                     &block_ctx,
                     &mut modules.acp,
                     &mut modules.bulletin,
@@ -352,7 +360,7 @@ impl VeraExecutor {
             gas_budget.charge(NATIVE_TX_GAS_LIMIT, receipt.gas_used)?;
             let journaled = ctx.journal_mut().finalize();
             outcome.changes.merge(extract_changes(&journaled));
-            // Native module storage is retained even when its account has no balance or code.
+            // Registry storage is retained even though its account has no balance or code.
             for (address, account) in journaled {
                 if account.is_touched() {
                     ctx.journal_mut()
@@ -378,118 +386,13 @@ impl VeraExecutor {
                 "native execution stages");
         }
 
-        let precompiles = VeraPrecompiles::with_modules(
-            self.config.spec_id,
-            modules.acp.clone(),
-            modules.bulletin.clone(),
-            modules.vera.clone(),
-        )
-        .with_genesis_id(self.config.genesis_id)
-        .with_membership_limit(self.config.max_active_members());
-        let mut evm = ctx
-            .build_mainnet_with_inspector(precompiles.inspector())
-            .with_precompiles(precompiles);
-
-        for (i, tx_bytes) in txs.iter().enumerate() {
-            if !tx_bytes.is_empty() && NativeTx::is_native_tx(tx_bytes[0]) {
-                continue;
-            }
-
-            let tx_hash = keccak256(tx_bytes);
-
-            let (tx_env, signer_did) = match decode_evm_tx(tx_bytes) {
-                Ok(r) => r,
-                Err(ExecutionError::TxDecode(msg)) if building => {
-                    warn!(%tx_hash, msg, "skipping tx: decode error");
-                    rejected_indices.push(i);
-                    continue;
-                }
-                Err(e) => return Err(e),
-            };
-
-            let tx_gas_limit = tx_env.gas_limit;
-            if !gas_budget.admit(tx_gas_limit, building)? {
-                continue;
-            }
-
-            evm.precompiles.set_tx_hash(tx_hash);
-            evm.precompiles.set_signer_did(signer_did);
-
-            evm.precompiles.begin_transaction();
-            let execution = evm.inspect_tx(tx_env);
-            if let Some(error) = state_failure
-                .lock()
-                .expect("state failure lock poisoned")
-                .take()
-            {
-                return Err(error.into());
-            }
-            evm.precompiles
-                .finish_transaction(execution.as_ref().is_ok_and(|r| r.result.is_success()));
-            let result_and_state = match execution {
-                Ok(r) => r,
-                Err(EVMError::Database(
-                    revm::database_interface::bal::EvmDatabaseError::Database(error),
-                )) => return Err(error),
-                Err(e) if building => {
-                    warn!(%tx_hash, ?e, "skipping tx: execution error");
-                    // A nonce ahead of the account can become valid once the
-                    // predecessor this block deferred is included.
-                    if matches!(&e, EVMError::Transaction(invalid)
-                        if !matches!(invalid, InvalidTransaction::NonceTooHigh { .. }))
-                    {
-                        rejected_indices.push(i);
-                    }
-                    continue;
-                }
-                Err(e) => {
-                    return Err(ExecutionError::TxExecution(format!("{e:?}")));
-                }
-            };
-
-            match &result_and_state.result {
-                ExecutionResult::Revert { output, .. } => {
-                    let reason = String::from_utf8_lossy(output);
-                    warn!(%tx_hash, %reason, "EVM tx reverted");
-                }
-                ExecutionResult::Halt { reason, .. } => {
-                    warn!(%tx_hash, ?reason, "EVM tx halted");
-                }
-                ExecutionResult::Success { .. } => {}
-            }
-
-            executed_indices.push(i);
-
-            let gas_used = result_and_state.result.tx_gas_used();
-            gas_budget.charge(tx_gas_limit, gas_used)?;
-
-            let receipt = build_receipt(
-                &result_and_state.result,
-                tx_hash,
-                gas_used,
-                gas_budget.used(),
-            );
-            outcome.receipts.push(receipt);
-
-            let changes = extract_changes(&result_and_state.state);
-            // Advance the proposal cache without writing canonical state.
-            evm.commit(result_and_state.state);
-            outcome.changes.merge(changes);
-        }
-
-        let (acp, bulletin, vera) = evm.precompiles.take_modules();
-        modules.acp = acp;
-        modules.bulletin = bulletin;
-        modules.vera = vera;
-
         if let Some(length) = self.config.membership_epoch_length {
             let height = context.header.number;
             if height % length.get() == length.get() - 1 {
                 let epoch = (height / length.get()).checked_add(3).ok_or_else(|| {
                     ExecutionError::TxExecution("membership epoch overflow".into())
                 })?;
-                let keys =
-                    crate::precompiles::validator_registry::active_consensus_keys(&mut evm.ctx);
+                let keys = crate::precompiles::validator_registry::active_consensus_keys(&mut ctx);
                 if let Some(error) = state_failure
                     .lock()
                     .expect("state failure lock poisoned")
@@ -1029,6 +932,39 @@ mod tests {
         assert!(outcome.receipts.is_empty());
         assert_eq!(outcome.gas_used, 0);
         assert_eq!(outcome.executed_tx_indices, Some(vec![]));
+    }
+
+    /// A block carries native requests only: a proposer drops anything else
+    /// and reports it, and a verifier rejects the block.
+    #[test]
+    fn a_request_that_is_not_native_is_dropped_when_building_and_fails_verification() {
+        let executor = test_executor();
+        let (sk, pk) = test_bls_keypair();
+        let context = BlockContext::new(
+            alloy_consensus::Header {
+                number: 1,
+                gas_limit: 30_000_000,
+                ..Default::default()
+            },
+            B256::ZERO,
+        );
+        let txs: Vec<Bytes> = vec![
+            Bytes::from_static(&[0x02, 0xc0]),
+            signed_native_tx(&sk, &pk, 0).into(),
+            Bytes::new(),
+        ];
+
+        let built = execute(&executor, &context, &txs).unwrap();
+        assert_eq!(built.executed_tx_indices, Some(vec![1]));
+        assert_eq!(built.rejected_tx_indices, vec![0, 2]);
+        assert_eq!(built.receipts.len(), 1);
+
+        let verification = context.with_verification();
+        assert!(matches!(
+            execute(&executor, &verification, &txs),
+            Err(ExecutionError::TxDecode(_))
+        ));
+        execute(&executor, &verification, &txs[1..2]).unwrap();
     }
 
     #[test]

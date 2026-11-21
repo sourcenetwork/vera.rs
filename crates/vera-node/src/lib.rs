@@ -37,7 +37,7 @@ mod term;
 pub use term::{Contest, Device, Switching, TermRefusal, TermSeat};
 
 mod finalize;
-pub use finalize::{index_finalized_block, subscription_data};
+pub use finalize::index_finalized_block;
 
 mod history;
 pub use history::{
