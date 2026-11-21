@@ -51,8 +51,8 @@ pub use vera_domain::{
     ReceiptResponse, ReceiptResponseError, Refusal, RefusalKind, RefusingModule, SimulatedLog,
 };
 pub use vera_permission::{
-    AccessRequest, Actor, ModuleId, Object, Operation, PERMISSION_LIMITS, PermissionLimits,
-    PermissionProof, PermissionRead, PermissionResponse, PolicyPrefixPageProof,
+    AccessRequest, Actor, AssignmentSelector, ModuleId, Object, Operation, PERMISSION_LIMITS,
+    PermissionLimits, PermissionProof, PermissionRead, PermissionResponse, PolicyPrefixPageProof,
     PolicyPrefixPageResponse, PolicyPrefixProof, PolicyPrefixResponse, PrefixProof, PrefixResponse,
     RECORD_PROOF_BYTES, ReadLimits, RecordProof, RecordResponse, object_owner_prefix,
     verify_permission_proof,
