@@ -78,6 +78,27 @@ include selection bytes and every point/relationship key and value. Certified
 policy absence returns `None` only after validating the complete evidence;
 invalid or unavailable evidence remains an error.
 
+### Certified direct assignments
+
+`VeraClient::read_certified_assignments` selects the active generation for a
+resource and relation, then reads a complete policy-prefix proof. The verifier
+binds the generation to the policy in the same proof before filtering active
+direct relationships by subject and by the relationship creator in
+`metadata.owner_did`. The result carries both matching records and the original
+`PolicyPrefixResponse`; `verify_assignments` can verify the evidence again.
+A policy or relation that is absent, a wildcard actor, an oversized result, or
+an incomplete or unavailable proof is an error. A relation-generation change
+during selection returns `AssignmentRevisionChanged` and the read can be retried.
+Owner relations use their object-scoped evidence API.
+
+The proof includes all physical relationships in the selected generation,
+including those for other actors. Its limits apply to the whole generation, so
+this API does not provide actor-scoped confidentiality or unbounded enumeration.
+It returns a finalized revision, and the caller supplies consensus trust and the
+minimum height. A consumer following an active-device term must independently
+track verified term certificates and reject evidence from a superseded term;
+a height alone does not establish the active term.
+
 `vera_getCurrentPolicySnapshot(policy, minimum_height)` returns a
 `PolicySnapshotResponse`: the policy record and complete proofs of its
 relationship, relationship-index and object-incarnation prefixes at one

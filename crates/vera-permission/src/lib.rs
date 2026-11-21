@@ -16,6 +16,8 @@ pub use vera_modules::acp::{
 };
 pub use vera_modules::types::Timestamp;
 
+mod assignments;
+pub use assignments::AssignmentSelector;
 /// Current-state point and complete-prefix evidence over Commonware storage.
 pub mod current;
 mod decision;

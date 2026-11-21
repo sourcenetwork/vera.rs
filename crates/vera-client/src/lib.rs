@@ -12,6 +12,8 @@ pub mod administration;
 pub mod amendments;
 /// Anchors in another deployment and policy snapshots verified against them.
 pub mod anchoring;
+/// Certified direct assignment discovery.
+pub mod assignments;
 mod bearer;
 mod bls_signer;
 /// Certified bulletin records and bounded listings.
@@ -49,8 +51,8 @@ pub use vera_domain::{
     ReceiptResponse, ReceiptResponseError, Refusal, RefusalKind, RefusingModule, SimulatedLog,
 };
 pub use vera_permission::{
-    AccessRequest, Actor, ModuleId, Object, Operation, PERMISSION_LIMITS, PermissionLimits,
-    PermissionProof, PermissionRead, PermissionResponse, PolicyPrefixPageProof,
+    AccessRequest, Actor, AssignmentSelector, ModuleId, Object, Operation, PERMISSION_LIMITS,
+    PermissionLimits, PermissionProof, PermissionRead, PermissionResponse, PolicyPrefixPageProof,
     PolicyPrefixPageResponse, PolicyPrefixProof, PolicyPrefixResponse, PrefixProof, PrefixResponse,
     RECORD_PROOF_BYTES, ReadLimits, RecordProof, RecordResponse, object_owner_prefix,
     verify_permission_proof,
