@@ -1,13 +1,14 @@
 //! Signed delegation, batch rollback and revocation recovery across replicas.
 
+#[path = "support/native_receipt.rs"]
+mod native_receipt;
+
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use alloy_primitives::{Address, B256, Bytes};
 use alloy_sol_types::SolCall;
 use vera_client::Secp256k1SigningKey as SigningKey;
-use vera_client::{
-    ACP_ADDRESS, BlsSigner, EvmSigner, TransactionReceipt, VERA_ADDRESS, VeraClient,
-};
+use vera_client::{ACP_ADDRESS, BlsSigner, NativeReceipt, VERA_ADDRESS, VeraClient};
 use vera_e2e::cluster::{ConsensusPreset, TestCluster};
 use vera_modules::{
     acp::abi::IAcp,
@@ -26,22 +27,19 @@ fn token(submitter: &str, deployment: u64, now: u64) -> String {
     vera_client::create_bearer_token(&key, submitter, deployment, now, now + 300).unwrap()
 }
 
-async fn evm(
-    client: &VeraClient,
-    signer: &EvmSigner,
-    target: Address,
-    data: Vec<u8>,
-) -> TransactionReceipt {
-    let nonce = client.get_nonce(signer.address()).await.unwrap();
-    let raw = signer.sign_tx(target, data.into(), nonce).unwrap();
-    let hash = client.send_raw_transaction(&raw).await.unwrap();
-    client.wait_for_receipt(hash, POLL, 600).await.unwrap()
+async fn native(client: &VeraClient, signer: &BlsSigner, data: Vec<u8>) -> NativeReceipt {
+    send(client, signer, ACP_ADDRESS, data).await
 }
 
-async fn native(client: &VeraClient, signer: &BlsSigner, data: Vec<u8>) -> TransactionReceipt {
-    let raw = signer.sign_native_tx(ACP_ADDRESS, data.into()).unwrap();
+async fn send(
+    client: &VeraClient,
+    signer: &BlsSigner,
+    target: Address,
+    data: Vec<u8>,
+) -> NativeReceipt {
+    let raw = signer.sign_native_tx(target, data.into()).unwrap();
     let hash = client.send_native_tx(&raw).await.unwrap();
-    client.wait_for_receipt(hash, POLL, 600).await.unwrap()
+    native_receipt::wait(client, hash).await
 }
 
 fn register(policy: B256, bearer: &str, object: &str) -> Vec<u8> {
@@ -71,13 +69,12 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
         .await
         .unwrap();
     let client = VeraClient::new(cluster.node(0).rpc_url());
-    let owner = EvmSigner::from_hex(OWNER, 9001).unwrap();
+    let creator = BlsSigner::new(6u64.into(), 9001).unwrap();
     let delegate = BlsSigner::new(7u64.into(), 9001).unwrap();
     let stranger = BlsSigner::new(8u64.into(), 9001).unwrap();
-    let created = evm(
+    let created = native(
         &client,
-        &owner,
-        ACP_ADDRESS,
+        &creator,
         IAcp::createPolicyCall {
             policy: Bytes::from_static(b"name: delegation\nresources:\n  - name: file\n"),
             marshalType: 1,
@@ -115,14 +112,9 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
         0
     );
     assert_eq!(
-        evm(
-            &client,
-            &owner,
-            ACP_ADDRESS,
-            register(policy, &bearer, "wrong-path")
-        )
-        .await
-        .status,
+        native(&client, &creator, register(policy, &bearer, "wrong-relay"))
+            .await
+            .status,
         0
     );
 
@@ -179,13 +171,12 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
     .unwrap();
     assert!(tokens.is_empty());
 
-    let evm_bearer = token(&owner.did(), 9001, now);
+    let creator_bearer = token(creator.did(), 9001, now);
     assert_eq!(
-        evm(
+        native(
             &client,
-            &owner,
-            ACP_ADDRESS,
-            register(policy, &evm_bearer, "evm")
+            &creator,
+            register(policy, &creator_bearer, "creator")
         )
         .await
         .status,
@@ -193,10 +184,11 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
     );
     let unused = token(stranger.did(), 9001, now);
     let mut revocations = Vec::new();
-    for bearer in [&bearer, &unused] {
-        let receipt = evm(
+    // Each token's authorized submitter revokes it.
+    for (submitter, bearer) in [(&delegate, &bearer), (&stranger, &unused)] {
+        let receipt = send(
             &client,
-            &owner,
+            submitter,
             VERA_ADDRESS,
             IVera::revokeDelegationCall {
                 token: bearer.clone(),
@@ -234,7 +226,7 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
         .await
         .unwrap();
     for hash in revocations {
-        replica.wait_for_receipt(hash, POLL, 600).await.unwrap();
+        native_receipt::wait(&replica, hash).await;
     }
     for bearer in [&bearer, &unused] {
         let (found, bytes) = replica

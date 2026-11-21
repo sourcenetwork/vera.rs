@@ -22,14 +22,9 @@ async fn pipelined_quorum_recovery_crosses_epoch_boundaries() {
     quorum_recovery(true).await;
 }
 
-async fn quorum_recovery(pipelined: bool) {
-    let deployment = if pipelined { 9082 } else { 9081 };
-    let mut genesis = GenesisBuilder::devnet();
-    if pipelined {
-        genesis = genesis
-            .blocks_per_epoch(192)
-            .simplex(vera_domain::SimplexParameters::default());
-    }
+async fn quorum_recovery(cross_epochs: bool) {
+    let deployment = if cross_epochs { 9082 } else { 9081 };
+    let genesis = GenesisBuilder::devnet().blocks_per_epoch(192);
     let trusted = *KeySet::builder()
         .seed(deployment)
         .build()
@@ -59,10 +54,6 @@ async fn quorum_recovery(pipelined: bool) {
     let clients: Vec<_> = (0..4)
         .map(|i| VeraClient::new(cluster.node(i).rpc_url()))
         .collect();
-    if pipelined {
-        let error = clients[0].send_raw_transaction(&[2]).await.unwrap_err();
-        assert!(error.to_string().contains("EVM transactions are disabled"));
-    }
     cluster.kill_node(2);
     cluster.kill_node(3);
 
@@ -142,7 +133,7 @@ async fn quorum_recovery(pipelined: bool) {
         .wait_ready(vera_e2e::readiness_deadline())
         .await
         .unwrap();
-    if pipelined {
+    if cross_epochs {
         cluster
             .observe(Duration::from_millis(100))
             .wait_for_height(2 * 192 + 5, Duration::from_secs(240))

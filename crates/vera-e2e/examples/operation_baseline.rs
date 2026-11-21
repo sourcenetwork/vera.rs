@@ -69,7 +69,7 @@ async fn main() {
         "updates require permission verification"
     );
     let retained_consensus = parse(9, 0);
-    let pipelined = parse(10, 0);
+    let pipelined = parse(10, 1);
     assert!(pipelined <= 1);
     let inherit_rpc_listener = parse(11, usize::from(cfg!(unix)));
     assert!(
@@ -90,9 +90,10 @@ async fn main() {
         "epoch is too short for four participants with the configured leader term"
     );
     let mut genesis = GenesisBuilder::devnet().blocks_per_epoch(epoch_length.get());
-    if let Some(parameters) = simplex {
-        genesis = genesis.simplex(parameters);
-    }
+    genesis = match simplex {
+        Some(parameters) => genesis.simplex(parameters),
+        None => genesis.rotating(),
+    };
     if retained_consensus > 0 {
         let window = retained_consensus
             .checked_add(2)
@@ -194,7 +195,6 @@ async fn main() {
                 &client,
                 setup_receipt.transaction_hash,
                 setup_receipt.block_number,
-                setup_receipt.block_hash,
             )
             .await,
         )

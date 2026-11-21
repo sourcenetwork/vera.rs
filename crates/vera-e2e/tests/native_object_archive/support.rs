@@ -17,7 +17,10 @@ pub(super) async fn publication(cluster: &TestCluster, minimum: u64) {
         loop {
             let mut ready = true;
             for (index, client) in clients.iter().enumerate() {
-                let height = client.block_number().await;
+                let height = client
+                    .node_status()
+                    .await
+                    .map(|status| status.finalized_height.unwrap_or(0));
                 ready &= matches!(&height, Ok(height) if *height >= minimum);
                 observed[index] = format!("node {index}: {height:?}");
             }

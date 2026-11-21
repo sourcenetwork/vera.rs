@@ -2,31 +2,34 @@
 //! recovery across process restarts.
 //!
 //! Lifecycle:
-//!   1. Start 4-node cluster, submit EVM + BLS transactions
+//!   1. Start 4-node cluster, submit native requests from two signers
 //!   2. Snapshot state, kill node 3
-//!   3. Verify 3-node cluster continues (EVM tx while node is down)
+//!   3. Verify 3-node cluster continues (request while node is down)
 //!   4. Restart node 3, wait for backfill completion
 //!   5. Verify pre-kill state survived restart (QMDB persistence)
 //!   6. Verify restarted node caught up on blocks produced while down
-//!   7. Submit post-restart EVM + BLS txs, verify both paths work
+//!   7. Submit post-restart requests from both signers
 //!   8. Submit tx THROUGH the restarted node (mempool/forwarding)
 //!   9. Verify restarted node is in consensus (view advances, blocks produced)
 //!  10. Final cluster health
 //!
 //! Requires `cargo build -p verad` before running.
 
+#[path = "support/broadcast.rs"]
+mod broadcast;
+#[path = "support/native_receipt.rs"]
+mod native_receipt;
+
 use std::time::Duration;
 
 use alloy_primitives::{Address, Bytes};
 use alloy_sol_types::SolCall;
 
-use vera_client::{ACP_ADDRESS, BlsSigner, EvmSigner, TransactionReceipt, VeraClient};
+use vera_client::{ACP_ADDRESS, BlsSigner, NativeReceipt, VeraClient};
 use vera_domain::{ConsensusPublicKey, LightBlock, verify_light_block};
+use vera_e2e::RECEIPT_POLL_INTERVAL;
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, TestCluster};
-use vera_e2e::{RECEIPT_POLL_ATTEMPTS, RECEIPT_POLL_INTERVAL};
 use vera_modules::acp::abi::IAcp;
-
-const HARDHAT_KEY_0: &str = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 const TEST_POLICY_YAML: &str = "\
 name: restart-test-policy
@@ -70,102 +73,31 @@ fn create_policy_calldata() -> Vec<u8> {
     .abi_encode()
 }
 
-async fn broadcast_evm_tx(
-    cluster: &TestCluster,
-    client: &VeraClient,
-    signer: &EvmSigner,
-    target: Address,
-    calldata: Vec<u8>,
-) -> TransactionReceipt {
-    let nonce = client
-        .get_nonce(signer.address())
-        .await
-        .expect("get_nonce should work");
-    let raw = signer
-        .sign_tx(target, Bytes::from(calldata), nonce)
-        .expect("EVM sign should succeed");
-
-    let futs: Vec<_> = (0..cluster.node_count())
-        .map(|i| {
-            let r = raw.clone();
-            let url = cluster.node(i).rpc_url();
-            tokio::spawn(async move {
-                let result = VeraClient::new(url).send_raw_transaction(&r).await;
-                (i, result)
-            })
-        })
-        .collect();
-    let mut tx_hash = None;
-    for fut in futs {
-        if let Ok((_node_idx, Ok(hash))) = fut.await {
-            tx_hash = Some(hash);
-        }
-    }
-    let tx_hash = tx_hash.expect("at least one node should accept the EVM tx");
-
-    client
-        .wait_for_receipt(tx_hash, RECEIPT_POLL_INTERVAL, RECEIPT_POLL_ATTEMPTS)
-        .await
-        .expect("EVM receipt should appear")
-}
-
 async fn broadcast_native_tx(
     cluster: &TestCluster,
     client: &VeraClient,
     signer: &BlsSigner,
     target: Address,
     calldata: Vec<u8>,
-) -> TransactionReceipt {
+) -> NativeReceipt {
+    broadcast::native(cluster, client, signer, target, calldata).await
+}
+
+/// Send a single native request directly to one node (not broadcast).
+async fn send_native_tx_to_node(
+    client: &VeraClient,
+    signer: &BlsSigner,
+    target: Address,
+    calldata: Vec<u8>,
+) -> NativeReceipt {
     let wire = signer
         .sign_native_tx(target, Bytes::from(calldata))
         .expect("BLS sign should succeed");
-
-    let futs: Vec<_> = (0..cluster.node_count())
-        .map(|i| {
-            let w = wire.clone();
-            let url = cluster.node(i).rpc_url();
-            tokio::spawn(async move {
-                let result = VeraClient::new(url).send_native_tx(&w).await;
-                (i, result)
-            })
-        })
-        .collect();
-    let mut tx_hash = None;
-    for fut in futs {
-        if let Ok((_node_idx, Ok(hash))) = fut.await {
-            tx_hash = Some(hash);
-        }
-    }
-    let tx_hash = tx_hash.expect("at least one node should accept the BLS tx");
-
-    client
-        .wait_for_receipt(tx_hash, RECEIPT_POLL_INTERVAL, RECEIPT_POLL_ATTEMPTS)
-        .await
-        .expect("BLS receipt should appear")
-}
-
-/// Send a single EVM tx directly to one node (not broadcast).
-async fn send_evm_tx_to_node(
-    client: &VeraClient,
-    signer: &EvmSigner,
-    target: Address,
-    calldata: Vec<u8>,
-) -> TransactionReceipt {
-    let nonce = client
-        .get_nonce(signer.address())
-        .await
-        .expect("get_nonce should work");
-    let raw = signer
-        .sign_tx(target, Bytes::from(calldata), nonce)
-        .expect("EVM sign should succeed");
     let tx_hash = client
-        .send_raw_transaction(&raw)
+        .send_native_tx(&wire)
         .await
-        .expect("node should accept tx");
-    client
-        .wait_for_receipt(tx_hash, RECEIPT_POLL_INTERVAL, RECEIPT_POLL_ATTEMPTS)
-        .await
-        .expect("receipt should appear")
+        .expect("node should accept the request");
+    native_receipt::wait(client, tx_hash).await
 }
 
 /// Poll until a condition holds, with a descriptive panic on timeout.
@@ -189,16 +121,18 @@ async fn poll_until(
     }
 }
 
-async fn wait_for_nonce(rpc_url: &str, address: Address, expected: u64) {
+async fn wait_for_nonce(rpc_url: &str, did: &str, expected: u64) {
     let rpc_url = rpc_url.to_owned();
+    let did = did.to_owned();
     poll_until(
         "restarted replica sequence convergence",
         Duration::from_secs(120),
         Duration::from_millis(500),
         move || {
             let rpc_url = rpc_url.clone();
+            let did = did.clone();
             Box::pin(async move {
-                match VeraClient::new(rpc_url).get_nonce(address).await {
+                match VeraClient::new(rpc_url).get_native_nonce(&did).await {
                     Ok(nonce) if nonce >= expected => None,
                     Ok(nonce) => Some(format!("sequence {nonce}, need {expected}")),
                     Err(error) => Some(error.to_string()),
@@ -220,7 +154,11 @@ async fn node_restart_preserves_state() {
         .output
         .public()
         .public();
-    let genesis = GenesisBuilder::devnet().funded_accounts(1, "1000000000000000000000000");
+    // The stall timeout must exceed the Stress preset's notarization timeout.
+    let genesis = GenesisBuilder::devnet().simplex(vera_domain::SimplexParameters {
+        stall_timeout_ms: 15_000,
+        ..vera_domain::SimplexParameters::default()
+    });
 
     let mut cluster = TestCluster::builder()
         .binary(vera_e2e::resolve_binary().expect("resolve verad binary"))
@@ -245,21 +183,25 @@ async fn node_restart_preserves_state() {
         .expect("should reach height 3");
 
     let client = VeraClient::new(cluster.node(0).rpc_url());
-    let evm_signer = EvmSigner::from_hex(HARDHAT_KEY_0, chain_id).expect("valid signer");
+    let writer = BlsSigner::random(chain_id).expect("random BLS signer");
+    let writer_did = writer.did().to_owned();
     let bls_signer = BlsSigner::random(chain_id).expect("random BLS signer");
     let bls_did = bls_signer.did().to_owned();
 
-    // ── 1. Submit EVM + BLS policies before kill ───────────────────
+    // ── 1. Submit policies from both signers before kill ───────────────────
 
-    let evm_receipt = broadcast_evm_tx(
+    let writer_receipt = broadcast_native_tx(
         &cluster,
         &client,
-        &evm_signer,
+        &writer,
         ACP_ADDRESS,
         create_policy_calldata(),
     )
     .await;
-    assert_eq!(evm_receipt.status, 1, "EVM create_policy should succeed");
+    assert_eq!(
+        writer_receipt.status, 1,
+        "writer create_policy should succeed"
+    );
 
     let bls_receipt = broadcast_native_tx(
         &cluster,
@@ -271,7 +213,7 @@ async fn node_restart_preserves_state() {
     .await;
     assert_eq!(bls_receipt.status, 1, "BLS create_policy should succeed");
 
-    let max_block = evm_receipt.block_number.max(bls_receipt.block_number);
+    let max_block = writer_receipt.block_number.max(bls_receipt.block_number);
     state
         .wait_for_height(max_block + 1, Duration::from_secs(60))
         .await
@@ -294,10 +236,10 @@ async fn node_restart_preserves_state() {
         .expect("get_native_nonce should work");
     assert_eq!(pre_kill_bls_nonce, 1, "BLS nonce should be 1 after one tx");
 
-    let pre_kill_evm_nonce = client
-        .get_nonce(evm_signer.address())
+    let pre_kill_writer_nonce = client
+        .get_native_nonce(&writer_did)
         .await
-        .expect("get_nonce should work");
+        .expect("get_native_nonce should work");
 
     let pre_kill_height = state
         .all_nodes()
@@ -309,21 +251,14 @@ async fn node_restart_preserves_state() {
 
     let before_restart = VeraClient::new(cluster.node(3).rpc_url());
     let mut history = Vec::new();
-    for receipt in [&evm_receipt, &bls_receipt] {
-        let confirmed = before_restart
-            .wait_for_receipt(
-                receipt.transaction_hash,
-                RECEIPT_POLL_INTERVAL,
-                RECEIPT_POLL_ATTEMPTS,
-            )
-            .await
-            .expect("replica should confirm the historical operation");
+    for receipt in [&writer_receipt, &bls_receipt] {
+        let confirmed = native_receipt::wait(&before_restart, receipt.transaction_hash).await;
         history.push(confirmed);
     }
 
     let historical_light = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            for height in (1..=bls_receipt.block_number.max(evm_receipt.block_number)).rev() {
+            for height in (1..=bls_receipt.block_number.max(writer_receipt.block_number)).rev() {
                 if let Ok(light) = before_restart
                     .rpc_call_typed::<LightBlock>("vera_getLightBlock", serde_json::json!([height]))
                     .await
@@ -352,28 +287,28 @@ async fn node_restart_preserves_state() {
         .await
         .expect("cluster should continue producing blocks with 3 nodes");
 
-    // Submit an EVM tx while node 3 is down — the restarted node must
+    // Submit a request while node 3 is down — the restarted node must
     // catch up on this block during backfill.
-    let while_down_receipt = broadcast_evm_tx(
+    let while_down_receipt = broadcast_native_tx(
         &cluster,
         &client,
-        &evm_signer,
+        &writer,
         ACP_ADDRESS,
         create_policy_calldata(),
     )
     .await;
     assert_eq!(
         while_down_receipt.status, 1,
-        "EVM tx while node down should succeed"
+        "request while node down should succeed"
     );
 
-    let while_down_evm_nonce = client
-        .get_nonce(evm_signer.address())
+    let while_down_writer_nonce = client
+        .get_native_nonce(&writer_did)
         .await
-        .expect("get_nonce after while-down tx");
+        .expect("get_native_nonce after while-down request");
     assert!(
-        while_down_evm_nonce > pre_kill_evm_nonce,
-        "EVM nonce should advance while node is down"
+        while_down_writer_nonce > pre_kill_writer_nonce,
+        "writer sequence should advance while node is down"
     );
 
     // ── 4. Restart node 3 ───────────────────────────────────────
@@ -396,9 +331,10 @@ async fn node_restart_preserves_state() {
     let restarted_client = VeraClient::new(cluster.node(3).rpc_url());
 
     let restarted_chain_id = restarted_client
-        .chain_id()
+        .node_status()
         .await
-        .expect("restarted node should respond to eth_chainId");
+        .expect("restarted node should respond to vera_nodeStatus")
+        .chain_id;
     assert_eq!(
         restarted_chain_id, chain_id,
         "restarted node chain ID should match"
@@ -435,11 +371,10 @@ async fn node_restart_preserves_state() {
         .await
         .expect("all 4 nodes should finish backfilling");
 
-    // EVM nonce convergence: the restarted node must process the
-    // tx submitted while it was down.
+    // Sequence convergence: the restarted node must process the
+    // request submitted while it was down.
     let restarted_url = cluster.node(3).rpc_url();
-    let addr = evm_signer.address();
-    wait_for_nonce(&restarted_url, addr, while_down_evm_nonce).await;
+    wait_for_nonce(&restarted_url, &writer_did, while_down_writer_nonce).await;
 
     // The restarted node should now see the policy created while it was down.
     let converged_policies = restarted_client
@@ -455,7 +390,7 @@ async fn node_restart_preserves_state() {
 
     for receipt in history {
         let restored = restarted_client
-            .get_transaction_receipt(receipt.transaction_hash)
+            .get_native_receipt(receipt.transaction_hash)
             .await
             .unwrap()
             .expect("confirmed receipt must survive restart");
@@ -470,21 +405,21 @@ async fn node_restart_preserves_state() {
         "historical proof material changed on restart"
     );
 
-    // ── 7. Post-restart EVM + BLS transactions ──────────────────
+    // ── 7. Post-restart requests ────────────────────────────────
     //
-    // Verify both tx paths work through the full cluster after restart.
+    // Verify both signers' requests go through the full cluster after restart.
 
-    let post_evm_receipt = broadcast_evm_tx(
+    let post_writer_receipt = broadcast_native_tx(
         &cluster,
         &client,
-        &evm_signer,
+        &writer,
         ACP_ADDRESS,
         create_policy_calldata(),
     )
     .await;
     assert_eq!(
-        post_evm_receipt.status, 1,
-        "post-restart EVM tx should succeed"
+        post_writer_receipt.status, 1,
+        "post-restart writer request should succeed"
     );
 
     let post_bls_receipt = broadcast_native_tx(
@@ -516,12 +451,15 @@ async fn node_restart_preserves_state() {
     // them to all validators for inclusion.
 
     // A receipt from replica 0 does not guarantee replica 3 has applied the write.
-    let post_evm_nonce = client.get_nonce(addr).await.expect("sequence after write");
-    wait_for_nonce(&restarted_url, addr, post_evm_nonce).await;
+    let post_writer_nonce = client
+        .get_native_nonce(&writer_did)
+        .await
+        .expect("sequence after write");
+    wait_for_nonce(&restarted_url, &writer_did, post_writer_nonce).await;
 
-    let through_restarted_receipt = send_evm_tx_to_node(
+    let through_restarted_receipt = send_native_tx_to_node(
         &restarted_client,
-        &evm_signer,
+        &writer,
         ACP_ADDRESS,
         create_policy_calldata(),
     )

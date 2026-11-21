@@ -58,7 +58,10 @@ async fn wait_for_replica_publication(cluster: &TestCluster, minimum: u64) {
         loop {
             let mut ready = true;
             for (index, client) in clients.iter().enumerate() {
-                let height = client.block_number().await;
+                let height = client
+                    .node_status()
+                    .await
+                    .map(|status| status.finalized_height.unwrap_or(0));
                 ready &= matches!(&height, Ok(height) if *height >= minimum);
                 observations[index] = format!("node {index}: {height:?}");
             }
@@ -114,17 +117,8 @@ fn evaluate(
 }
 
 #[tokio::test]
-async fn native_permission_reads_follow_finalized_grants_and_denials() {
-    permission_lifecycle(false).await;
-}
-
-#[tokio::test]
 async fn pipelined_permission_reads_follow_finalized_grants_and_deletion() {
-    permission_lifecycle(true).await;
-}
-
-async fn permission_lifecycle(pipelined: bool) {
-    let deployment = if pipelined { 9057 } else { 9047 };
+    let deployment = 9057;
     let trusted = *KeySet::builder()
         .seed(deployment)
         .build()
@@ -133,18 +127,14 @@ async fn permission_lifecycle(pipelined: bool) {
         .output
         .public()
         .public();
-    let genesis = if pipelined {
-        GenesisBuilder::devnet().simplex(vera_domain::SimplexParameters::default())
-    } else {
-        GenesisBuilder::devnet()
-    };
+    let genesis = GenesisBuilder::devnet();
     let mut cluster = TestCluster::builder()
         .binary(vera_e2e::resolve_binary().unwrap())
         .nodes(4)
         .seed(deployment)
         .chain_id(deployment)
         .genesis(genesis)
-        .preset(ConsensusPreset::Fast)
+        .preset(ConsensusPreset::Normal)
         .build()
         .await
         .unwrap();
@@ -249,16 +239,14 @@ async fn permission_lifecycle(pipelined: bool) {
         .await
         .unwrap();
     assert!(policy_record.record.value.is_some());
-    if pipelined {
-        read_check::exercise(
-            &cluster.node(0).rpc_url(),
-            &policy,
-            granted,
-            &trusted,
-            &unrelated_trust,
-        )
-        .await;
-    }
+    read_check::exercise(
+        &cluster.node(0).rpc_url(),
+        &policy,
+        granted,
+        &trusted,
+        &unrelated_trust,
+    )
+    .await;
     let missing = client
         .read_current_record(
             ModuleId::Acp,
@@ -433,9 +421,7 @@ async fn permission_lifecycle(pipelined: bool) {
         }
     };
     tokio::join!(reads, writes);
-    if pipelined {
-        policy_edits::exercise(&mut cluster, &policy, &owner, &request, &trusted).await;
-    }
+    policy_edits::exercise(&mut cluster, &policy, &owner, &request, &trusted).await;
     let archived = submit(
         &client,
         &owner,

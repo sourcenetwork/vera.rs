@@ -65,14 +65,14 @@ pub(super) async fn check_peer_and_absence(
     // this exact revision to be indexed, without retrying verification failures.
     tokio::time::timeout(vera_e2e::readiness_deadline(), async {
         loop {
-            let block: Option<serde_json::Value> = peer
-                .rpc_call_typed(
-                    "eth_getBlockByNumber",
-                    serde_json::json!([format!("0x{:x}", original.revision.height), false]),
-                )
+            let status = peer
+                .node_status()
                 .await
-                .expect("peer block lookup should succeed");
-            if block.is_some() {
+                .expect("peer status lookup should succeed");
+            if status
+                .finalized_height
+                .is_some_and(|height| height >= original.revision.height)
+            {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;

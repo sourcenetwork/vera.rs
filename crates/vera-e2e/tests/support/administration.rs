@@ -35,12 +35,14 @@ pub(super) async fn approve(
 ) -> SignedAdministrativeRequest {
     let genesis = tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
-            let first: serde_json::Value = client
-                .rpc_call_typed("eth_getBlockByNumber", serde_json::json!(["0x1", false]))
+            if let Ok(first) = client
+                .rpc_call_typed::<vera_domain::LightBlock>(
+                    "vera_getLightBlock",
+                    serde_json::json!([1]),
+                )
                 .await
-                .unwrap();
-            if let Some(parent) = first["parentHash"].as_str() {
-                return parent.parse::<alloy_primitives::B256>().unwrap();
+            {
+                return first.parent_hash.parse::<alloy_primitives::B256>().unwrap();
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }

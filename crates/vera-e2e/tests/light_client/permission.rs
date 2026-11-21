@@ -1,8 +1,8 @@
-use super::{broadcast_evm_tx, parse_policy_id};
+use super::{broadcast_native_tx, parse_policy_id};
 use alloy_sol_types::SolCall;
 use commonware_codec::{Decode as _, Encode as _};
 use vera_client::{
-    ACP_ADDRESS, AccessRequest, Actor, EvmSigner, Object, Operation, PERMISSION_LIMITS,
+    ACP_ADDRESS, AccessRequest, Actor, BlsSigner, Object, Operation, PERMISSION_LIMITS,
     PermissionProof, PermissionRead, PermissionResponse, VeraClient, verify_permission_proof,
 };
 use vera_domain::{ConsensusPublicKey, verify_light_block};
@@ -18,7 +18,7 @@ pub(super) const READER_DID: &str = "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8
 pub(super) async fn check_permissions(
     cluster: &TestCluster,
     client: &VeraClient,
-    signer: &EvmSigner,
+    signer: &BlsSigner,
     policy: &str,
     minimum_height: u64,
     trusted: &ConsensusPublicKey,
@@ -69,7 +69,7 @@ pub(super) async fn check_permissions(
     }
     .abi_encode();
     assert_eq!(
-        broadcast_evm_tx(cluster, client, signer, ACP_ADDRESS, register)
+        broadcast_native_tx(cluster, client, signer, ACP_ADDRESS, register)
             .await
             .status,
         1
@@ -87,7 +87,7 @@ pub(super) async fn check_permissions(
     }
     .abi_encode();
     assert_eq!(
-        broadcast_evm_tx(cluster, client, signer, ACP_ADDRESS, edge)
+        broadcast_native_tx(cluster, client, signer, ACP_ADDRESS, edge)
             .await
             .status,
         1
@@ -100,7 +100,7 @@ pub(super) async fn check_permissions(
         actor: READER_DID.into(),
     }
     .abi_encode();
-    let receipt = broadcast_evm_tx(cluster, client, signer, ACP_ADDRESS, block).await;
+    let receipt = broadcast_native_tx(cluster, client, signer, ACP_ADDRESS, block).await;
     assert_eq!(receipt.status, 1);
     let response = evidence(client, policy, &request, receipt.block_number).await;
     assert!(

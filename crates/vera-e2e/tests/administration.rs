@@ -1,13 +1,13 @@
 //! Operator quorum, transport independence and rotation recovery.
 
+#[path = "support/native_receipt.rs"]
+mod native_receipt;
 #[path = "support/administration.rs"]
 mod support;
 
-use std::time::Duration;
-
 use vera_client::Secp256k1SigningKey as SigningKey;
 use vera_client::{
-    BlsSigner, ClientError, EvmSigner, VeraClient,
+    BlsSigner, ClientError, VeraClient,
     administration::{AdministrativeCommand, OperatorPolicy, approve_administration},
 };
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, TestCluster};
@@ -91,20 +91,14 @@ async fn operator_rotation_and_sequence_survive_replica_restart() {
         1,
     )
     .await;
-    let evm_submitter = EvmSigner::from_hex(
-        "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-        9001,
-    )
-    .unwrap();
+    // Any submitter may carry an approved change: authority is in the approvals.
+    let other_submitter = BlsSigner::new(43u64.into(), 9001).unwrap();
     let receipt = client
-        .apply_administration(&evm_submitter, &rotation)
+        .native_apply_administration(&other_submitter, &rotation)
         .await
         .unwrap();
     let replica = VeraClient::new(cluster.node(3).rpc_url());
-    replica
-        .wait_for_receipt(receipt.transaction_hash, Duration::from_millis(50), 600)
-        .await
-        .unwrap();
+    native_receipt::wait(&replica, receipt.transaction_hash).await;
     cluster.restart_node(3).unwrap();
     cluster
         .wait_ready(vera_e2e::readiness_deadline())
@@ -191,9 +185,10 @@ async fn operator_rotation_and_sequence_survive_replica_restart() {
         AcpParams::default()
     );
     for index in 0..cluster.node_count() {
-        VeraClient::new(cluster.node(index).rpc_url())
-            .wait_for_receipt(applied.transaction_hash, Duration::from_millis(50), 600)
-            .await
-            .unwrap();
+        native_receipt::wait(
+            &VeraClient::new(cluster.node(index).rpc_url()),
+            applied.transaction_hash,
+        )
+        .await;
     }
 }

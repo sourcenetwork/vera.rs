@@ -110,7 +110,7 @@ fn check_pending_branches(handoff: bool) {
             64,
             30_000_000,
         )
-        .with_native_pipeline(handoff, std::time::Duration::ZERO);
+        .with_native_pipeline(true, std::time::Duration::ZERO);
         let alice = BlsSigner::new(1u64.into(), CHAIN_ID).unwrap();
         let bob = BlsSigner::new(2u64.into(), CHAIN_ID).unwrap();
 
