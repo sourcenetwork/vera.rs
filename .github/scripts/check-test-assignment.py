@@ -18,10 +18,6 @@ TEST_DIRECTORIES = (
 )
 
 EXCLUDED_TARGETS = {
-    'native_go_client': (
-        'every case is ignored: it needs Trust test binaries built with vera_native '
-        '(TRUST_NATIVE_TEST_BINARY, TRUST_NATIVE_GATEWAY_TEST_BINARY) from the separate trust-api repository'
-    ),
     'native_pressure': (
         'release-mode overload and network-fault suite with resource evidence; '
         'native-pressure.yml runs it on pull requests that change its paths and on dispatch'
@@ -29,9 +25,6 @@ EXCLUDED_TARGETS = {
 }
 
 IGNORED_CASES = {
-    'native_go_client::native_go_workers_verify_policy_creation': 'needs a Trust native test binary',
-    'native_go_client::native_go_gateway_verifies_pipelined_vera': 'needs Trust native test and gateway binaries',
-    'native_go_client::native_go_policy_pages': 'needs a Trust native test binary',
     'native_pressure::delayed_validator::pipelined_delayed_validator_crosses_epoch_and_preserves_work': (
         'needs explicitly enabled network fault injection; native-pressure.yml runs it with --include-ignored'
     ),

@@ -23,7 +23,7 @@ Raft group or proof-of-history mechanism is introduced. Wall-clock timestamps
 cannot decide which concurrent policy proposal is authorized. An expiry check,
 if introduced, needs an explicit clock and validation rule.
 
-Trust remains a separate Go gateway. An edge client must be able to authenticate
+A gateway, where one is used, is a separate service. An edge client must be able to authenticate
 evidence without trusting the gateway. Commonware consensus certification does
 not by itself authorize an application operation or provide Orbis decryption.
 

@@ -20,7 +20,6 @@ and the unresolved revocation rules. That design is not yet an enabled ACP featu
 ```mermaid
 flowchart TB
     App[Application]
-    Trust[Trust API · Go<br/>Authentication, API keys, relay, retries]
     Defra[DefraDB · Rust<br/>Documents and queries]
     Orbis[Orbis · Rust<br/>Application signing and encryption]
     subgraph Vera[Vera consensus group · Rust]
@@ -33,28 +32,24 @@ flowchart TB
         V3 <--> V4
         V4 <--> V1
     end
-    App --> Trust
     App --> Defra
-    Trust -->|Native requests and verified evidence| Vera
+    App -->|Native requests and verified evidence| Vera
     Defra -->|Native client: ACP and certified state| Vera
     Defra -->|Threshold service client| Orbis
     Orbis -->|ACP, ring records, bulletin| Vera
     Defra --- Documents[(Regolith document storage)]
     classDef service fill:#e8f1ff,stroke:#526c94,color:#142d50
     classDef storage fill:#e6f4ee,stroke:#527a68,color:#173d2c
-    class Trust,Defra,Orbis,V1,V2,V3,V4 service
+    class Defra,Orbis,V1,V2,V3,V4 service
     class Documents storage
 ```
 
 The consensus links are illustrative; they do not prescribe a ring topology.
-Trust is optional for clients that authenticate and sign native requests directly.
-It is a separate service, never part of consensus. The compatible native gateway
-candidate exposes identity, ACP and ring creation/read operations. When configured
-with an Orbis control endpoint, it also exposes DKG initiation and local node
-status. It has no general native bulletin API; Orbis uses Vera's bulletin directly.
-Application signing and encryption remain Orbis services used by their own clients.
-The gateway remains under standalone recovery qualification; the completed ring
-contracts do not qualify every gateway route or deployment condition.
+Clients sign native requests themselves, or a relay worker signs them under an
+operator-approved grant; see [delegated policies](delegated-policies.md). A relay
+gateway is a separate service, never part of consensus. Orbis uses Vera's bulletin
+directly. Application signing and encryption remain Orbis services used by their
+own clients.
 
 ## Inside one member
 
@@ -160,7 +155,7 @@ not durable admission or a confirmation deadline, and admission checks are uncha
 ```mermaid
 sequenceDiagram
     participant Caller
-    participant Gateway as Trust API
+    participant Gateway as Relay gateway
     participant Member as Vera member
     participant Group as Consensus group
     Caller->>Caller: Persist operation ID and exact request
@@ -172,7 +167,7 @@ sequenceDiagram
     Group->>Group: Order, re-execute, finalize, persist
     Gateway->>Member: Request receipt and operation evidence
     Member-->>Gateway: Certified result
-    Gateway->>Gateway: Verify evidence with Rust verifier
+    Gateway->>Gateway: Verify evidence with vera-client
     Gateway-->>Caller: Original result and certified revision
     opt Response lost or confirmation uncertain
         Caller->>Gateway: Recover using the same operation ID and request
@@ -329,7 +324,6 @@ See [snapshot recovery](snapshot-recovery.md) and [history storage](history-stor
 | Proposal execution and finalized state | [`vera-app`](../crates/vera-app/src), [`vera-executor`](../crates/vera-executor/src) |
 | Product rules | [`vera-modules`](../crates/vera-modules/src) |
 | Native requests and verified reads | [`vera-client`](../crates/vera-client/src) |
-| Shared verifier for Go consumers | [`vera-verifier`](../crates/vera-verifier/src) |
 
 For deployment and diagnostics, start with [operating](operating.md). Performance
 claims must distinguish submission capacity, finality latency, certified receipt

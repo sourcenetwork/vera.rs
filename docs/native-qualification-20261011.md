@@ -77,8 +77,8 @@ and Dockerfiles remain unchanged. A fixture revision does not repin the runtime.
   revocation/regrant and three full-member restarts. It keeps membership fixed.
 
 The standalone Trust checks use independently provisioned consensus trust and
-exercise rejected proofs. The gateway loads the matching shared verifier; ship
-its library and header together as described in [verifier integration](native-verifier.md).
+exercise rejected proofs. The gateway loaded the matching shared verifier, which
+Vera has since removed.
 The historical September integration baseline remains in
 [native-integration.md](native-integration.md).
 
