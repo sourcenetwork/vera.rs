@@ -12,6 +12,8 @@ pub mod administration;
 pub mod amendments;
 /// Anchors in another deployment and policy snapshots verified against them.
 pub mod anchoring;
+/// Certified direct assignment discovery.
+pub mod assignments;
 mod bearer;
 mod bls_signer;
 /// Certified bulletin records and bounded listings.

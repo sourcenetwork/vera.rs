@@ -25,6 +25,34 @@ pub struct PolicyPrefixProof {
 }
 
 impl PolicyPrefixProof {
+    /// Verify a complete relation generation bound to the policy at this root.
+    pub fn verify_relation(
+        &self,
+        root: B256,
+        policy: &str,
+        resource: &str,
+        relation: &str,
+        maximum_bytes: usize,
+    ) -> Result<PrefixEvidence, PermissionError> {
+        let record = verify_policy(&self.policy, root, policy, maximum_bytes)?
+            .ok_or(PermissionError::Invalid("policy is absent"))?;
+        let generation =
+            record
+                .relations
+                .generation(resource, relation)
+                .ok_or(PermissionError::Invalid(
+                    "relation is absent from the authenticated policy",
+                ))?;
+        if generation == 0 {
+            return Err(PermissionError::Invalid(
+                "owner relation requires object-scoped evidence",
+            ));
+        }
+        let prefix = vera_modules::acp::keys::relationship_target_prefix(policy, generation);
+        self.verify(root, policy, &prefix, maximum_bytes)?
+            .ok_or(PermissionError::Invalid("policy is absent"))
+    }
+
     /// Verify both proofs and expose a complete prefix only when every row is current.
     /// Retired generations require paged enumeration or the generic physical-prefix API.
     pub fn verify(
@@ -88,6 +116,27 @@ pub struct PolicyPrefixResponse {
 }
 
 impl PolicyPrefixResponse {
+    /// Verify a complete relation generation selected by the authenticated policy.
+    pub fn verify_relation(
+        &self,
+        policy: &str,
+        resource: &str,
+        relation: &str,
+        minimum_height: u64,
+        trusted: &ConsensusPublicKey,
+        maximum_bytes: usize,
+    ) -> Result<PrefixEvidence, PermissionError> {
+        encoded_size(&self.revision, LIGHT_BLOCK_RESPONSE_BYTES)?;
+        let (_, root) = verify_light_block(&self.revision, trusted)?;
+        if self.revision.height < minimum_height {
+            return Err(PermissionError::Invalid(
+                "revision precedes required minimum",
+            ));
+        }
+        self.proof
+            .verify_relation(root, policy, resource, relation, maximum_bytes)
+    }
+
     /// Authenticate liveness and relationships with caller-provided trust and freshness.
     pub fn verify(
         &self,
