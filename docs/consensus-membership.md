@@ -179,6 +179,6 @@ timeout must be 1–60000 milliseconds. All parameters are included in the genes
 fingerprint, which the genesis block names as its parent. Changing parameters
 requires a new deployment; restarting against different parameters is rejected.
 
-Deployments accept native signed requests only. EVM submissions are rejected at
-admission, and proposals containing EVM transactions are invalid. Blocks carry
+Deployments accept native signed requests only. Other bytes are refused at
+admission, and a proposal that carries any is invalid. Blocks carry
 no consensus randomness. Threshold signatures and DKG/resharing remain enabled.

@@ -59,7 +59,7 @@ async fn replica(
     let server = ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
     let address = server.local_addr().unwrap();
     let mut rpc = jsonrpsee::RpcModule::new(state.clone());
-    rpc.register_method("eth_getTransactionReceipt", |params, state, _| {
+    rpc.register_method("vera_getTransactionReceipt", |params, state, _| {
         let (hash,): (B256,) = params.parse()?;
         let mut state = state.lock().unwrap();
         let response = if hash == state.early.transaction_hash {
@@ -76,17 +76,18 @@ async fn replica(
         Ok::<_, ErrorObjectOwned>(response)
     })
     .unwrap();
-    rpc.register_method("eth_call", |_, state, _| {
+    rpc.register_method("vera_call", |_, state, _| {
         let registered = !state.lock().unwrap().caught_up;
-        Ok::<_, ErrorObjectOwned>(format!(
-            "0x{}",
-            hex::encode(IAcp::getObjectOwnerCall::abi_encode_returns(
-                &IAcp::getObjectOwnerReturn {
-                    registered,
-                    record: Bytes::new()
-                }
-            ))
-        ))
+        Ok::<_, ErrorObjectOwned>(vera_domain::ViewCallResult {
+            output: IAcp::getObjectOwnerCall::abi_encode_returns(&IAcp::getObjectOwnerReturn {
+                registered,
+                record: Bytes::new(),
+            })
+            .into(),
+            refusal: None,
+            block_number: Default::default(),
+            timestamp: Default::default(),
+        })
     })
     .unwrap();
     let handle = server.start(rpc);

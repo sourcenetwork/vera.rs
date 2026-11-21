@@ -294,7 +294,6 @@ jobs:
         run: >-
           cargo test --frozen -p vera-e2e
           --test core_chain
-          --test contract_deploy
           --test light_client
           --test gossip_headers
           --test validator_bootstrap
@@ -307,7 +306,7 @@ jobs:
         run: >-
           python3 .github/scripts/capture-tests.py --logs "$TMPDIR"
           cargo test --frozen -p vera-e2e
-          --test core_chain --test contract_deploy --test light_client
+          --test core_chain --test light_client
           --test gossip_headers --test validator_bootstrap
           --test validator_epoch_transition --test cross_object_acp
           -- --nocapture

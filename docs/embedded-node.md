@@ -306,7 +306,7 @@ A submission (`vera_sendNativeTx`) fails on a backup with the
 retryable code `-32002` and the data `{"retryable": true, "role": "backup"}`;
 `LocalRpcError::is_backup_refusal` identifies the response. Nothing is
 admitted or forwarded: the host sends the request to the active device.
-`eth_call`, `eth_estimateGas` and `vera_simulateNativeCall` run on a backup as
+`vera_call` and `vera_simulateNativeCall` run on a backup as
 on any node, against its own state.
 
 ### Limits of this version

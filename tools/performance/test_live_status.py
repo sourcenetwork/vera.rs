@@ -26,8 +26,6 @@ class CollectorTests(unittest.TestCase):
     def call(self, url, method, params, timeout):
         if self.failure:
             raise ValueError('private endpoint secret')
-        if method == 'eth_chainId':
-            return hex(self.status['chainId'])
         return dict(self.status) if method == 'vera_nodeStatus' else dict(self.light)
 
     def poll(self):
@@ -137,11 +135,10 @@ class CollectorTests(unittest.TestCase):
 
     def test_local_rpc_and_browser_api(self):
         status = dict(self.status)
-        status.pop('chainId')  # Real nodeStatus does not include chain ID.
         class RPC(BaseHTTPRequestHandler):
             def do_POST(self):
                 request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-                result = '0x7' if request['method'] == 'eth_chainId' else status
+                result = status
                 body = json.dumps(dict(jsonrpc='2.0', id=request['id'], result=result)).encode()
                 self.send_response(200)
                 self.end_headers()

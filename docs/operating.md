@@ -466,13 +466,7 @@ failure coverage alongside the completed-partition recovery matrix.
   Null does not mean no nullifications or a known non-leader.
   `validatorIndex` and `validatorCount` describe startup configuration, not the
   active membership after operator changes. Rust clients represent unavailable
-  fields as `Option`; JSON consumers must accept null. The compatibility
-  `net_peerCount` method returns resource-unavailable (`-32002`) until an actual
-  count is observed; it does not substitute zero for unknown connectivity.
-- While backfilling, the compatibility `eth_syncing` response uses the published
-  finalized height for `currentBlock`. Its `highestBlock` is only the maximum of
-  that height and the recovered snapshot floor, not an estimate of the network
-  tip. Consensus views and process counters are never used as heights.
+  fields as `Option`; JSON consumers must accept null.
 - `RUST_LOG=warn,vera_resource_diagnostics=debug` emits a resource snapshot every 30
   seconds (runtime metrics, resident execution index, cache occupancy,
   history-backend memory counters). Collection runs off the async executor and
@@ -535,8 +529,9 @@ workloads and measurement boundaries.
 - Certificate and proof endpoints apply fixed budgets; a client exceeding
   them receives retryable `-32002` errors and must back off, not reconnect
   harder.
-- `eth_call` and `eth_estimateGas`, which carry the Rust client's typed
-  queries, share four slots per node with `vera_simulateNativeCall`. Up to 64
+- `vera_call`, which carries the Rust client's typed queries, shares four
+  slots per node with `vera_simulateNativeCall`. Both are unauthenticated
+  ([simulation.md](simulation.md#when-an-unauthenticated-read-is-acceptable)). Up to 64
   more callers wait at most two seconds for a slot; a caller beyond those, or
   one whose wait expires, receives the same retryable `-32002`. The client
   does not retry it.

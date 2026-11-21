@@ -276,7 +276,6 @@ floor:
 | Point lookup by height (`execution_bounded`), light block | `HistoryPruned`; over JSON-RPC code `4444` with `{"retryable": false, "floor": F}` |
 | History chunk or proof served to an importing peer | served for the floor's parent; `HistoryPruned` below it, which the peer receives as a refusal naming the floor |
 | Lookup by block or submission hash | not found once the mapping is removed; a mapping that still names a pruned revision fails with `HistoryPruned` |
-| Log range (`eth_getLogs`) reaching below the floor | fails with `4444` at the first pruned revision; results are never skipped |
 | Receipt (`vera_getTransactionReceipt`, `vera_getReceiptProof`) | `null` for a pruned submission, as for an unknown one; it does not become available later. `4444` when a stale mapping names a pruned revision |
 | Cut back to a block (`standing`, `rewind_to`) or a recovery anchor | `HistoryPruned`; nothing is removed |
 | Term ancestry search | compares blocks only from the higher of the two devices' floors; differing there refuses with `TermRefusal::Pruned` instead of reporting a shared block |

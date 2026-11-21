@@ -39,7 +39,7 @@ qualification. Member IDs are public-safe labels, not authenticated identities.
 Omitting `trusted_key` permits explicitly **unverified** observations; providing a
 key without a verifier is an error rather than an unverified fallback.
 
-Each poll checks `eth_chainId`, reads `vera_nodeStatus`, then requests the exact
+Each poll reads `vera_nodeStatus`, checks its `chainId`, then requests the exact
 `vera_getLightBlock` height and verifies its evidence with `verify_light_block`
 against operator trust. A bad certificate, wrong height, chain mismatch, malformed
 response or timeout fails the observation. Last good data remain visible with a

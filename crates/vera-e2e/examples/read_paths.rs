@@ -542,7 +542,7 @@ impl Outcome {
     }
 }
 
-fn expected(query: Query) -> usize {
+const fn expected(query: Query) -> usize {
     match query {
         Query::PolicyCall | Query::PolicyVerified | Query::AccessCall | Query::AccessVerified => 1,
         Query::RelationshipsCall | Query::RelationshipsVerified128 => RELATIONSHIPS + 1,

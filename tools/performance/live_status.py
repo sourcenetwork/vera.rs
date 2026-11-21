@@ -114,11 +114,8 @@ class Collector:
             self.members[name]['attempt'] = self.wall()
         began = self.clock()
         try:
-            chain = self.call(member['rpc'], 'eth_chainId', [], self.timeout)
-            if not isinstance(chain, str) or not re.fullmatch(r'0x[0-9a-fA-F]+', chain) or uint(int(chain, 16)) != member['chain_id']:
-                raise ValueError('wrong deployment')
             status = self.call(member['rpc'], 'vera_nodeStatus', [], self.timeout)
-            if not isinstance(status, dict):
+            if not isinstance(status, dict) or uint(status.get('chainId')) != member['chain_id']:
                 raise ValueError('wrong deployment')
             height = status.get('finalizedHeight')
             if height is not None:

@@ -127,24 +127,21 @@ proposals by re-execution, and hands finalized receipts to a `FinalizedSink`
 subscription channels. Block execution goes through `VeraExecutor`:
 
 ```
-                     VeraExecutor
-                          |
-          +---------------+---------------+
-          |                               |
-     Native BLS txs                  EVM txs
-     (processed first)               (processed second)
-          |                               |
-     BLS verify → did:key             REVM execution
-     Deserialize NativeTx                 |
-          |                          Precompile calls
-     Dispatch to module              hit same modules
-          |                               |
-          v                               v
-    module.method(args)  ←— same Rust code —→  module.method(args)
+        VeraExecutor
+             |
+      Native BLS request
+             |
+      BLS verify → did:key
+      Deserialize NativeTx
+             |
+      Dispatch to module
+             |
+             v
+      module.method(args)
 ```
 
-Admission refuses EVM transactions and block verification rejects a block that
-carries one, so the EVM path runs only for read-only calls such as `eth_call`.
+A block carries native requests only. Building skips and drops bytes that are
+not a native request; verification rejects a block that carries any.
 
 ### Precompile addresses
 
@@ -249,15 +246,11 @@ message, bounded to 1,024 bytes and not committed because it embeds parser and
 library text. A module error's variant decides its kind
 (`vera_executor::precompiles::refusal`). A refusal is charged what the call
 reported, at least 5,000; `out_of_gas` and a module panic keep the full limit.
-`vera-client` returns `ClientError::Refused` for a refused native request and
-`TxReverted` for an EVM revert; a contract caller still gets the message as
-revert data. See `docs/receipt-commitments.md#refusals`.
-Only a transaction's own call to a module carries its signer's authority. A call
-made by contract code, DELEGATECALL and CALLCODE included, has no signer, and a
-method that needs one refuses it.
-EVM transactions execute only in their canonical EIP-2718 encoding, and a legacy
-transaction must carry a chain ID. Blob (type 3) transactions are refused at
-admission and execution. ACP and token lifecycle errors reject proposal execution and re-verification.
+`vera-client` returns `ClientError::Refused` for a refused native request, with
+its receipt. See `docs/receipt-commitments.md#refusals`.
+A module method that needs a signer refuses a call without one
+(`RefusalKind::Unauthenticated`), which is how the signerless `vera_call` is kept
+to queries. ACP and token lifecycle errors reject proposal execution and re-verification.
 Malformed token records encountered during reads or expiry are errors, including a mismatch between the storage key
 and the record's token hash. Failed lifecycle work cannot publish its module view. Token expiry uses an ordered
 deadline index, leaving invalidated tokens out of each revision's sweep. Every
@@ -387,49 +380,33 @@ payload lengths; it is not a total RSS bound. Readers hold immutable revision
 snapshots across proof assembly, so eviction cannot remove their receipts.
 Index publication and removal update all lookup maps under one lock.
 
-Revision number/hash, transaction and receipt point queries use bounded archive
-reads when absent from memory. The native receipt endpoint uses the same
-conversion for recent and historical data, including signer identity, nonce and refusal.
-Archive reconstruction uses one retained revision and the existing index builder;
-it does not populate the global memory index. Archive errors propagate, and
-occupied history-read slots return a retryable -32002 response.
+Receipt point queries use bounded archive reads when absent from memory. The
+receipt endpoint uses the same conversion for recent and historical data,
+including signer identity, nonce and refusal. Archive reconstruction uses one
+retained revision and the existing index builder; it does not populate the
+global memory index. Archive errors propagate, and occupied history-read slots
+return a retryable -32002 response.
 
-Log queries inspect at most 10,000 revisions and 10,000 log entries, accept at
-most 64 alternatives per address/topic selector over at most four topic
-positions, and return at most 1,000 logs. `eth_subscribe("logs")` applies the
-same selector limits and rejects a larger filter with -32602. A `blockHash`
-filter selects that one revision; it cannot be combined with a range, and an
-unknown hash fails with -32602.
-The result budget charges 1 MiB for record structures, topics and payload bytes.
-Ranges combine resident revisions with archive fallback under shared budgets.
-Each range holds one history-read slot and decodes at most 64 MiB of encoded
-archive records, charging each record before decoding. The backend must fetch the
-record to determine its encoded length.
-Queries exceeding a budget fail with RPC code -32005; clients must narrow their
-range or filter. Reversed ranges fail with -32602. Results are never silently
-truncated. These limits also apply when compatibility methods are enabled on a
-native service.
-
-`eth_call`, `eth_estimateGas` and `vera_simulateNativeCall` execute on the
-blocking pool against a snapshot of module state, so they hold neither an
-async worker nor the lock finalization publishes under. They share four slots
-per node, and up to 64 more callers wait at most two seconds for one; a caller
-beyond the 64, or one whose wait expires, gets the retryable -32002. A slot
-stays taken until its execution ends. Each observes the head revision's height
-and time, the deployment's genesis record and its membership limit, and writes
-nothing. `eth_call` carries no signer, so module writes revert there.
-`vera_simulateNativeCall` dry-runs a module call as a named DID without a
-signature or sequence and returns success or the refusal its receipt would
-name, gas and logs.
-It is unauthenticated: it answers what a DID could do and authorizes nothing.
-Its input is bounded like a native submission. See `docs/simulation.md`.
-An estimate is a limit the call succeeded with. The search stops within 1/64 of
-its upper bound and starts from the gas used at the cap, so a call that uses
-less gas under a lower limit can be estimated well above its smallest
-sufficient limit. `eth_getCode` returns empty bytes for an account without
-code. Account state
-reads answer for current state only: an explicit block number or `earliest`
-fails with -32004, as it does for `eth_call`.
+`vera_call` and `vera_simulateNativeCall` execute on the blocking pool against
+a snapshot of module state, so they hold neither an async worker nor the lock
+finalization publishes under. They share four slots per node, and up to 64 more
+callers wait at most two seconds for one; a caller beyond the 64, or one whose
+wait expires, gets the retryable -32002. A slot stays taken until its execution
+ends. Each observes the head revision's height and time, the deployment's
+genesis record and its membership limit, and writes nothing.
+`vera_call(target, calldata)` evaluates a module call without a signer and
+returns its output or the refusal: queries answer, and every method that needs
+a signer is refused. `vera_simulateNativeCall` dry-runs a module call as a named
+DID without a signature or sequence and returns success or the refusal its
+receipt would name, gas and logs. Both bound their input like a native
+submission.
+Both are unauthenticated: the answer is the serving node's word about its head
+revision, with no finality certificate and no state proof. Nothing that grants
+access, records a decision or acts for another party may rely on either; the
+certified record, prefix and permission reads are the authenticated path. The
+Rust client's typed queries (`get_policy`, `has_relationship`, `get_post`, …)
+go through `vera_call` and name their verified equivalents. See
+`docs/simulation.md#when-an-unauthenticated-read-is-acceptable`.
 
 `vera-jsonrpc` limits each batch to 64 calls and each connection to eight
 subscriptions, eight queued output messages and eight WebSocket request tasks.
@@ -441,10 +418,8 @@ time out after ten seconds, and socket closure after one second.
 
 | Surface | Methods | Consumer |
 |----------|---------|----------|
-| `eth_*` | `eth_sendRawTransaction`, `eth_call`, `eth_getStorageAt`, `eth_getTransactionReceipt`, … | Optional compatibility clients; `eth_sendRawTransaction` submissions are refused |
-| `eth_subscribe` | `newHeads`, `logs` | Indexers, light clients |
 | `vera_subscribeHeaders` | `vera_header` notifications; `vera_unsubscribeHeaders` cancellation | Native verified consumers |
-| `vera_*` | `vera_nodeStatus`, `vera_sendNativeTx`, `vera_simulateNativeCall` (unauthenticated dry run), `vera_getTransactionReceipt`, `vera_getNativeNonce`, current permission/record proofs and light blocks | Native Defra, Orbis and verification clients |
+| `vera_*` | `vera_nodeStatus`, `vera_sendNativeTx`, `vera_call` (unauthenticated module query), `vera_simulateNativeCall` (unauthenticated dry run), `vera_getTransactionReceipt`, `vera_getNativeNonce`, current permission/record proofs and light blocks | Native Defra, Orbis and verification clients |
 
 ### Light-client material
 
@@ -623,7 +598,7 @@ vera.rs/
         vera-app/               # Glue stateful Application around the block executor
         vera-backend/           # Concrete QMDB backend: VeraStateSet, BatchState, DbTargets
         vera-cli/               # CLI utilities (backtrace + SIGSEGV handlers)
-        vera-client/            # Rust client library (EVM + BLS tx paths, typed queries)
+        vera-client/            # Rust client library (native requests, verified reads, typed queries)
         vera-config/            # Node configuration types (node, network, rpc, execution)
         vera-consensus/         # Consensus application layer: mempool, proposal, traits
         vera-crypto/            # BLS12-381, actor keys (secp256k1, Ed25519, P-256), JWT
@@ -633,7 +608,7 @@ vera.rs/
         vera-genesis/           # Extended genesis configuration (validators, native mint)
         vera-harness/           # Node manager, cluster builder, observability (test-only)
         vera-indexer/           # Block/tx/light-block indexes backing RPC queries
-        vera-jsonrpc/           # Native vera_* RPC, subscriptions and compatibility methods
+        vera-jsonrpc/           # Native vera_* RPC and header subscriptions
         vera-modules/           # ACP, Bulletin, Vera, ValidatorRegistry module logic
         vera-node/              # Validator assembly: p2p, marshal, DKG, stateful glue, RPC
         vera-permission/        # Permission/record/prefix evidence types and verification
@@ -692,7 +667,7 @@ Borrowed from [defradb.rs](https://github.com/sourcenetwork/defradb.rs):
 4. `cargo fmt` applied
 5. `cargo test -p vera-e2e --test vera_e2e_canonical` passes (requires `cargo build -p verad` first)
 
-The e2e test (`vera_e2e_canonical`) is the baseline gate. It exercises both EVM and BLS transaction paths through a 4-node cluster: create policies, verify receipts, query state back, check cross-node consistency, and assert cluster health. Any change that breaks this test has broken the core pipeline.
+The e2e test (`vera_e2e_canonical`) is the baseline gate. It exercises native requests through a 4-node cluster: create policies, verify receipts, query state back, check cross-node consistency, and assert cluster health. Any change that breaks this test has broken the core pipeline.
 
 ## Git Conventions
 

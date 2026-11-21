@@ -9,7 +9,6 @@
 //! - Consensus presets — Fast/Normal/Stress timing profiles
 
 pub mod cluster;
-pub mod contracts;
 pub mod observe;
 
 pub use cluster::resolve_binary;
