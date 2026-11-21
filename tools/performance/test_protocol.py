@@ -72,13 +72,14 @@ pub struct RelationshipRecord {
         self.assertTrue(baseline_incompatible(identity))
         self.assertEqual(incompatibility_reason(identity), 'incompatible ACP proof schema')
 
-    def test_v5_cannot_compare_with_either_previous_proof_schema(self):
-        for namespace in ('relationship/v3/', 'relationship/v4/'):
-            identity = dict(format_version=2, head=dict(proof_schema=dict(SCHEMAS['relationship/v5/'])),
-                            base=dict(proof_schema=SCHEMAS[namespace]))
-            self.assertTrue(baseline_incompatible(identity))
-            identity['base']['proof_schema'] = dict(SCHEMAS['relationship/v5/'])
-            self.assertFalse(baseline_incompatible(identity))
+    def test_earlier_proof_schemas_are_unrecognized(self):
+        identity = dict(format_version=2, head=dict(proof_schema=dict(SCHEMAS['relationship/v5/'])),
+                        base=dict(proof_schema={'relationship_namespace': 'relationship/v4/',
+                                                'policy_generations': 'required'}))
+        with self.assertRaisesRegex(ValueError, 'base: unrecognized proof schema'):
+            baseline_incompatible(identity)
+        identity['base']['proof_schema'] = dict(SCHEMAS['relationship/v5/'])
+        self.assertFalse(baseline_incompatible(identity))
         identity['head']['proof_schema'].pop('object_incarnation')
         with self.assertRaisesRegex(ValueError, 'unrecognized proof schema'):
             baseline_incompatible(identity)

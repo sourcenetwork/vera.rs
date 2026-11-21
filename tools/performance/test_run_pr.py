@@ -67,14 +67,15 @@ import sys
 print({help_text!r} if sys.argv[1:] == ['validator', '--help'] else {side!r})
 ''')
 
-    def write_schema(self, side, namespace):
+    def write_schema(self, side, namespace, origin=False):
         source = self.root / side
         (source / KEYS).parent.mkdir(parents=True, exist_ok=True)
         (source / KEYS).write_text(f'pub const RELATIONSHIP_PREFIX: &[u8] = b"{namespace}";\n')
-        fields = '    pub relations: RelationGenerations,\n' if namespace != 'relationship/v3/' else ''
+        fields = '    pub relations: RelationGenerations,\n'
+        if origin:
+            fields += '    pub nonce: PolicyNonce,\n    pub policy_hash: PolicyHash,\n'
         record = 'pub struct PolicyRecord {\n' + fields + '}\n'
-        if namespace == 'relationship/v5/':
-            record += 'pub struct RelationshipRecord {\n    pub incarnation: u64,\n}\n'
+        record += 'pub struct RelationshipRecord {\n    pub incarnation: u64,\n}\n'
         (source / TYPES).write_text(record)
 
     def commit(self, side, message):
@@ -85,8 +86,8 @@ print({help_text!r} if sys.argv[1:] == ['validator', '--help'] else {side!r})
                         'commit', '-qm', message], cwd=source, check=True)
         self.revisions[side] = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip()
 
-    def commit_schema(self, side, namespace):
-        self.write_schema(side, namespace)
+    def commit_schema(self, side, namespace, origin=False):
+        self.write_schema(side, namespace, origin)
         self.commit(side, 'schema')
 
     def workload_arguments(self, tag, objects):
@@ -220,7 +221,7 @@ print({help_text!r} if sys.argv[1:] == ['validator', '--help'] else {side!r})
                 self.assertEqual((row['driver'], row['node']), ('head', 'base'))
 
     def test_incompatible_baseline_is_recorded_without_starting_its_workloads(self):
-        self.commit_schema('base', 'relationship/v4/')
+        self.commit_schema('base', 'relationship/v5/', origin=True)
         self.measure(workloads=4)
         identity = json.loads((self.output / 'comparison.json').read_text())
         for tag in ('base1', 'base2'):
@@ -292,7 +293,7 @@ print({help_text!r} if sys.argv[1:] == ['validator', '--help'] else {side!r})
                 self.assertTrue((self.output / tag / f'objects-{objects}' / 'manifest.json').exists())
 
     def test_incompatible_base_does_not_suppress_head_process_failure(self):
-        self.commit_schema('base', 'relationship/v4/')
+        self.commit_schema('base', 'relationship/v5/', origin=True)
         self.executable('head', 'operation_baseline', '#!/bin/sh\nexit 1\n')
         self.measure(workloads=4, exit_code=1)
 
@@ -303,11 +304,11 @@ print({help_text!r} if sys.argv[1:] == ['validator', '--help'] else {side!r})
         self.assertFalse((self.output / 'head1').exists())
 
     def test_namespace_and_policy_record_must_agree_at_committed_revision(self):
-        self.write_schema('base', 'relationship/v3/')
-        # Uncommitted bytes do not replace the schema of the recorded binary source.
-        self.assertEqual(source_schema(self.root / 'base', self.revisions['base'])['policy_generations'], 'required')
         source = self.root / 'base'
-        (source / TYPES).write_text('pub struct PolicyRecord {\n    pub relations: RelationGenerations,\n}\n')
+        (source / TYPES).write_text('pub struct PolicyRecord {\n}\n'
+                                    'pub struct RelationshipRecord {\n    pub incarnation: u64,\n}\n')
+        # Uncommitted bytes do not replace the schema of the recorded binary source.
+        self.assertEqual(source_schema(source, self.revisions['base'])['policy_generations'], 'required')
         subprocess.run(['git', 'add', '.'], cwd=source, check=True)
         subprocess.run(['git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
                         '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null',

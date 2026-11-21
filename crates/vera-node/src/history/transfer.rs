@@ -112,8 +112,7 @@ impl FinalizedHistory {
             trusted: trusted.encode().to_vec(),
         };
         let mut batch = WriteBatch::default();
-        // Older binaries must reject the store rather than trim an unfinished import.
-        batch.put(FORMAT, [3]);
+        batch.put(FORMAT, FORMAT_IMPORTED);
         batch.put(IMPORT, borsh::to_vec(&import)?);
         write(&self.db, batch)
     }

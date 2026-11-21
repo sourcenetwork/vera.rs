@@ -43,11 +43,6 @@ impl KeySet {
         self.seed
     }
 
-    /// Identity (P2P) private key for the node at `index`.
-    pub fn identity_key(&self, index: usize) -> &ed25519::PrivateKey {
-        &self.identity_keys[index]
-    }
-
     /// Ordered participant public keys for the cluster.
     pub fn participants(&self) -> &[ed25519::PublicKey] {
         &self.participants
