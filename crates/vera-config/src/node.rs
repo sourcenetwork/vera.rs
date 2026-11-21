@@ -263,14 +263,6 @@ impl NodeConfig {
             }),
         }
     }
-
-    /// Get the validator public key.
-    pub fn validator_public_key(
-        &self,
-    ) -> Result<commonware_cryptography::ed25519::PublicKey, ConfigError> {
-        use commonware_cryptography::Signer as _;
-        Ok(self.validator_key()?.public_key())
-    }
 }
 
 const fn default_chain_id() -> u64 {

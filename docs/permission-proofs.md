@@ -2,8 +2,7 @@
 
 The native node serves a finalized revision and its Commonware permission evidence together through `vera_getCurrentPermissionProof`. `vera_getPermissionProof` accepts a caller-selected revision when its evidence is available. `vera_getCurrentRecordProof` provides native record membership and absence; `vera_getCurrentPrefixProof` proves complete current prefixes. The service exposes authenticated native QMDB evidence only. `vera_getStateProof`
 and `vera_getRelationProof` are not registered; record and complete-prefix reads
-use the native endpoints below. The server no longer provides JMT storage or
-relationship cardinality indexes.
+use the native endpoints below.
 
 The JSON-RPC request budget covers the complete encoded body, including all batch
 members and request metadata. HTTP requests exceeding that budget return HTTP 413
@@ -206,7 +205,7 @@ optional value; absence requires an exclusion proof. A prefix carries an
 authenticated boundary followed by the complete ordered successor chain. A
 missing successor, reordered record or substituted value invalidates the proof.
 Every permission read uses native QMDB evidence and the shared ACP evaluator.
-Missing namespace roots and retired JMT read variants are rejected.
+Missing namespace roots and unknown read kinds are rejected.
 
 Generation holds read locks on all four namespaces and checks the selected root
 before reading evidence. Prefix generation walks successors with aggregate record

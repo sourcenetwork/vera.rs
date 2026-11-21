@@ -165,15 +165,11 @@ rejects unfinished imports and other anchors before indexing records. Its final
 durable batch removes the marker. This is the history-side handoff; the running
 node drives this handoff before synchronized databases reach the processor.
 
-Starting an import upgrades the history metadata format to 3 in the same batch
-as the import marker. A later authenticated selection can restart the descending
-cursor while retaining the original committed-prefix boundary. Older binaries
-reject that format rather than treating an
-unfinished import as an execution suffix to discard. Record bytes remain
-unchanged. Format 1 and completed format 2 histories remain readable; unfinished
-format 2 imports require the previous binary to complete recovery before upgrade.
-The new importer cannot resume them without the missing persisted trust and
-finality evidence.
+Starting an import marks the history store as imported in the same batch as the
+import marker; recovery of an imported store keeps the blocks its certificates
+need above the recovery anchor. A later authenticated selection can restart the
+descending cursor while retaining the original committed-prefix boundary.
+Record bytes remain unchanged. Any other store format is refused.
 
 ## Canonical encoding and existing data
 
