@@ -8,6 +8,9 @@
 //! `READ_SECONDS` (default 8) sets each concurrent run, `READ_SEQUENTIAL`
 //! (default 200) the sequential reads and `READ_MAX_LOAD` (default 8) the load
 //! average a run waits for, at most `READ_LOAD_WAIT_S` (default 1,800) in all.
+//! `READ_QUERIES` keeps the queries whose names contain one of its
+//! comma-separated parts, and `READ_VERIFIED_REVISIONS` bounds the revisions the
+//! reading client remembers as verified (0 verifies every certificate).
 
 use std::{
     io::{BufRead as _, Write as _},
@@ -682,7 +685,11 @@ async fn measure(setup: &str, target: &Target) {
             permission: "read".into(),
         }],
     };
-    let client = VeraClient::new(&target.reader);
+    let mut client = VeraClient::new(&target.reader);
+    if let Ok(remembered) = std::env::var("READ_VERIFIED_REVISIONS") {
+        client = client.with_verified_revisions(remembered.parse().unwrap());
+    }
+    let selected = std::env::var("READ_QUERIES").ok();
     let permission = client
         .current_permission_response(
             &hex::encode(seeded.policy),
@@ -724,6 +731,13 @@ async fn measure(setup: &str, target: &Target) {
             (cpu_seconds(target.pid) - idle_began) / idle_clock.elapsed().as_secs_f64();
         eprintln!("{setup} {phase}: node background CPU {:.3} s/s", background);
         for query in QUERIES {
+            let name = format!("{query:?}");
+            if selected
+                .as_ref()
+                .is_some_and(|parts| !parts.split(',').any(|part| name.contains(part)))
+            {
+                continue;
+            }
             for _ in 0..20 {
                 let _ = reader.read(query).await;
             }

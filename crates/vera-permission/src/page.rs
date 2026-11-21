@@ -2,9 +2,7 @@ use alloy_primitives::{B256, Bytes};
 use commonware_codec::Decode as _;
 use commonware_cryptography::sha256::Digest;
 use serde::{Deserialize, Serialize};
-use vera_domain::{
-    ConsensusPublicKey, LIGHT_BLOCK_RESPONSE_BYTES, LightBlock, ModuleId, verify_light_block,
-};
+use vera_domain::{FinalityTrust, LIGHT_BLOCK_RESPONSE_BYTES, LightBlock, ModuleId};
 
 use crate::{
     PermissionError,
@@ -130,12 +128,12 @@ impl PrefixPageResponse {
         &self,
         request: &PrefixPageRequest,
         minimum_height: u64,
-        trusted: &ConsensusPublicKey,
+        trusted: &impl FinalityTrust,
         maximum_bytes: usize,
     ) -> Result<VerifiedPrefixPage, PermissionError> {
         request.validate()?;
         encoded_size(&self.revision, LIGHT_BLOCK_RESPONSE_BYTES)?;
-        let (_, root) = verify_light_block(&self.revision, trusted)?;
+        let root = trusted.finalized_block(&self.revision)?.module_state_root;
         if self.revision.height < minimum_height {
             return Err(PermissionError::Invalid(
                 "revision precedes required minimum",

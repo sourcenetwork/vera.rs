@@ -26,6 +26,9 @@ use crate::{Block, BlockCfg, ConsensusDigest, PublicKey, TxCfg};
 mod artifacts;
 pub use artifacts::FinalizedArtifacts;
 
+mod trust;
+pub use trust::FinalityTrust;
+
 /// Simplex namespace shared with validator nodes.
 pub const LIGHT_BLOCK_NAMESPACE: &[u8] = b"_COMMONWARE_VERA_SIMPLEX";
 /// Maximum participant count accepted from an untrusted light-block response.
@@ -358,6 +361,21 @@ pub fn verify_finalized_block(
     light: &LightBlock,
     trusted_key: &ConsensusPublicKey,
 ) -> Result<Block, LightBlockError> {
+    verify_finalized_block_unless(light, trusted_key, |_, _| false).map(|(block, _)| block)
+}
+
+/// Validate a light block like [`verify_finalized_block`], skipping the
+/// certificate check when `established` says the block with this hash is one
+/// whose finality the caller has verified under `trusted_key` before.
+///
+/// The block bytes are hashed and every displayed field is compared with the
+/// decoded block either way, so a response cannot attach other fields to an
+/// established block. Returns the block with its hash.
+pub fn verify_finalized_block_unless(
+    light: &LightBlock,
+    trusted_key: &ConsensusPublicKey,
+    established: impl FnOnce(&Block, B256) -> bool,
+) -> Result<(Block, B256), LightBlockError> {
     let artifacts = light.artifacts()?;
     let block_hash = decode_b256("block_hash", &light.block_hash)?;
     if keccak256(&artifacts.block) != block_hash {
@@ -390,8 +408,10 @@ pub fn verify_finalized_block(
     if let Some((_, field)) = checks.into_iter().find(|(matches, _)| !matches) {
         return Err(LightBlockError::BlockFieldMismatch(field));
     }
-    verify_certified(&block, block_hash, &artifacts, trusted_key)?;
-    Ok(block)
+    if !established(&block, block_hash) {
+        verify_certified(&block, block_hash, &artifacts, trusted_key)?;
+    }
+    Ok((block, block_hash))
 }
 
 /// Verify canonical finality artifacts and return the requested block with its identifier.

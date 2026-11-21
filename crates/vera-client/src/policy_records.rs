@@ -28,7 +28,13 @@ impl VeraClient {
                 LIGHT_BLOCK_RESPONSE_BYTES + maximum_bytes + 1024,
             )
             .await?;
-        response.verify(policy, prefix, minimum_height, trusted, maximum_bytes)?;
+        response.verify(
+            policy,
+            prefix,
+            minimum_height,
+            &self.established(trusted),
+            maximum_bytes,
+        )?;
         Ok(response)
     }
 
@@ -70,7 +76,13 @@ impl VeraClient {
                 LIGHT_BLOCK_RESPONSE_BYTES + maximum_bytes + 1024,
             )
             .await?;
-        let page = response.verify(policy, request, minimum_height, trusted, maximum_bytes)?;
+        let page = response.verify(
+            policy,
+            request,
+            minimum_height,
+            &self.established(trusted),
+            maximum_bytes,
+        )?;
         Ok((response, page))
     }
 }

@@ -1,7 +1,7 @@
 use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};
 use vera_crypto::operation::{DEFAULT_OPERATION_LEAD, OperationId};
-use vera_domain::ConsensusPublicKey;
+use vera_domain::FinalityTrust;
 use vera_modules::acp::{
     delegated_operation::DelegatedOperation,
     operation::{OperationRecord, operation_key},
@@ -56,7 +56,7 @@ impl RecordResponse {
         &self,
         expected: &DecisionOperation,
         minimum_height: u64,
-        trusted: &ConsensusPublicKey,
+        trusted: &impl FinalityTrust,
     ) -> Result<Option<DecisionOutcome>, PermissionError> {
         validate_request(&expected.policy_id, &expected.request, PERMISSION_LIMITS)?;
         let id = OperationId(expected.operation_id.0);

@@ -31,6 +31,8 @@ mod query;
 mod readiness;
 mod receipt;
 mod record;
+mod revision_cache;
+pub use revision_cache::DEFAULT_VERIFIED_REVISIONS;
 /// Certified registration commitment discovery.
 pub mod registrations;
 pub mod relationships;

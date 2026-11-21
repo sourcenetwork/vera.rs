@@ -70,7 +70,7 @@ impl VeraClient {
                 POLICY_SNAPSHOT_RESPONSE_BYTES,
             )
             .await?;
-        response.verify(policy, minimum_height, trusted)?;
+        response.verify(policy, minimum_height, &self.established(trusted))?;
         Ok(response)
     }
 

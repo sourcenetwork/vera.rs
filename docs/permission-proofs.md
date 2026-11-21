@@ -10,6 +10,23 @@ with JSON-RPC code `-32007`, whether the length is declared or the body is strea
 Rejection occurs before dispatching any member. The separate 64-member batch limit
 also applies.
 
+## Verified revisions in the Rust client
+
+`VeraClient` verifies the finalization certificate of a revision once. Each
+verified read hashes the returned block, compares every displayed field with it
+and, when the client holds that height and block hash as verified under the same
+consensus key, skips the certificate check; the record, prefix or permission
+evidence is verified against the block's module root on every read.
+
+The client remembers 256 revisions (`VeraClient::with_verified_revisions`; zero
+verifies every certificate) in the newest term it has verified. A block of a
+later term, a different block at a remembered height and a different consensus
+key each empty the record, and a block of an earlier term is never remembered,
+so whatever a switch of the active device may have replaced is verified with
+its certificate again. `vera_permission` response types take any
+`vera_domain::FinalityTrust`; a consensus key is one and verifies every
+certificate.
+
 ## Native record reads
 
 `vera_getCurrentRecordProof(module, key, minimum_height)` returns

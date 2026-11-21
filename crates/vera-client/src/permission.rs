@@ -1,5 +1,5 @@
 use crate::{ClientError, VeraClient};
-use vera_domain::{ConsensusPublicKey, LightBlock, verify_light_block};
+use vera_domain::{ConsensusPublicKey, FinalityTrust as _, LightBlock};
 use vera_permission::{
     AccessRequest, PermissionLimits, PermissionProof, PermissionResponse, validate_request,
     verify_permission_proof,
@@ -25,7 +25,7 @@ impl VeraClient {
         if revision.height != height {
             return Err(ClientError::InvalidResponse("finality revision mismatch"));
         }
-        verify_light_block(&revision, trusted_key)?;
+        self.established(trusted_key).finalized_block(&revision)?;
         Ok(revision)
     }
 
@@ -50,7 +50,13 @@ impl VeraClient {
                     .saturating_add(1024),
             )
             .await?;
-        let allowed = response.verify(policy, request, minimum_height, trusted_key, limits)?;
+        let allowed = response.verify(
+            policy,
+            request,
+            minimum_height,
+            &self.established(trusted_key),
+            limits,
+        )?;
         Ok((response.revision, allowed))
     }
 
@@ -91,7 +97,10 @@ impl VeraClient {
         limits: PermissionLimits,
     ) -> Result<bool, ClientError> {
         validate_request(policy, request, limits)?;
-        let (_, root) = verify_light_block(revision, trusted_key)?;
+        let root = self
+            .established(trusted_key)
+            .finalized_block(revision)?
+            .module_state_root;
         let proof: PermissionProof = self
             .rpc_call_bounded(
                 "vera_getPermissionProof",

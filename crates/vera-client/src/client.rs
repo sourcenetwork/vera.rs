@@ -7,6 +7,7 @@ use serde::de::DeserializeOwned;
 use tracing::debug;
 
 use crate::error::ClientError;
+use crate::revision_cache::{DEFAULT_VERIFIED_REVISIONS, RevisionCache};
 use crate::types::{NativeReceipt, NodeStatus, TransactionReceipt};
 
 mod admission;
@@ -47,6 +48,7 @@ pub struct VeraClient {
     id: AtomicU64,
     requests: tokio::sync::Semaphore,
     request_queue: Option<admission::RequestQueue>,
+    revisions: RevisionCache,
 }
 
 impl VeraClient {
@@ -58,7 +60,25 @@ impl VeraClient {
             id: AtomicU64::new(1),
             requests: tokio::sync::Semaphore::new(64),
             request_queue: None,
+            revisions: RevisionCache::new(DEFAULT_VERIFIED_REVISIONS),
         }
+    }
+
+    /// Bound the verified revisions this client remembers (default:
+    /// [`DEFAULT_VERIFIED_REVISIONS`]). A remembered revision's finalization
+    /// certificate is not verified again; zero verifies every response's.
+    #[must_use]
+    pub fn with_verified_revisions(mut self, maximum: usize) -> Self {
+        self.revisions = RevisionCache::new(maximum);
+        self
+    }
+
+    /// Finality checks under `trusted` that verify each revision's certificate once.
+    pub(crate) const fn established<'a>(
+        &'a self,
+        trusted: &'a vera_domain::ConsensusPublicKey,
+    ) -> crate::revision_cache::Established<'a> {
+        self.revisions.under(trusted)
     }
 
     /// Bound concurrent HTTP calls, including response decoding (default: 64).
