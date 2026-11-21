@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from protocol import SCHEMAS, unavailable
+from protocol import POLICY_ORIGIN, SCHEMAS, unavailable
 from compare_pr import BASIC_ACP_COMPONENTS, BULLETIN_COMPONENTS, COMPONENT_FIXTURES, COMPONENTS, DELEGATION_COMPONENTS, IDENTITY_COMPONENTS, LIFECYCLE_COMPONENTS, LOGICAL_EDIT_COMPONENTS, TAGS, change, compare, components
 
 
@@ -134,7 +134,7 @@ class CompareTests(unittest.TestCase):
     def incompatible_driver(self):
         self.shared_driver()
         self.identity['head']['proof_schema'] = dict(SCHEMAS['relationship/v5/'])
-        self.identity['base']['proof_schema'] = dict(SCHEMAS['relationship/v4/'])
+        self.identity['base']['proof_schema'] = dict(POLICY_ORIGIN)
         self.write_identity()
         for tag in ('base1', 'base2'):
             for objects in (0, 32):
