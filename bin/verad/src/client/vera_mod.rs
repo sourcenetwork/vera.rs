@@ -81,12 +81,8 @@ impl VeraCommand {
                 ctx.print_json(&json)?;
             }
             Self::InvalidateToken { token_hash } => {
-                let receipt = if let Some(bls) = ctx.bls_signer.as_ref() {
-                    ctx.client.native_invalidate_jws(bls, &token_hash).await?
-                } else {
-                    let signer = ctx.require_evm_signer()?;
-                    ctx.client.invalidate_jws(&signer, &token_hash).await?
-                };
+                let bls = ctx.require_bls_signer()?;
+                let receipt = ctx.client.native_invalidate_jws(bls, &token_hash).await?;
                 ctx.print_json(&receipt)?;
             }
         }

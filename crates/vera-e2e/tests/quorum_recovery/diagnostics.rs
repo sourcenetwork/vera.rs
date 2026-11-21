@@ -44,13 +44,16 @@ pub(super) async fn capture(
                     .map(|nonce| json!(nonce))
             }),
             probe(async {
-                client.get_native_receipt(submission).await.map(|receipt| {
-                    json!(receipt.map(|receipt| json!({
-                        "submission": receipt.transaction_hash,
-                        "height": receipt.block_number,
-                        "status": receipt.status,
-                    })))
-                })
+                client
+                    .get_transaction_receipt(submission)
+                    .await
+                    .map(|receipt| {
+                        json!(receipt.map(|receipt| json!({
+                            "submission": receipt.transaction_hash,
+                            "height": receipt.block_number,
+                            "success": receipt.success,
+                        })))
+                    })
             }),
             probe(async {
                 client.read_receipt(submission, trusted).await.map(|proof| {

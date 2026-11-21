@@ -19,14 +19,9 @@ use vera_domain::GossipHeader;
 use crate::header_subscribe::{HeaderSubscriptionApiImpl, HeaderSubscriptionApiServer};
 
 use crate::{
-    eth::{
-        EthApiImpl, EthApiServer, NetApiImpl, NetApiServer, TxSubmitCallback, Web3ApiImpl,
-        Web3ApiServer,
-    },
-    eth_subscribe::{EthSubscriptionApiImpl, EthSubscriptionApiServer},
     state::NodeState,
     state_provider::{NoopStateProvider, StateProvider},
-    types::{RpcBlock, RpcLog},
+    tx_submit::TxSubmitCallback,
     vera_api::{LightBlockLookup, ReceiptProofLookup, VeraApiImpl, VeraApiServer},
 };
 
@@ -48,12 +43,9 @@ pub enum ServerError {
 pub struct RpcServer<S: StateProvider = NoopStateProvider> {
     state: NodeState,
     addr: SocketAddr,
-    chain_id: u64,
     tx_submit: Option<TxSubmitCallback>,
     state_provider: S,
     max_connections: u32,
-    subscription_heads: Option<broadcast::Sender<RpcBlock>>,
-    subscription_logs: Option<broadcast::Sender<Vec<RpcLog>>>,
     subscription_headers: Option<broadcast::Sender<GossipHeader>>,
     extra_modules: Vec<jsonrpsee::RpcModule<()>>,
     vera_index: Option<Arc<BlockIndex>>,
@@ -70,9 +62,8 @@ impl<S: StateProvider> std::fmt::Debug for RpcServer<S> {
         f.debug_struct("RpcServer")
             .field("state", &self.state)
             .field("addr", &self.addr)
-            .field("chain_id", &self.chain_id)
             .field("tx_submit", &self.tx_submit.is_some())
-            .field("subscriptions", &self.subscription_heads.is_some())
+            .field("headers", &self.subscription_headers.is_some())
             .finish()
     }
 }
@@ -83,12 +74,9 @@ impl RpcServer<NoopStateProvider> {
         Self {
             state,
             addr,
-            chain_id: 1,
             tx_submit: None,
             state_provider: NoopStateProvider,
             max_connections: 100,
-            subscription_heads: None,
-            subscription_logs: None,
             subscription_headers: None,
             extra_modules: Vec::new(),
             vera_index: None,
@@ -104,21 +92,13 @@ impl RpcServer<NoopStateProvider> {
 
 impl<S: StateProvider + Clone + 'static> RpcServer<S> {
     /// Create a new RPC server with a custom state provider.
-    pub fn with_state_provider(
-        state: NodeState,
-        addr: SocketAddr,
-        chain_id: u64,
-        state_provider: S,
-    ) -> Self {
+    pub fn with_state_provider(state: NodeState, addr: SocketAddr, state_provider: S) -> Self {
         Self {
             state,
             addr,
-            chain_id,
             tx_submit: None,
             state_provider,
             max_connections: 100,
-            subscription_heads: None,
-            subscription_logs: None,
             subscription_headers: None,
             extra_modules: Vec::new(),
             vera_index: None,
@@ -142,18 +122,6 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
     #[must_use]
     pub const fn with_max_connections(mut self, max_connections: u32) -> Self {
         self.max_connections = max_connections;
-        self
-    }
-
-    /// Set subscription broadcast senders for `eth_subscribe` support.
-    #[must_use]
-    pub fn with_subscriptions(
-        mut self,
-        heads_tx: broadcast::Sender<RpcBlock>,
-        logs_tx: broadcast::Sender<Vec<RpcLog>>,
-    ) -> Self {
-        self.subscription_heads = Some(heads_tx);
-        self.subscription_logs = Some(logs_tx);
         self
     }
 
@@ -226,11 +194,8 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
     /// Build the method table served by this node, without binding a listener.
     pub fn into_module(self) -> Result<jsonrpsee::RpcModule<()>, ServerError> {
         let node_state = Arc::new(self.state);
-        let chain_id = self.chain_id;
         let tx_submit = self.tx_submit;
         let state_provider = self.state_provider;
-        let subscription_heads = self.subscription_heads;
-        let subscription_logs = self.subscription_logs;
         let subscription_headers = self.subscription_headers;
         let vera_index = self.vera_index;
         let vera_modules = self.vera_modules;
@@ -241,17 +206,6 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
         let vera_archive = self.vera_archive;
         let extra_modules = self.extra_modules;
 
-        let eth_api = {
-            let api = tx_submit.as_ref().map_or_else(
-                || EthApiImpl::new(chain_id, state_provider.clone()),
-                |submit| {
-                    EthApiImpl::with_tx_submit(chain_id, state_provider.clone(), submit.clone())
-                },
-            );
-            api.with_node_state((*node_state).clone())
-        };
-        let net_api = NetApiImpl::new(chain_id).with_node_state((*node_state).clone());
-        let web3_api = Web3ApiImpl::new();
         let vera_api = {
             let mut api =
                 VeraApiImpl::new(node_state, tx_submit).with_simulator(Arc::new(state_provider));
@@ -277,19 +231,9 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
         };
 
         let mut module = jsonrpsee::RpcModule::new(());
-        module.merge(eth_api.into_rpc())?;
-        module.merge(net_api.into_rpc())?;
-        module.merge(web3_api.into_rpc())?;
         module.merge(vera_api.into_rpc())?;
-        if let Some(headers) = subscription_headers.as_ref() {
-            module.merge(HeaderSubscriptionApiImpl(headers.clone()).into_rpc())?;
-        }
-        if let (Some(heads_tx), Some(logs_tx)) = (subscription_heads, subscription_logs) {
-            let mut sub_api = EthSubscriptionApiImpl::new(heads_tx, logs_tx);
-            if let Some(headers_tx) = subscription_headers {
-                sub_api = sub_api.with_headers(headers_tx);
-            }
-            module.merge(sub_api.into_rpc())?;
+        if let Some(headers) = subscription_headers {
+            module.merge(HeaderSubscriptionApiImpl(headers).into_rpc())?;
         }
         for extra in extra_modules {
             module.merge(extra)?;

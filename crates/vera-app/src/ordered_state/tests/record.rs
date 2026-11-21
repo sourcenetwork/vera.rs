@@ -58,7 +58,6 @@ fn native_record_rpc_keeps_the_captured_revision_across_finalization() {
                     let (server, _local) = RpcServer::with_state_provider(
                         NodeState::new(DEPLOYMENT, 0, 4),
                         "127.0.0.1:0".parse().unwrap(),
-                        DEPLOYMENT,
                         vera_jsonrpc::NoopStateProvider,
                     )
                     .with_vera_index_and_modules(index.clone(), set.executor.modules().clone())

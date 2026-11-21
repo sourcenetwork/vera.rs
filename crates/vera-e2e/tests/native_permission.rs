@@ -43,7 +43,7 @@ async fn submit(client: &VeraClient, signer: &BlsSigner, call: impl SolCall) -> 
         .wait_for_receipt(id, RECEIPT_POLL_INTERVAL, RECEIPT_POLL_ATTEMPTS)
         .await
         .unwrap();
-    assert_eq!(receipt.status, 1);
+    assert!(receipt.success);
     receipt.block_number
 }
 

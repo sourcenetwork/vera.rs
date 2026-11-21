@@ -22,13 +22,13 @@ fn anchors() -> (Anchor, Anchor) {
             transaction_hash: B256::repeat_byte(1),
             block_hash: B256::repeat_byte(2),
             height: 31,
-            status: 1,
+            success: true,
         },
         Anchor {
             transaction_hash: B256::repeat_byte(3),
             block_hash: B256::repeat_byte(4),
             height: 268,
-            status: 1,
+            success: true,
         },
     )
 }
@@ -38,7 +38,7 @@ fn receipt(anchor: Anchor) -> TransactionReceipt {
         transaction_hash: anchor.transaction_hash,
         block_hash: anchor.block_hash,
         block_number: anchor.height,
-        status: anchor.status,
+        success: anchor.success,
         ..Default::default()
     }
 }
@@ -147,7 +147,7 @@ async fn final_state_barrier_rejects_each_receipt_identity_mismatch() {
             0 => invalid.transaction_hash = B256::repeat_byte(5),
             1 => invalid.block_hash = B256::repeat_byte(6),
             2 => invalid.height -= 1,
-            3 => invalid.status = 0,
+            3 => invalid.success = false,
             _ => unreachable!(),
         }
         let (client, _, handle) = replica(invalid, Some(1)).await;

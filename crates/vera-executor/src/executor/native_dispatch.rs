@@ -1,4 +1,4 @@
-//! One native module call, run against module values and the EVM journal.
+//! One native module call, run against module values and the registry's storage journal.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -23,6 +23,8 @@ pub(crate) struct NativeCall<'a> {
     pub(crate) target: Address,
     pub(crate) calldata: &'a [u8],
     pub(crate) max_active_members: u32,
+    /// Gas the call may use.
+    pub(crate) gas_limit: u64,
 }
 
 /// Whether a module call ran to completion: not a revert, a halt, an error or a panic.
@@ -60,7 +62,7 @@ pub(crate) fn dispatch_native_call<CTX: ContextTr>(
                 call.max_active_members,
                 tx_ctx,
                 call.calldata,
-                NATIVE_TX_GAS_LIMIT,
+                call.gas_limit,
             );
         }
         dispatch_to_module(
@@ -71,7 +73,7 @@ pub(crate) fn dispatch_native_call<CTX: ContextTr>(
             call.calldata,
             block_ctx,
             tx_ctx,
-            NATIVE_TX_GAS_LIMIT,
+            call.gas_limit,
         )
         .expect("target validated above")
     }));

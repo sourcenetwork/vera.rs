@@ -9,7 +9,7 @@ pub use vera_modules::vera::administration::{
     OperatorPolicy, SignedAdministrativeRequest,
 };
 
-use crate::{BlsSigner, ClientError, EvmSigner, TransactionReceipt, VERA_ADDRESS, VeraClient};
+use crate::{BlsSigner, ClientError, TransactionReceipt, VERA_ADDRESS, VeraClient};
 
 /// Sign an explicit request using this key's index in the current operator policy.
 pub fn approve_administration(
@@ -176,9 +176,10 @@ impl VeraClient {
     }
 
     /// Fetch the current operator policy and next administrative sequence.
+    /// Unauthenticated; the verified read is [`VeraClient::read_administration`].
     pub async fn administration(&self) -> Result<Option<AdministrationState>, ClientError> {
         let result = self
-            .eth_call(
+            .view_call(
                 VERA_ADDRESS,
                 IVera::getAdministrationCall {}.abi_encode().into(),
             )
@@ -199,20 +200,6 @@ impl VeraClient {
         }
         .abi_encode();
         self.send_native_precompile_tx(submitter, VERA_ADDRESS, calldata.into())
-            .await
-    }
-
-    /// Submit operator approvals through an independent secp256k1 submitter.
-    pub async fn apply_administration(
-        &self,
-        submitter: &EvmSigner,
-        signed: &SignedAdministrativeRequest,
-    ) -> Result<TransactionReceipt, ClientError> {
-        let calldata = IVera::applyAdministrationCall {
-            request: serde_json::to_vec(signed)?.into(),
-        }
-        .abi_encode();
-        self.send_precompile_tx(submitter, VERA_ADDRESS, calldata.into())
             .await
     }
 }

@@ -25,7 +25,7 @@ use std::time::Duration;
 use alloy_primitives::{Address, Bytes};
 use alloy_sol_types::SolCall;
 
-use vera_client::{ACP_ADDRESS, BlsSigner, NativeReceipt, VeraClient};
+use vera_client::{ACP_ADDRESS, BlsSigner, TransactionReceipt, VeraClient};
 use vera_domain::{ConsensusPublicKey, LightBlock, verify_light_block};
 use vera_e2e::RECEIPT_POLL_INTERVAL;
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, TestCluster};
@@ -79,7 +79,7 @@ async fn broadcast_native_tx(
     signer: &BlsSigner,
     target: Address,
     calldata: Vec<u8>,
-) -> NativeReceipt {
+) -> TransactionReceipt {
     broadcast::native(cluster, client, signer, target, calldata).await
 }
 
@@ -89,7 +89,7 @@ async fn send_native_tx_to_node(
     signer: &BlsSigner,
     target: Address,
     calldata: Vec<u8>,
-) -> NativeReceipt {
+) -> TransactionReceipt {
     let wire = signer
         .sign_native_tx(target, Bytes::from(calldata))
         .expect("BLS sign should succeed");
@@ -198,8 +198,8 @@ async fn node_restart_preserves_state() {
         create_policy_calldata(),
     )
     .await;
-    assert_eq!(
-        writer_receipt.status, 1,
+    assert!(
+        writer_receipt.success,
         "writer create_policy should succeed"
     );
 
@@ -211,7 +211,7 @@ async fn node_restart_preserves_state() {
         create_policy_calldata(),
     )
     .await;
-    assert_eq!(bls_receipt.status, 1, "BLS create_policy should succeed");
+    assert!(bls_receipt.success, "BLS create_policy should succeed");
 
     let max_block = writer_receipt.block_number.max(bls_receipt.block_number);
     state
@@ -297,8 +297,8 @@ async fn node_restart_preserves_state() {
         create_policy_calldata(),
     )
     .await;
-    assert_eq!(
-        while_down_receipt.status, 1,
+    assert!(
+        while_down_receipt.success,
         "request while node down should succeed"
     );
 
@@ -390,7 +390,7 @@ async fn node_restart_preserves_state() {
 
     for receipt in history {
         let restored = restarted_client
-            .get_native_receipt(receipt.transaction_hash)
+            .get_transaction_receipt(receipt.transaction_hash)
             .await
             .unwrap()
             .expect("confirmed receipt must survive restart");
@@ -417,8 +417,8 @@ async fn node_restart_preserves_state() {
         create_policy_calldata(),
     )
     .await;
-    assert_eq!(
-        post_writer_receipt.status, 1,
+    assert!(
+        post_writer_receipt.success,
         "post-restart writer request should succeed"
     );
 
@@ -430,8 +430,8 @@ async fn node_restart_preserves_state() {
         create_policy_calldata(),
     )
     .await;
-    assert_eq!(
-        post_bls_receipt.status, 1,
+    assert!(
+        post_bls_receipt.success,
         "post-restart BLS tx should succeed (native nonce recovery)"
     );
 
@@ -464,8 +464,8 @@ async fn node_restart_preserves_state() {
         create_policy_calldata(),
     )
     .await;
-    assert_eq!(
-        through_restarted_receipt.status, 1,
+    assert!(
+        through_restarted_receipt.success,
         "tx submitted through restarted node should succeed"
     );
 

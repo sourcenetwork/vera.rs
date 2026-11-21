@@ -27,8 +27,8 @@ use jsonrpsee::core::client::SubscriptionClientT;
 use jsonrpsee::rpc_params;
 use jsonrpsee::ws_client::WsClientBuilder;
 use vera_client::{
-    ACP_ADDRESS, BULLETIN_ADDRESS, BlsSigner, ClientError, NativeReceipt, PolicyMarshalingType,
-    VERA_ADDRESS, VeraClient,
+    ACP_ADDRESS, BULLETIN_ADDRESS, BlsSigner, ClientError, PolicyMarshalingType,
+    TransactionReceipt, VERA_ADDRESS, VeraClient,
 };
 use vera_domain::GossipHeader;
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, TestCluster};
@@ -73,13 +73,13 @@ async fn broadcast_native_tx(
     signer: &BlsSigner,
     target: Address,
     calldata: Vec<u8>,
-) -> NativeReceipt {
+) -> TransactionReceipt {
     broadcast::native(cluster, client, signer, target, calldata).await
 }
 
 /// Assert common fields on a native request's receipt.
-fn assert_bls_receipt(receipt: &NativeReceipt, target: Address, signer: &str, label: &str) {
-    assert_eq!(receipt.status, 1, "{label} should succeed");
+fn assert_bls_receipt(receipt: &TransactionReceipt, target: Address, signer: &str, label: &str) {
+    assert!(receipt.success, "{label} should succeed");
     assert!(
         receipt.block_number > 0,
         "{label} should be included in a real block"
@@ -91,28 +91,17 @@ fn assert_bls_receipt(receipt: &NativeReceipt, target: Address, signer: &str, la
         "{label} tx hash should be non-degenerate"
     );
     assert_eq!(
-        receipt.from,
-        Address::ZERO,
-        "{label} receipt 'from' should be Address::ZERO for native txs"
+        receipt.target, target,
+        "{label} receipt should name the target module"
     );
     assert_eq!(
-        receipt.to,
-        Some(target),
-        "{label} receipt 'to' should be the target module"
-    );
-    assert_eq!(
-        receipt.signer_did.as_deref(),
-        Some(signer),
+        receipt.signer_did, signer,
         "{label} receipt should name its signer"
-    );
-    assert!(
-        receipt.native_nonce.is_some(),
-        "{label} receipt should carry the native sequence"
     );
 }
 
 /// Assert that a receipt contains at least one log matching the expected module address and event topic.
-fn assert_event_log(receipt: &NativeReceipt, address: Address, topic: B256, label: &str) {
+fn assert_event_log(receipt: &TransactionReceipt, address: Address, topic: B256, label: &str) {
     assert!(!receipt.logs.is_empty(), "{label} should emit event logs");
     let log = &receipt.logs[0];
     assert_eq!(
@@ -226,11 +215,7 @@ async fn canonical_module_test() {
         IAcp::PolicyCreated::SIGNATURE_HASH,
         "A1 owner createPolicy",
     );
-    assert_eq!(
-        owner_receipt.native_nonce,
-        Some(0),
-        "A1 is the owner's first request"
-    );
+    assert_eq!(owner_receipt.nonce, 0, "A1 is the owner's first request");
     let nonce_after_a1 = client
         .get_native_nonce(&owner_did)
         .await
@@ -404,10 +389,7 @@ async fn canonical_module_test() {
     }
     .abi_encode();
     let c1_receipt = broadcast_native_tx(&cluster, &client, &owner, ACP_ADDRESS, c1_calldata).await;
-    assert_eq!(
-        c1_receipt.status, 1,
-        "owner set_relationship should succeed"
-    );
+    assert!(c1_receipt.success, "owner set_relationship should succeed");
     assert_event_log(
         &c1_receipt,
         ACP_ADDRESS,
@@ -483,7 +465,7 @@ async fn canonical_module_test() {
     }
     .abi_encode();
     let d1_receipt = broadcast_native_tx(&cluster, &client, &owner, ACP_ADDRESS, d1_calldata).await;
-    assert_eq!(d1_receipt.status, 1, "delete_relationship should succeed");
+    assert!(d1_receipt.success, "delete_relationship should succeed");
     assert_event_log(
         &d1_receipt,
         ACP_ADDRESS,
@@ -566,10 +548,7 @@ async fn canonical_module_test() {
     }
     .abi_encode();
     let d5_receipt = broadcast_native_tx(&cluster, &client, &owner, ACP_ADDRESS, d5_calldata).await;
-    assert_eq!(
-        d5_receipt.status, 1,
-        "bearer register_object should succeed"
-    );
+    assert!(d5_receipt.success, "bearer register_object should succeed");
     assert!(
         d5_receipt.block_number >= max_block,
         "D5.1 block should be >= previous max"
@@ -611,8 +590,8 @@ async fn canonical_module_test() {
     .abi_encode();
     let d5_set_receipt =
         broadcast_native_tx(&cluster, &client, &owner, ACP_ADDRESS, d5_set_calldata).await;
-    assert_eq!(
-        d5_set_receipt.status, 1,
+    assert!(
+        d5_set_receipt.success,
         "bearer set_relationship should succeed"
     );
     assert!(
@@ -653,8 +632,8 @@ async fn canonical_module_test() {
     .abi_encode();
     let d5_bad_receipt =
         broadcast_native_tx(&cluster, &client, &owner, ACP_ADDRESS, d5_bad_calldata).await;
-    assert_eq!(
-        d5_bad_receipt.status, 0,
+    assert!(
+        !d5_bad_receipt.success,
         "tampered bearer token should revert"
     );
 
@@ -676,7 +655,7 @@ async fn canonical_module_test() {
         }
         .abi_encode();
         let receipt = broadcast_native_tx(&cluster, &client, relay, ACP_ADDRESS, calldata).await;
-        assert_eq!(receipt.status, 0, "expired bearer command must fail");
+        assert!(!receipt.success, "expired bearer command must fail");
         for i in 0..cluster.node_count() {
             let reader = VeraClient::new(cluster.node(i).rpc_url());
             let (registered, _) = reader
@@ -710,8 +689,8 @@ async fn canonical_module_test() {
         ),
     );
 
-    assert_eq!(
-        e1_receipt.status, 1,
+    assert!(
+        e1_receipt.success,
         "owner register_namespace should succeed"
     );
     assert_event_log(
@@ -752,10 +731,7 @@ async fn canonical_module_test() {
     .abi_encode();
     let e3_receipt =
         broadcast_native_tx(&cluster, &client, &owner, BULLETIN_ADDRESS, e3_calldata).await;
-    assert_eq!(
-        e3_receipt.status, 1,
-        "owner add_collaborator should succeed"
-    );
+    assert!(e3_receipt.success, "owner add_collaborator should succeed");
     assert_event_log(
         &e3_receipt,
         BULLETIN_ADDRESS,
@@ -805,7 +781,7 @@ async fn canonical_module_test() {
         ),
     );
 
-    assert_eq!(e4_receipt.status, 1, "owner create_post should succeed");
+    assert!(e4_receipt.success, "owner create_post should succeed");
     assert_event_log(
         &e4_receipt,
         BULLETIN_ADDRESS,
@@ -926,7 +902,10 @@ async fn canonical_module_test() {
         .native_invalidate_jws(&owner, "nonexistent_token_hash")
         .await;
     match &owner_invalidate {
-        Err(ClientError::Refused { receipt, .. }) => {
+        Err(ClientError::Refused {
+            receipt: Some(receipt),
+            ..
+        }) => {
             max_block = max_block.max(receipt.block_number);
             assert!(
                 receipt.logs.is_empty(),
@@ -945,8 +924,8 @@ async fn canonical_module_test() {
     .abi_encode();
     let g7_receipt =
         broadcast_native_tx(&cluster, &client, &bls_signer, VERA_ADDRESS, g7_calldata).await;
-    assert_eq!(
-        g7_receipt.status, 0,
+    assert!(
+        !g7_receipt.success,
         "G7 BLS invalidate of non-existent token should revert"
     );
     assert!(
@@ -1310,7 +1289,7 @@ async fn canonical_module_test() {
         let response = receipt::wait_for_proof(&client, receipt.transaction_hash, &trusted).await;
         let verified = response.verify(receipt.transaction_hash, &trusted).unwrap();
         assert_eq!(response.revision.height, receipt.block_number);
-        assert_eq!(verified.success(), receipt.status == 1);
+        assert_eq!(verified.success(), receipt.success);
         assert_eq!(verified.logs().len(), receipt.logs.len());
     }
     let next_owner = BlsSigner::random(chain_id).unwrap();

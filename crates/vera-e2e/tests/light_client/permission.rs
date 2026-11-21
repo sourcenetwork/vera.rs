@@ -68,11 +68,10 @@ pub(super) async fn check_permissions(
         objectId: "suspensions".into(),
     }
     .abi_encode();
-    assert_eq!(
+    assert!(
         broadcast_native_tx(cluster, client, signer, ACP_ADDRESS, register)
             .await
-            .status,
-        1
+            .success
     );
 
     let edge = IAcp::setRelationshipSubjectCall {
@@ -86,11 +85,10 @@ pub(super) async fn check_permissions(
         subjectRelation: "blocked".into(),
     }
     .abi_encode();
-    assert_eq!(
+    assert!(
         broadcast_native_tx(cluster, client, signer, ACP_ADDRESS, edge)
             .await
-            .status,
-        1
+            .success
     );
     let block = IAcp::setRelationshipCall {
         policyId: parse_policy_id(policy),
@@ -101,7 +99,7 @@ pub(super) async fn check_permissions(
     }
     .abi_encode();
     let receipt = broadcast_native_tx(cluster, client, signer, ACP_ADDRESS, block).await;
-    assert_eq!(receipt.status, 1);
+    assert!(receipt.success);
     let response = evidence(client, policy, &request, receipt.block_number).await;
     assert!(
         !response

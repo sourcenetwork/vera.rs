@@ -173,7 +173,7 @@ async fn main() {
     })
     .await
     .expect("policy creation timed out");
-    assert_eq!(setup_receipt.status, 1);
+    assert!(setup_receipt.success);
     let ids = client.get_policy_ids().await.unwrap();
     assert_eq!(ids.len(), 1);
     let policy_id = FixedBytes::<32>::from_slice(&hex::decode(&ids[0]).unwrap());
@@ -423,7 +423,7 @@ async fn main() {
     })
     .await
     .expect("three-node write timed out");
-    assert_eq!(probe_receipt.status, 1);
+    assert!(probe_receipt.success);
     let restart = Instant::now();
     cluster.restart_node(3).expect("restart replica");
     if let Err(error) = cluster.wait_ready(driver::REQUEST_TIMEOUT).await {
@@ -445,7 +445,7 @@ async fn main() {
     .expect("recovery deadline")
     .expect("recover probe receipt");
     assert_eq!(recovered_receipt.block_hash, probe_receipt.block_hash);
-    assert_eq!(recovered_receipt.status, 1);
+    assert!(recovered_receipt.success);
     let (registered, owner) = recovered
         .get_object_owner(policy_id, "file", "recovery-probe")
         .await

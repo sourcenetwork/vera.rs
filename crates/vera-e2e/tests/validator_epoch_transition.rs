@@ -22,7 +22,7 @@ use alloy_sol_types::{SolCall, SolEvent};
 use commonware_codec::Encode;
 use commonware_cryptography::{Signer as _, ed25519};
 
-use vera_client::{ACP_ADDRESS, NativeReceipt, VALIDATOR_REGISTRY_ADDRESS, VeraClient};
+use vera_client::{ACP_ADDRESS, TransactionReceipt, VALIDATOR_REGISTRY_ADDRESS, VeraClient};
 use vera_domain::{EpochMaterial, LightBlock, verify_light_block};
 use vera_e2e::RECEIPT_POLL_INTERVAL;
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, TestCluster};
@@ -72,7 +72,7 @@ async fn broadcast_native_tx(
     signer: &BlsSigner,
     target: Address,
     calldata: Vec<u8>,
-) -> NativeReceipt {
+) -> TransactionReceipt {
     broadcast::native(cluster, client, signer, target, calldata).await
 }
 
@@ -98,7 +98,7 @@ async fn setup_acp_policy(cluster: &TestCluster, client: &VeraClient, admin: &Bl
     }
     .abi_encode();
     let receipt = broadcast_native_tx(cluster, client, admin, ACP_ADDRESS, calldata).await;
-    assert_eq!(receipt.status, 1, "createPolicy should succeed");
+    assert!(receipt.success, "createPolicy should succeed");
 
     let policy_ids = client
         .get_policy_ids()
@@ -113,7 +113,7 @@ async fn setup_acp_policy(cluster: &TestCluster, client: &VeraClient, admin: &Bl
     }
     .abi_encode();
     let receipt = broadcast_native_tx(cluster, client, admin, ACP_ADDRESS, calldata).await;
-    assert_eq!(receipt.status, 1, "registerObject should succeed");
+    assert!(receipt.success, "registerObject should succeed");
 
     let calldata = IAcp::setRelationshipCall {
         policyId: policy_id,
@@ -124,7 +124,7 @@ async fn setup_acp_policy(cluster: &TestCluster, client: &VeraClient, admin: &Bl
     }
     .abi_encode();
     let receipt = broadcast_native_tx(cluster, client, admin, ACP_ADDRESS, calldata).await;
-    assert_eq!(receipt.status, 1, "setRelationship should succeed");
+    assert!(receipt.success, "setRelationship should succeed");
 
     let signed = administration::approve(
         client,
@@ -139,7 +139,7 @@ async fn setup_acp_policy(cluster: &TestCluster, client: &VeraClient, admin: &Bl
         )
         .await
         .expect("initialize membership policy");
-    assert_eq!(receipt.status, 1);
+    assert!(receipt.success);
 }
 
 #[tokio::test]
@@ -218,7 +218,7 @@ async fn validator_epoch_transition() {
         calldata,
     )
     .await;
-    assert_eq!(receipt.status, 1, "addValidator should succeed");
+    assert!(receipt.success, "addValidator should succeed");
     assert_eq!(
         receipt.logs[0].topics[0],
         IValidatorRegistry::ValidatorAdded::SIGNATURE_HASH,
@@ -327,7 +327,7 @@ async fn validator_epoch_transition() {
         calldata,
     )
     .await;
-    assert_eq!(receipt.status, 1, "setValidatorStatus should succeed");
+    assert!(receipt.success, "setValidatorStatus should succeed");
     assert_eq!(
         receipt.logs[0].topics[0],
         IValidatorRegistry::ValidatorStatusChanged::SIGNATURE_HASH,
@@ -348,7 +348,7 @@ async fn validator_epoch_transition() {
         calldata,
     )
     .await;
-    assert_eq!(receipt.status, 1, "removeValidator should succeed");
+    assert!(receipt.success, "removeValidator should succeed");
     assert_eq!(
         receipt.logs[0].topics[0],
         IValidatorRegistry::ValidatorRemoved::SIGNATURE_HASH,

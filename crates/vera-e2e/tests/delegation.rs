@@ -9,7 +9,7 @@ use alloy_primitives::{Address, B256, Bytes};
 use alloy_sol_types::SolCall;
 use vera_client::Secp256k1SigningKey as SigningKey;
 use vera_client::{
-    ACP_ADDRESS, BlsSigner, NativeReceipt, TokenRevocation, VERA_ADDRESS, VeraClient,
+    ACP_ADDRESS, BlsSigner, TokenRevocation, TransactionReceipt, VERA_ADDRESS, VeraClient,
 };
 use vera_crypto::operation::OperationId;
 use vera_e2e::cluster::{ConsensusPreset, TestCluster};
@@ -33,7 +33,7 @@ fn token(submitter: &str, deployment: u64, now: u64) -> String {
     vera_client::create_bearer_token(&owner(), submitter, deployment, now, now + 300).unwrap()
 }
 
-async fn native(client: &VeraClient, signer: &BlsSigner, data: Vec<u8>) -> NativeReceipt {
+async fn native(client: &VeraClient, signer: &BlsSigner, data: Vec<u8>) -> TransactionReceipt {
     send(client, signer, ACP_ADDRESS, data).await
 }
 
@@ -42,7 +42,7 @@ async fn send(
     signer: &BlsSigner,
     target: Address,
     data: Vec<u8>,
-) -> NativeReceipt {
+) -> TransactionReceipt {
     let raw = signer.sign_native_tx(target, data.into()).unwrap();
     let hash = client.send_native_tx(&raw).await.unwrap();
     native_receipt::wait(client, hash).await
@@ -89,39 +89,36 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
         .abi_encode(),
     )
     .await;
-    assert_eq!(created.status, 1);
+    assert!(created.success);
     let policy: B256 = client.get_policy_ids().await.unwrap()[0].parse().unwrap();
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
     let bearer = token(delegate.did(), 9001, now);
-    assert_eq!(
-        native(
+    assert!(
+        !native(
             &client,
             &stranger,
             register(policy, &bearer, "wrong-caller")
         )
         .await
-        .status,
-        0
+        .success
     );
     let wrong_deployment = token(delegate.did(), 9002, now);
-    assert_eq!(
-        native(
+    assert!(
+        !native(
             &client,
             &delegate,
             register(policy, &wrong_deployment, "wrong-deployment")
         )
         .await
-        .status,
-        0
+        .success
     );
-    assert_eq!(
-        native(&client, &creator, register(policy, &bearer, "wrong-relay"))
+    assert!(
+        !native(&client, &creator, register(policy, &bearer, "wrong-relay"))
             .await
-            .status,
-        0
+            .success
     );
 
     let batch = IAcp::batchCallsCall {
@@ -131,7 +128,7 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
         ],
     }
     .abi_encode();
-    assert_eq!(native(&client, &delegate, batch).await.status, 0);
+    assert!(!native(&client, &delegate, batch).await.success);
     assert!(
         !client
             .get_jws_token(&hash_jws_token(&bearer))
@@ -146,11 +143,10 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
             .unwrap()
             .0
     );
-    assert_eq!(
+    assert!(
         native(&client, &delegate, register(policy, &bearer, "kept"))
             .await
-            .status,
-        1
+            .success
     );
     let (_, bytes) = client
         .get_jws_token(&hash_jws_token(&bearer))
@@ -178,15 +174,14 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
     assert!(tokens.is_empty());
 
     let creator_bearer = token(creator.did(), 9001, now);
-    assert_eq!(
+    assert!(
         native(
             &client,
             &creator,
             register(policy, &creator_bearer, "creator")
         )
         .await
-        .status,
-        1
+        .success
     );
     let unused = token(stranger.did(), 9001, now);
     let mut revocations = Vec::new();
@@ -202,7 +197,7 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
             .abi_encode(),
         )
         .await;
-        assert_eq!(receipt.status, 1);
+        assert!(receipt.success);
         revocations.push(receipt.transaction_hash);
     }
     // The secp256k1 issuer of a used token revokes it through a worker it names.
@@ -229,7 +224,7 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
         revocation.calldata(&operation),
     )
     .await;
-    assert_eq!(receipt.status, 1);
+    assert!(receipt.success);
     revocations.push(receipt.transaction_hash);
     let issuer = vera_crypto::jwt::verify_bearer_token(&creator_bearer)
         .unwrap()
@@ -277,31 +272,28 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
         assert_eq!(record.status, JWSTokenStatus::Invalid);
         assert_eq!(record.invalidated_by, revoker);
     }
-    assert_eq!(
-        native(&replica, &delegate, register(policy, &bearer, "revoked"))
+    assert!(
+        !native(&replica, &delegate, register(policy, &bearer, "revoked"))
             .await
-            .status,
-        0
+            .success
     );
-    assert_eq!(
-        native(
+    assert!(
+        !native(
             &replica,
             &stranger,
             register(policy, &unused, "revoked-unused")
         )
         .await
-        .status,
-        0
+        .success
     );
-    assert_eq!(
-        native(
+    assert!(
+        !native(
             &replica,
             &creator,
             register(policy, &creator_bearer, "revoked-by-issuer")
         )
         .await
-        .status,
-        0
+        .success
     );
     assert!(
         !replica

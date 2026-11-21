@@ -415,20 +415,8 @@ fn test_execute_with_populated_state() {
     assert_eq!(outcome.gas_used, 0);
 }
 
-#[path = "executor/call_authority.rs"]
-mod call_authority;
-
-#[path = "executor/encoding.rs"]
-mod encoding;
-
-#[path = "executor/rollback.rs"]
-mod rollback;
-
-#[path = "executor/evm_state.rs"]
-mod evm_state;
-
-#[path = "executor/sequence.rs"]
-mod sequence;
+#[path = "executor/native_call.rs"]
+mod native_call;
 
 #[path = "executor/registry_storage.rs"]
 mod registry_storage;

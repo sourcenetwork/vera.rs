@@ -1,9 +1,8 @@
 use super::{
-    rollback::{execute_with_executor, try_execute_with_executor},
+    native_call::{execute_native, member_did, member_request, try_execute_native},
     *,
 };
-use alloy_primitives::{TxKind, keccak256};
-use alloy_signer_local::PrivateKeySigner;
+use alloy_primitives::keccak256;
 use alloy_sol_types::SolCall;
 use vera_executor::{ModuleState, VeraExecutor, precompiles::VALIDATOR_REGISTRY_ADDRESS};
 use vera_modules::{
@@ -12,14 +11,7 @@ use vera_modules::{
 };
 
 fn authorized_state() -> (MockStateDb, VeraExecutor) {
-    let signer: PrivateKeySigner = "42".repeat(32).parse().unwrap();
-    let did = vera_crypto::secp256k1::did_from_secp256k1_pubkey(
-        &signer.credential().verifying_key().to_sec1_bytes(),
-    )
-    .unwrap()
-    .parse::<vera_identity::Did>()
-    .unwrap();
-    authorized_actor(did)
+    authorized_actor(member_did())
 }
 
 fn authorized_actor(did: vera_identity::Did) -> (MockStateDb, VeraExecutor) {
@@ -76,29 +68,9 @@ fn member_slot(address: Address) -> U256 {
 }
 
 fn native_member_call(sequence: u64, calldata: Vec<u8>) -> (Bytes, vera_identity::Did) {
-    use ark_ec::{AffineRepr as _, CurveGroup as _};
-    use ark_serialize::CanonicalSerialize as _;
-    let key = ark_bls12_381::Fr::from(7u64);
-    let public = (ark_bls12_381::G1Affine::generator() * key).into_affine();
-    let mut encoded = Vec::new();
-    public.serialize_compressed(&mut encoded).unwrap();
-    let mut request = vera_domain::NativeTx {
-        chain_id: 9001,
-        nonce: sequence,
-        bls_pubkey: alloy_primitives::FixedBytes::from_slice(&encoded),
-        target: VALIDATOR_REGISTRY_ADDRESS,
-        calldata: calldata.into(),
-        signature: Default::default(),
-    };
-    request.signature = alloy_primitives::FixedBytes::from_slice(
-        &vera_crypto::bls::sign(&key, &request.signing_data()).unwrap(),
-    );
     (
-        request.encode_wire().into(),
-        vera_crypto::bls::did_from_bls_pubkey(&public)
-            .unwrap()
-            .parse()
-            .unwrap(),
+        member_request(VALIDATOR_REGISTRY_ADDRESS, sequence, calldata),
+        member_did(),
     )
 }
 
@@ -281,7 +253,8 @@ fn native_membership_storage_failure_aborts_the_proposal(#[case] building: bool)
 #[test]
 fn native_membership_requires_the_configured_actor_permission() {
     let (registration, _) = native_member_call(0, native_registration());
-    let (state, executor) = authorized_state();
+    let (state, executor) =
+        authorized_actor(vera_identity::Did::new("did:key:another-admin").unwrap());
     let context = BlockContext::new(
         Header {
             number: 1,
@@ -440,38 +413,6 @@ fn native_membership_rejects_truncated_record_fields(#[case] offset: u64, #[case
 }
 
 #[rstest]
-#[case(0xf1)]
-#[case(0xf2)]
-#[case(0xf4)]
-fn a_called_contract_cannot_change_membership_as_the_signer(#[case] opcode: u8) {
-    let (state, executor) = authorized_state();
-    let contract = Address::repeat_byte(0x22);
-    super::rollback::install(
-        &state,
-        contract,
-        super::rollback::requiring_code(VALIDATOR_REGISTRY_ADDRESS, opcode, None),
-    );
-    let calldata = IValidatorRegistry::addValidatorCall {
-        evmAddr: Address::repeat_byte(0x11),
-        consensusPubkey: "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
-            .parse()
-            .unwrap(),
-        p2pAddr: "127.0.0.1:3000".into(),
-    }
-    .abi_encode();
-    let (outcome, _) =
-        execute_with_executor(&state, TxKind::Call(contract), calldata.into(), executor);
-    assert_eq!(outcome.receipts.len(), 1);
-    assert!(!outcome.receipts[0].success());
-    assert!(
-        !outcome
-            .changes
-            .accounts
-            .contains_key(&VALIDATOR_REGISTRY_ADDRESS)
-    );
-}
-
-#[rstest]
 #[case(None)]
 #[case(Some(false))]
 #[case(Some(true))]
@@ -492,12 +433,7 @@ fn registry_write_storage_failure_cannot_commit_partial_member(#[case] during_wr
         p2pAddr: "127.0.0.1:3000".into(),
     }
     .abi_encode();
-    let result = try_execute_with_executor(
-        &state,
-        TxKind::Call(VALIDATOR_REGISTRY_ADDRESS),
-        calldata.into(),
-        executor,
-    );
+    let result = try_execute_native(&state, VALIDATOR_REGISTRY_ADDRESS, calldata, executor);
     if during_write.is_none() {
         let (outcome, _) = result.unwrap();
         assert_eq!(outcome.receipts.len(), 1);
@@ -540,12 +476,7 @@ fn registry_queries_do_not_treat_storage_failure_as_absence(#[case] single_membe
         )
     };
     state.unreadable_storage = Some((VALIDATOR_REGISTRY_ADDRESS, slot));
-    let result = try_execute_with_executor(
-        &state,
-        TxKind::Call(VALIDATOR_REGISTRY_ADDRESS),
-        calldata.into(),
-        executor,
-    );
+    let result = try_execute_native(&state, VALIDATOR_REGISTRY_ADDRESS, calldata, executor);
     assert!(matches!(
         result,
         Err(vera_executor::ExecutionError::State(StateDbError::Storage(
@@ -563,12 +494,7 @@ fn registry_rejects_malformed_consensus_key() {
         p2pAddr: "127.0.0.1:3000".into(),
     }
     .abi_encode();
-    let (outcome, _) = execute_with_executor(
-        &state,
-        TxKind::Call(VALIDATOR_REGISTRY_ADDRESS),
-        calldata.into(),
-        executor,
-    );
+    let (outcome, _) = execute_native(&state, VALIDATOR_REGISTRY_ADDRESS, calldata, executor);
     assert_eq!(outcome.receipts.len(), 1);
     assert!(!outcome.receipts[0].success());
     assert!(
@@ -596,10 +522,10 @@ fn registry_status_checks_the_full_member_index(#[case] index: U256, #[case] suc
         p2pAddr: "127.0.0.1:3000".into(),
     }
     .abi_encode();
-    let (registered, _) = execute_with_executor(
+    let (registered, _) = execute_native(
         &state,
-        TxKind::Call(VALIDATOR_REGISTRY_ADDRESS),
-        registration.into(),
+        VALIDATOR_REGISTRY_ADDRESS,
+        registration,
         executor.clone(),
     );
     assert_eq!(registered.receipts.len(), 1);
@@ -621,12 +547,7 @@ fn registry_status_checks_the_full_member_index(#[case] index: U256, #[case] suc
         active: true,
     }
     .abi_encode();
-    let (outcome, _) = execute_with_executor(
-        &state,
-        TxKind::Call(VALIDATOR_REGISTRY_ADDRESS),
-        calldata.into(),
-        executor,
-    );
+    let (outcome, _) = execute_native(&state, VALIDATOR_REGISTRY_ADDRESS, calldata, executor);
     assert_eq!(outcome.receipts.len(), 1);
     assert_eq!(outcome.receipts[0].success(), success);
     let changes = outcome.changes.accounts.get(&VALIDATOR_REGISTRY_ADDRESS);
@@ -731,24 +652,16 @@ fn epoch_rosters_capture_the_boundary_branch_and_survive_later_changes() {
 }
 
 #[rstest]
-#[case(true, 4, 1, true)]
-#[case(false, 4, 1, true)]
-#[case(true, 20, 2, false)]
-#[case(false, 20, 2, false)]
-#[case(true, 20, 16, true)]
-#[case(false, 20, 16, true)]
-#[case(true, 192, 16, false)]
+#[case(4, 1, true)]
+#[case(20, 2, false)]
+#[case(20, 16, true)]
+#[case(192, 16, false)]
 fn membership_epoch_capacity_rejects_addition_and_both_reactivation_paths(
-    #[case] native: bool,
     #[case] epoch_length: u64,
     #[case] term_length: u64,
     #[case] limited: bool,
 ) {
-    let (state, executor) = if native {
-        authorized_actor(native_member_call(0, native_registration()).1)
-    } else {
-        authorized_state()
-    };
+    let (state, executor) = authorized_state();
     let context = BlockContext::new(
         Header {
             number: 1,
@@ -811,22 +724,11 @@ fn membership_epoch_capacity_rejects_addition_and_both_reactivation_paths(
         let before = state.accounts.read().unwrap()[&VALIDATOR_REGISTRY_ADDRESS]
             .storage
             .clone();
-        let outcome = if native {
-            let request = native_member_call(sequence as u64, calldata).0;
-            let (outcome, modules) = executor
-                .execute_with_modules(&state, &context, &[request], executor.snapshot())
-                .unwrap();
-            executor.publish_snapshot(modules);
-            outcome
-        } else {
-            execute_with_executor(
-                &state,
-                TxKind::Call(VALIDATOR_REGISTRY_ADDRESS),
-                calldata.into(),
-                executor,
-            )
-            .0
-        };
+        let request = native_member_call(sequence as u64, calldata).0;
+        let (outcome, modules) = executor
+            .execute_with_modules(&state, &context, &[request], executor.snapshot())
+            .unwrap();
+        executor.publish_snapshot(modules);
         assert_eq!(
             outcome.receipts[0].success(),
             expected,
@@ -896,4 +798,25 @@ fn epoch_roster_storage_failure_is_a_local_state_error() {
             _
         )))
     ));
+}
+
+#[test]
+fn unconfigured_membership_policy_cannot_be_claimed() {
+    let call = IValidatorRegistry::setPolicyCall {
+        policyId: B256::repeat_byte(7),
+    };
+    let (outcome, _) = execute_native(
+        &MockStateDb::new(),
+        VALIDATOR_REGISTRY_ADDRESS,
+        call.abi_encode(),
+        VeraExecutor::new(9001),
+    );
+    assert!(!outcome.receipts[0].success());
+    assert!(
+        outcome
+            .changes
+            .accounts
+            .get(&VALIDATOR_REGISTRY_ADDRESS)
+            .is_none_or(|account| account.storage.values().all(U256::is_zero))
+    );
 }

@@ -56,7 +56,7 @@ pub(super) async fn submit(
         )
         .await
         .unwrap();
-    assert_eq!(receipt.status, 1, "transaction {id} reverted");
+    assert!(receipt.success, "transaction {id} reverted");
     publication(cluster, receipt.block_number + 2).await;
     // Poll only publication. Evidence is requested and verified once on each member.
     for index in 0..cluster.node_count() {

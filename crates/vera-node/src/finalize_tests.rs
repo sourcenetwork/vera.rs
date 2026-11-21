@@ -1,11 +1,10 @@
-use alloy_primitives::{Address, B256, Bytes, Log, U64, U256, keccak256};
+use alloy_primitives::{B256, Bytes, Log, keccak256};
 use vera_client::{ACP_ADDRESS, BlsSigner};
 use vera_domain::{Block, BlockId, DbTargets, NativeTx, StateRoot, Tx};
 use vera_executor::ExecutionReceipt;
 use vera_indexer::BlockIndex;
-use vera_jsonrpc::BlockTransactions;
 
-use super::{index_finalized_block, subscription_data};
+use super::index_finalized_block;
 
 const GAS_LIMIT: u64 = 30_000_000;
 
@@ -90,18 +89,14 @@ fn indexing_returns_the_hashes_it_stored_and_names_each_signer() {
     assert_eq!(indexed.transaction_hashes, fixture.hashes);
     assert_eq!(indexed.timestamp, fixture.block.timestamp);
     assert_eq!(indexed.gas_limit, GAS_LIMIT);
-    assert_eq!(indexed.base_fee_per_gas, Some(0));
     for hash in &fixture.hashes[..2] {
         let transaction = index.get_transaction(hash).unwrap();
-        assert_eq!(
-            transaction.signer_did.as_deref(),
-            Some(fixture.signer_did.as_str())
-        );
-        assert_eq!(transaction.from, Address::ZERO);
-        assert_eq!(
-            index.get_receipt(hash).unwrap().signer_did.as_deref(),
-            Some(fixture.signer_did.as_str())
-        );
+        assert_eq!(transaction.signer_did, fixture.signer_did);
+        assert_eq!(transaction.target, ACP_ADDRESS);
+        let receipt = index.get_receipt(hash).unwrap();
+        assert_eq!(receipt.signer_did, fixture.signer_did);
+        assert_eq!(receipt.target, ACP_ADDRESS);
+        assert_eq!(receipt.nonce, transaction.nonce);
     }
     assert!(index.get_transaction(&fixture.hashes[2]).is_none());
 }
@@ -133,43 +128,21 @@ fn indexing_keeps_why_a_native_request_was_refused() {
 }
 
 #[test]
-fn subscription_data_orders_logs_by_block_position_from_the_given_hashes() {
+fn logs_are_numbered_by_block_position() {
     let fixture = fixture();
-
-    let (head, logs) = subscription_data(
+    let index = BlockIndex::new();
+    index_finalized_block(
+        &index,
         &fixture.block,
         fixture.block.id().0,
         GAS_LIMIT,
         &fixture.receipts,
         2,
-        &fixture.hashes,
     );
-
-    assert!(matches!(
-        &head.transactions,
-        BlockTransactions::Hashes(hashes) if *hashes == fixture.hashes
-    ));
-    assert_eq!(head.hash, fixture.block.id().0);
-    assert_eq!(head.timestamp, U64::from(fixture.block.timestamp));
-    assert_eq!(head.gas_limit, U64::from(GAS_LIMIT));
-    assert_eq!(head.base_fee_per_gas, Some(U256::ZERO));
-    let summary: Vec<_> = logs
+    let summary: Vec<_> = fixture.hashes[..2]
         .iter()
-        .map(|log| {
-            (
-                log.log_index,
-                log.transaction_index,
-                log.transaction_hash,
-                log.data[0],
-            )
-        })
+        .flat_map(|hash| index.get_receipt(hash).unwrap().logs)
+        .map(|log| (log.log_index, log.transaction_index, log.data[0]))
         .collect();
-    assert_eq!(
-        summary,
-        vec![
-            (U64::from(0), U64::from(0), fixture.hashes[0], 1),
-            (U64::from(1), U64::from(0), fixture.hashes[0], 2),
-            (U64::from(2), U64::from(1), fixture.hashes[1], 3),
-        ]
-    );
+    assert_eq!(summary, vec![(0, 0, 1), (1, 0, 2), (2, 1, 3)]);
 }

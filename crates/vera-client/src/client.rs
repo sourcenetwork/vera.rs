@@ -2,32 +2,32 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use alloy_primitives::{Address, B256, Bytes, FixedBytes, U256};
+use alloy_primitives::{Address, B256, FixedBytes};
 use serde::de::DeserializeOwned;
 use tracing::debug;
 
 use crate::error::ClientError;
 use crate::revision_cache::{DEFAULT_VERIFIED_REVISIONS, RevisionCache};
-use crate::types::{NativeReceipt, NodeStatus, TransactionReceipt};
+use crate::types::{NodeStatus, TransactionReceipt};
 
 mod admission;
 mod envelope;
 mod simulation;
 mod submission;
 
-/// ACP precompile address (`0x0810`).
+/// ACP module address (`0x0810`).
 pub const ACP_ADDRESS: Address = address_from_last_two_bytes(0x08, 0x10);
 
-/// Bulletin precompile address (`0x0811`).
+/// Bulletin module address (`0x0811`).
 pub const BULLETIN_ADDRESS: Address = address_from_last_two_bytes(0x08, 0x11);
 
-/// Vera precompile address (`0x0812`).
+/// Vera module address (`0x0812`).
 pub const VERA_ADDRESS: Address = address_from_last_two_bytes(0x08, 0x12);
 
-/// ValidatorRegistry precompile address (`0x0813`).
+/// ValidatorRegistry module address (`0x0813`).
 pub const VALIDATOR_REGISTRY_ADDRESS: Address = address_from_last_two_bytes(0x08, 0x13);
 
-/// Anchor precompile address (`0x0814`).
+/// Anchor module address (`0x0814`).
 pub const ANCHOR_ADDRESS: Address = address_from_last_two_bytes(0x08, 0x14);
 
 const fn address_from_last_two_bytes(hi: u8, lo: u8) -> Address {
@@ -39,8 +39,8 @@ const fn address_from_last_two_bytes(hi: u8, lo: u8) -> Address {
 
 /// Client for interacting with a vera node via JSON-RPC.
 ///
-/// Provides Ethereum-compatible RPC methods (`eth_*`), vera-specific
-/// methods (`vera_*`), and typed query helpers for each precompile module.
+/// Provides the node's `vera_*` methods, verified readers, native
+/// submission helpers and unauthenticated typed queries for each module.
 #[derive(Debug)]
 pub struct VeraClient {
     rpc_url: String,
@@ -148,14 +148,11 @@ impl VeraClient {
         envelope::decode(&bytes, id)
     }
 
-    // ── Ethereum RPC wrappers ───────────────────────────────────────
+    // ── Vera RPC wrappers ────────────────────────────────────────────
 
-    /// Return the chain ID (`eth_chainId`).
+    /// Return the deployment's chain ID (`vera_nodeStatus` `chainId`).
     pub async fn chain_id(&self) -> Result<u64, ClientError> {
-        let hex: String = self
-            .rpc_call_typed("eth_chainId", serde_json::json!([]))
-            .await?;
-        parse_hex_u64(&hex)
+        Ok(self.node_status().await?.chain_id)
     }
 
     /// Return the newest revision in the node's execution index
@@ -170,76 +167,21 @@ impl VeraClient {
             ))
     }
 
-    /// Return the balance of an address (`eth_getBalance`).
-    pub async fn get_balance(&self, address: Address) -> Result<U256, ClientError> {
-        let hex: String = self
-            .rpc_call_typed(
-                "eth_getBalance",
-                serde_json::json!([format!("{address:?}"), "latest"]),
-            )
-            .await?;
-        parse_hex_u256(&hex)
-    }
-
-    /// Return the nonce of an address (`eth_getTransactionCount`).
-    pub async fn get_nonce(&self, address: Address) -> Result<u64, ClientError> {
-        let hex: String = self
-            .rpc_call_typed(
-                "eth_getTransactionCount",
-                serde_json::json!([format!("{address:?}"), "latest"]),
-            )
-            .await?;
-        parse_hex_u64(&hex)
-    }
-
-    /// Execute a read-only call against a contract (`eth_call`).
-    pub async fn eth_call(&self, to: Address, data: Bytes) -> Result<Bytes, ClientError> {
-        let call_obj = serde_json::json!({
-            "to": format!("{to:?}"),
-            "data": format!("0x{}", hex::encode(&data)),
-        });
-        let hex: String = self
-            .rpc_call_typed("eth_call", serde_json::json!([call_obj, "latest"]))
-            .await?;
-        let hex = hex.strip_prefix("0x").unwrap_or(&hex);
-        let bytes = hex::decode(hex).map_err(|e| ClientError::AbiDecode(e.to_string()))?;
-        Ok(Bytes::from(bytes))
-    }
-
-    /// Submit a signed EVM transaction (`eth_sendRawTransaction`).
-    pub async fn send_raw_transaction(&self, raw_tx: &[u8]) -> Result<B256, ClientError> {
-        let hex: String = self
-            .rpc_call_typed(
-                "eth_sendRawTransaction",
-                serde_json::json!([format!("0x{}", hex::encode(raw_tx))]),
-            )
-            .await?;
-        parse_hex_b256(&hex)
-    }
-
-    /// Fetch a transaction receipt (`eth_getTransactionReceipt`).
+    /// Fetch the execution result of a native request (`vera_getTransactionReceipt`).
     ///
-    /// Returns `None` if the transaction has not yet been included.
+    /// Returns `None` if the request has not yet been included. The receipt
+    /// is execution data without finality evidence; [`Self::read_receipt`]
+    /// verifies a receipt against a trusted consensus key.
     pub async fn get_transaction_receipt(
         &self,
         tx_hash: B256,
     ) -> Result<Option<TransactionReceipt>, ClientError> {
         self.rpc_call_typed(
-            "eth_getTransactionReceipt",
+            "vera_getTransactionReceipt",
             serde_json::json!([format!("{tx_hash:?}")]),
         )
         .await
     }
-
-    /// Return the current gas price (`eth_gasPrice`).
-    pub async fn gas_price(&self) -> Result<U256, ClientError> {
-        let hex: String = self
-            .rpc_call_typed("eth_gasPrice", serde_json::json!([]))
-            .await?;
-        parse_hex_u256(&hex)
-    }
-
-    // ── Vera RPC wrappers ────────────────────────────────────────────
 
     /// Submit a BLS-signed native transaction (`vera_sendNativeTx`).
     pub async fn send_native_tx(&self, raw_tx: &[u8]) -> Result<B256, ClientError> {
@@ -256,20 +198,6 @@ impl VeraClient {
     pub async fn node_status(&self) -> Result<NodeStatus, ClientError> {
         self.rpc_call_typed("vera_nodeStatus", serde_json::json!([]))
             .await
-    }
-
-    /// Fetch an extended transaction receipt with BLS identity info (`vera_getTransactionReceipt`).
-    ///
-    /// Returns `None` if the transaction has not yet been included.
-    pub async fn get_native_receipt(
-        &self,
-        tx_hash: B256,
-    ) -> Result<Option<NativeReceipt>, ClientError> {
-        self.rpc_call_typed(
-            "vera_getTransactionReceipt",
-            serde_json::json!([format!("{tx_hash:?}")]),
-        )
-        .await
     }
 
     /// Fetch the on-chain native nonce for a BLS identity (`vera_getNativeNonce`).
@@ -301,19 +229,6 @@ fn parse_hex_u64(hex: &str) -> Result<u64, ClientError> {
     let hex = hex.strip_prefix("0x").unwrap_or(hex);
     u64::from_str_radix(hex, 16)
         .map_err(|e| ClientError::AbiDecode(format!("invalid hex u64: {e}")))
-}
-
-fn parse_hex_u256(hex: &str) -> Result<U256, ClientError> {
-    let hex = hex.strip_prefix("0x").unwrap_or(hex);
-    let padded = if !hex.len().is_multiple_of(2) {
-        format!("0{hex}")
-    } else {
-        hex.to_string()
-    };
-    let bytes =
-        hex::decode(&padded).map_err(|e| ClientError::AbiDecode(format!("invalid hex: {e}")))?;
-    U256::try_from_be_slice(&bytes)
-        .ok_or_else(|| ClientError::AbiDecode("hex value exceeds 256 bits".into()))
 }
 
 fn parse_hex_b256(hex: &str) -> Result<B256, ClientError> {
@@ -357,26 +272,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_hex_u256_ok() {
-        let val = parse_hex_u256("0x3b9aca00").unwrap();
-        assert_eq!(val, U256::from(1_000_000_000u64));
-    }
-
-    #[test]
-    fn parse_hex_u256_rejects_more_than_256_bits() {
-        assert_eq!(parse_hex_u256("0x").unwrap(), U256::ZERO);
-        let oversized = format!("0x{}", "0".repeat(66));
-        assert!(matches!(
-            parse_hex_u256(&oversized),
-            Err(ClientError::AbiDecode(_))
-        ));
-    }
-
-    #[test]
     fn parse_hex_b256_ok() {
         let hex = "0x0000000000000000000000000000000000000000000000000000000000000001";
         let b = parse_hex_b256(hex).unwrap();
-        assert_eq!(b, B256::from(U256::from(1)));
+        assert_eq!(b, B256::with_last_byte(1));
     }
 
     #[test]

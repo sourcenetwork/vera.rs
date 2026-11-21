@@ -32,7 +32,7 @@ pub(super) struct ReadContext {
 struct MeasuredReceipt {
     block_hash: B256,
     block_number: u64,
-    status: u64,
+    success: bool,
 }
 
 #[derive(Debug)]
@@ -66,7 +66,7 @@ impl Observation {
                 transaction_hash: self.request.hash,
                 block_hash: receipt.block_hash,
                 height: receipt.block_number,
-                status: receipt.status,
+                success: receipt.success,
             })
     }
 
@@ -183,7 +183,7 @@ pub(super) async fn observe(
                     observation.receipt = Some(MeasuredReceipt {
                         block_hash: response.revision.block_hash.parse().unwrap(),
                         block_number: response.revision.height,
-                        status: u64::from(success),
+                        success,
                     });
                     if success && reads.permissions {
                         let request = AccessRequest {
@@ -361,7 +361,7 @@ pub(super) async fn check_recovered(
             (None, None) => true,
             (Some(expected), Some(actual)) => {
                 expected.block_hash == actual.block_hash
-                    && expected.status == actual.status
+                    && expected.success == actual.success
                     && expected.transaction_hash == actual.transaction_hash
             }
             _ => false,
@@ -373,7 +373,7 @@ pub(super) async fn check_recovered(
         let expected_registration = observation
             .request
             .final_registered
-            .unwrap_or_else(|| expected.as_ref().is_some_and(|r| r.status == 1));
+            .unwrap_or_else(|| expected.as_ref().is_some_and(|r| r.success));
         let owner_matches = !registered || {
             let record: Value = serde_json::from_slice(&record).unwrap();
             record["metadata"]["owner_did"] == observation.request.owner
@@ -407,7 +407,7 @@ pub(super) async fn verify(
         if let Some(measured) = &observation.receipt {
             let current = receipt.as_ref().expect("measured receipt disappeared");
             assert_eq!(current.block_hash, measured.block_hash);
-            assert_eq!(current.status, measured.status);
+            assert_eq!(current.success, measured.success);
         }
         for (index, client) in clients.iter().enumerate() {
             let replica_receipt = if let Some(expected) = &receipt {
@@ -420,7 +420,7 @@ pub(super) async fn verify(
                     "replica {index} receipt differs"
                 );
                 assert_eq!(
-                    actual.status, expected.status,
+                    actual.success, expected.success,
                     "replica {index} status differs"
                 );
                 Some(actual)
@@ -437,7 +437,7 @@ pub(super) async fn verify(
             let expected_registration = observation
                 .request
                 .final_registered
-                .unwrap_or_else(|| receipt.as_ref().is_some_and(|r| r.status == 1));
+                .unwrap_or_else(|| receipt.as_ref().is_some_and(|r| r.success));
             assert_eq!(
                 registered, expected_registration,
                 "replica {index} ownership differs"

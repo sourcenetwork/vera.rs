@@ -42,7 +42,10 @@ async fn check(
     message: &str,
 ) {
     let (refusal, receipt) = match result {
-        Err(ClientError::Refused { refusal, receipt }) => (refusal, receipt),
+        Err(ClientError::Refused {
+            refusal,
+            receipt: Some(receipt),
+        }) => (refusal, receipt),
         other => panic!("expected a refusal by {module:?}, got {other:?}"),
     };
     assert_eq!((refusal.module, refusal.kind), (module, kind), "{refusal}");
@@ -52,7 +55,7 @@ async fn check(
     let proven = verified_refusal(client, trusted, receipt.transaction_hash).await;
     assert_eq!(proven, refusal);
     let native = client
-        .get_native_receipt(receipt.transaction_hash)
+        .get_transaction_receipt(receipt.transaction_hash)
         .await
         .unwrap()
         .unwrap();
@@ -95,7 +98,7 @@ async fn each_module_names_its_refusal_through_the_receipt_proof() {
         )
         .await
         .unwrap();
-    assert_eq!(accepted.status, 1);
+    assert!(accepted.success);
     assert_eq!(accepted.refusal, None);
     check(
         &client,
@@ -147,7 +150,7 @@ async fn each_module_names_its_refusal_through_the_receipt_proof() {
         .wait_for_receipt(submission, Duration::from_millis(100), 300)
         .await
         .unwrap();
-    assert_eq!(receipt.status, 0);
+    assert!(!receipt.success);
     let refusal = receipt.refusal.clone().unwrap();
     assert_eq!(
         (refusal.module, refusal.kind),

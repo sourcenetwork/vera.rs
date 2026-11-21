@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, Bytes};
-use vera_client::{BlsSigner, NativeReceipt, VeraClient};
+use vera_client::{BlsSigner, TransactionReceipt, VeraClient};
 use vera_e2e::cluster::TestCluster;
 
 /// Sign a native request, submit it to every node and wait for its receipt.
@@ -13,7 +13,7 @@ pub(super) async fn native(
     signer: &BlsSigner,
     target: Address,
     calldata: Vec<u8>,
-) -> NativeReceipt {
+) -> TransactionReceipt {
     let wire = signer
         .sign_native_tx(target, Bytes::from(calldata))
         .expect("BLS signing should succeed");

@@ -10,14 +10,8 @@ pub use archive::{ArchiveReader, IndexLookup};
 mod error;
 pub use error::{RpcError, TxSubmitError, codes as error_codes};
 
-mod eth;
-pub use eth::{
-    EthApiImpl, EthApiServer, FeeHistory, NetApiImpl, NetApiServer, TxSubmitCallback, Web3ApiImpl,
-    Web3ApiServer,
-};
-
-mod eth_subscribe;
-pub use eth_subscribe::{EthSubscriptionApiImpl, EthSubscriptionApiServer};
+mod tx_submit;
+pub use tx_submit::TxSubmitCallback;
 
 mod header_subscribe;
 
@@ -45,11 +39,7 @@ mod indexed_provider;
 pub use indexed_provider::IndexedStateProvider;
 
 mod types;
-pub use types::{
-    AddressFilter, BlockNumberOrTag, BlockTag, BlockTransactions, CallRequest, RpcBlock, RpcLog,
-    RpcLogFilter, RpcNativeReceipt, RpcTransaction, RpcTransactionReceipt, SyncInfo, SyncStatus,
-    TopicFilter,
-};
+pub use types::{RpcLog, RpcTransactionReceipt};
 
 #[cfg(test)]
 mod local_tests;

@@ -34,9 +34,6 @@ tokio-util = { version = "0.7", features = ["compat"], optional = true }
 serde.workspace = true
 serde_json.workspace = true
 
-# Encoding
-hex.workspace = true
-
 # Error handling
 thiserror.workspace = true
 

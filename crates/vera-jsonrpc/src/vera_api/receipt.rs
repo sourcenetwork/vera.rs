@@ -46,12 +46,9 @@ impl VeraApiImpl {
         {
             return Err(error("incomplete receipt index"));
         }
-        // Execution groups native submissions first while preserving order within each group.
-        let receipts = execution.receipts.iter();
-        let receipts = receipts
-            .clone()
-            .filter(|receipt| receipt.signer_did.is_some())
-            .chain(receipts.filter(|receipt| receipt.signer_did.is_none()))
+        let receipts = execution
+            .receipts
+            .iter()
             .map(|r| {
                 ExecutionReceipt::new(
                     r.transaction_hash,
@@ -62,7 +59,7 @@ impl VeraApiImpl {
                         .iter()
                         .map(|l| Log::new_unchecked(l.address, l.topics.clone(), l.data.clone()))
                         .collect(),
-                    r.contract_address,
+                    None,
                 )
                 .with_refusal(r.refusal.clone())
             })

@@ -1,8 +1,15 @@
-//! Rust client library for vera (EVM + BLS transaction paths).
+//! Rust client library for vera.
 //!
-//! Provides [`VeraClient`] for interacting with a vera node via JSON-RPC.
-//! Includes typed query methods for each precompile module (ACP, Bulletin, Vera)
-//! and standard Ethereum RPC wrappers.
+//! Provides [`VeraClient`] for interacting with a vera node via JSON-RPC:
+//! native BLS submissions, verified readers that check evidence against a
+//! trusted consensus key, and typed queries for each module (ACP, Bulletin,
+//! Vera).
+//!
+//! The typed queries (`get_*`, `has_relationship`, `verify_access_request`
+//! and the other helpers answered by `vera_call`) are UNAUTHENTICATED: the
+//! node's unproven answer, with no finality certificate or state proof. They
+//! must not grant access or be recorded as a decision. The `read_*` methods
+//! and [`VeraClient::verify_current_access`] are the authenticated path.
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
@@ -49,6 +56,7 @@ pub mod tokens;
 pub use vera_domain::{
     ExecutionReceipt, MAX_REFUSAL_MESSAGE_BYTES, NativeCallRequest, NativeCallSimulation,
     ReceiptResponse, ReceiptResponseError, Refusal, RefusalKind, RefusingModule, SimulatedLog,
+    ViewCallResult,
 };
 pub use vera_permission::{
     AccessRequest, Actor, ModuleId, Object, Operation, PERMISSION_LIMITS, PermissionLimits,
@@ -59,9 +67,7 @@ pub use vera_permission::{
 };
 mod policy_id;
 mod policy_operation;
-mod signer;
 mod subject;
-mod tx;
 mod types;
 pub use policy_id::{PolicyMarshalingType, PolicyNonce, predict_policy_id, random_policy_nonce};
 pub use policy_operation::{PolicyOperation, PolicyOperationLead};
@@ -84,8 +90,7 @@ pub use error::ClientError;
 /// Signing key for native service and authorization requests.
 pub use k256_native::ecdsa::SigningKey as Secp256k1SigningKey;
 pub use readiness::{ReadinessError, VerifiedReadiness};
-pub use signer::EvmSigner;
 pub use subject::RelationshipSubject;
-pub use types::{Log, NativeReceipt, NodeStatus, TransactionReceipt};
+pub use types::{Log, NodeStatus, TransactionReceipt};
 pub use unsigned_token::UnsignedToken;
 pub use vera_crypto::jwt::DelegationScope;

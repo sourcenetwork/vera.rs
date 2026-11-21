@@ -1,4 +1,4 @@
-//! Vera read-only queries via `eth_call` to precompile `0x0812`.
+//! Vera typed queries: unauthenticated view calls to the module at `0x0812`.
 
 use alloy_primitives::{Address, Bytes};
 use alloy_sol_types::SolCall;
@@ -9,36 +9,40 @@ use crate::error::ClientError;
 
 impl VeraClient {
     /// Look up a JWS token record by hash.
+    /// Unauthenticated; the verified read is [`VeraClient::read_token_record`].
     pub async fn get_jws_token(&self, token_hash: &str) -> Result<(bool, Bytes), ClientError> {
         let calldata = IVera::getJWSTokenCall {
             tokenHash: token_hash.into(),
         }
         .abi_encode();
-        let result = self.eth_call(VERA_ADDRESS, calldata.into()).await?;
+        let result = self.view_call(VERA_ADDRESS, calldata.into()).await?;
         let decoded = IVera::getJWSTokenCall::abi_decode_returns(&result)
             .map_err(|e| ClientError::AbiDecode(e.to_string()))?;
         Ok((decoded.found, decoded.record))
     }
 
     /// Look up all JWS tokens issued by a DID.
+    /// Unauthenticated; the verified read is [`VeraClient::read_current_prefix`] on the vera module with [`VeraClient::read_token_record`].
     pub async fn get_jws_tokens_by_did(&self, did: &str) -> Result<Bytes, ClientError> {
         let calldata = IVera::getJWSTokensByDidCall { did: did.into() }.abi_encode();
-        let result = self.eth_call(VERA_ADDRESS, calldata.into()).await?;
+        let result = self.view_call(VERA_ADDRESS, calldata.into()).await?;
         let decoded = IVera::getJWSTokensByDidCall::abi_decode_returns(&result)
             .map_err(|e| ClientError::AbiDecode(e.to_string()))?;
         Ok(decoded)
     }
 
     /// Look up all JWS tokens authorized for an account.
+    /// Unauthenticated; the verified read is [`VeraClient::read_current_prefix`] on the vera module with [`VeraClient::read_token_record`].
     pub async fn get_jws_tokens_by_account(&self, account: Address) -> Result<Bytes, ClientError> {
         let calldata = IVera::getJWSTokensByAccountCall { account }.abi_encode();
-        let result = self.eth_call(VERA_ADDRESS, calldata.into()).await?;
+        let result = self.view_call(VERA_ADDRESS, calldata.into()).await?;
         let decoded = IVera::getJWSTokensByAccountCall::abi_decode_returns(&result)
             .map_err(|e| ClientError::AbiDecode(e.to_string()))?;
         Ok(decoded)
     }
 
     /// Look up recorded delegations bound to a submitting DID.
+    /// Unauthenticated; the verified read is [`VeraClient::read_current_prefix`] on the vera module with [`VeraClient::read_token_record`].
     pub async fn get_delegations_by_submitter(
         &self,
         submitter: &str,
@@ -47,7 +51,7 @@ impl VeraClient {
             submitter: submitter.into(),
         }
         .abi_encode();
-        let result = self.eth_call(VERA_ADDRESS, calldata.into()).await?;
+        let result = self.view_call(VERA_ADDRESS, calldata.into()).await?;
         IVera::getDelegationsBySubmitterCall::abi_decode_returns(&result)
             .map_err(|e| ClientError::AbiDecode(e.to_string()))
     }

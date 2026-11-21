@@ -52,7 +52,7 @@ pub(super) async fn check_decisions(
             .abi_encode(),
         )
         .await;
-        assert_eq!(receipt.status, 1);
+        assert!(receipt.success);
         let id = expected.id().unwrap();
         let key = vera_modules::acp::keys::access_decision_key(&id);
         let response = client

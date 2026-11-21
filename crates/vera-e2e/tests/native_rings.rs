@@ -7,7 +7,7 @@ use vera_client::threshold_objects::{
     EncryptedDocument, KeyDerivation, ObjectKind, ThresholdObject, encode_threshold_object,
 };
 use vera_client::{
-    ACP_ADDRESS, BlsSigner, DelegationScope, NativeReceipt, Secp256k1SigningKey as SigningKey,
+    ACP_ADDRESS, BlsSigner, DelegationScope, Secp256k1SigningKey as SigningKey, TransactionReceipt,
     VERA_ADDRESS, VeraClient, create_scoped_bearer_token,
     nodes::{NodeCommand, NodeInfo, NodeRequest, encode_node_request, sign_node_request},
     rings::*,
@@ -32,7 +32,7 @@ async fn execute(
     target: Address,
     call: Bytes,
     success: bool,
-) -> NativeReceipt {
+) -> TransactionReceipt {
     let call_bytes = call.len();
     let receipt_deadline = if call_bytes > 8 << 20 {
         vera_e2e::readiness_deadline().max(Duration::from_secs(120))
@@ -51,7 +51,7 @@ async fn execute(
             .unwrap();
             if let (Some(local), Some(_)) = (local, remote) {
                 assert_eq!(local.verify(id, trusted).unwrap().success(), success);
-                return writer.get_native_receipt(id).await.unwrap().unwrap();
+                return writer.get_transaction_receipt(id).await.unwrap().unwrap();
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }

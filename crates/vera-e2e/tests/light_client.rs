@@ -15,7 +15,7 @@ use jsonrpsee::core::client::SubscriptionClientT;
 use jsonrpsee::rpc_params;
 use jsonrpsee::ws_client::WsClientBuilder;
 use vera_client::{
-    ACP_ADDRESS, BlsSigner, ModuleId, NativeReceipt, PERMISSION_LIMITS, RECORD_PROOF_BYTES,
+    ACP_ADDRESS, BlsSigner, ModuleId, PERMISSION_LIMITS, RECORD_PROOF_BYTES, TransactionReceipt,
     VeraClient,
 };
 use vera_domain::{LightBlock, verify_light_block};
@@ -58,7 +58,7 @@ async fn broadcast_native_tx(
     signer: &BlsSigner,
     target: Address,
     calldata: Vec<u8>,
-) -> NativeReceipt {
+) -> TransactionReceipt {
     broadcast::native(cluster, client, signer, target, calldata).await
 }
 
@@ -108,7 +108,7 @@ async fn light_client_proof_verification() {
     .abi_encode();
     let create_receipt =
         broadcast_native_tx(&cluster, &client, &signer, ACP_ADDRESS, create_calldata).await;
-    assert_eq!(create_receipt.status, 1, "create_policy should succeed");
+    assert!(create_receipt.success, "create_policy should succeed");
 
     let policy_ids = client
         .get_policy_ids()
@@ -125,7 +125,7 @@ async fn light_client_proof_verification() {
     .abi_encode();
     let register_receipt =
         broadcast_native_tx(&cluster, &client, &signer, ACP_ADDRESS, register_calldata).await;
-    assert_eq!(register_receipt.status, 1, "register_object should succeed");
+    assert!(register_receipt.success, "register_object should succeed");
     let h_register = register_receipt.block_number;
 
     let ws_client = WsClientBuilder::default()
@@ -222,7 +222,7 @@ async fn light_client_proof_verification() {
     .abi_encode();
     let mutate_receipt =
         broadcast_native_tx(&cluster, &client, &signer, ACP_ADDRESS, set_rel_calldata).await;
-    assert_eq!(mutate_receipt.status, 1, "set_relationship should succeed");
+    assert!(mutate_receipt.success, "set_relationship should succeed");
     let h_mutate = mutate_receipt.block_number;
 
     // Native proof roots may advance on empty revisions; require the confirmed mutation.

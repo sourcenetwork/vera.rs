@@ -181,7 +181,7 @@ async fn submit(
         .wait_for_receipt(id, Duration::from_millis(20), 3_000)
         .await
         .unwrap();
-    assert_eq!(receipt.status, 1, "seeding request failed");
+    assert!(receipt.success, "seeding request failed");
     receipt.block_number
 }
 

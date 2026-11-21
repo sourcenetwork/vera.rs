@@ -1,9 +1,5 @@
 use super::*;
-use alloy_consensus::{SignableTransaction, TxEnvelope, TxLegacy};
-use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::{FixedBytes, TxKind};
-use alloy_signer::SignerSync;
-use alloy_signer_local::PrivateKeySigner;
+use alloy_primitives::FixedBytes;
 use alloy_sol_types::SolCall;
 use ark_ec::{AffineRepr as _, CurveGroup as _};
 use ark_serialize::CanonicalSerialize as _;
@@ -11,7 +7,6 @@ use vera_executor::{ExecutionError, ModuleSnapshot, VeraExecutor, precompiles::A
 use vera_modules::acp::abi::IAcp;
 
 const NATIVE_LIMIT: u64 = 1_000_000;
-const RECIPIENT: Address = Address::repeat_byte(0x21);
 
 fn policy(valid: bool) -> Vec<u8> {
     IAcp::createPolicyCall {
@@ -62,32 +57,6 @@ fn native_gas_used(tx: &Bytes) -> u64 {
     assert!(outcome.receipts[0].success());
     assert!(outcome.gas_used > 0 && outcome.gas_used < NATIVE_LIMIT);
     outcome.gas_used
-}
-
-fn transfer(state: &MockStateDb, nonce: u64, gas_limit: u64) -> (Bytes, Address) {
-    let signer = PrivateKeySigner::from_bytes(&B256::repeat_byte(0x42)).unwrap();
-    state.insert_account(
-        signer.address(),
-        MockAccount {
-            balance: U256::from(1_000_000),
-            ..Default::default()
-        },
-    );
-    let tx = TxLegacy {
-        chain_id: Some(9001),
-        nonce,
-        gas_limit,
-        to: TxKind::Call(RECIPIENT),
-        value: U256::from(1),
-        ..Default::default()
-    };
-    let signature = signer.sign_hash_sync(&tx.signature_hash()).unwrap();
-    (
-        TxEnvelope::Legacy(tx.into_signed(signature))
-            .encoded_2718()
-            .into(),
-        signer.address(),
-    )
 }
 
 fn context(gas_limit: u64) -> BlockContext {
@@ -251,128 +220,4 @@ fn failed_native_and_reverted_batch_are_charged_what_they_used(#[case] batch: bo
         ),
         Err(ExecutionError::BlockValidation(_))
     ));
-}
-
-#[rstest]
-#[case(21_000, true)]
-#[case(21_001, false)]
-fn evm_limit_must_fit_before_account_changes(#[case] declared: u64, #[case] accepted: bool) {
-    let executor = VeraExecutor::new(9001);
-    let state = MockStateDb::new();
-    let (tx, actor) = transfer(&state, 0, declared);
-    let context = context(21_000);
-    let (outcome, next) = executor
-        .execute_with_modules(
-            &state,
-            &context,
-            std::slice::from_ref(&tx),
-            executor.snapshot(),
-        )
-        .unwrap();
-    assert_eq!(
-        outcome.executed_tx_indices,
-        Some(if accepted { vec![0] } else { vec![] })
-    );
-    if accepted {
-        assert_eq!(outcome.gas_used, 21_000);
-        assert_eq!(outcome.changes.accounts[&actor].nonce, 1);
-        assert_eq!(outcome.changes.accounts[&RECIPIENT].balance, U256::from(1));
-    } else {
-        assert_eq!(outcome.gas_used, 0);
-        assert!(outcome.changes.accounts.is_empty());
-        assert!(matches!(
-            executor.execute_with_modules(
-                &state,
-                &context.clone().with_verification(),
-                std::slice::from_ref(&tx),
-                executor.snapshot()
-            ),
-            Err(ExecutionError::BlockValidation(_))
-        ));
-    }
-    verify_selected(&executor, &state, &context, &[tx], &outcome, &next);
-    assert_eq!(state.accounts.read().unwrap()[&actor].nonce, 0);
-}
-
-#[test]
-fn native_and_evm_share_actual_usage_while_reserving_full_limits() {
-    let executor = VeraExecutor::new(9001);
-    let state = MockStateDb::new();
-    let (native_tx, actor) = native(0, policy(true));
-    let creation_gas = native_gas_used(&native_tx);
-    let remaining = NATIVE_LIMIT - creation_gas;
-    let (evm, sender) = transfer(&state, 0, remaining);
-    let (deferred_evm, _) = transfer(&state, 1, remaining - 21_000 + 1);
-    let (deferred_native, _) = native(1, policy(true));
-    let txs = [evm, native_tx, deferred_native, deferred_evm];
-    let context = context(NATIVE_LIMIT);
-    let (outcome, next) = executor
-        .execute_with_modules(&state, &context, &txs, executor.snapshot())
-        .unwrap();
-    assert_eq!(outcome.executed_tx_indices, Some(vec![1, 0]));
-    assert_eq!(outcome.gas_used, creation_gas + 21_000);
-    assert_eq!(
-        outcome
-            .receipts
-            .iter()
-            .map(|r| r.cumulative_gas_used())
-            .collect::<Vec<_>>(),
-        [creation_gas, creation_gas + 21_000]
-    );
-    assert_eq!(module_state(&next).nonces.get_nonce(&actor).unwrap(), 1);
-    assert_eq!(module_state(&next).acp.query_policy_ids().unwrap().len(), 1);
-    assert_eq!(outcome.changes.accounts[&sender].nonce, 1);
-    assert_eq!(outcome.changes.accounts[&RECIPIENT].balance, U256::from(1));
-    verify_selected(&executor, &state, &context, &txs, &outcome, &next);
-    assert!(matches!(
-        executor.execute_with_modules(
-            &state,
-            &context.with_verification(),
-            &txs,
-            executor.snapshot()
-        ),
-        Err(ExecutionError::BlockValidation(_))
-    ));
-}
-
-#[test]
-fn failed_native_leaves_what_it_did_not_use_for_evm() {
-    let executor = VeraExecutor::new(9001);
-    let state = MockStateDb::new();
-    let (failed, _) = native(0, policy(false));
-    let (evm, _) = transfer(&state, 0, 21_000);
-    let (second, _) = transfer(&state, 1, 21_000);
-    let txs = [evm, failed, second];
-    let context = context(NATIVE_LIMIT + 21_000);
-    let (outcome, next) = executor
-        .execute_with_modules(&state, &context, &txs, executor.snapshot())
-        .unwrap();
-    assert_eq!(outcome.executed_tx_indices, Some(vec![1, 0, 2]));
-    let refused = outcome.receipts[0].gas_used;
-    assert!(refused < NATIVE_LIMIT);
-    assert_eq!(outcome.gas_used, refused + 42_000);
-    assert!(!outcome.receipts[0].success());
-    assert!(outcome.receipts[1].success() && outcome.receipts[2].success());
-    verify_selected(&executor, &state, &context, &txs, &outcome, &next);
-}
-
-#[test]
-fn evm_state_read_failure_is_not_skipped_or_flattened() {
-    let executor = VeraExecutor::new(9001);
-    let mut state = MockStateDb::new();
-    let (tx, sender) = transfer(&state, 0, 21_000);
-    state.unreadable_account = Some(sender);
-
-    for context in [context(100_000), context(100_000).with_verification()] {
-        let result = executor.execute_with_modules(
-            &state,
-            &context,
-            std::slice::from_ref(&tx),
-            executor.snapshot(),
-        );
-        assert!(matches!(
-            result,
-            Err(ExecutionError::State(StateDbError::Storage(_)))
-        ));
-    }
 }

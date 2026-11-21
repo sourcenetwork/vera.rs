@@ -1,207 +1,18 @@
-//! Conversions between signed EVM transactions, REVM and execution results.
+//! State changes recorded by the journal that hosts registry storage.
 
 use std::collections::BTreeMap;
 
-use alloy_primitives::{B256, Bytes, U256};
+use alloy_primitives::U256;
 use revm::{
     bytecode::Bytecode,
-    context::result::{ExecutionResult, Output},
-    context_interface::transaction::{AccessList, AccessListItem},
-    primitives::TxKind,
     state::{EvmState, EvmStorageSlot},
 };
 use vera_qmdb::{AccountUpdate, ChangeSet};
 
-/// The EVM specification revision used for execution.
+/// The revision of the journal that hosts registry storage.
 pub use revm::primitives::hardfork::SpecId;
 
-use crate::{ExecutionError, ExecutionReceipt};
-
-/// Decode EVM transaction bytes, returning both the REVM TxEnv and the signer's `did:key:`.
-///
-/// Single decode + EC recovery pass: builds the TxEnv for REVM execution and
-/// recovers the secp256k1 public key for `did:key:` construction. Only the
-/// canonical EIP-2718 encoding of a replay-protected transaction is accepted.
-pub fn decode_evm_tx(tx_bytes: &Bytes) -> Result<(revm::context::TxEnv, String), ExecutionError> {
-    use alloy_consensus::TxEnvelope;
-
-    let envelope = crate::envelope::decode_envelope(tx_bytes)?;
-
-    let mut builder = revm::context::TxEnv::builder();
-
-    match &envelope {
-        TxEnvelope::Legacy(signed) => {
-            let tx = signed.tx();
-            let caller = signed
-                .recover_signer()
-                .map_err(|e| ExecutionError::TxDecode(format!("failed to recover signer: {e}")))?;
-
-            builder = builder
-                .caller(caller)
-                .gas_limit(tx.gas_limit)
-                .gas_price(tx.gas_price)
-                .value(tx.value)
-                .data(tx.input.clone())
-                .nonce(tx.nonce)
-                .chain_id(tx.chain_id)
-                .kind(convert_tx_kind(tx.to));
-        }
-        TxEnvelope::Eip2930(signed) => {
-            let tx = signed.tx();
-            let caller = signed
-                .recover_signer()
-                .map_err(|e| ExecutionError::TxDecode(format!("failed to recover signer: {e}")))?;
-
-            builder = builder
-                .caller(caller)
-                .gas_limit(tx.gas_limit)
-                .gas_price(tx.gas_price)
-                .value(tx.value)
-                .data(tx.input.clone())
-                .nonce(tx.nonce)
-                .chain_id(Some(tx.chain_id))
-                .kind(convert_tx_kind(tx.to))
-                .access_list(convert_access_list(&tx.access_list));
-        }
-        TxEnvelope::Eip1559(signed) => {
-            let tx = signed.tx();
-            let caller = signed
-                .recover_signer()
-                .map_err(|e| ExecutionError::TxDecode(format!("failed to recover signer: {e}")))?;
-
-            builder = builder
-                .caller(caller)
-                .gas_limit(tx.gas_limit)
-                .gas_price(tx.max_fee_per_gas)
-                .gas_priority_fee(Some(tx.max_priority_fee_per_gas))
-                .value(tx.value)
-                .data(tx.input.clone())
-                .nonce(tx.nonce)
-                .chain_id(Some(tx.chain_id))
-                .kind(convert_tx_kind(tx.to))
-                .access_list(convert_access_list(&tx.access_list));
-        }
-        TxEnvelope::Eip4844(_) => return Err(crate::envelope::blob_transaction()),
-        TxEnvelope::Eip7702(signed) => {
-            let tx = signed.tx();
-            let caller = signed
-                .recover_signer()
-                .map_err(|e| ExecutionError::TxDecode(format!("failed to recover signer: {e}")))?;
-
-            builder = builder
-                .caller(caller)
-                .gas_limit(tx.gas_limit)
-                .gas_price(tx.max_fee_per_gas)
-                .gas_priority_fee(Some(tx.max_priority_fee_per_gas))
-                .value(tx.value)
-                .data(tx.input.clone())
-                .nonce(tx.nonce)
-                .chain_id(Some(tx.chain_id))
-                .kind(TxKind::Call(tx.to))
-                .access_list(convert_access_list(&tx.access_list))
-                .authorization_list(convert_authorization_list(&tx.authorization_list));
-        }
-    }
-
-    let tx_env = builder
-        .build()
-        .map_err(|e| ExecutionError::TxDecode(format!("failed to build tx env: {e:?}")))?;
-
-    let signer_did =
-        vera_crypto::secp256k1::recover_did(envelope.signature(), &envelope.signature_hash())
-            .map_err(|e| ExecutionError::SignerDidRecovery(e.to_string()))?;
-
-    Ok((tx_env, signer_did))
-}
-
-/// Convert alloy TxKind to revm TxKind.
-pub const fn convert_tx_kind(kind: alloy_primitives::TxKind) -> TxKind {
-    match kind {
-        alloy_primitives::TxKind::Call(addr) => TxKind::Call(addr),
-        alloy_primitives::TxKind::Create => TxKind::Create,
-    }
-}
-
-/// Convert alloy AccessList to revm AccessList.
-pub fn convert_access_list(access_list: &alloy_eips::eip2930::AccessList) -> AccessList {
-    AccessList(
-        access_list
-            .iter()
-            .map(|item| AccessListItem {
-                address: item.address,
-                storage_keys: item.storage_keys.clone(),
-            })
-            .collect(),
-    )
-}
-
-/// Convert alloy authorization list to revm authorization list.
-pub fn convert_authorization_list(
-    auth_list: &[alloy_eips::eip7702::SignedAuthorization],
-) -> Vec<
-    revm::context_interface::either::Either<
-        revm::context_interface::transaction::SignedAuthorization,
-        revm::context_interface::transaction::RecoveredAuthorization,
-    >,
-> {
-    use alloy_eips::eip7702::RecoveredAuthority;
-
-    auth_list
-        .iter()
-        .map(|auth| {
-            // Build the inner authorization
-            let inner = revm::context_interface::transaction::Authorization {
-                chain_id: *auth.chain_id(),
-                address: *auth.address(),
-                nonce: auth.nonce(),
-            };
-
-            // Convert to recovered authorization - use Valid if recovery succeeds, Invalid otherwise
-            let recovered_authority = auth
-                .recover_authority()
-                .map_or(RecoveredAuthority::Invalid, RecoveredAuthority::Valid);
-
-            revm::context_interface::either::Either::Right(
-                revm::context_interface::transaction::RecoveredAuthorization::new_unchecked(
-                    inner,
-                    recovered_authority,
-                ),
-            )
-        })
-        .collect()
-}
-
-/// Build a transaction receipt from execution result.
-pub fn build_receipt(
-    result: &ExecutionResult,
-    tx_hash: B256,
-    gas_used: u64,
-    cumulative_gas_used: u64,
-) -> ExecutionReceipt {
-    let (success, logs, contract_address) = match result {
-        ExecutionResult::Success { logs, output, .. } => {
-            let contract_addr = match output {
-                Output::Create(_, addr) => *addr,
-                Output::Call(_) => None,
-            };
-            // REVM logs are already alloy_primitives::Log, just clone them
-            (true, logs.clone(), contract_addr)
-        }
-        ExecutionResult::Revert { .. } => (false, Vec::new(), None),
-        ExecutionResult::Halt { .. } => (false, Vec::new(), None),
-    };
-
-    ExecutionReceipt::new(
-        tx_hash,
-        success,
-        gas_used,
-        cumulative_gas_used,
-        logs,
-        contract_address,
-    )
-}
-
-/// Extract state changes from REVM execution state.
+/// Extract the state changes a journal recorded.
 pub fn extract_changes(state: &EvmState) -> ChangeSet {
     let mut changes = ChangeSet::new();
 
@@ -244,57 +55,11 @@ pub fn extract_changes(state: &EvmState) -> ChangeSet {
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{Address, KECCAK256_EMPTY};
-    use revm::context::result::ResultGas;
+    use alloy_primitives::{Address, Bytes, KECCAK256_EMPTY};
     use revm::state::Account;
     use revm::state::TransactionId;
 
     use super::*;
-
-    #[test]
-    fn build_receipt_success() {
-        let result = ExecutionResult::Success {
-            reason: revm::context::result::SuccessReason::Stop,
-            gas: ResultGas::default().with_total_gas_spent(21000),
-            logs: vec![],
-            output: Output::Call(Bytes::new()),
-        };
-
-        let receipt = build_receipt(&result, B256::ZERO, 21000, 21000);
-        assert!(receipt.success());
-        assert_eq!(receipt.gas_used, 21000);
-        assert_eq!(receipt.cumulative_gas_used(), 21000);
-        assert!(receipt.logs().is_empty());
-        assert!(receipt.contract_address.is_none());
-    }
-
-    #[test]
-    fn build_receipt_revert() {
-        let result = ExecutionResult::Revert {
-            gas: ResultGas::default().with_total_gas_spent(21000),
-            logs: vec![],
-            output: Bytes::new(),
-        };
-
-        let receipt = build_receipt(&result, B256::ZERO, 21000, 21000);
-        assert!(!receipt.success());
-        assert_eq!(receipt.gas_used, 21000);
-    }
-
-    #[test]
-    fn build_receipt_halt() {
-        let result = ExecutionResult::Halt {
-            reason: revm::context::result::HaltReason::OutOfGas(
-                revm::context::result::OutOfGasError::Basic,
-            ),
-            gas: ResultGas::default().with_total_gas_spent(21000),
-            logs: vec![],
-        };
-
-        let receipt = build_receipt(&result, B256::ZERO, 21000, 21000);
-        assert!(!receipt.success());
-        assert_eq!(receipt.gas_used, 21000);
-    }
 
     #[test]
     fn extract_changes_empty() {

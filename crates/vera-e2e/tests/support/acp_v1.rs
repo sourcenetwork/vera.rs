@@ -18,7 +18,7 @@ pub(super) async fn lifecycle(
         marshal_type: PolicyMarshalingType::ShortYaml, required_specification: None, metadata: metadata.clone(),
         nonce: Default::default(),
     }).await.unwrap()];
-    assert_eq!(receipts[0].status, 1);
+    assert!(receipts[0].success);
     let record = client
         .get_policies()
         .await
@@ -159,6 +159,6 @@ pub(super) async fn lifecycle(
             .iter()
             .all(|record| record.policy.id != hex::encode(policy))
     );
-    assert!(receipts.iter().all(|receipt| receipt.status == 1));
+    assert!(receipts.iter().all(|receipt| receipt.success));
     receipts
 }

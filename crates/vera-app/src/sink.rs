@@ -16,12 +16,6 @@ pub trait FinalizedSink: Clone + Send + Sync + 'static {
     /// Called after this node built a proposal.
     fn proposed(&self, _block: &Block) {}
 
-    /// Called after this node's proposal refused requests and dropped them
-    /// from the pool, so whatever admission reserved for them can be released.
-    fn rejected(&self) -> impl Future<Output = ()> + Send {
-        async {}
-    }
-
     /// Called once a finalized block's batches are applied and readable.
     fn finalized(
         &self,

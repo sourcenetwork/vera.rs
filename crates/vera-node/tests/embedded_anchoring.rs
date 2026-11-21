@@ -88,19 +88,19 @@ async fn a_relayed_snapshot_verifies_against_the_anchor_and_goes_stale_after_a_r
         )
         .await
         .unwrap();
-    assert_eq!(created.status, 1);
+    assert!(created.success);
     let policy = d.get_policy_ids().await.unwrap().remove(0);
     let policy_id = vera_client::parse_policy_id(&policy).unwrap();
     let registered = d
         .native_register_object(&author, policy_id, "notes", "collection")
         .await
         .unwrap();
-    assert_eq!(registered.status, 1);
+    assert!(registered.success);
     let granted = d
         .native_set_relationship(&author, policy_id, "collection", "notes", "reader", READER)
         .await
         .unwrap();
-    assert_eq!(granted.status, 1);
+    assert!(granted.success);
 
     let relay = BlsSigner::new(82u64.into(), anchoring_chain).unwrap();
     let first = d
@@ -158,7 +158,7 @@ async fn a_relayed_snapshot_verifies_against_the_anchor_and_goes_stale_after_a_r
         .native_delete_relationship(&author, policy_id, "collection", "notes", "reader", READER)
         .await
         .unwrap();
-    assert_eq!(revoked.status, 1);
+    assert!(revoked.success);
     let second = d
         .publish_policy_snapshot(&s, &relay, &policy, &owner_key, &anchoring_key, DEADLINE)
         .await

@@ -11,7 +11,7 @@ use vera_traits::StateDbRead;
 use super::SimulationContext;
 use crate::ExecutionError;
 use crate::executor::native_authentication::is_native_target;
-use crate::executor::native_dispatch::{NativeCall, dispatch_native_call};
+use crate::executor::native_dispatch::{NATIVE_TX_GAS_LIMIT, NativeCall, dispatch_native_call};
 use crate::executor::native_outcome::native_outcome;
 
 /// Longest acting DID a simulation accepts.
@@ -119,13 +119,14 @@ pub fn simulate_native_call<S: StateDbRead>(
             target: request.target,
             calldata: &request.calldata,
             max_active_members: context.max_active_members,
+            gas_limit: NATIVE_TX_GAS_LIMIT,
         },
         &context.block(),
         &tx_ctx,
         &mut acp,
         &mut bulletin,
         &mut vera,
-        &mut context.evm(state),
+        &mut context.journal(state),
     );
 
     let outcome = native_outcome(request.target, dispatch)?;

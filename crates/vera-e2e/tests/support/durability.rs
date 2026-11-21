@@ -38,7 +38,7 @@ pub(super) async fn create_policy(
     tokio::time::timeout(deadline(), async {
         let hash = client.send_native_tx(&raw).await.unwrap();
         let receipt = client.wait_for_receipt(hash, POLL, 600).await.unwrap();
-        assert_eq!(receipt.status, 1);
+        assert!(receipt.success);
         receipt
     })
     .await

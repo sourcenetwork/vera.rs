@@ -23,7 +23,7 @@ use alloy_primitives::{Address, B256, FixedBytes, U256};
 use alloy_sol_types::{SolCall, SolEvent};
 
 use tokio::sync::Mutex;
-use vera_client::{ACP_ADDRESS, NativeReceipt, VALIDATOR_REGISTRY_ADDRESS, VeraClient};
+use vera_client::{ACP_ADDRESS, TransactionReceipt, VALIDATOR_REGISTRY_ADDRESS, VeraClient};
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, TestCluster, ValidatorConfig};
 use vera_modules::acp::abi::IAcp;
 use vera_modules::validator_registry::abi::IValidatorRegistry;
@@ -80,7 +80,7 @@ async fn broadcast_native_tx(
     signer: &BlsSigner,
     target: Address,
     calldata: Vec<u8>,
-) -> NativeReceipt {
+) -> TransactionReceipt {
     broadcast::native(cluster, client, signer, target, calldata).await
 }
 
@@ -190,7 +190,7 @@ async fn validator_bootstrap() {
     .abi_encode();
     let receipt =
         broadcast_native_tx(&cluster, &client, &admin_signer, ACP_ADDRESS, calldata).await;
-    assert_eq!(receipt.status, 1, "createPolicy should succeed");
+    assert!(receipt.success, "createPolicy should succeed");
     assert_eq!(
         receipt.logs[0].topics[0],
         IAcp::PolicyCreated::SIGNATURE_HASH,
@@ -214,7 +214,7 @@ async fn validator_bootstrap() {
     .abi_encode();
     let receipt =
         broadcast_native_tx(&cluster, &client, &admin_signer, ACP_ADDRESS, calldata).await;
-    assert_eq!(receipt.status, 1, "registerObject should succeed");
+    assert!(receipt.success, "registerObject should succeed");
 
     // ACP3: Set admin relationship for the signer
     let admin_did = admin_signer.did().to_owned();
@@ -228,7 +228,7 @@ async fn validator_bootstrap() {
     .abi_encode();
     let receipt =
         broadcast_native_tx(&cluster, &client, &admin_signer, ACP_ADDRESS, calldata).await;
-    assert_eq!(receipt.status, 1, "setRelationship should succeed");
+    assert!(receipt.success, "setRelationship should succeed");
 
     // ACP4: Set the policy on the ValidatorRegistry
     let signed = administration::approve(
@@ -244,7 +244,7 @@ async fn validator_bootstrap() {
         )
         .await
         .expect("initialize membership policy");
-    assert_eq!(receipt.status, 1);
+    assert!(receipt.success);
 
     // ── B: Add a new validator via a native request ───────────────
 
@@ -264,7 +264,7 @@ async fn validator_bootstrap() {
         calldata,
     )
     .await;
-    assert_eq!(receipt.status, 1, "addValidator should succeed");
+    assert!(receipt.success, "addValidator should succeed");
     assert!(
         !receipt.logs.is_empty(),
         "addValidator should emit ValidatorAdded"
@@ -304,7 +304,7 @@ async fn validator_bootstrap() {
         calldata,
     )
     .await;
-    assert_eq!(receipt.status, 1, "setValidatorStatus should succeed");
+    assert!(receipt.success, "setValidatorStatus should succeed");
     assert_eq!(
         receipt.logs[0].topics[0],
         IValidatorRegistry::ValidatorStatusChanged::SIGNATURE_HASH,
@@ -336,7 +336,7 @@ async fn validator_bootstrap() {
         calldata,
     )
     .await;
-    assert_eq!(receipt.status, 1, "reactivation should succeed");
+    assert!(receipt.success, "reactivation should succeed");
 
     let calldata = IValidatorRegistry::getActiveValidatorCountCall {}.abi_encode();
     let result = registry_view(&client, &admin_signer, calldata).await;
@@ -363,7 +363,7 @@ async fn validator_bootstrap() {
         calldata,
     )
     .await;
-    assert_eq!(receipt.status, 1, "removeValidator should succeed");
+    assert!(receipt.success, "removeValidator should succeed");
     assert_eq!(
         receipt.logs[0].topics[0],
         IValidatorRegistry::ValidatorRemoved::SIGNATURE_HASH,
@@ -392,7 +392,7 @@ async fn validator_bootstrap() {
         node1_receipt.transaction_hash, receipt.transaction_hash,
         "node 1 should confirm the same removal transaction"
     );
-    assert_eq!(node1_receipt.status, 1, "removal should succeed on node 1");
+    assert!(node1_receipt.success, "removal should succeed on node 1");
     assert_eq!(
         node1_receipt.block_hash, receipt.block_hash,
         "removal block should match across nodes"
@@ -473,8 +473,8 @@ async fn validator_registry_adversarial() {
         calldata,
     )
     .await;
-    assert_eq!(
-        receipt.status, 0,
+    assert!(
+        !receipt.success,
         "N1: addValidator without policy should revert"
     );
 
@@ -492,10 +492,7 @@ async fn validator_registry_adversarial() {
         calldata,
     )
     .await;
-    assert_eq!(
-        receipt.status, 0,
-        "N2: setPolicy with zero ID should revert"
-    );
+    assert!(!receipt.success, "N2: setPolicy with zero ID should revert");
 
     // ── Set up ACP policy (required for remaining tests) ────────
 
@@ -507,7 +504,7 @@ async fn validator_registry_adversarial() {
     .abi_encode();
     let receipt =
         broadcast_native_tx(&cluster, &client, &admin_signer, ACP_ADDRESS, calldata).await;
-    assert_eq!(receipt.status, 1, "createPolicy should succeed");
+    assert!(receipt.success, "createPolicy should succeed");
 
     let policy_ids = client
         .get_policy_ids()
@@ -523,7 +520,7 @@ async fn validator_registry_adversarial() {
     .abi_encode();
     let receipt =
         broadcast_native_tx(&cluster, &client, &admin_signer, ACP_ADDRESS, calldata).await;
-    assert_eq!(receipt.status, 1, "registerObject should succeed");
+    assert!(receipt.success, "registerObject should succeed");
 
     let calldata = IAcp::setRelationshipCall {
         policyId: policy_id,
@@ -535,7 +532,7 @@ async fn validator_registry_adversarial() {
     .abi_encode();
     let receipt =
         broadcast_native_tx(&cluster, &client, &admin_signer, ACP_ADDRESS, calldata).await;
-    assert_eq!(receipt.status, 1, "setRelationship should succeed");
+    assert!(receipt.success, "setRelationship should succeed");
 
     let signed = administration::approve(
         &client,
@@ -550,7 +547,7 @@ async fn validator_registry_adversarial() {
         )
         .await
         .expect("initialize membership policy");
-    assert_eq!(receipt.status, 1);
+    assert!(receipt.success);
 
     // ── N3: setPolicy again → revert (immutable) ────────────────
 
@@ -566,7 +563,7 @@ async fn validator_registry_adversarial() {
         calldata,
     )
     .await;
-    assert_eq!(receipt.status, 0, "N3: setPolicy twice should revert");
+    assert!(!receipt.success, "N3: setPolicy twice should revert");
     let repeated = administration::approve(
         &client,
         AdministrativeCommand::InitializeMembershipPolicy(policy_id.0),
@@ -600,8 +597,8 @@ async fn validator_registry_adversarial() {
         calldata,
     )
     .await;
-    assert_eq!(
-        receipt.status, 0,
+    assert!(
+        !receipt.success,
         "N4: addValidator from unauthorized caller should revert"
     );
 
@@ -621,8 +618,8 @@ async fn validator_registry_adversarial() {
         calldata,
     )
     .await;
-    assert_eq!(
-        receipt.status, 0,
+    assert!(
+        !receipt.success,
         "N5: addValidator with zero address should revert"
     );
 
@@ -644,8 +641,8 @@ async fn validator_registry_adversarial() {
         calldata,
     )
     .await;
-    assert_eq!(
-        receipt.status, 0,
+    assert!(
+        !receipt.success,
         "N6: addValidator with zero consensus key should revert"
     );
 
@@ -667,8 +664,8 @@ async fn validator_registry_adversarial() {
         calldata,
     )
     .await;
-    assert_eq!(
-        receipt.status, 0,
+    assert!(
+        !receipt.success,
         "N7: addValidator with invalid p2p should revert"
     );
 
@@ -690,8 +687,8 @@ async fn validator_registry_adversarial() {
         calldata,
     )
     .await;
-    assert_eq!(
-        receipt.status, 0,
+    assert!(
+        !receipt.success,
         "N8: addValidator with oversized p2p should revert"
     );
 
@@ -711,7 +708,7 @@ async fn validator_registry_adversarial() {
         calldata,
     )
     .await;
-    assert_eq!(receipt.status, 1, "addValidator should succeed");
+    assert!(receipt.success, "addValidator should succeed");
 
     // ── N9: Duplicate addValidator → revert ─────────────────────
 
@@ -729,10 +726,7 @@ async fn validator_registry_adversarial() {
         calldata,
     )
     .await;
-    assert_eq!(
-        receipt.status, 0,
-        "N9: duplicate addValidator should revert"
-    );
+    assert!(!receipt.success, "N9: duplicate addValidator should revert");
 
     // ── N10: removeValidator for non-existent address → revert ──
 
@@ -748,8 +742,8 @@ async fn validator_registry_adversarial() {
         calldata,
     )
     .await;
-    assert_eq!(
-        receipt.status, 0,
+    assert!(
+        !receipt.success,
         "N10: removeValidator for non-existent should revert"
     );
 
@@ -768,8 +762,8 @@ async fn validator_registry_adversarial() {
         calldata,
     )
     .await;
-    assert_eq!(
-        receipt.status, 0,
+    assert!(
+        !receipt.success,
         "N11: setValidatorStatusByIndex out of bounds should revert"
     );
 
@@ -787,8 +781,8 @@ async fn validator_registry_adversarial() {
         calldata,
     )
     .await;
-    assert_eq!(
-        receipt.status, 0,
+    assert!(
+        !receipt.success,
         "N12: updateP2PAddress from a non-validator should revert"
     );
 
@@ -807,8 +801,8 @@ async fn validator_registry_adversarial() {
         calldata,
     )
     .await;
-    assert_eq!(
-        receipt.status, 0,
+    assert!(
+        !receipt.success,
         "N14: setValidatorStatus for non-existent should revert"
     );
 

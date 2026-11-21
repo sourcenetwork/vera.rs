@@ -11,14 +11,14 @@ use commonware_runtime::{Clock, Spawner};
 use tokio::sync::Mutex;
 use tracing::{debug, trace, warn};
 use vera_consensus::{Mempool as _, TxId, components::InMemoryMempool};
-use vera_domain::{NativeTx, Tx};
+use vera_domain::Tx;
 use vera_executor::MempoolValidator;
 use vera_jsonrpc::TxSubmitError;
 use vera_modules::native_account::NativeNonceStore;
 
-use crate::{CommittedState, tx_admission::Admission};
+use crate::tx_admission::Admission;
 
-/// Admission state over committed state, bound once the databases are open.
+/// Admission state, bound once the committed sequences are loaded.
 pub type SharedValidator = Arc<OnceLock<Mutex<Admission>>>;
 
 /// Admits transactions locally and forwards them to peers.
@@ -79,15 +79,8 @@ async fn admit_identified(
     if mempool.contains(&id) {
         return Ok(None);
     }
-    let is_native = !bytes.is_empty() && NativeTx::is_native_tx(bytes[0]);
-    let pre = if is_native {
-        Some(
-            MempoolValidator::<CommittedState>::pre_validate_native(chain_id, &bytes)
-                .map_err(|error| TxSubmitError::Rejected(error.to_string()))?,
-        )
-    } else {
-        None
-    };
+    let pre = MempoolValidator::pre_validate_native(chain_id, &bytes)
+        .map_err(|error| TxSubmitError::Rejected(error.to_string()))?;
     let mut guard = validator.lock().await;
     if mempool.contains(&id) {
         return Ok(None);
@@ -96,11 +89,10 @@ async fn admit_identified(
         return Err(TxSubmitError::AtCapacity);
     }
     guard
-        .reserve(pre.as_ref(), &bytes)
-        .await
+        .reserve(&pre)
         .map_err(|error| TxSubmitError::Rejected(error.to_string()))?;
     let inserted = mempool.insert_with_id(id, tx);
-    if inserted && let Some(pre) = pre {
+    if inserted {
         guard.remember(id, pre);
     }
     Ok(inserted.then_some(id))
@@ -167,34 +159,18 @@ impl<S: Sender, E: Clock> TxGossip<S, E> {
     }
 }
 
-/// Reset the validator against fresh committed state after a finalized block
+/// Reset the validator to the committed sequences after a finalized block
 /// and evict transactions that no longer validate.
 pub(crate) async fn recheck(
     mempool: &InMemoryMempool,
     validator: &SharedValidator,
-    state: CommittedState,
     nonces: NativeNonceStore,
 ) {
     let Some(validator) = validator.get() else {
         return;
     };
     let mut guard = validator.lock().await;
-    let evict = guard.recheck(state, nonces, &mempool.pending()).await;
-    if !evict.is_empty() {
-        debug!(count = evict.len(), "evicted stale transactions");
-        mempool.prune(&evict);
-    }
-}
-
-/// Release what admission reserved for requests the proposer dropped from
-/// the pool, so their senders are not held to a nonce that will never be used
-/// until the next finalized block.
-pub(crate) async fn release(mempool: &InMemoryMempool, validator: &SharedValidator) {
-    let Some(validator) = validator.get() else {
-        return;
-    };
-    let mut guard = validator.lock().await;
-    let evict = guard.release_evm(&mempool.pending()).await;
+    let evict = guard.recheck(nonces, &mempool.pending());
     if !evict.is_empty() {
         debug!(count = evict.len(), "evicted stale transactions");
         mempool.prune(&evict);

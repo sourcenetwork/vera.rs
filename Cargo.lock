@@ -7026,8 +7026,6 @@ dependencies = [
 name = "vera-client"
 version = "0.1.2"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
  "alloy-primitives",
  "alloy-signer",
  "alloy-signer-local",
@@ -7054,10 +7052,8 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "vera-acp",
  "vera-crypto",
  "vera-domain",
- "vera-identity",
  "vera-modules",
  "vera-permission",
  "zeroize",
@@ -7183,10 +7179,7 @@ name = "vera-executor"
 version = "0.1.2"
 dependencies = [
  "alloy-consensus",
- "alloy-eips",
  "alloy-primitives",
- "alloy-signer",
- "alloy-signer-local",
  "alloy-sol-types",
  "ark-bls12-381 0.4.0",
  "ark-ec 0.4.2",
@@ -7297,7 +7290,6 @@ dependencies = [
  "commonware-cryptography",
  "commonware-glue",
  "commonware-runtime",
- "hex",
  "jsonrpsee",
  "jsonrpsee-server",
  "nuclei",

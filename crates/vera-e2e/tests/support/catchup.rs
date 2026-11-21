@@ -347,7 +347,7 @@ async fn recover_replica_from(
             .await
             .unwrap(),
     );
-    assert!(receipts.iter().all(|receipt| receipt.status == 1));
+    assert!(receipts.iter().all(|receipt| receipt.success));
     let (target, allowed) = current_access(
         &origin,
         &policies[0],
@@ -544,7 +544,7 @@ async fn recover_replica_from(
         )
         .await
         .unwrap();
-    assert_eq!(subsequent.status, 1);
+    assert!(subsequent.success);
     origin
         .wait_for_receipt(subsequent.transaction_hash, POLL, 900)
         .await

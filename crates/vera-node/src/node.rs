@@ -367,7 +367,6 @@ pub async fn run_node_with_options(
     let executor = VeraExecutor::new(chain_id)
         .with_membership_epochs(blocks_per_epoch, term_length)
         .with_native_verification_strategy(verification_strategy.clone());
-    let executor_spec = executor.spec_id();
     #[cfg(feature = "fault-injection")]
     let executor = executor.with_crash_marker(config.data_dir.join("module-commit-crash"));
     let modules = executor.modules().clone();
@@ -717,8 +716,6 @@ pub async fn run_node_with_options(
     if let Some(height) = completed_sync_height {
         node_state.set_snapshot_revision(height.get());
     }
-    let (heads_tx, _) = ::tokio::sync::broadcast::channel(64);
-    let (logs_tx, _) = ::tokio::sync::broadcast::channel(256);
     let (headers_tx, _) = ::tokio::sync::broadcast::channel(64);
 
     let validator: SharedValidator = Arc::new(OnceLock::new());
@@ -757,8 +754,6 @@ pub async fn run_node_with_options(
         history: history.clone(),
         index: block_index.clone(),
         light_index: light_block_index.clone(),
-        heads: heads_tx.clone(),
-        logs: logs_tx.clone(),
         headers: headers_tx.clone(),
         node_state: node_state.clone(),
         finalization_lookup: finalization_lookup.clone(),
@@ -1214,16 +1209,12 @@ pub async fn run_node_with_options(
     let native_databases = databases.native_databases();
     let state_set = databases.execution_databases();
     let committed_state = CommittedState::new(state_set.clone());
-    sink.attach_state(state_set.clone());
     {
         // Hold the module read lock through publication so finalization cannot
         // advance nonces between loading them and enabling admission.
         let recovered_modules = modules.read().expect("module state lock poisoned");
-        let mut admission =
-            MempoolValidator::new(committed_state.clone(), ExecutionConfig::new(chain_id), 0)
-                .with_native_only(true)
-                .with_block_gas_limit(gas_limit);
-        admission.reset(committed_state.clone(), recovered_modules.nonces.clone());
+        let mut admission = MempoolValidator::new(ExecutionConfig::new(chain_id));
+        admission.reset(recovered_modules.nonces.clone());
         let _ = validator.set(::tokio::sync::Mutex::new(Admission::new(admission)));
     }
     application_ready.send_replace(true);
@@ -1289,7 +1280,7 @@ pub async fn run_node_with_options(
                 gas_used,
             );
             if let vera_indexer::IndexQuery::Submission(hash) = query
-                && (index.get_receipt(&hash).is_none() || index.get_transaction(&hash).is_none())
+                && index.get_receipt(&hash).is_none()
             {
                 return Err(vera_jsonrpc::RpcError::StateError(
                     "historical submission cannot be indexed".into(),
@@ -1301,13 +1292,10 @@ pub async fn run_node_with_options(
     let state_provider = IndexedStateProvider::new(
         block_index.clone(),
         committed_state,
-        chain_id,
-        executor_spec,
+        execution_config,
         gas_limit,
         modules.clone(),
-    )
-    .with_execution_config(execution_config)
-    .with_archive(archive.clone());
+    );
     if crate::diagnostics::enabled() {
         let history = history.clone();
         let index = block_index.clone();
@@ -1376,10 +1364,9 @@ pub async fn run_node_with_options(
         () = crate::replay::replayed(&block_index, stored, crate::replay::LIMIT) => {}
     }
 
-    let rpc_server = RpcServer::with_state_provider(node_state, rpc_addr, chain_id, state_provider)
+    let rpc_server = RpcServer::with_state_provider(node_state, rpc_addr, state_provider)
         .with_max_connections(config.rpc.max_connections.get())
         .with_tx_submit(tx_submit)
-        .with_subscriptions(heads_tx, logs_tx)
         .with_headers_subscription(headers_tx)
         .with_vera_index_and_modules(block_index, modules.clone())
         .with_vera_native_modules(native_databases, modules)

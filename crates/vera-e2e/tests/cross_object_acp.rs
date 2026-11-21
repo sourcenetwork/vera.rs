@@ -102,7 +102,7 @@ async fn cross_object_grant_replicates_across_nodes() {
     }
     .abi_encode();
     let create_receipt = broadcast::native(&cluster, &client, &signer, ACP_ADDRESS, create).await;
-    assert_eq!(create_receipt.status, 1, "createPolicy should succeed");
+    assert!(create_receipt.success, "createPolicy should succeed");
 
     let policy_ids = client
         .get_policy_ids()
@@ -119,7 +119,7 @@ async fn cross_object_grant_replicates_across_nodes() {
         }
         .abi_encode();
         let receipt = broadcast::native(&cluster, &client, &signer, ACP_ADDRESS, register).await;
-        assert_eq!(receipt.status, 1, "register {resource}/{object_id}");
+        assert!(receipt.success, "register {resource}/{object_id}");
     }
 
     // ── 2. Seed the parent edge via setRelationshipSubject ───────────────
@@ -139,8 +139,8 @@ async fn cross_object_grant_replicates_across_nodes() {
     .abi_encode();
     let parent_receipt =
         broadcast::native(&cluster, &client, &signer, ACP_ADDRESS, parent_calldata).await;
-    assert_eq!(
-        parent_receipt.status, 1,
+    assert!(
+        parent_receipt.success,
         "setting the userset parent edge should succeed"
     );
 
@@ -154,7 +154,7 @@ async fn cross_object_grant_replicates_across_nodes() {
     }
     .abi_encode();
     let grant_receipt = broadcast::native(&cluster, &client, &signer, ACP_ADDRESS, grant).await;
-    assert_eq!(grant_receipt.status, 1, "child grant should succeed");
+    assert!(grant_receipt.success, "child grant should succeed");
 
     // ── 4. Converge, then verify replication on BOTH nodes ───────────────
     let max_block = create_receipt
@@ -244,8 +244,8 @@ async fn cross_object_grant_replicates_across_nodes() {
     .abi_encode();
     let revoke_receipt =
         broadcast::native(&cluster, &client, &signer, ACP_ADDRESS, revoke_calldata).await;
-    assert_eq!(
-        revoke_receipt.status, 1,
+    assert!(
+        revoke_receipt.success,
         "revoking the parent edge should succeed"
     );
 
