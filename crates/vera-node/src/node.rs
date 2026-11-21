@@ -805,6 +805,7 @@ pub async fn run_node_with_options(
         || (leader_timeout / 4).min(Duration::from_millis(100)),
         |pacing| pacing.batch,
     ))
+    .with_settled_batch_wait(solo_pacing.map(|pacing| pacing.settled))
     .with_timestamp_step(
         genesis
             .timestamp_step_secs

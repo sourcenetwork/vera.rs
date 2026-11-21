@@ -72,16 +72,26 @@ pub(crate) fn default_verification_threads() -> std::num::NonZeroUsize {
 pub struct SoloPacing {
     /// Longest wait for a first request before proposing an empty block.
     pub idle: std::time::Duration,
-    /// Window for collecting further requests once one has arrived.
+    /// Window for collecting further requests once one has arrived while an
+    /// earlier block is still being finalized.
     pub batch: std::time::Duration,
+    /// Window for collecting further requests once one has arrived with every
+    /// earlier block finalized.
+    pub settled: std::time::Duration,
 }
 
 impl SoloPacing {
-    /// Default batching window.
+    /// Default batching window behind a block in flight.
     ///
-    /// Shorter windows propose empty blocks faster than they are durably committed,
+    /// Shorter windows propose blocks faster than they are durably committed,
     /// which delays the receipts of real requests. See `docs/embedded-node.md`.
     pub const BATCH: std::time::Duration = std::time::Duration::from_millis(50);
+
+    /// Default batching window with no block in flight.
+    ///
+    /// There is no earlier block to wait for, only requests sent together
+    /// with the first one. See `docs/embedded-node.md`.
+    pub const SETTLED: std::time::Duration = std::time::Duration::from_millis(8);
 }
 
 impl NodeOptions {

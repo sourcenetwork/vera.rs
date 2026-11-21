@@ -40,6 +40,7 @@ pub struct StatefulVeraApp<S: FinalizedSink, D: ApplicationState = OrderedState>
     gas_limit: u64,
     participant_addresses: Arc<Vec<(PublicKey, Address)>>,
     proposal_batch_wait: std::time::Duration,
+    settled_batch_wait: Option<std::time::Duration>,
     timestamp_step: u64,
     term: crate::TermGuard,
 }
@@ -77,6 +78,7 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
             gas_limit,
             participant_addresses: Arc::new(Vec::new()),
             proposal_batch_wait: std::time::Duration::ZERO,
+            settled_batch_wait: None,
             timestamp_step: MAX_TIMESTAMP_STEP_SECS,
             term: crate::TermGuard::default(),
         }
@@ -106,6 +108,16 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
     #[must_use]
     pub const fn with_proposal_batch_wait(mut self, batch_wait: std::time::Duration) -> Self {
         self.proposal_batch_wait = batch_wait;
+        self
+    }
+
+    /// Collect requests for `wait` instead of the batch window when the parent is finalized.
+    ///
+    /// For a lone validator, a request that finds every block finalized has
+    /// no block in flight to wait for, only requests sent with it.
+    #[must_use]
+    pub const fn with_settled_batch_wait(mut self, wait: Option<std::time::Duration>) -> Self {
+        self.settled_batch_wait = wait;
         self
     }
 
@@ -253,9 +265,13 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         let excluded = Self::pending_tx_ids(&pending);
         // The actor processes finalization only between builds, so a proposer
         // that idles waits before its request reaches the actor, not here.
+        let batch_wait = match self.settled_batch_wait {
+            Some(wait) if parent.height <= finalized_height => wait,
+            _ => self.proposal_batch_wait,
+        };
         let mut txs = input
             .provider
-            .build_block_wait(self.max_txs, &excluded, self.proposal_batch_wait)
+            .build_block_wait(self.max_txs, &excluded, batch_wait)
             .await;
         txs.retain(Tx::is_native);
 

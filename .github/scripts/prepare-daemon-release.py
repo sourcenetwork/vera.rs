@@ -69,7 +69,7 @@ def prepare(root, source, tag, first, second, destination):
         'Linux x86-64 daemon with Regolith history. The archive includes the executable '
         'and its build provenance. Verify SHA256SUMS before extracting. '
         'release.json records the two clean-build comparison.\n\n'
-        'Client and verifier crates are published separately by the maintainer.\n\n'
+        'Client crates are published separately by the maintainer.\n\n'
         'Four-host WAN qualification and qualification of the selected Orbis '
         'service version remain outstanding. A validator that state syncs past '
         'the epoch midpoint sits out that epoch\'s resharing, reducing the '

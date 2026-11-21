@@ -70,7 +70,7 @@ def plan(metadata, config, readme=None):
     for root in sorted(config['roots']):
         visit(root)
     for name in sorted(visited ^ permitted):
-        refuse('release_closure', name, 'declared allowlist differs from the client/verifier dependency closure')
+        refuse('release_closure', name, 'declared allowlist differs from the client dependency closure')
     versions = {workspace[name]['version'] for name in visited}
     if len(versions) != 1:
         refuse('release_version', 'workspace', 'release packages must have one version')

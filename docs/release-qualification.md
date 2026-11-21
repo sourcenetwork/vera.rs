@@ -2,9 +2,9 @@
 
 This record covers native ACP v1, bulletin, identity and operator-managed
 membership on pipelined Simplex, with QMDB authenticated state and synchronous
-Regolith history. Trust is a separate Go gateway; Orbis provides the separate
-application threshold protocols. The first-release scope below separates package
-publication from the later [four-host WAN qualification](wan-gates.md).
+Regolith history. Orbis provides the separate application threshold protocols.
+The first-release scope below separates package publication from the later
+[four-host WAN qualification](wan-gates.md).
 
 ## First release: crates and daemon artifacts
 
@@ -21,17 +21,17 @@ packaging them must not require merging the entire Orbis service stack. Consumer
 qualification records must identify actual source revisions rather than assume
 that a passing branch has reached a repository's default branch.
 
-Versions 0.1.0 to 0.1.2 are tagged, and the nine packaged crates are published
-on crates.io at 0.1.2, with prerelease daemon assets for v0.1.1 and v0.1.2. The
+Versions 0.1.0 to 0.1.2 are tagged, and the nine crates packaged at the time are
+published on crates.io at 0.1.2, with prerelease daemon assets for v0.1.1 and v0.1.2. The
 gates below were the first-release requirements, and every later release
 repeats them for its own candidate:
 
 | Gate | Required result |
 | --- | --- |
 | Official Commonware source | Qualify the official `2026.10.0` registry release, including its upstream archive, synchronization and DKG boundary changes, against the selected Vera candidate. |
-| Publishable crates | Version every packaged dependency, complete package metadata and verify the registry dependency graph without workspace patches. The nine-crate client/verifier closure has explicit publication boundaries, versioned internal dependencies and package metadata. `orbis-reporting` 0.0.3 is published and selected from the registry. |
+| Publishable crates | Version every packaged dependency, complete package metadata and verify the registry dependency graph without workspace patches. The eight-crate client closure has explicit publication boundaries, versioned internal dependencies and package metadata. `orbis-reporting` 0.0.3 is published and selected from the registry. |
 | Release automation | Validate versions and packages and produce tagged daemon assets with checksums and provenance from the same commit. The release workflow builds and compares two clean daemon artifacts and creates a draft GitHub release for an existing matching version tag. Keep crate uploads manual; CI needs no crates.io publishing credentials. |
-| Candidate validation | Run focused native authorization, membership, receipt and recovery checks affected by the dependency change. Verify the packaged client/verifier from a clean registry consumer, independent trust configuration, and the chosen daemon artifact. Reuse earlier source-bound evidence for unchanged code. |
+| Candidate validation | Run focused native authorization, membership, receipt and recovery checks affected by the dependency change. Verify the packaged client from a clean registry consumer, independent trust configuration, and the chosen daemon artifact. Reuse earlier source-bound evidence for unchanged code. |
 | Publication handoff | Record exact source, versions, dependencies, target and limitations. Provide package checksums and dependency-ordered commands for the maintainer to publish manually, followed by registry installation and download checks. Crate uploads belong to the maintainer, not the automated workflow. |
 
 The candidate selects official Commonware `2026.10.0` registry packages and
@@ -41,8 +41,8 @@ below remain requirements for the maintainer's later crates.io publication.
 See [Git SDK access](manual-release.md#current-git-sdk-access).
 
 The workspace version names the release candidate; `0.1.0` was the first.
-The approved packaging scope is `vera-client`, `vera-verifier` and their seven
-required Vera libraries, plus daemon binaries. An installable `verad` crate, test
+The approved packaging scope is `vera-client` and its seven required Vera
+libraries, plus daemon binaries. An installable `verad` crate, test
 harnesses and development tools are outside the published set.
 Crates.io cannot reproduce Git-only or path-only dependencies from this checkout;
 adding version strings alone does not establish that the registry packages have
@@ -79,7 +79,7 @@ python3 .github/scripts/release-packages.py check
 ```
 
 `plan` records dependency order and unresolved blockers for review. `check` fails
-unless the complete client/verifier closure has matching package versions,
+unless the complete client closure has matching package versions,
 explicit publication settings, complete metadata and registry-sourced runtime
 dependencies. Neither command uploads crates. CI retains the plan; a green
 metadata-report job does not mean `ready` is true.
@@ -163,44 +163,6 @@ acknowledged-operation loss was reproduced in those recorded follow-ups.
 
 ## Consumer compatibility
 
-### Trust candidate checkpoint
-
-On a macOS arm64 host, Vera `3473e34e58668ae344df1f49b175450f559564c5`
-passed `native_go_workers_verify_policy_creation` and
-`native_go_gateway_verifies_pipelined_vera` against Trust API
-`be7d44749a33bdd81f646f9b7815dcad892b09cc`. The first selector used rotating
-consensus; the second used pipelined consensus and the Trust gateway fixture.
-Both ran four local validators and the Trust test binaries built with Go 1.26.9
-and the candidate's shared verifier, built with Rust 1.99.1. They exercised signed
-native policy commands, worker keys, verified reads and the gateway contract.
-
-The debug daemon SHA-256 was
-`bfdcbc2ef253831188f9d0bbc5b289a71f2925bcbea1abe31fc0d3642999a997`;
-the shared verifier SHA-256 was
-`f846e95c16a77a50f95ad26b3b3b0e4a64d4e0b38a0b9a51cb1913de3ac65df2`.
-The Trust client and gateway test binary hashes were
-`857a3f5e03c6875f62655faccd8161f34fd0c2ffb01263c6012e24192983c01e` and
-`ed9870fc0268f65641a39fd70ddb80482fcdbd859f7a014ca6574ab047cf52a8`,
-respectively. These are local test artifacts, not release builds. The gateway
-fixture did not use the Rust Defra sidecar, external gateway process, or Docker
-Orbis nodes. It does not replace the final release-set qualification.
-
-After the zstd update, the pipelined selector also passed against Vera
-`51e2ea9f86fed0c86e88f68e37e62464dc130cee`, Trust
-`be7d44749a33bdd81f646f9b7815dcad892b09cc`, and Defra
-`f0304032367a93a75aaad45903fa5bc31a3f8624` on macOS arm64. It used the
-current Rust Defra CLI as the remote identity-store sidecar, with node access
-control enabled, and exercised the shared-store gateway configuration. The Defra
-CLI was built without its `vera` feature; this checkpoint does not qualify
-Defra's direct Vera authorization integration or Orbis containers.
-
-The debug daemon, verifier and Defra sidecar SHA-256 values were, respectively,
-`c4333192d669a8ead0ae9ad2ad7213e09b069d2aaa7a5b9d5f0145d6f601814f`,
-`29b87ab7be998ff12d4f997d1802d897802b6cb1d4b582cc320cca095edc283d`, and
-`ce6ae72bb6a81486a1eda25319df8f41a7df631f8a9cef7ad279d22e8d1f9dcd`.
-The same Trust test binaries and toolchains listed above were used. These are
-local test artifacts, not release binaries.
-
 ### Earlier checkpoints
 
 The [consumer qualification record](native-qualification-20261014.md#native-consumer-checks)
@@ -220,6 +182,9 @@ changes still await merging; these are tested revisions, not a claim that every
 repository's main branch was tested together. Proposal receipt ownership and the
 TLS patch do not change the native request encoding, policy/proof schema or
 independent trust provisioning.
+
+The Trust row is a past record only. Vera no longer builds a verifier library
+for the Go gateway or runs its tests, and releases do not qualify it.
 
 ## Security and release inputs
 

@@ -172,6 +172,7 @@ fn a_backup_takes_over_past_the_certificate_of_a_block_it_never_received() {
     quiet.pacing = Some(vera_node::SoloPacing {
         idle: vera_node::EmbeddedConfig::HEARTBEAT,
         batch: vera_node::SoloPacing::BATCH,
+        settled: vera_node::SoloPacing::SETTLED,
     });
     let phone = block_on(EmbeddedNode::start(quiet)).unwrap();
     let again = finalize_a_write(&phone, &other);
