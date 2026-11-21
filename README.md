@@ -41,7 +41,7 @@ The repository pins Rust 1.99.1. Build the service with:
 cargo +1.99.1 build --frozen -p verad
 ```
 
-See [CLAUDE.md](CLAUDE.md) for implementation structure and development conventions.
+See [AGENTS.md](AGENTS.md) for implementation structure and development conventions.
 
 ## Qualification status
 
