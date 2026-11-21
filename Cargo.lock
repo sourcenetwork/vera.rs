@@ -7443,12 +7443,9 @@ name = "vera-test-infra"
 version = "0.1.2"
 dependencies = [
  "eyre",
- "futures",
  "libc",
  "rand 0.8.8",
- "regex",
  "serde",
- "tokio",
  "toml 0.8.23",
  "tracing",
 ]

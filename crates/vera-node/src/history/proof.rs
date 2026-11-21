@@ -22,7 +22,7 @@ impl FinalizedHistory {
         head: u64,
         batch: &mut WriteBatch,
     ) -> Result<()> {
-        if self.db.get(FORMAT)?.as_deref() != Some(&[3]) {
+        if self.db.get(FORMAT)?.as_deref() != Some(FORMAT_IMPORTED.as_slice()) {
             return Ok(());
         }
         let mut remaining = LIGHT_BLOCK_MAX_ARTIFACT_BYTES;

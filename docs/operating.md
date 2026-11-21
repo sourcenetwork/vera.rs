@@ -226,9 +226,8 @@ media failure or power-loss behavior. Those require deployment-specific validati
   than marking the candidate invalid. Inspect and repair the local storage before
   restarting. Other execution errors still require separate classification.
 
-Do not delete `history/` or the genesis record to "reset" a node: existing
-JMT directories or a missing genesis record alongside finalized history are
-rejected. Restore a complete compatible backup or use authenticated recovery.
+Do not delete `history/` or the genesis record to "reset" a node: a missing
+genesis record alongside finalized history is rejected. Restore a complete compatible backup or use authenticated recovery.
 
 ## Configuration knobs operators own
 

@@ -108,7 +108,7 @@ async fn authenticated_reverse_import_resumes_and_requires_matching_state_recove
         assert!(target.begin_import(&light, &wrong_key).is_err());
         assert!(target.db.get(IMPORT).unwrap().is_none());
         target.begin_import(&light, &trusted).unwrap();
-        assert_eq!(target.db.get(FORMAT).unwrap().unwrap(), [3]);
+        assert_eq!(target.db.get(FORMAT).unwrap().unwrap(), FORMAT_IMPORTED);
         assert!(target.append(&second, &second_receipts, 100).is_err());
         let mut changed: Record = borsh::from_slice(&third_bytes).unwrap();
         changed.gas_limit += 1;
@@ -350,29 +350,6 @@ async fn imported_descendant_finality_survives_restart_without_advancing_executi
         verify_finalized_block(&target.light_block(3, &epochs).unwrap(), &trusted).unwrap(),
         third
     );
-}
-
-#[test]
-fn previous_format_imports_are_rejected_without_modification() {
-    let dir = tempfile::tempdir().unwrap();
-    let (genesis, _) = revision(0, BlockId(B256::ZERO));
-    {
-        let history = FinalizedHistory::open(dir.path(), &genesis).unwrap();
-        history.db.put(FORMAT, [2]).unwrap();
-        history.db.put(IMPORT, b"old cursor").unwrap();
-    }
-    assert!(
-        FinalizedHistory::open(dir.path(), &genesis)
-            .unwrap_err()
-            .to_string()
-            .contains("previous binary")
-    );
-    {
-        let db = DB::open_default(dir.path(), None).unwrap();
-        assert_eq!(db.get(IMPORT).unwrap().unwrap(), b"old cursor");
-        db.delete(IMPORT).unwrap();
-    }
-    FinalizedHistory::open(dir.path(), &genesis).unwrap();
 }
 
 #[tokio::test]

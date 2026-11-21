@@ -308,8 +308,8 @@ provide historical activity or absence proofs.
 `FinalizedHistory` provides 64 KiB record chunks and a bounded reverse-ancestry
 import API. The import selection and cursor are durable, and imported history
 remains unavailable until recovery at the matching state anchor completes.
-Starting an import selects metadata format 3 to prevent older binaries from
-discarding its unfinished records. The node serves chunks through Commonware's
+Starting an import marks the store as imported, so recovery keeps the blocks
+its certificates need above the anchor. The node serves chunks through Commonware's
 resolver on authenticated channel 16, producing each chunk on the blocking pool,
 two at a time; further requests are dropped and retried by the importer.
 `HistoryPeer::import_next_from` bounds
