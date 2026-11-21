@@ -8,7 +8,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use alloy_primitives::{Address, B256, Bytes};
 use alloy_sol_types::SolCall;
 use vera_client::Secp256k1SigningKey as SigningKey;
-use vera_client::{ACP_ADDRESS, BlsSigner, NativeReceipt, VERA_ADDRESS, VeraClient};
+use vera_client::{
+    ACP_ADDRESS, BlsSigner, NativeReceipt, TokenRevocation, VERA_ADDRESS, VeraClient,
+};
+use vera_crypto::operation::OperationId;
 use vera_e2e::cluster::{ConsensusPreset, TestCluster};
 use vera_modules::{
     acp::abi::IAcp,
@@ -22,9 +25,12 @@ use vera_modules::{
 const OWNER: &str = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const POLL: Duration = Duration::from_millis(50);
 
+fn owner() -> SigningKey {
+    SigningKey::from_slice(&hex::decode(OWNER).unwrap()).unwrap()
+}
+
 fn token(submitter: &str, deployment: u64, now: u64) -> String {
-    let key = SigningKey::from_slice(&hex::decode(OWNER).unwrap()).unwrap();
-    vera_client::create_bearer_token(&key, submitter, deployment, now, now + 300).unwrap()
+    vera_client::create_bearer_token(&owner(), submitter, deployment, now, now + 300).unwrap()
 }
 
 async fn native(client: &VeraClient, signer: &BlsSigner, data: Vec<u8>) -> NativeReceipt {
@@ -199,12 +205,41 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
         assert_eq!(receipt.status, 1);
         revocations.push(receipt.transaction_hash);
     }
+    // The secp256k1 issuer of a used token revokes it through a worker it names.
+    let first: vera_domain::LightBlock = client
+        .rpc_call_typed("vera_getLightBlock", serde_json::json!([1]))
+        .await
+        .unwrap();
+    let genesis = first.parent_hash.parse::<B256>().unwrap().0;
+    let revocation = TokenRevocation::of_token(&creator_bearer);
+    let operation = revocation
+        .sign(
+            &owner(),
+            stranger.did(),
+            9001,
+            genesis,
+            OperationId::new(now + 300, [9; 24]),
+            now,
+        )
+        .unwrap();
+    let receipt = send(
+        &client,
+        &stranger,
+        VERA_ADDRESS,
+        revocation.calldata(&operation),
+    )
+    .await;
+    assert_eq!(receipt.status, 1);
+    revocations.push(receipt.transaction_hash);
+    let issuer = vera_crypto::jwt::verify_bearer_token(&creator_bearer)
+        .unwrap()
+        .iss;
     // Establish the same finalized revocation on the replica before restarting it.
     let replica = VeraClient::new(cluster.node(3).rpc_url());
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             let (found, bytes) = replica
-                .get_jws_token(&hash_jws_token(&unused))
+                .get_jws_token(&hash_jws_token(&creator_bearer))
                 .await
                 .unwrap();
             if found
@@ -228,18 +263,19 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
     for hash in revocations {
         native_receipt::wait(&replica, hash).await;
     }
-    for bearer in [&bearer, &unused] {
+    for (bearer, revoker) in [
+        (&bearer, delegate.did()),
+        (&unused, stranger.did()),
+        (&creator_bearer, issuer.as_str()),
+    ] {
         let (found, bytes) = replica
             .get_jws_token(&hash_jws_token(bearer))
             .await
             .unwrap();
         assert!(found);
-        assert_eq!(
-            serde_json::from_slice::<JWSTokenRecord>(&bytes)
-                .unwrap()
-                .status,
-            JWSTokenStatus::Invalid
-        );
+        let record = serde_json::from_slice::<JWSTokenRecord>(&bytes).unwrap();
+        assert_eq!(record.status, JWSTokenStatus::Invalid);
+        assert_eq!(record.invalidated_by, revoker);
     }
     assert_eq!(
         native(&replica, &delegate, register(policy, &bearer, "revoked"))
@@ -252,6 +288,16 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
             &replica,
             &stranger,
             register(policy, &unused, "revoked-unused")
+        )
+        .await
+        .status,
+        0
+    );
+    assert_eq!(
+        native(
+            &replica,
+            &creator,
+            register(policy, &creator_bearer, "revoked-by-issuer")
         )
         .await
         .status,

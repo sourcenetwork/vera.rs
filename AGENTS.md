@@ -704,6 +704,10 @@ The creation event also retains the submitted artifact label.
 
 Token invalidation events identify the token issuer even when an authorized
 account performs the revocation; the record retains that account in invalidated_by.
+An issuer revokes its own recorded token through any worker it names with
+`invalidateJWSByIssuer`, under an operation it signs with scope
+`vera:token:revoke` and an operation identity; the record then names the issuer
+in invalidated_by. See `docs/token-lifecycle.md#revocation-by-the-issuer`.
 
 Resource snapshots are opt-in with `RUST_LOG=warn,vera_resource_diagnostics=debug`.
 This target leaves per-revision tracing disabled. `vera_diagnostics=debug` selects

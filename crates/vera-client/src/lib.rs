@@ -63,6 +63,8 @@ mod tx;
 mod types;
 pub use policy_id::{PolicyMarshalingType, PolicyNonce, predict_policy_id, random_policy_nonce};
 pub use policy_operation::{PolicyOperation, PolicyOperationLead};
+mod token_revocation;
+pub use token_revocation::TokenRevocation;
 mod unsigned_token;
 mod worker;
 pub use worker::NativeWorker;

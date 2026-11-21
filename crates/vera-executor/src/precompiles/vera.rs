@@ -256,6 +256,33 @@ pub(super) fn dispatch(
                 vec![event_log(VERA_ADDRESS, &event)],
             ))
         }
+        IVera::invalidateJWSByIssuerCall::SELECTOR => {
+            if gas_limit < WRITE_GAS {
+                return Ok(oog_dispatch());
+            }
+            let call = IVera::invalidateJWSByIssuerCall::abi_decode(input).map_err(decode_error)?;
+            did_from_signer(&tx_ctx.signer)?;
+            let record = match module.invalidate_jws_by_issuer(
+                acp,
+                block_ctx,
+                tx_ctx,
+                &call.operation,
+                &call.tokenHash,
+            ) {
+                Ok(record) => record,
+                Err(error) => return Ok(err_dispatch(error)),
+            };
+            let output = IVera::invalidateJWSByIssuerCall::abi_encode_returns(&json_bytes(&record));
+            let event = IVera::JWSTokenInvalidated {
+                tokenHash: alloy_primitives::keccak256(record.token_hash.as_bytes()),
+                issuerDid: record.issuer_did,
+            };
+            Ok(ok_dispatch(
+                WRITE_GAS,
+                output,
+                vec![event_log(VERA_ADDRESS, &event)],
+            ))
+        }
         IVera::invalidateJWSCall::SELECTOR => {
             if gas_limit < WRITE_GAS {
                 return Ok(oog_dispatch());
@@ -378,6 +405,10 @@ fn threshold_object_requires_gas_before_decoding_or_admission() {
         Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
     ));
 }
+
+#[cfg(test)]
+#[path = "vera_issuer_revocation_tests.rs"]
+mod issuer_revocation_tests;
 
 #[cfg(test)]
 mod tests {

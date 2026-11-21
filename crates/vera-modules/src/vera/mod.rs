@@ -9,6 +9,7 @@ pub mod anchors;
 mod delegation;
 /// Vera error types.
 pub mod error;
+mod issuer_revocation;
 /// Key prefixes and builders for Vera KV storage.
 pub mod keys;
 /// Finalized rosters selected for future consensus epochs.
@@ -83,6 +84,8 @@ impl VeraModule {
     /// Invalidate a token by its hash.
     ///
     /// The caller must be the token issuer or the token's authorized account.
+    /// An issuer that does not sign native requests revokes through
+    /// [`Self::invalidate_jws_by_issuer`].
     pub fn invalidate_jws(
         &mut self,
         block_ctx: &BlockExecCtx,

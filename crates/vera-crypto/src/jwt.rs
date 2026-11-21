@@ -43,6 +43,9 @@ pub enum DelegationScope {
     /// Register encrypted documents and signing derivations.
     #[serde(rename = "orbis:object:store")]
     StoreThresholdObject,
+    /// Invalidate one token the actor issued, named by its hash.
+    #[serde(rename = "vera:token:revoke")]
+    RevokeToken,
 }
 
 /// Verified claims extracted from a JWT bearer token.

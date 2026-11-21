@@ -26,6 +26,8 @@ pub enum DelegatedOperation<'a> {
     PolicyCommandList(&'a [(String, PolicyCmd)]),
     /// Policy identifier, target actor and ordered permission operations.
     CheckAccess(&'a str, &'a AccessRequest),
+    /// Hash of the token its issuer invalidates, as the record key spells it.
+    RevokeToken(&'a str),
 }
 
 impl DelegatedOperation<'_> {
@@ -40,6 +42,7 @@ impl DelegatedOperation<'_> {
             Self::CheckAccess(..) => DelegationScope::RecordAccessDecision,
             Self::RingCommand(..) => DelegationScope::ManageRings,
             Self::StoreThresholdObject(..) => DelegationScope::StoreThresholdObject,
+            Self::RevokeToken(..) => DelegationScope::RevokeToken,
         }
     }
 

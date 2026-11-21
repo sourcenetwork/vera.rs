@@ -13,6 +13,9 @@ sol! {
 
         function invalidateJWS(string tokenHash) external;
 
+        /// Invalidate a token for its issuer, under an operation the issuer signed.
+        function invalidateJWSByIssuer(string tokenHash, string operation) external returns (bytes);
+
         function revokeDelegation(string token) external;
 
         function applyAdministration(bytes request) external;

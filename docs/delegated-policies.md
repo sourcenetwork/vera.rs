@@ -47,6 +47,7 @@ The supported scopes are separate:
 | `acp:policy:create` | Create policies owned by the token issuer |
 | `acp:policy:edit` | Edit policies already owned by the token issuer |
 | `acp:access:record` | Record granted access for the requested target actor |
+| `vera:token:revoke` | Invalidate one recorded token the actor issued ([token lifecycle](token-lifecycle.md#revocation-by-the-issuer)) |
 
 `create_bearer_token` retains the existing command scope.
 `create_scoped_bearer_token` accepts `DelegationScope::CreatePolicy` or
@@ -223,8 +224,8 @@ remain separate. The worker and issuer may revoke individual assertions through
 The operation commitment is SHA-256 of `vera/acp-operation/v1\0` followed by
 compact UTF-8 JSON from `DelegatedOperation`. Its externally tagged variants are
 `CreatePolicy: [definition, format]`, `EditPolicy: [policyId, definition, format]`,
-`PolicyCommand: [policyId, command]`, `PolicyCommandList: [[policyId, command], ...]`
-and `CheckAccess: [policyId, request]`. The JSON has no whitespace outside
+`PolicyCommand: [policyId, command]`, `PolicyCommandList: [[policyId, command], ...]`,
+`CheckAccess: [policyId, request]` and `RevokeToken: tokenHash`. The JSON has no whitespace outside
 strings; strings use serde JSON escaping, fields retain declaration order, and
 formats use their enum names such as `ShortYaml`. Graph commands use the typed
 `PolicyCmd` representation. Access requests contain ordered `operations` followed
