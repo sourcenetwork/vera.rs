@@ -125,8 +125,6 @@ pub type NativeStateSet = (
 );
 /// Operation-log targets for the four native namespaces.
 pub type NativeTargets = <NativeStateSet as DatabaseSet<Ctx>>::SyncTargets;
-/// Pending native records based on one parent revision.
-pub type NativeUnmerkleized = <NativeStateSet as DatabaseSet<Ctx>>::Unmerkleized;
 /// Sealed native records with authenticated current-state roots.
 pub type NativeMerkleized = <NativeStateSet as DatabaseSet<Ctx>>::Merkleized;
 /// Configuration for the four ordered partitions.

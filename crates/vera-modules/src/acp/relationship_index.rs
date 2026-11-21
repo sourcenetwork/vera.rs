@@ -17,11 +17,6 @@ pub fn policy_prefix(policy: &str) -> Vec<u8> {
     format!("relation_state/{policy}/").into_bytes()
 }
 
-/// All physical outgoing pair counters for a policy.
-pub fn outgoing_policy_prefix(policy: &str) -> Vec<u8> {
-    format!("relation_state/{policy}/out/").into_bytes()
-}
-
 /// All physical incoming pair counters for a policy.
 pub fn incoming_policy_prefix(policy: &str) -> Vec<u8> {
     format!("relation_state/{policy}/in/").into_bytes()
