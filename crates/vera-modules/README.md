@@ -8,7 +8,7 @@ blocks; it does not run a Vera node.
 
 ```toml
 [dependencies]
-vera-modules = "0.1.2"
+vera-modules = "0.2.0"
 ```
 
 See the [API documentation](https://docs.rs/vera-modules) and

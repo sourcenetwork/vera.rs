@@ -10,7 +10,7 @@ identities.
 
 ```toml
 [dependencies]
-vera-crypto = "0.1.2"
+vera-crypto = "0.2.0"
 ```
 
 See the [API documentation](https://docs.rs/vera-crypto) and

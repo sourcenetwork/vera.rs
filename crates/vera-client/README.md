@@ -8,7 +8,7 @@ of the endpoint when verifying certified responses.
 
 ```toml
 [dependencies]
-vera-client = "0.1.2"
+vera-client = "0.2.0"
 ```
 
 See the [API documentation](https://docs.rs/vera-client) and

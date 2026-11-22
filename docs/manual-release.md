@@ -7,17 +7,11 @@ test harnesses and development tools are not published as crates.
 
 ## SDK access
 
-The `0.1.1` crates are published on crates.io. This
-runbook prepares `0.1.2`, which must be published in dependency order before
-consumers can resolve that version. `0.1.2` accepts Ed25519 and P-256 actors and
-operator keys and records one canonical DID per secp256k1 actor, so results can
-name an actor under a different spelling than a request used; see
-[delegated policies](delegated-policies.md). Threshold-ring identifiers no
-longer include the deployment or the creator, so `RingConfig::id` takes no
-arguments and every ring identifier differs from `0.1.1`; `RingUpdate` gains
-`CancelReshare` and `SetPreShareEndpoints`. Consumers that derive ring
-identifiers or match ring commands must be updated together with this version.
-Every validator of a deployment must run the same version.
+The `0.1.2` crates are published on crates.io. This runbook prepares
+`0.2.0`, which must be published in dependency order before consumers can resolve
+that version. The public client API has changed since `0.1.2`; for example,
+`VeraDocumentACP` is no longer exported. Review compatibility and update consumers
+before release. Every validator of a deployment must run the same version.
 
 The SDK uses official Commonware `2026.10.0` registry packages. Daemon and
 consumer qualification must identify the exact Vera revision and dependencies.
@@ -95,7 +89,7 @@ checksums, source commit and check results with the release record.
 
 ## Publish crates manually
 
-The candidate version is `0.1.2`. Use the dependency order in the generated plan;
+The candidate version is `0.2.0`. Use the dependency order in the generated plan;
 for the current graph it is:
 
 | Order | Package |
@@ -113,7 +107,7 @@ For each package, verify its archive before uploading it. Start with:
 
 ```sh
 cargo package --locked --registry crates-io -p vera-identity
-shasum -a 256 target/package/vera-identity-0.1.2.crate
+shasum -a 256 target/package/vera-identity-0.2.0.crate
 cargo publish --locked --registry crates-io -p vera-identity
 ```
 
@@ -145,7 +139,7 @@ root using only registry dependencies:
 ```sh
 VERA_RELEASE_SMOKE=$(mktemp -d)
 cargo init --lib --name vera_release_smoke "$VERA_RELEASE_SMOKE"
-cargo add --manifest-path "$VERA_RELEASE_SMOKE/Cargo.toml" 'vera-client@=0.1.2'
+cargo add --manifest-path "$VERA_RELEASE_SMOKE/Cargo.toml" 'vera-client@=0.2.0'
 printf '%s\n' 'pub use vera_client as client;' > "$VERA_RELEASE_SMOKE/src/lib.rs"
 cargo check --locked --manifest-path "$VERA_RELEASE_SMOKE/Cargo.toml"
 cargo metadata --locked --format-version 1 --manifest-path "$VERA_RELEASE_SMOKE/Cargo.toml" > "$VERA_RELEASE_SMOKE/metadata.json"
@@ -179,7 +173,7 @@ version tag yourself:
 
 ```sh
 VERA_RELEASE_SOURCE=$(git rev-parse HEAD)
-VERA_RELEASE_TAG=v0.1.2
+VERA_RELEASE_TAG=v0.2.0
 git tag --annotate "$VERA_RELEASE_TAG" "$VERA_RELEASE_SOURCE" --message "Vera $VERA_RELEASE_TAG"
 git push origin "refs/tags/$VERA_RELEASE_TAG"
 ```

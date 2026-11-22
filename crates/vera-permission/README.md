@@ -8,7 +8,7 @@ anchors used to authenticate that evidence.
 
 ```toml
 [dependencies]
-vera-permission = "0.1.2"
+vera-permission = "0.2.0"
 ```
 
 See the [API documentation](https://docs.rs/vera-permission) and
