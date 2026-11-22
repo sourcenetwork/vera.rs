@@ -16,6 +16,10 @@ MAX_RESULTS = 32
 MAX_CASES = 128
 MAX_ADMISSION_SAMPLES = 16
 MAX_NETEM_SAMPLES = 16
+MAX_HEIGHT_TIMEOUTS = 8
+HEIGHT_TIMEOUT = re.compile(r'timeout waiting for height (\d{1,20}) \(node states: \[(.*)\]\)$')
+HEIGHT_NODE = re.compile(r'\((\d{1,3}), (\d{1,20}), (None|Some\(\d{1,20}\)), '
+                         r'(\d{1,20}), (\d{1,20}), (true|false)\)')
 DISK_FULL_EXIT = re.compile(
     r'disk_full_exit enospc=(true|false) write_failed=(true|false) '
     r'sync_failed=(true|false) state_failure=(true|false) panicked=(true|false)')
@@ -89,6 +93,7 @@ def summarize(root, inventory, function_names=frozenset()):
                 'admission_progress': [], 'admission_progress_limit_reached': False,
                 'admission_state': [], 'admission_state_limit_reached': False,
                 'netem_coverage': [], 'netem_coverage_limit_reached': False,
+                'height_timeouts': [], 'height_timeout_limit_reached': False,
                 'disk_full_exit': None}
     exit_path = root / 'test-exit-code'
     if exit_path.exists() or exit_path.is_symlink():
@@ -118,6 +123,30 @@ def summarize(root, inventory, function_names=frozenset()):
             if len(raw) > 16384:
                 continue
             line = ANSI.sub('', raw)
+            timeout = HEIGHT_TIMEOUT.search(line) if path == root / 'test-output.log' else None
+            if timeout is not None:
+                target, raw_nodes = timeout.groups()
+                nodes = raw_nodes.split(', (') if raw_nodes else []
+                parsed = [HEIGHT_NODE.fullmatch(node if i == 0 else '(' + node)
+                          for i, node in enumerate(nodes)]
+                if (int(target) <= (1 << 64) - 1 and 0 < len(nodes) <= 16
+                        and all(parsed)):
+                    entries = []
+                    for match in parsed:
+                        index, effective, finalized, count, latest, healthy = match.groups()
+                        finalized = None if finalized == 'None' else int(finalized[5:-1])
+                        numbers = [int(effective), int(count), int(latest)]
+                        if any(value > (1 << 64) - 1 for value in numbers) or (finalized is not None and finalized > (1 << 64) - 1):
+                            break
+                        entries.append({'node': int(index), 'effective_height': numbers[0],
+                                        'finalized_height': finalized, 'finalized_count': numbers[1],
+                                        'latest_block_height': numbers[2], 'healthy': healthy == 'true'})
+                    if len(entries) == len(nodes):
+                        sample = {'target': int(target), 'nodes': entries}
+                        if len(evidence['height_timeouts']) == MAX_HEIGHT_TIMEOUTS:
+                            evidence['height_timeout_limit_reached'] = True
+                        else:
+                            evidence['height_timeouts'].append(sample)
             disk_exit = DISK_FULL_EXIT.fullmatch(line) if path == root / 'test-output.log' else None
             if disk_exit is not None and evidence['disk_full_exit'] is None:
                 evidence['disk_full_exit'] = dict(zip(
