@@ -5,8 +5,8 @@ use std::path::Path;
 
 /// Open existing private material and validate its metadata before reading.
 ///
-/// Unix reads reject symlinks and require a regular, single-link file with no
-/// group or other access.
+/// Unix reads reject symlinks and require a regular, single-link file owned by
+/// the effective user, with no group or other access.
 /// The opened descriptor is checked before reading; permissions are not repaired.
 /// Parent directories must be protected by the operator.
 pub fn open_private(path: impl AsRef<Path>) -> std::io::Result<std::fs::File> {
@@ -37,14 +37,26 @@ pub fn open_private(path: impl AsRef<Path>) -> std::io::Result<std::fs::File> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
-        if metadata.permissions().mode() & 0o077 != 0 || metadata.nlink() != 1 {
+        // SAFETY: geteuid has no preconditions and returns the process identity.
+        let effective_user = unsafe { libc::geteuid() };
+        if !private_metadata_allowed(
+            metadata.uid(),
+            effective_user,
+            metadata.permissions().mode(),
+            metadata.nlink(),
+        ) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
-                "private material requires owner-only access and a single link",
+                "private material requires effective-user ownership, owner-only access, and a single link",
             ));
         }
     }
     Ok(file)
+}
+
+#[cfg(unix)]
+const fn private_metadata_allowed(owner: u32, effective_user: u32, mode: u32, links: u64) -> bool {
+    owner == effective_user && mode & 0o077 == 0 && links == 1
 }
 
 /// Create `path` with `bytes`, readable only by its owner. Existing paths are rejected.
@@ -99,6 +111,25 @@ mod tests {
             .unwrap();
         assert_eq!(contents, [7; 32]);
         assert!(open_private(directory.path()).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_metadata_requires_effective_user_ownership() {
+        let effective_user = 1_000;
+        let other_user = 1_001;
+        assert!(private_metadata_allowed(
+            effective_user,
+            effective_user,
+            0o600,
+            1
+        ));
+        assert!(!private_metadata_allowed(
+            other_user,
+            effective_user,
+            0o600,
+            1
+        ));
     }
 
     #[cfg(unix)]
