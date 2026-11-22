@@ -62,40 +62,39 @@ const fn private_metadata_allowed(owner: u32, effective_user: u32, mode: u32, li
 
 /// Reject macOS access control lists on an already opened private file.
 /// Call before reading or writing any secret bytes.
+#[cfg(target_os = "macos")]
 pub fn validate_private_acl(file: &std::fs::File) -> std::io::Result<()> {
-    #[cfg(target_os = "macos")]
-    {
-        use std::ffi::c_void;
-        use std::os::fd::AsRawFd as _;
-        unsafe extern "C" {
-            fn acl_get_fd_np(fd: libc::c_int, kind: libc::c_int) -> *mut c_void;
-            fn acl_free(acl: *mut c_void) -> libc::c_int;
-        }
-        const ACL_TYPE_EXTENDED: libc::c_int = 0x100;
-        // SAFETY: the descriptor remains open and the ACL type is defined by macOS.
-        // macOS returns ENOENT when the descriptor has no extended ACL.
-        let acl = unsafe { acl_get_fd_np(file.as_raw_fd(), ACL_TYPE_EXTENDED) };
-        if acl.is_null() {
-            let error = std::io::Error::last_os_error();
-            return if error.raw_os_error() == Some(libc::ENOENT) {
-                Ok(())
-            } else {
-                Err(error)
-            };
-        }
-        // Reject even an empty ACL object, conservatively; do not attempt repair.
-        // SAFETY: acl_get_fd_np returned this allocated ACL, which is freed once.
-        let _ = unsafe { acl_free(acl) };
-        Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "private material cannot have an extended ACL",
-        ))
+    use std::ffi::c_void;
+    use std::os::fd::AsRawFd as _;
+    unsafe extern "C" {
+        fn acl_get_fd_np(fd: libc::c_int, kind: libc::c_int) -> *mut c_void;
+        fn acl_free(acl: *mut c_void) -> libc::c_int;
     }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = file;
-        Ok(())
+    const ACL_TYPE_EXTENDED: libc::c_int = 0x100;
+    // SAFETY: the descriptor remains open and the ACL type is defined by macOS.
+    // macOS returns ENOENT when the descriptor has no extended ACL.
+    let acl = unsafe { acl_get_fd_np(file.as_raw_fd(), ACL_TYPE_EXTENDED) };
+    if acl.is_null() {
+        let error = std::io::Error::last_os_error();
+        return if error.raw_os_error() == Some(libc::ENOENT) {
+            Ok(())
+        } else {
+            Err(error)
+        };
     }
+    // Reject even an empty ACL object, conservatively; do not attempt repair.
+    // SAFETY: acl_get_fd_np returned this allocated ACL, which is freed once.
+    let _ = unsafe { acl_free(acl) };
+    Err(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "private material cannot have an extended ACL",
+    ))
+}
+
+/// The macOS ACL check does not apply on this platform.
+#[cfg(not(target_os = "macos"))]
+pub const fn validate_private_acl(_file: &std::fs::File) -> std::io::Result<()> {
+    Ok(())
 }
 
 /// Create `path` with `bytes`, readable only by its owner. Existing paths are rejected.
