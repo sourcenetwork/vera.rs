@@ -51,12 +51,51 @@ pub fn open_private(path: impl AsRef<Path>) -> std::io::Result<std::fs::File> {
             ));
         }
     }
+    validate_private_acl(&file)?;
     Ok(file)
 }
 
 #[cfg(unix)]
 const fn private_metadata_allowed(owner: u32, effective_user: u32, mode: u32, links: u64) -> bool {
     owner == effective_user && mode & 0o077 == 0 && links == 1
+}
+
+/// Reject macOS access control lists on an already opened private file.
+/// Call before reading or writing any secret bytes.
+pub fn validate_private_acl(file: &std::fs::File) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::ffi::c_void;
+        use std::os::fd::AsRawFd as _;
+        unsafe extern "C" {
+            fn acl_get_fd_np(fd: libc::c_int, kind: libc::c_int) -> *mut c_void;
+            fn acl_free(acl: *mut c_void) -> libc::c_int;
+        }
+        const ACL_TYPE_EXTENDED: libc::c_int = 0x100;
+        // SAFETY: the descriptor remains open and the ACL type is defined by macOS.
+        // macOS returns ENOENT when the descriptor has no extended ACL.
+        let acl = unsafe { acl_get_fd_np(file.as_raw_fd(), ACL_TYPE_EXTENDED) };
+        if acl.is_null() {
+            let error = std::io::Error::last_os_error();
+            return if error.raw_os_error() == Some(libc::ENOENT) {
+                Ok(())
+            } else {
+                Err(error)
+            };
+        }
+        // Reject even an empty ACL object, conservatively; do not attempt repair.
+        // SAFETY: acl_get_fd_np returned this allocated ACL, which is freed once.
+        let _ = unsafe { acl_free(acl) };
+        Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "private material cannot have an extended ACL",
+        ))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = file;
+        Ok(())
+    }
 }
 
 /// Create `path` with `bytes`, readable only by its owner. Existing paths are rejected.
@@ -75,6 +114,7 @@ pub fn write_private(path: impl AsRef<Path>, bytes: &[u8]) -> std::io::Result<()
         options.mode(0o600);
     }
     let mut file = options.open(path.as_ref())?;
+    validate_private_acl(&file)?;
     file.write_all(bytes)?;
     file.sync_all()?;
     #[cfg(unix)]
@@ -92,6 +132,30 @@ pub fn write_private(path: impl AsRef<Path>, bytes: &[u8]) -> std::io::Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn private_files_reject_inherited_acls_before_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(
+            std::process::Command::new("chmod")
+                .args(["+a", "everyone allow read,write,file_inherit"])
+                .arg(dir.path())
+                .status()
+                .unwrap()
+                .success()
+        );
+        let path = dir.path().join("validator.key");
+        assert_eq!(
+            write_private(&path, &[7; 32]).unwrap_err().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
+        assert_eq!(
+            open_private(&path).unwrap_err().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+    }
 
     #[test]
     fn private_reads_preserve_created_material_and_missing_paths() {

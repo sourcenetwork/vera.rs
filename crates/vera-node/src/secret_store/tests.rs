@@ -265,3 +265,35 @@ fn exposed_or_linked_secret_material_is_rejected_without_changes() {
     assert_eq!(fs::read(&path).unwrap(), original);
     assert!(FileSecretStore::load(&path).is_ok());
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn inherited_acl_rejects_secret_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("secrets.json");
+    let store = super::FileSecretStore::load(&path).unwrap();
+    store
+        .update(|data| {
+            data.seeds.insert(0, "old".into());
+        })
+        .unwrap();
+    let original = std::fs::read(&path).unwrap();
+    assert!(
+        std::process::Command::new("chmod")
+            .args(["+a", "everyone allow read,write,file_inherit"])
+            .arg(dir.path())
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert!(
+        store
+            .update(|data| {
+                data.seeds.insert(0, "secret".into());
+            })
+            .is_err()
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    assert_eq!(store.inner.lock().seeds.get(&0).unwrap(), "old");
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+}
