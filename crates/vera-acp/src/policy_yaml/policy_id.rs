@@ -67,7 +67,7 @@ pub fn policy_hash(policy: &ParsedPolicy) -> Result<PolicyHash> {
     let mut resources: Vec<_> = policy.resources.iter().collect();
     resources.sort_by(|a, b| a.name.cmp(&b.name));
     e.len(resources.len());
-    for resource in resources {
+    for resource in &resources {
         e.str(&resource.name);
         e.str(&resource.description);
         e.relations(&resource.relations);
@@ -83,6 +83,18 @@ pub fn policy_hash(policy: &ParsedPolicy) -> Result<PolicyHash> {
                 e.0.push(1);
                 e.expression(&RelationExpression::parse(&permission.expr)?)?;
             }
+        }
+    }
+    let rules: Vec<_> = resources
+        .iter()
+        .filter_map(|resource| resource.create.as_ref().map(|rule| (&resource.name, rule)))
+        .collect();
+    if !rules.is_empty() {
+        e.len(rules.len());
+        for (name, rule) in rules {
+            e.str(name);
+            e.str(&rule.parent);
+            e.str(&rule.requires);
         }
     }
     if !policy.actor.relations.is_empty() {
