@@ -101,6 +101,19 @@ impl AcpModule {
                     ),
                 });
             }
+            let previous_parent = resource.create.as_ref().map(|rule| rule.parent.as_str());
+            let next_parent = new_zanzibar
+                .get_resource(&resource.name)
+                .and_then(|updated| updated.create.as_ref())
+                .map(|rule| rule.parent.as_str());
+            if previous_parent != next_parent {
+                return Err(AcpError::InvalidPolicy {
+                    reason: format!(
+                        "registration parent for resource '{}' is immutable",
+                        resource.name
+                    ),
+                });
+            }
         }
         if existing.policy.actor.as_ref().map(|actor| &actor.name)
             != new_zanzibar.actor.as_ref().map(|actor| &actor.name)

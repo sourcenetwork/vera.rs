@@ -39,6 +39,8 @@ mod policy_listing;
 pub use permission_budget::PermissionBudget;
 mod query_budget;
 pub use query_budget::QueryBudget;
+#[cfg(test)]
+mod parent_lifetime_tests;
 mod parent_registration;
 mod registration_queries;
 mod relation_cleanup;
@@ -803,6 +805,20 @@ impl AcpModule {
 
     // ── PolicyCmd variant handlers ───────────────────────────────────────
 
+    fn ensure_mutable_relationship(policy: &PolicyRecord, rel: &Relationship) -> Result<()> {
+        if policy
+            .policy
+            .get_resource(&rel.resource)
+            .and_then(|resource| resource.create.as_ref())
+            .is_some_and(|rule| rule.parent == rel.relation)
+        {
+            return Err(AcpError::InvalidAccessRequest {
+                reason: "registration parent relation is immutable".into(),
+            });
+        }
+        Ok(())
+    }
+
     fn cmd_set_relationship(
         &mut self,
         creator: &Did,
@@ -811,6 +827,7 @@ impl AcpModule {
         stamp: &CommandStamp,
         budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
+        Self::ensure_mutable_relationship(policy_record, &rel)?;
         let policy_id = policy_record.policy.id.as_str();
         let policy = self
             .zanzibar_policies
@@ -900,6 +917,7 @@ impl AcpModule {
         rel: Relationship,
         budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
+        Self::ensure_mutable_relationship(policy, &rel)?;
         let policy_id = policy.policy.id.as_str();
         // Ownership is established at registration and cannot be stripped via a
         // relationship delete (matches defradb).
