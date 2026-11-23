@@ -5,8 +5,8 @@ mod schema;
 
 pub use parse::parse_policy_yaml;
 pub use policy_id::{
-    policy_hash, policy_id, HexError, PolicyHash, PolicyNonce, HASH_LEN, POLICY_HASH_DOMAIN,
-    POLICY_ID_DOMAIN,
+    HASH_LEN, HexError, POLICY_HASH_DOMAIN, POLICY_ID_DOMAIN, PolicyHash, PolicyNonce, policy_hash,
+    policy_id,
 };
 
 use std::collections::BTreeMap;
@@ -80,6 +80,7 @@ pub struct PolicyActor {
 ///
 /// Each type names an allowed subject shape:
 /// - `actor`               → an actor DID or the all-actors wildcard `*`
+/// - `actor:individual`    → an individual actor DID only
 /// - `resource`            → a cross-object edge to an object of `resource`
 /// - `resource->relation`  → a userset `resource:obj#relation`
 ///
@@ -94,6 +95,8 @@ fn build_subject_restriction(types: &[String]) -> crate::error::Result<Option<Su
         let ty = ty.trim();
         let restriction = if ty == "actor" {
             SubjectRestriction::Actor
+        } else if ty == "actor:individual" {
+            SubjectRestriction::Entity
         } else if let Some((resource, relation)) = ty.split_once("->") {
             if resource.is_empty() || relation.is_empty() {
                 return Err(crate::error::Error::InvalidRelation(format!(
