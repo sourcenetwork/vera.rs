@@ -7,6 +7,10 @@ use crate::types::TransactionReceipt;
 /// Errors returned by [`VeraClient`](crate::VeraClient) methods.
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
+    /// The policy relation changed while assignment evidence was being selected.
+    #[error("assignment relation changed during the read; retry")]
+    AssignmentRevisionChanged,
+
     /// JSON-RPC error returned by the node.
     #[error("RPC error ({code}): {message}")]
     Rpc {

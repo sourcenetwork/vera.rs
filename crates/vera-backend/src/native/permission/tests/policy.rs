@@ -362,3 +362,235 @@ resources:
         },
     );
 }
+
+#[test]
+fn complete_relation_evidence_survives_unrelated_growth_and_withdrawal() {
+    use vera_modules::acp::types::{PolicyCmdResult, RelationshipRecord};
+
+    const POLICY: &str = "name: fleet
+resources:
+  - name: host_specs
+    relations:
+      - name: assigned
+        types: [actor]
+  - name: host_observations
+    relations:
+      - name: reader
+        types: [actor]
+";
+    let directory = tempfile::tempdir().unwrap();
+    let runtime = tokio::Runner::new(tokio::Config::new().with_storage_directory(directory.path()));
+    runtime.start(|context| async move {
+        let set = init(&context).await;
+        let issuer = "did:key:issuer".parse().unwrap();
+        let host = Actor("did:key:host".parse().unwrap()).0;
+        let mut state = ModuleState::default();
+        let policy = state
+            .acp
+            .create_policy(
+                &issuer,
+                POLICY,
+                PolicyMarshalingType::ShortYaml,
+                Default::default(),
+            )
+            .unwrap();
+        let id = &policy.policy.id;
+        let assigned =
+            Relationship::with_entity("host_specs", "revision-1", "assigned", host.clone());
+        let generation = policy.relations.pair(&assigned).unwrap().target;
+        let all = keys::relationship_policy_prefix(id);
+        let scoped = keys::relationship_target_prefix(id, generation);
+
+        let grant = |state: &mut ModuleState, row: &Relationship| {
+            let object = Object {
+                resource: row.resource.clone(),
+                id: row.object_id.clone(),
+            };
+            state
+                .acp
+                .direct_policy_cmd(&issuer, id, PolicyCmd::RegisterObject(object))
+                .unwrap();
+            state
+                .acp
+                .direct_policy_cmd(&issuer, id, PolicyCmd::SetRelationship(row.clone()))
+                .unwrap();
+        };
+        grant(&mut state, &assigned);
+        let mut previous = ModuleState::default();
+        let mut reports = 0;
+        for (count, active) in [
+            (0, true),
+            (100, true),
+            (253, true),
+            (254, true),
+            (10_000, true),
+            (10_000, false),
+        ] {
+            for i in reports..count {
+                let report = Relationship::with_entity(
+                    "host_observations",
+                    format!("report-{i:05}"),
+                    "reader",
+                    host.clone(),
+                );
+                grant(&mut state, &report);
+            }
+            reports = count;
+            if !active {
+                let result = state
+                    .acp
+                    .direct_policy_cmd(&issuer, id, PolicyCmd::DeleteRelationship(assigned.clone()))
+                    .unwrap();
+                assert!(matches!(
+                    result,
+                    PolicyCmdResult::DeleteRelationship { record_found: true }
+                ));
+            }
+            let root = apply(&set, state.diff_from(&previous)).await;
+            previous = state.clone();
+            let (a, b, h, n) =
+                futures::join!(set.0.read(), set.1.read(), set.2.read(), set.3.read());
+            let databases: [&NativeDb; 4] = [&a, &b, &h, &n];
+            for (name, prefix) in [("policy", &all), ("assigned", &scoped)] {
+                let result = policy_prefix_proof_at(databases, root, id, prefix).await;
+                if name == "policy" && count >= 254 {
+                    assert!(matches!(
+                        result,
+                        Err(BackendError::Permission(PermissionError::Limit))
+                    ));
+                    println!(
+                        "reports={count} active={active} prefix={name} error=Permission(Limit)"
+                    );
+                    continue;
+                }
+                let proof = result.unwrap();
+                let rows = proof
+                    .verify(root, id, prefix, RECORD_PROOF_BYTES)
+                    .unwrap()
+                    .unwrap()
+                    .entries;
+                if name == "policy" {
+                    assert_eq!(rows.len(), 2 * (count + 1));
+                    assert_eq!(proof.objects.len(), count + 1);
+                } else if active {
+                    let verified = proof
+                        .verify_relation(root, id, "host_specs", "assigned", RECORD_PROOF_BYTES)
+                        .unwrap();
+                    assert_eq!(verified.entries.len(), 1);
+                    let subject = Actor(host.clone());
+                    let issuing_actor = Actor(issuer.clone());
+                    let selector = vera_permission::AssignmentSelector {
+                        resource: "host_specs",
+                        relation: "assigned",
+                        subject: &subject,
+                        issuer: &issuing_actor,
+                    };
+                    let assignments = proof
+                        .verify_assignments(root, id, &selector, RECORD_PROOF_BYTES)
+                        .unwrap();
+                    assert_eq!(assignments.len(), 1);
+                    assert_eq!(assignments[0].relationship, assigned);
+                    let other = Actor("did:key:other".parse().unwrap());
+                    let wrong_issuer = vera_permission::AssignmentSelector {
+                        issuer: &other,
+                        ..selector
+                    };
+                    assert!(
+                        proof
+                            .verify_assignments(root, id, &wrong_issuer, RECORD_PROOF_BYTES)
+                            .unwrap()
+                            .is_empty()
+                    );
+                    assert!(
+                        proof
+                            .verify_relation(
+                                root,
+                                id,
+                                "host_observations",
+                                "reader",
+                                RECORD_PROOF_BYTES
+                            )
+                            .is_err()
+                    );
+                    let [entry] = rows.as_slice() else {
+                        panic!("expected the original assignment")
+                    };
+                    let record: RelationshipRecord = serde_json::from_slice(&entry.value).unwrap();
+                    assert!(!record.archived);
+                    assert_eq!(record.relationship, assigned);
+                    assert_eq!(proof.objects.len(), 1);
+                } else {
+                    assert!(rows.is_empty());
+                    assert!(proof.objects.is_empty());
+                    assert!(
+                        proof
+                            .verify_relation(root, id, "host_specs", "assigned", RECORD_PROOF_BYTES)
+                            .unwrap()
+                            .entries
+                            .is_empty()
+                    );
+                    assert!(
+                        proof
+                            .verify_relation(
+                                root,
+                                id,
+                                "host_observations",
+                                "reader",
+                                RECORD_PROOF_BYTES
+                            )
+                            .is_err()
+                    );
+                }
+                println!(
+                    "reports={count} active={active} prefix={name} rows={} witnesses={} bytes={}",
+                    rows.len(),
+                    proof.objects.len(),
+                    encoded_size(&proof, RECORD_PROOF_BYTES).unwrap()
+                );
+            }
+        }
+        let before = state.clone();
+        let removed = POLICY.replace(
+            "    relations:\n      - name: assigned\n        types: [actor]\n",
+            "",
+        );
+        state
+            .acp
+            .edit_policy(&issuer, id, &removed, PolicyMarshalingType::ShortYaml)
+            .unwrap();
+        let (_, updated) = state
+            .acp
+            .edit_policy(&issuer, id, POLICY, PolicyMarshalingType::ShortYaml)
+            .unwrap();
+        let new_generation = updated.relations.pair(&assigned).unwrap().target;
+        assert_ne!(generation, new_generation);
+        let root = apply(&set, state.diff_from(&before)).await;
+        let (a, b, h, n) = futures::join!(set.0.read(), set.1.read(), set.2.read(), set.3.read());
+        let databases: [&NativeDb; 4] = [&a, &b, &h, &n];
+        let old = policy_prefix_proof_at(databases, root, id, &scoped)
+            .await
+            .unwrap();
+        assert!(
+            old.verify(root, id, &scoped, RECORD_PROOF_BYTES)
+                .unwrap()
+                .unwrap()
+                .entries
+                .is_empty()
+        );
+        assert!(
+            old.verify_relation(root, id, "host_specs", "assigned", RECORD_PROOF_BYTES)
+                .is_err()
+        );
+        let current = keys::relationship_target_prefix(id, new_generation);
+        let fresh = policy_prefix_proof_at(databases, root, id, &current)
+            .await
+            .unwrap();
+        assert!(
+            fresh
+                .verify_relation(root, id, "host_specs", "assigned", RECORD_PROOF_BYTES)
+                .unwrap()
+                .entries
+                .is_empty()
+        );
+    });
+}

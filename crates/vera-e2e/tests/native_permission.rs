@@ -553,3 +553,121 @@ async fn pipelined_permission_reads_follow_finalized_grants_and_deletion() {
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn certified_assignments_follow_grants_and_withdrawal() {
+    let deployment = 9067;
+    let trusted = *KeySet::builder()
+        .seed(deployment)
+        .build()
+        .unwrap()
+        .epoch_info()
+        .output
+        .public()
+        .public();
+    let cluster = TestCluster::builder()
+        .binary(vera_e2e::resolve_binary().unwrap())
+        .nodes(4)
+        .seed(deployment)
+        .chain_id(deployment)
+        .genesis(GenesisBuilder::devnet().simplex(vera_domain::SimplexParameters::default()))
+        .preset(ConsensusPreset::Normal)
+        .build()
+        .await
+        .unwrap();
+    cluster
+        .wait_ready(vera_e2e::readiness_deadline())
+        .await
+        .unwrap();
+    let client = VeraClient::new(cluster.node(0).rpc_url());
+    let owner = BlsSigner::new(1u64.into(), deployment).unwrap();
+    submit(
+        &client,
+        &owner,
+        IAcp::createPolicyCall {
+            policy: POLICY.as_bytes().to_vec().into(),
+            marshalType: 1,
+            nonce: vera_client::random_policy_nonce().0.into(),
+        },
+    )
+    .await;
+    let policy = client.get_policy_ids().await.unwrap().remove(0);
+    let policy_id = policy.parse().unwrap();
+    let granted = submit(
+        &client,
+        &owner,
+        IAcp::batchCallsCall {
+            calls: vec![
+                IAcp::registerObjectCall {
+                    policyId: policy_id,
+                    resource: "document".into(),
+                    objectId: "report".into(),
+                }
+                .abi_encode()
+                .into(),
+                IAcp::setRelationshipCall {
+                    policyId: policy_id,
+                    resource: "document".into(),
+                    objectId: "report".into(),
+                    relation: "reader".into(),
+                    actor: READER.into(),
+                }
+                .abi_encode()
+                .into(),
+            ],
+        },
+    )
+    .await;
+    let subject = Actor(READER.parse().unwrap());
+    let issuer = Actor(owner.did().parse().unwrap());
+    let selector = vera_permission::AssignmentSelector {
+        resource: "document",
+        relation: "reader",
+        subject: &subject,
+        issuer: &issuer,
+    };
+    let result = client
+        .read_certified_assignments(policy_id, &selector, granted, &trusted)
+        .await
+        .unwrap();
+    assert_eq!(result.records.len(), 1);
+    assert_eq!(result.records[0].relationship.object_id, "report");
+    assert_eq!(
+        result
+            .evidence
+            .verify_assignments(&policy, &selector, granted, &trusted, RECORD_PROOF_BYTES)
+            .unwrap()
+            .len(),
+        1
+    );
+    let withdrawn = submit(
+        &client,
+        &owner,
+        IAcp::deleteRelationshipCall {
+            policyId: policy_id,
+            resource: "document".into(),
+            objectId: "report".into(),
+            relation: "reader".into(),
+            actor: READER.into(),
+        },
+    )
+    .await;
+    assert!(
+        result
+            .evidence
+            .verify_assignments(&policy, &selector, withdrawn, &trusted, RECORD_PROOF_BYTES)
+            .is_err()
+    );
+    let empty = client
+        .read_certified_assignments(policy_id, &selector, withdrawn, &trusted)
+        .await
+        .unwrap();
+    assert!(empty.records.is_empty());
+    assert!(
+        empty
+            .evidence
+            .verify_assignments(&policy, &selector, withdrawn, &trusted, RECORD_PROOF_BYTES)
+            .unwrap()
+            .is_empty()
+    );
+}
