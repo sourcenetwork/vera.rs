@@ -99,7 +99,7 @@ impl VeraClient {
             &policy,
             selector,
             selected.revision.max(minimum),
-            trusted,
+            &self.established(trusted),
             RECORD_PROOF_BYTES,
         )?;
         Ok(CertifiedAssignments { evidence, records })
