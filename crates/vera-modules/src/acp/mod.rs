@@ -827,7 +827,6 @@ impl AcpModule {
         stamp: &CommandStamp,
         budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
-        Self::ensure_mutable_relationship(policy_record, &rel)?;
         let policy_id = policy_record.policy.id.as_str();
         let policy = self
             .zanzibar_policies
@@ -869,6 +868,7 @@ impl AcpModule {
         }
 
         self.check_parent_link(creator, policy_record, &rel, budget)?;
+        Self::ensure_mutable_relationship(policy_record, &rel)?;
         self.insert_authorized_relationship(creator, policy_record, rel, stamp, budget)
     }
 
@@ -917,7 +917,6 @@ impl AcpModule {
         rel: Relationship,
         budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
-        Self::ensure_mutable_relationship(policy, &rel)?;
         let policy_id = policy.policy.id.as_str();
         // Ownership is established at registration and cannot be stripped via a
         // relationship delete (matches defradb).
@@ -947,6 +946,7 @@ impl AcpModule {
             });
         }
 
+        Self::ensure_mutable_relationship(policy, &rel)?;
         let existing = self.relationship_in(policy, &rel, Some(budget))?;
         let record_found = existing.is_some();
         if let Some(record) = existing {

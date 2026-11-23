@@ -74,4 +74,10 @@ fn registered_parent_cannot_be_removed_or_replaced() {
         ),
         Err(AcpError::InvalidPolicy { .. })
     ));
+    let retargeted = "name: agents\nresources:\n- name: agent\n- name: device\n- name: session\n  relations: [{name: agent, types: [device]}]\n  create: {parent: agent, requires: owner}\n";
+    assert!(matches!(
+        module.edit_policy(&owner, &policy, retargeted, PolicyMarshalingType::ShortYaml),
+        Err(AcpError::InvalidPolicy { .. })
+    ));
+    assert_eq!(before, module.store.serialize());
 }
