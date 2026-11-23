@@ -58,8 +58,9 @@ resources:
 Use `VeraClient::native_register_under_parent` with the child and parent
 objects. Vera evaluates the acting identity against the active parent before
 writing either the child's owner or its parent relationship. Both writes
-commit together. Adding a parent link later also requires authority on its
-target. Direct registration and commitment reveals cannot create a gated
+commit together. Registration fixes the child's parent. Subsequent relationship
+commands cannot add a second parent, replace the original, or remove it.
+Direct registration and commitment reveals cannot create a gated
 resource without naming the parent. Resources without a creation rule retain
 their existing registration semantics and policy hashes.
 
