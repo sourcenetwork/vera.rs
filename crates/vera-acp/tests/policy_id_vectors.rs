@@ -58,6 +58,27 @@ fn untyped_relations_and_actor_relations_change_the_hash() {
 }
 
 #[test]
+fn parent_registration_hash_matches_acp() {
+    let policy = r#"name: agents
+resources:
+- name: agent
+- name: session
+  relations:
+  - name: agent
+    types: [agent]
+  create:
+    parent: agent
+    requires: owner
+"#;
+    let parsed = parse_policy_yaml(policy).unwrap();
+    // acp-playground compile derives this content ID from the same policy.
+    assert_eq!(
+        policy_hash(&parsed).unwrap().to_string(),
+        "c3edc38de343983969a98e548ac7b09c98fc9c754bcb9b850860f70d9278618f"
+    );
+}
+
+#[test]
 fn nonces_and_hashes_are_64_hexadecimal_characters() {
     let nonce: PolicyNonce = "0A".repeat(32).parse().unwrap();
     assert_eq!(nonce.0, [10; 32]);

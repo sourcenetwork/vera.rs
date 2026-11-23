@@ -101,6 +101,10 @@ pub enum PolicyCmd {
     FlagHijackAttempt {
         event_id: u64,
     },
+    RegisterUnderParent {
+        object: Object,
+        parent: Object,
+    },
 }
 
 /// The result of executing a policy command (matches Go oneof).

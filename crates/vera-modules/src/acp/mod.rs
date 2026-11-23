@@ -39,6 +39,7 @@ mod policy_listing;
 pub use permission_budget::PermissionBudget;
 mod query_budget;
 pub use query_budget::QueryBudget;
+mod parent_registration;
 mod registration_queries;
 mod relation_cleanup;
 mod relation_edits;
@@ -319,6 +320,7 @@ impl AcpModule {
                 Some(rel.object_id.as_str())
             }
             PolicyCmd::TransferObject { object: obj, .. }
+            | PolicyCmd::RegisterUnderParent { object: obj, .. }
             | PolicyCmd::RegisterObject(obj)
             | PolicyCmd::ArchiveObject(obj)
             | PolicyCmd::UnarchiveObject(obj) => Some(obj.id.as_str()),
@@ -341,7 +343,11 @@ impl AcpModule {
                 .transfer_object_with_budget(creator, policy_id, &object, &new_owner.0, budget)
                 .map(|record| PolicyCmdResult::TransferObject { record }),
             PolicyCmd::RegisterObject(obj) => {
+                Self::require_ungated(policy, &obj)?;
                 self.cmd_register_object(creator, policy, obj, stamp, budget)
+            }
+            PolicyCmd::RegisterUnderParent { object, parent } => {
+                self.register_under_parent(creator, policy, object, parent, stamp, budget)
             }
             PolicyCmd::ArchiveObject(obj) => {
                 self.cmd_archive_object(creator, policy_id, obj, budget)
@@ -845,6 +851,19 @@ impl AcpModule {
             });
         }
 
+        self.check_parent_link(creator, policy_record, &rel, budget)?;
+        self.insert_authorized_relationship(creator, policy_record, rel, stamp, budget)
+    }
+
+    fn insert_authorized_relationship(
+        &mut self,
+        creator: &Did,
+        policy_record: &PolicyRecord,
+        rel: Relationship,
+        stamp: &CommandStamp,
+        budget: &CommandBudget,
+    ) -> Result<PolicyCmdResult> {
+        let policy_id = policy_record.policy.id.as_str();
         if let Some(record) = self.relationship_in(policy_record, &rel, Some(budget))? {
             return Ok(PolicyCmdResult::SetRelationship {
                 record_existed: true,
@@ -1102,6 +1121,7 @@ impl AcpModule {
         budget: &CommandBudget,
     ) -> Result<PolicyCmdResult> {
         let policy_id = policy.policy.id.as_str();
+        Self::require_ungated(policy, &proof.object)?;
         self.validate_registration_object(policy_id, &proof.object)?;
         let commitment = self
             .get_commitment_by_id_with_budget(commitment_id, Some(budget))?
