@@ -64,6 +64,12 @@ Direct registration and commitment reveals cannot create a gated
 resource without naming the parent. Resources without a creation rule retain
 their existing registration semantics and policy hashes.
 
+To require individual delegation, declare a direct relation on the parent,
+such as `{name: publisher, types: [actor:individual]}`, and set the child's
+`requires` to `publisher`. Each acting DID needs its own grant. Vera rejects
+a wildcard grant to that relation. Use `[actor]` for relations that also
+accept an all-actors grant.
+
 A certified receipt attests the command outcome. A proof of a current
 relationship attests its state at the queried revision. Independently
 replaying the original authorization decision requires the pre-command state.
