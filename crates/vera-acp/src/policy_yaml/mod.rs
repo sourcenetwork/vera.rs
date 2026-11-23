@@ -5,8 +5,8 @@ mod schema;
 
 pub use parse::parse_policy_yaml;
 pub use policy_id::{
-    HASH_LEN, HexError, POLICY_HASH_DOMAIN, POLICY_ID_DOMAIN, PolicyHash, PolicyNonce, policy_hash,
-    policy_id,
+    policy_hash, policy_id, HexError, PolicyHash, PolicyNonce, HASH_LEN, POLICY_HASH_DOMAIN,
+    POLICY_ID_DOMAIN,
 };
 
 use std::collections::BTreeMap;
