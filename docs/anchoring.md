@@ -254,8 +254,11 @@ tip: either it is another block at the tip's height, or it lies above it and
 `ancestryProof` shows that its ancestor at that height is `ancestor`, a block
 other than the tip. A block below the tip, a block that descends from it, a
 block without the proof, and a block the certified term voids are refused with
-`invalid_proof`; a deployment without a tip with `not_found`; a block already
-recorded with `already_exists`. A refused anchor leaves no state behind, which
+`invalid_proof`; a block of a term above the certified one with
+`unauthorized`, as an anchor is, until that term's certificate is recorded and
+says whether the block is a switch of the active device or a fork; a
+deployment without a tip with `not_found`; a block already recorded with
+`already_exists`. A refused anchor leaves no state behind, which
 is why the evidence is its own call.
 
 The record is JSON at `"anchor-fork/v1/" || hex(deployment) || "/" ||

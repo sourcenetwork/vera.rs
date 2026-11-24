@@ -234,6 +234,48 @@ fn a_block_the_certified_term_voids_is_no_fork_and_one_that_leaves_the_cut_is() 
 }
 
 #[test]
+fn a_block_of_an_uncertified_term_is_no_fork_until_its_certificate_explains_it() {
+    let key = key(19);
+    let deployment = deployment_id(&key);
+    let mut module = registered(&[&key]);
+    // Device A anchored up to 80 in term 0.
+    module
+        .record_anchor(&context(1), &deployment, &revision(50, 0, 5))
+        .unwrap();
+    module
+        .record_anchor(&context(2), &deployment, &descendant(80, 0, 8, 50, 5))
+        .unwrap();
+    // Device B's block at 90 in term 1, whose cut is at 50, is reported before
+    // the term's certificate lands.
+    let switched = descendant(90, 1, 9, 80, 7);
+    assert_eq!(
+        module.record_fork(&context(3), &deployment, &switched),
+        Err(AnchorError::TermNotCertified {
+            certified: 0,
+            term: 1
+        })
+    );
+    assert!(module.forks(&deployment).unwrap().is_empty());
+
+    // Once term 1 is recorded the block descends from its cut: a
+    // supersession, not a fork.
+    module
+        .record_term(&context(4), &deployment, &term(1, 50, 5))
+        .unwrap();
+    assert_eq!(
+        module.record_fork(&context(5), &deployment, &descendant(90, 1, 9, 50, 5)),
+        Err(AnchorError::NotAFork {
+            latest: 50,
+            height: 90
+        })
+    );
+    module
+        .record_anchor(&context(5), &deployment, &descendant(90, 1, 9, 50, 5))
+        .unwrap();
+    assert!(module.forks(&deployment).unwrap().is_empty());
+}
+
+#[test]
 fn a_page_cursor_reads_back_only_canonical_term_and_fork_keys() {
     let deployment = B256::repeat_byte(4);
     let other = B256::repeat_byte(5);

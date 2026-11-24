@@ -100,7 +100,9 @@ impl VeraModule {
     /// an ancestor of it. The block conflicts with the tip of the
     /// deployment's [`super::Lineage`] when it is another block at the tip's
     /// height, or lies above it with another ancestor at that height. A block
-    /// the certified term voids is no fork.
+    /// the certified term voids is no fork, and a block of a term above the
+    /// certified one is refused until that term's certificate is recorded,
+    /// which may explain it as a switch of the active device.
     pub fn record_fork(
         &mut self,
         block_ctx: &BlockExecCtx,
@@ -118,6 +120,13 @@ impl VeraModule {
         // A block the certified term voids is explained by the term.
         if lineage.voids(revision.height, revision.term) {
             return Err(not_a_fork);
+        }
+        let certified = lineage.certified_term();
+        if revision.term > certified {
+            return Err(AnchorError::TermNotCertified {
+                certified,
+                term: revision.term,
+            });
         }
         let ancestor = if revision.height == tip_height {
             Some(revision.block_hash)
