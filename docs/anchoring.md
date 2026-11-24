@@ -21,7 +21,7 @@ deployment = SHA-256("vera/anchor/deployment/v1\0" || canonical consensus key)
 ```
 
 There is no registration step. The first anchor of a key creates the
-deployment's record. Because the identifier is derived from the key, nobody can
+deployment's record and is the block its chain of anchors starts at. Because the identifier is derived from the key, nobody can
 record revisions under another deployment's identifier with keys of their own,
 and recording a revision under someone else's key requires that deployment's
 own certificate.
@@ -34,16 +34,19 @@ An anchor is a native request to the anchor module at
 ```solidity
 function anchorRevision(
     bytes consensusKey, bytes block, bytes[] descendants,
-    bytes finalization, bytes epochMaterial
+    bytes finalization, bytes epochMaterial, bytes ancestryProof
 ) external returns (bytes record);
 event RevisionAnchored(bytes32 indexed deployment, uint64 sequence, uint64 height, bytes32 blockHash);
 ```
 
 The byte fields are those of D's `LightBlock` for the revision, decoded from
-hex (`LightBlock::artifacts`). Anyone may submit one: the request's authority is
-D's certificate, not its signer, so D's owner, S's operator or a relay can post
-it. S's executor verifies the submission and `VeraModule::record_anchor`
-records it:
+hex (`LightBlock::artifacts`), and `ancestryProof` is the encoding of an
+`AncestryProof` that D's latest anchor is an ancestor of the revision; it is
+empty for D's first anchor. D's node gives the proof
+(`vera_getAncestryProof`, `VeraClient::anchor_proof`). Anyone may submit an
+anchor: the request's authority is D's certificate, not its signer, so D's
+owner, S's operator or a relay can post it. S's executor verifies the
+submission and `VeraModule::record_anchor` records it:
 
 1. The artifacts together are at most 256 KiB (`MAX_ANCHOR_ARTIFACT_BYTES`).
 2. The key decodes, and `vera_domain::verify_finalized_artifacts` verifies the
@@ -52,18 +55,27 @@ records it:
 3. The block's height is above the deployment's latest anchor, and its term is
    not below the latest anchor's. Resubmitting the latest anchored block
    succeeds without changing anything or emitting an event.
-4. S stores the new record, numbered one above the previous anchor.
+4. The proof shows that the latest anchored block is the block's ancestor at
+   the anchored height (`Block::has_ancestor`, against the ancestry the block
+   itself carries; see
+   [receipt-commitments.md](receipt-commitments.md#ancestry)). The first anchor
+   of a deployment has no anchor to extend and starts its chain.
+5. S stores the new record, numbered one above the previous anchor.
 
-Steps 1 and 2 run in `vera-executor`, which holds the consensus types; the
-module receives the verified block's fields as a `VerifiedRevision` and the
-key's canonical encoding. `vera-modules` keeps no Commonware dependency, so
-clients that encode module calls do not build the consensus stack.
+Steps 1, 2 and the proof check of step 4 run in `vera-executor`, which holds
+the consensus types; the module receives the verified block's fields and the
+ancestor the proof established as a `VerifiedRevision`, and the key's
+canonical encoding. `vera-modules` keeps no Commonware dependency, so clients
+that encode module calls do not build the consensus stack.
 
 A refused anchor has a failed receipt from module `anchor` (code 5): kind
 `invalid_proof` when the revision is not finalized under the key, `not_newer`
 (code 20) when it is not above the latest anchor or is in a lower term,
-`argument_out_of_bounds` for oversized artifacts and `undecodable_input` for a
-key that does not decode. An anchor costs 250,000 gas.
+`not_descendant` (code 21) when it is above the latest anchor and not shown to
+descend from it, `argument_out_of_bounds` for oversized artifacts and
+`undecodable_input` for a key that does not decode. An anchor costs 250,000
+gas, and so does one refused after its artifacts decoded: every validator
+verified it.
 
 ### The record
 
@@ -92,17 +104,62 @@ it, or its absence, with S's light block, and
 `VeraClient::read_latest_anchor(deployment, minimum, s_key)` verifies it. The
 proof is a Merkle path in one partition plus S's light block.
 
-### Conflicting histories
+### One chain per deployment
+
+Every anchor after the first descends from the one before, so a deployment's
+anchors are blocks of one history in increasing height, and S's revisions
+order them in time.
+
+The proof is checked against the ancestry the anchored block commits to, and
+that block is certified by D's key. A deployment whose validators follow the
+protocol cannot produce a certified block with a false ancestry: every voter
+recomputes it from the parent. A holder of a single-validator deployment's
+key who signs arbitrary blocks can claim any ancestry; what S guarantees then
+is that each anchored block *commits* to every earlier anchor, so the anchors
+remain one chain of commitments, and the honest history, which does not
+contain the forged block, is refused from then on and shows up as a fork.
+
+### Forks
 
 A single-validator deployment whose key runs on two devices can finalize two
-blocks at one height. The first one anchored at a height wins: another block at
-that height, or at any height up to the latest anchor, is refused. S does not
-check that a later anchor descends from the previous one: blocks carry no
-accumulator of their ancestors, and a chain of headers between two anchors is
-unbounded. A second history that branched below the latest anchor can still be
-anchored at a greater height in the same or a later term. Readers who need more
-compare the anchored block with the term certificate D's operators issued (see
-[terms](active-term.md)).
+histories. Only one of them extends the latest anchor. A block of the other
+is refused as an anchor, and anyone holding it can record it as evidence:
+
+```solidity
+function reportFork(
+    bytes consensusKey, bytes block, bytes[] descendants,
+    bytes finalization, bytes epochMaterial, bytes32 ancestor, bytes ancestryProof
+) external returns (bytes record);
+event ForkReported(bytes32 indexed deployment, uint64 sequence, bytes32 anchoredBlock, uint64 height, bytes32 blockHash);
+```
+
+The block must be finalized under the key and conflict with the latest anchor:
+either it is another block at the anchored height, or it lies above it and
+`ancestryProof` shows that its ancestor at the anchored height is `ancestor`,
+a block other than the anchored one. A block below the latest anchor, a block
+that descends from it, and a block without the proof are refused with
+`invalid_proof`; a deployment without an anchor with `not_found`; a block
+already recorded with `already_exists`. The call costs what an anchor costs. A
+refused anchor leaves no state behind, which is why the evidence is its own
+call.
+
+The record is JSON at `"anchor-fork/v1/" || hex(deployment) || "/" ||
+hex(blockHash)` in the identity partition:
+
+| Field | Meaning |
+|---|---|
+| `deployment` | The deployment's identifier |
+| `sequence`, `anchored_height`, `anchored_block` | The anchor the block conflicts with |
+| `height`, `block_hash`, `term` | The conflicting block |
+| `ancestor` | The conflicting block's ancestor at the anchored height; the block itself at that height |
+| `reported_at` | Height of S's revision that recorded it |
+
+`VeraClient::report_fork`, called on the device that holds the other history,
+builds the report, and `VeraClient::read_forks(deployment, minimum, s_key)`
+reads every fork of a deployment as one complete-prefix proof, so a reader
+that trusts only S's key learns that D's key finalized two histories and which
+blocks they are. A fork record does not move the latest anchor or stop later
+anchors.
 
 ## Snapshots
 
@@ -143,10 +200,15 @@ anchor evidence to S's record-response limit, which includes S's whole block.
 3. reads the latest anchor from S at or after the receipt's revision;
 4. assembles and verifies the snapshot.
 
-A deployment that prunes history can publish, because the revision captured is
-the current one. A refusal of step 2 (`AnchoringError::Refused`) means another
-anchor at or above that revision landed first; publishing again captures and
-anchors a newer revision. An anchor that lands between steps 2 and 3 makes step
+Before step 2 it reads D's latest anchor from S and asks D's node for the
+proof that the anchor is an ancestor of the captured revision. D's node builds
+it from retained history, so a deployment that prunes history publishes as
+long as it still holds its latest anchored revision and at most 65,536
+revisions lie between the two. A refusal of step 2
+(`AnchoringError::Refused`) with `not_newer` means another anchor at or above
+that revision landed first, and publishing again captures and anchors a newer
+revision; with `not_descendant` it means the latest anchor belongs to another
+device's history. An anchor that lands between steps 2 and 3 makes step
 4 fail with `NotAnchored`, and publishing again succeeds.
 
 ## Verification
@@ -190,23 +252,35 @@ snapshot never reflects changes D has not anchored.
 | Call | Where | Purpose |
 |---|---|---|
 | `vera_getCurrentPolicySnapshot` / `capture_policy_snapshot` | D | Policy state at the current revision |
+| `vera_getAncestryProof` / `ancestry_proof`, `anchor_proof` | D | Proof that the latest anchor is an ancestor |
 | `vera_sendNativeTx` to `0x0814` / `submit_anchor`, `await_anchor` | S | Anchor a revision |
+| `vera_sendNativeTx` to `0x0814` / `report_fork`; `read_forks` | D and S; S | Record and read a fork |
 | `vera_getCurrentRecordProof` / `read_latest_anchor` | S | Latest anchor with proof |
 | `publish_policy_snapshot` | D and S | The three steps above |
 | `AnchoredSnapshot::decode`, `verify`; `VerifiedSnapshot::check`, `ensure_current` | Anywhere | Relay, verify and evaluate |
 
 ## What changed in consensus
 
-No partition, block field or commitment changed. Anchor records live in the
-existing identity partition under their own prefix, so the module state root,
-the four native log targets and the receipt commitment keep their structure.
-Execution accepts a fifth native target address (`0x0814`), and receipts can
-name refusal module code 5 and refusal kind code 20; both are committed through
-the receipt commitment, so every validator must run a release that knows them.
+Blocks carry their ancestry, which raised the block format to 2
+([receipt-commitments.md](receipt-commitments.md#format-versions)): a
+deployment and the deployment that anchors it run releases of the same block
+format, because S decodes D's block. Anchor and fork records live in the
+existing identity partition under their own prefixes, so the module state
+root, the four native log targets and the receipt commitment keep their
+structure. Receipts can name refusal module code 5 and refusal kinds 20 and
+21; both are committed through the receipt commitment, so every validator
+must run a release that knows them.
 
 ## Limits
 
-- Ancestry between anchors is not checked (see above).
+- A key holder that signs arbitrary blocks can forge an ancestry (see above);
+  S then holds a chain of commitments and the honest history is a fork.
+- A proof needs D's records from the latest anchor on. A device whose history
+  floor is above the latest anchor, or more than 65,536 revisions past it,
+  cannot extend it.
+- S decodes one block format. Accepting an older or newer format of D would
+  be a second decoder in `vera_domain::light_block::decode_block`, selected by
+  the block's first byte.
 - The anchor evidence carries S's whole block, so a snapshot is as large as S's
   block at the revision it was read at.
 - Only one policy per snapshot, at most 4,096 records.

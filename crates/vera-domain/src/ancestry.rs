@@ -210,12 +210,6 @@ impl AncestryProof {
     pub fn encode(&self) -> Vec<u8> {
         self.0.encode().to_vec()
     }
-
-    /// Number of digests the proof carries.
-    #[must_use]
-    pub fn digests(&self) -> usize {
-        self.0.digests.len()
-    }
 }
 
 impl serde::Serialize for AncestryProof {

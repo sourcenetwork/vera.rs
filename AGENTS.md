@@ -151,7 +151,7 @@ not a native request; verification rejects a block that carries any.
 | `0x0811` | Bulletin | Coordination / DKG messages / posts |
 | `0x0812` | Vera | Identity / JWT token lifecycle |
 | `0x0813` | ValidatorRegistry | Validator identity management (feeds resharing) |
-| `0x0814` | Anchor | Latest finalized revision of other deployments (identity partition) |
+| `0x0814` | Anchor | Finalized revisions of other deployments as one chain each, and their forks (identity partition) |
 
 ### Shared module pattern
 
@@ -522,14 +522,23 @@ The anchor module records another deployment's finalized revision when its
 certificate verifies against that deployment's consensus key (verified in
 `vera-executor`, recorded by `VeraModule::record_anchor`), keeping one
 record per deployment (identifier: SHA-256 of the key) in the identity
-partition. Anchors only move up in height and never down in term; the first
-block anchored at a height wins. `vera_getCurrentPolicySnapshot` captures a
+partition. Anchors only move up in height and never down in term, and each
+must prove, against the ancestry its block carries, that it descends from the
+one before; a certified block of another history is refused and recordable as
+a fork (`reportFork`, `anchor-fork/v1/`). `vera_getCurrentPolicySnapshot` captures a
 policy record and its relationship, index and object prefixes at one revision.
 `vera_client::anchoring` publishes a snapshot (capture, anchor that revision,
 read the anchor back), verifies a relayed `AnchoredSnapshot` with the
 anchoring deployment's key alone, evaluates access with the shared evaluator,
-and reports a snapshot as stale once a newer anchor is known. No partition or
-block commitment changed. See `docs/anchoring.md`.
+and reports a snapshot as stale once a newer anchor is known. No partition
+changed. See `docs/anchoring.md`.
+
+A block carries the peaks of a Commonware Merkle mountain range over its
+ancestors' identifiers (`vera_domain::Ancestry`, block format 2). Voters check
+that a candidate's ancestry extends its parent's, `Block::has_ancestor`
+verifies an `AncestryProof`, and `vera_getAncestryProof` rebuilds one from
+retained history without storing the range. See
+`docs/receipt-commitments.md#ancestry`.
 
 ### Terms and the active device
 
