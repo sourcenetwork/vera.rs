@@ -13,7 +13,7 @@ mod listener;
 #[cfg(unix)]
 pub use listener::inherited_tcp_listener;
 mod private_file;
-pub use private_file::{open_private, write_private};
+pub use private_file::{open_private, validate_private_acl, write_private};
 
 #[cfg(unix)]
 mod sigsegv;

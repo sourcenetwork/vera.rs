@@ -39,6 +39,8 @@ mod policy_listing;
 pub use permission_budget::PermissionBudget;
 mod query_budget;
 pub use query_budget::QueryBudget;
+#[cfg(test)]
+mod parent_lifetime_tests;
 mod parent_registration;
 mod registration_queries;
 mod relation_cleanup;
@@ -803,6 +805,20 @@ impl AcpModule {
 
     // ── PolicyCmd variant handlers ───────────────────────────────────────
 
+    fn ensure_mutable_relationship(policy: &PolicyRecord, rel: &Relationship) -> Result<()> {
+        if policy
+            .policy
+            .get_resource(&rel.resource)
+            .and_then(|resource| resource.create.as_ref())
+            .is_some_and(|rule| rule.parent == rel.relation)
+        {
+            return Err(AcpError::InvalidAccessRequest {
+                reason: "registration parent relation is immutable".into(),
+            });
+        }
+        Ok(())
+    }
+
     fn cmd_set_relationship(
         &mut self,
         creator: &Did,
@@ -852,6 +868,7 @@ impl AcpModule {
         }
 
         self.check_parent_link(creator, policy_record, &rel, budget)?;
+        Self::ensure_mutable_relationship(policy_record, &rel)?;
         self.insert_authorized_relationship(creator, policy_record, rel, stamp, budget)
     }
 
@@ -929,6 +946,7 @@ impl AcpModule {
             });
         }
 
+        Self::ensure_mutable_relationship(policy, &rel)?;
         let existing = self.relationship_in(policy, &rel, Some(budget))?;
         let record_found = existing.is_some();
         if let Some(record) = existing {

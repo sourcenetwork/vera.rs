@@ -138,6 +138,9 @@ fn validate_references(
         }
         for subject_type in &relation.types {
             let subject_type = subject_type.trim();
+            if subject_type == "actor:individual" {
+                continue;
+            }
             let (resource, relation) = subject_type.split_once("->").unwrap_or((subject_type, ""));
             let valid = resources
                 .get(resource)
@@ -178,5 +181,17 @@ mod tests {
                 "{parent} {requires}"
             );
         }
+    }
+
+    #[test]
+    fn individual_actor_changes_the_policy_hash() {
+        let yaml = "name: p\nresources:\n- name: node\n  relations: [{name: publisher, types: [actor:individual]}]\n";
+        let restricted = parse_policy_yaml(yaml).unwrap();
+        let legacy = parse_policy_yaml(&yaml.replace("actor:individual", "actor")).unwrap();
+        assert!(validate(&restricted).is_ok());
+        assert_ne!(
+            crate::policy_yaml::policy_hash(&restricted).unwrap(),
+            crate::policy_yaml::policy_hash(&legacy).unwrap()
+        );
     }
 }

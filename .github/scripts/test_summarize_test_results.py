@@ -23,6 +23,23 @@ class SafeTestEvidence(unittest.TestCase):
             (root / 'test-output.log').write_text(content)
             return summary.summarize(root, {'crates/vera-e2e/tests/case.rs': 100}, function_names)
 
+    def test_height_timeout_exports_only_bounded_numeric_state(self):
+        message = ('timeout waiting for height 3 (node states: '
+                   '[(0, 1, Some(1), 2, 1, true), (1, 0, None, 0, 0, false)])')
+        evidence = self.collect('Error: ' + message + '\n' + message + ' private-secret\n')
+        self.assertEqual(evidence['height_timeouts'], [{
+            'target': 3, 'nodes': [
+                {'node': 0, 'effective_height': 1, 'finalized_height': 1,
+                 'finalized_count': 2, 'latest_block_height': 1, 'healthy': True},
+                {'node': 1, 'effective_height': 0, 'finalized_height': None,
+                 'finalized_count': 0, 'latest_block_height': 0, 'healthy': False},
+            ]}])
+        self.assertNotIn('private-secret', json.dumps(evidence))
+        with patch.object(summary, 'MAX_HEIGHT_TIMEOUTS', 1):
+            self.assertTrue(self.collect(message + '\n' + message + '\n')['height_timeout_limit_reached'])
+        self.assertEqual(self.collect('timeout waiting for height 18446744073709551616 '
+                                      '(node states: [(0, 1, None, 0, 1, true)])\n')['height_timeouts'], [])
+
     def test_disk_full_exit_exports_only_static_boolean_fields(self):
         evidence = self.collect(
             'disk_full_exit enospc=false write_failed=true sync_failed=false '

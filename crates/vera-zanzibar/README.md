@@ -10,7 +10,7 @@ reachable membership; an exclusion that depends on itself fails closed.
 
 ```toml
 [dependencies]
-vera-zanzibar = "0.1.2"
+vera-zanzibar = "0.2.0"
 ```
 
 See the [API documentation](https://docs.rs/vera-zanzibar) and

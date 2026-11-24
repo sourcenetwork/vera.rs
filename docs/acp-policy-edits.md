@@ -6,6 +6,11 @@ their grants, including when an expression, type restriction or manager changes.
 Removing a relation also removes grants that refer to it as a userset. Recreating
 the name does not restore those grants.
 
+An existing resource keeps its registration parent relation and that relation's
+target resource type. Vera rejects edits that add, remove, rename or retarget
+the registration parent on an existing resource. A new resource can declare
+its parent when it is introduced.
+
 ## Stored identities
 
 `PolicyRecord.relations` maps compiled resource/relation names to immutable numeric

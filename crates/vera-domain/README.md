@@ -8,7 +8,7 @@ components.
 
 ```toml
 [dependencies]
-vera-domain = "0.1.2"
+vera-domain = "0.2.0"
 ```
 
 See the [API documentation](https://docs.rs/vera-domain) and

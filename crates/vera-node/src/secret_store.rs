@@ -147,6 +147,7 @@ impl FileSecretStore {
             .unwrap_or(Path::new("."));
         fs::create_dir_all(parent)?;
         let mut file = tempfile::NamedTempFile::new_in(parent)?;
+        vera_cli::validate_private_acl(file.as_file())?;
         serde_json::to_writer_pretty(file.as_file_mut(), &next)?;
         sync(file.as_file())?;
         file.persist(&self.path)?;

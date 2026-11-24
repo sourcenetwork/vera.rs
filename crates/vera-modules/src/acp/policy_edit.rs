@@ -4,6 +4,27 @@ use super::policy_edit_budget::EditRecords;
 use super::record_store::RecordStore;
 use super::*;
 
+fn registration_parent(resource: &vera_zanzibar::Resource) -> Result<Option<(&str, &str)>> {
+    let Some(rule) = &resource.create else {
+        return Ok(None);
+    };
+    let restriction = resource
+        .get_relation(&rule.parent)
+        .and_then(|parent| parent.subject_restriction.as_ref());
+    match restriction {
+        Some(vera_zanzibar::SubjectRestriction::EntitySet {
+            resource: target,
+            relation,
+        }) if relation.is_empty() => Ok(Some((&rule.parent, target))),
+        _ => Err(AcpError::InvalidPolicy {
+            reason: format!(
+                "invalid registration parent for resource '{}'",
+                resource.name
+            ),
+        }),
+    }
+}
+
 impl AcpModule {
     /// Replace the current definition without an expected-parent check or revision DAG.
     /// Runtime callers use the budgeted variant; this convenience method has no work limit.
@@ -87,16 +108,24 @@ impl AcpModule {
         let (mut new_zanzibar, _) =
             Self::compile_policy(policy, &marshal_type, Some(existing.policy.specification))?;
 
-        let new_resources: std::collections::BTreeSet<_> = new_zanzibar
+        let new_resources: std::collections::BTreeMap<_, _> = new_zanzibar
             .resources
             .iter()
-            .map(|resource| resource.name.as_str())
+            .map(|resource| (resource.name.as_str(), resource))
             .collect();
         for resource in &existing.policy.resources {
-            if !new_resources.contains(resource.name.as_str()) {
+            let Some(updated) = new_resources.get(resource.name.as_str()) else {
                 return Err(AcpError::InvalidPolicy {
                     reason: format!(
                         "resource '{}' cannot be removed from an existing policy",
+                        resource.name
+                    ),
+                });
+            };
+            if registration_parent(resource)? != registration_parent(updated)? {
+                return Err(AcpError::InvalidPolicy {
+                    reason: format!(
+                        "registration parent for resource '{}' is immutable",
                         resource.name
                     ),
                 });
