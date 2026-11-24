@@ -8,7 +8,7 @@ Original texts are reproduced below and identified by SHA-256. For texts from
 upstream source trees, the source URL includes the reviewed revision. Aurora's
 package records a dirty source tree; see its package-specific notice below.
 
-Cargo.lock SHA-256: d5d17245a525ab421b4d305f6afc735a1131e8ef5b28cd35bc29a19b4cacec3c
+Cargo.lock SHA-256: 445510def7071ed341771aed6ae8b25ebdba4d67b9f88af3ed50d0bd8901e375
 Packages: 468
 
 PACKAGE INDEX
@@ -588,7 +588,7 @@ foreign-types-shared 0.1.1 | MIT/Apache-2.0
   c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08  LICENSE-APACHE
   333ea3aaa3cadb819f4acd9f9153f9feee060a995ca8710f32bc5bd9a4b91734  LICENSE-MIT
 
-form_urlencoded 1.2.2 | MIT OR Apache-2.0
+form_urlencoded 1.2.3 | MIT OR Apache-2.0
   a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
   20c7855c364d57ea4c97889a5e8d98470a9952dade37bd9248b9a54431670e5e  LICENSE-MIT
 
@@ -1604,7 +1604,7 @@ untrusted 0.7.1 | ISC
 untrusted 0.9.0 | ISC
   7abd9b6960dcf7d4d0a48606a5b71bfe37d472db68d70637f3a58a56785f1621  LICENSE.txt
 
-url 2.5.8 | MIT OR Apache-2.0
+url 2.5.9 | MIT OR Apache-2.0
   a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
   b38f11f6096706e6de553dabe2a7ed142d59b6fa8c97e290c67496154745cdd5  LICENSE-MIT
 
