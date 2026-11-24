@@ -662,7 +662,7 @@ fresh-state deployment requirements, report trust and qualification limits.
 cargo check                        # type-check workspace
 cargo build -p verad                # build binary
 cargo test --workspace --exclude vera-e2e  # run non-e2e tests
-cargo clippy --all -- -D warnings  # lint
+cargo clippy --all --all-targets -- -D warnings  # lint
 cargo fmt                    # format
 ```
 
@@ -697,7 +697,7 @@ Borrowed from [defradb.rs](https://github.com/sourcenetwork/defradb.rs):
 
 1. `cargo check` passes
 2. `cargo test --workspace --exclude vera-e2e` passes
-3. `cargo clippy --all -- -D warnings` clean
+3. `cargo clippy --all --all-targets -- -D warnings` clean
 4. `cargo fmt` applied
 5. `cargo test -p vera-e2e --test vera_e2e_canonical` passes (requires `cargo build -p verad` first)
 

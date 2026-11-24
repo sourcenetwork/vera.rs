@@ -99,7 +99,7 @@ jobs:
         run: cargo fmt -- --check
 
       - name: Clippy
-        run: cargo clippy --frozen --all -- -D warnings
+        run: cargo clippy --frozen --all --all-targets -- -D warnings
 
   build:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
