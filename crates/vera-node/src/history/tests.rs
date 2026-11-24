@@ -762,3 +762,36 @@ async fn pruned_roster_selection_survives_history_and_module_reopen() {
 
 #[path = "metrics_tests.rs"]
 mod metrics_tests;
+
+#[test]
+fn a_store_of_another_format_is_refused_unchanged_with_a_typed_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let genesis = block(0, BlockId(B256::ZERO));
+    drop(FinalizedHistory::open(dir.path(), &genesis).unwrap());
+    for found in [vec![0], vec![2], vec![4], vec![1, 0], Vec::new()] {
+        {
+            let db = DB::open_default(dir.path(), None).unwrap();
+            let mut batch = WriteBatch::default();
+            batch.put(FORMAT, &found);
+            write(&db, batch).unwrap();
+        }
+        let error = FinalizedHistory::open(dir.path(), &genesis).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<UnsupportedHistoryFormat>(),
+            Some(&UnsupportedHistoryFormat {
+                found: found.clone()
+            })
+        );
+        let db = DB::open_default(dir.path(), None).unwrap();
+        assert_eq!(db.get(FORMAT).unwrap().unwrap(), found);
+    }
+    for supported in [FORMAT_APPENDED, FORMAT_IMPORTED] {
+        {
+            let db = DB::open_default(dir.path(), None).unwrap();
+            let mut batch = WriteBatch::default();
+            batch.put(FORMAT, supported);
+            write(&db, batch).unwrap();
+        }
+        drop(FinalizedHistory::open(dir.path(), &genesis).unwrap());
+    }
+}

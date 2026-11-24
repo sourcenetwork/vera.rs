@@ -5,15 +5,36 @@ use anyhow::ensure;
 use commonware_codec::{Decode as _, Encode as _};
 use commonware_glue::stateful::db::DatabaseSet as _;
 use commonware_runtime::{Supervisor as _, buffer::paged::CacheRef, tokio};
-use vera_backend::native::{self, NativeStateSet};
-use vera_domain::Block;
+use vera_backend::native::{self, NativeStateSet, STATE_LAYOUT_VERSION};
+use vera_domain::{Block, UnsupportedVersion};
 use vera_genesis::VeraGenesis;
 use vera_modules::ModuleState;
 
+/// Deployment fingerprint: the genesis configuration under the state layout
+/// this node runs.
 pub(super) fn fingerprint(genesis: &VeraGenesis) -> anyhow::Result<alloy_primitives::B256> {
     let mut bytes = b"vera/native-genesis/v3\0".to_vec();
+    bytes.push(STATE_LAYOUT_VERSION);
     bytes.extend_from_slice(&serde_json::to_vec(genesis)?);
     Ok(keccak256(bytes))
+}
+
+/// Leading bytes of the genesis record and the whole of the initialization
+/// intent: the state layout version, then the fingerprint.
+pub(super) fn layout_identity(fingerprint: &alloy_primitives::B256) -> Vec<u8> {
+    let mut bytes = vec![STATE_LAYOUT_VERSION];
+    bytes.extend_from_slice(fingerprint.as_slice());
+    bytes
+}
+
+/// Refuse a marker written under another state layout, then return what
+/// follows its layout version.
+fn after_layout_version(marker: &[u8]) -> anyhow::Result<&[u8]> {
+    let (&found, rest) = marker
+        .split_first()
+        .ok_or_else(|| anyhow::anyhow!("native genesis marker is empty"))?;
+    UnsupportedVersion::check("state layout", found, STATE_LAYOUT_VERSION)?;
+    Ok(rest)
 }
 
 /// Initialize the four journals once, with a durable intent for interrupted first boots.
@@ -28,9 +49,10 @@ pub(super) async fn load_or_create(
     let path = data_dir.join("native-genesis.bin");
     if marker_exists(&path)? {
         let record = fs::read(&path)?;
+        let record = after_layout_version(&record)?;
         ensure!(
             record.get(..32) == Some(fingerprint.as_slice()),
-            "native genesis configuration or storage format does not match this node"
+            "native genesis configuration does not match this node"
         );
         let block = Block::decode_cfg(
             commonware_codec::Copying(&record[32..]),
@@ -55,7 +77,7 @@ pub(super) async fn load_or_create(
     let interrupted = marker_exists(&intent)?;
     if interrupted {
         ensure!(
-            fs::read(&intent)? == fingerprint.as_slice(),
+            after_layout_version(&fs::read(&intent)?)? == fingerprint.as_slice(),
             "interrupted genesis has different configuration"
         );
     }
@@ -70,7 +92,7 @@ pub(super) async fn load_or_create(
             native.committed_targets().await == NativeStateSet::initial_sync_targets(),
             "existing journals have no native genesis or initialization intent"
         );
-        vera_cli::write_durable(&intent, fingerprint.as_slice())?;
+        vera_cli::write_durable(&intent, &layout_identity(&fingerprint))?;
     }
     let mut modules = ModuleState::default();
     if let Some(policy) = &genesis.operators {
@@ -134,7 +156,7 @@ pub(super) async fn load_or_create(
     // The genesis block has no parent: its parent field binds the native schema
     // and consensus parameters into the deployment identity.
     block.parent = vera_domain::BlockId(fingerprint);
-    let mut record = fingerprint.to_vec();
+    let mut record = layout_identity(&fingerprint);
     record.extend_from_slice(&block.encode());
     vera_cli::write_durable(&path, &record)?;
     fs::remove_file(intent)?;

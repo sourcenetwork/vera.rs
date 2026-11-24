@@ -132,8 +132,15 @@ pub struct RelationshipRecord {
             with patch('protocol.subprocess.check_output', return_value=block % fields) as git:
                 self.assertEqual(source_block_encoding('.', 'revision'), expected)
             self.assertEqual(git.call_args.args[0], ['git', 'show', f'revision:{BLOCK}'])
+        version = 'pub const BLOCK_FORMAT_VERSION: u8 = %s;\n'
+        for declared, expected in ((1, 'v1'), (2, 'v2'), (12, 'v12')):
+            with patch('protocol.subprocess.check_output', return_value=version % declared + block % term):
+                self.assertEqual(source_block_encoding('.', 'revision'), expected)
         for invalid in ('', block % '    pub term: u32,\n', block % (root + root),
-                        (block % root) * 2):
+                        (block % root) * 2, version % 1 + block % '', version % 1 + block % (term + root),
+                        version % 1 + version % 2 + block % term,
+                        version % 'CURRENT' + block % term,
+                        'const BLOCK_FORMAT_VERSION: u16 = 1;\n' + block % term):
             with patch('protocol.subprocess.check_output', return_value=invalid):
                 with self.assertRaisesRegex(ValueError, 'block'):
                     source_block_encoding('.', 'revision')
@@ -147,6 +154,9 @@ pub struct RelationshipRecord {
         self.assertIn('block encodings', incompatibility_reason(identity))
         identity['base']['block_encoding'] = 2
         self.assertFalse(baseline_incompatible(identity))
+        for head, base, incompatible in (('v1', 3, True), ('v2', 'v1', True), ('v1', 'v1', False)):
+            identity['head']['block_encoding'], identity['base']['block_encoding'] = head, base
+            self.assertEqual(baseline_incompatible(identity), incompatible)
         del identity['base']['block_encoding']
         with self.assertRaisesRegex(ValueError, 'block encoding provenance'):
             baseline_incompatible(identity)

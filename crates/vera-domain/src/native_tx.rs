@@ -5,8 +5,27 @@ use alloy_rlp::{Encodable, RlpDecodable, RlpEncodable};
 
 use crate::TxId;
 
-/// Custom EIP-2718 type byte for BLS native transactions.
+/// Request type of a BLS12-381 signed native transaction: the first byte of
+/// its wire and signing encodings. The type fixes the signing scheme and the
+/// field layout that follow it; a request of any other type is refused.
 pub const NATIVE_TX_TYPE: u8 = 0x45;
+
+/// Why bytes were refused as a native request.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum NativeTxDecodeError {
+    /// The request carries no bytes, so it names no request type.
+    #[error("empty native request")]
+    Empty,
+    /// The request names a type this build does not read.
+    #[error("unsupported native request type {found:#04x}; this build reads {NATIVE_TX_TYPE:#04x}")]
+    UnsupportedType {
+        /// The type byte the request carries.
+        found: u8,
+    },
+    /// The fields after the request type do not decode.
+    #[error("native request fields: {0}")]
+    Fields(#[from] alloy_rlp::Error),
+}
 
 /// A BLS12-381 signed native transaction.
 ///
@@ -59,12 +78,14 @@ impl NativeTx {
     ///
     /// # Errors
     ///
-    /// Returns an error if the first byte is not `0x45` or RLP decoding fails.
-    pub fn decode_wire(bytes: &[u8]) -> Result<Self, alloy_rlp::Error> {
-        if bytes.first() != Some(&NATIVE_TX_TYPE) {
-            return Err(alloy_rlp::Error::Custom("missing native tx type byte"));
+    /// Returns an error if the request is empty, names another request type
+    /// or its fields do not decode.
+    pub fn decode_wire(bytes: &[u8]) -> Result<Self, NativeTxDecodeError> {
+        let (&found, fields) = bytes.split_first().ok_or(NativeTxDecodeError::Empty)?;
+        if found != NATIVE_TX_TYPE {
+            return Err(NativeTxDecodeError::UnsupportedType { found });
         }
-        alloy_rlp::decode_exact(&bytes[1..])
+        Ok(alloy_rlp::decode_exact(fields)?)
     }
 
     /// Produce the bytes that are signed by the BLS key.
@@ -176,13 +197,18 @@ mod tests {
     fn decode_wire_rejects_wrong_type_byte() {
         let tx = sample_tx();
         let mut wire = tx.encode_wire();
-        wire[0] = 0x02;
-        assert!(NativeTx::decode_wire(&wire).is_err());
+        for found in [0x00, 0x02, NATIVE_TX_TYPE + 1, 0xFF] {
+            wire[0] = found;
+            assert_eq!(
+                NativeTx::decode_wire(&wire),
+                Err(NativeTxDecodeError::UnsupportedType { found })
+            );
+        }
     }
 
     #[test]
     fn decode_wire_rejects_empty() {
-        assert!(NativeTx::decode_wire(&[]).is_err());
+        assert_eq!(NativeTx::decode_wire(&[]), Err(NativeTxDecodeError::Empty));
     }
 
     #[test]
@@ -190,6 +216,9 @@ mod tests {
         let tx = sample_tx();
         let mut wire = tx.encode_wire();
         wire.push(0xFF);
-        assert!(NativeTx::decode_wire(&wire).is_err());
+        assert!(matches!(
+            NativeTx::decode_wire(&wire),
+            Err(NativeTxDecodeError::Fields(_))
+        ));
     }
 }

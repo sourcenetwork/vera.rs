@@ -12,7 +12,11 @@ use commonware_utils::{NZU32, sequence::Unit};
 use std::fmt;
 use std::num::NonZeroU32;
 
-use crate::{BlockId, ConsensusContext, DbTarget, Idents, Tx, TxCfg};
+use crate::{BlockId, ConsensusContext, DbTarget, Idents, Tx, TxCfg, UnsupportedVersion};
+
+/// Version of the block encoding, written as a block's first byte and covered
+/// by its identifier. A block carrying any other version is refused on decode.
+pub const BLOCK_FORMAT_VERSION: u8 = 1;
 
 /// BLS variant used by the DKG reshare payload.
 pub type DkgVariant = MinSig;
@@ -158,6 +162,7 @@ impl commonware_consensus::CertifiableBlock for Block {
 
 impl Write for Block {
     fn write(&self, buf: &mut impl BufMut) {
+        BLOCK_FORMAT_VERSION.write(buf);
         self.context.write(buf);
         self.parent.write(buf);
         self.height.write(buf);
@@ -173,7 +178,8 @@ impl Write for Block {
 
 impl EncodeSize for Block {
     fn encode_size(&self) -> usize {
-        self.context.encode_size()
+        BLOCK_FORMAT_VERSION.encode_size()
+            + self.context.encode_size()
             + self.parent.encode_size()
             + self.height.encode_size()
             + self.timestamp.encode_size()
@@ -191,6 +197,8 @@ impl Read for Block {
 
     fn read_cfg(buf: &mut impl commonware_codec::Buf, cfg: &Self::Cfg) -> Result<Self, CodecError> {
         let buf = &mut buf.take(crate::MAX_BLOCK_BYTES);
+        UnsupportedVersion::check("block format", u8::read(buf)?, BLOCK_FORMAT_VERSION)
+            .map_err(|error| CodecError::Wrapped("Block", Box::new(error)))?;
         let context = ConsensusContext::read(buf)?;
         let parent = BlockId::read(buf)?;
         let height = u64::read(buf)?;
@@ -395,6 +403,41 @@ mod tests {
         let encoded = block.encode();
         let decoded = Block::decode_cfg(encoded, &default_block_cfg()).expect("decode");
         assert_eq!(block, decoded);
+    }
+
+    #[test]
+    fn the_format_version_leads_the_encoding_and_changes_the_block_id() {
+        let block = sample_block();
+        let encoded = block.encode();
+        assert_eq!(encoded[0], BLOCK_FORMAT_VERSION);
+        let mut later = encoded.to_vec();
+        later[0] = BLOCK_FORMAT_VERSION + 1;
+        assert_ne!(BlockId(keccak256(&later)), block.id());
+    }
+
+    #[test]
+    fn another_format_version_is_refused_with_a_typed_error() {
+        let encoded = sample_block().encode();
+        for found in [0, BLOCK_FORMAT_VERSION + 1, u8::MAX] {
+            let mut other = encoded.to_vec();
+            other[0] = found;
+            let error = Block::decode_cfg(
+                commonware_codec::Copying(other.as_slice()),
+                &default_block_cfg(),
+            )
+            .unwrap_err();
+            let CodecError::Wrapped("Block", source) = error else {
+                panic!("expected a version refusal, got {error:?}");
+            };
+            assert_eq!(
+                source.downcast_ref::<UnsupportedVersion>(),
+                Some(&UnsupportedVersion {
+                    format: "block format",
+                    found,
+                    supported: BLOCK_FORMAT_VERSION,
+                })
+            );
+        }
     }
 
     #[test]

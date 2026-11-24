@@ -18,10 +18,13 @@ pub use aliases::{ConsensusContext, ConsensusDigest, PublicKey};
 mod db_targets;
 pub use db_targets::DbTarget;
 
+mod unsupported_version;
+pub use unsupported_version::UnsupportedVersion;
+
 mod block;
 pub use block::{
-    Block, BlockCfg, DKG_PAYLOAD_CFG, DkgDirectory, DkgPayload, DkgPayloadCfg, DkgSigner,
-    DkgVariant, MAX_DKG_PARTICIPANTS,
+    BLOCK_FORMAT_VERSION, Block, BlockCfg, DKG_PAYLOAD_CFG, DkgDirectory, DkgPayload,
+    DkgPayloadCfg, DkgSigner, DkgVariant, MAX_DKG_PARTICIPANTS,
 };
 
 mod term;
@@ -34,7 +37,7 @@ mod idents;
 pub use idents::{BlockId, Idents, TxId};
 
 mod native_tx;
-pub use native_tx::{NATIVE_TX_TYPE, NativeTx, NativeTxPayload};
+pub use native_tx::{NATIVE_TX_TYPE, NativeTx, NativeTxDecodeError, NativeTxPayload};
 
 mod native_simulation;
 pub use native_simulation::{NativeCallRequest, NativeCallSimulation, SimulatedLog};

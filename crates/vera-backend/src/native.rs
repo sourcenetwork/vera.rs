@@ -155,6 +155,13 @@ pub async fn read_partitions<T>(databases: [&Shared<T>; 4]) -> [ReadGuard<'_, T>
     }
 }
 
+/// Version of the authenticated state layout: four ordered current-QMDB
+/// partitions named `acp`, `bulletin`, `vera` and `nonces`, sealed into each
+/// block in that order. A layout with another partition set, order or record
+/// placement takes another version, and a node refuses a data directory
+/// initialized under one it does not run.
+pub const STATE_LAYOUT_VERSION: u8 = 1;
+
 /// Configure independent journals for the four native namespaces.
 pub fn state_config(prefix: &str, cache: CacheRef) -> NativeConfig {
     (

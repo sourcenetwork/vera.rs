@@ -39,7 +39,8 @@ mod history;
 pub use history::{
     DiscardedSubmission, FinalizedHistory, HISTORY_CHUNK_BYTES, HISTORY_MAINTENANCE_INTERVAL,
     HistoricalExecution, HistoryChunk, HistoryLimits, HistoryMemory, HistoryPeer, HistoryPruned,
-    RetentionTooShort, check_history_retention, minimum_history_retention, start_history_peer,
+    RetentionTooShort, UnsupportedHistoryFormat, check_history_retention,
+    minimum_history_retention, start_history_peer,
 };
 
 #[cfg(feature = "fault-injection")]

@@ -32,11 +32,6 @@ const PROOF_BLOCK: u8 = 4;
 const BLOCK_HASH: u8 = 5;
 const SUBMISSION_HASH: u8 = 6;
 const QUERY_HEAD: &[u8] = b"query_head";
-const FORMAT: &[u8] = b"format";
-/// Layout of a store that has only appended its own execution.
-const FORMAT_APPENDED: [u8; 1] = [1];
-/// Layout of a store that has begun importing history; recovery keeps its certified suffix.
-const FORMAT_IMPORTED: [u8; 1] = [3];
 const GENESIS: &[u8] = b"genesis";
 const HEAD: &[u8] = b"head";
 
@@ -45,8 +40,11 @@ pub use cut::DiscardedSubmission;
 pub(crate) use cut::Standing;
 mod floor;
 pub use floor::HistoryPruned;
+mod format;
 pub(crate) use floor::rpc_error;
 use floor::{FLOOR, check_cut, check_retained};
+pub use format::UnsupportedHistoryFormat;
+use format::{FORMAT, FORMAT_APPENDED, FORMAT_IMPORTED};
 mod retention;
 mod sweep;
 pub(crate) use retention::HistoryRetention;
@@ -220,10 +218,7 @@ impl FinalizedHistory {
         let db = DB::open_default(path, memory)?;
         match db.get(FORMAT)? {
             Some(version) => {
-                ensure!(
-                    version.as_slice() == FORMAT_APPENDED || version.as_slice() == FORMAT_IMPORTED,
-                    "unsupported finalized history format"
-                );
+                format::check(&version)?;
                 ensure!(
                     db.get(GENESIS)?.as_deref() == Some(genesis.as_slice()),
                     "finalized history belongs to another genesis"
