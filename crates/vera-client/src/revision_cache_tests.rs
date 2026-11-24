@@ -1,7 +1,26 @@
 use alloy_primitives::B256;
 use vera_domain::{FinalityTrust as _, LightBlock, LightBlockError, testing::TestDeployment};
 
-use super::RevisionCache;
+use super::{Remembered, RevisionCache};
+
+/// Whether `light`, with the evidence it carries, would answer from the record.
+fn remembered(
+    cache: &RevisionCache,
+    key: &vera_domain::ConsensusPublicKey,
+    light: &LightBlock,
+) -> bool {
+    let artifacts = light.artifacts().unwrap();
+    let (block, hash) = vera_domain::verify_finalized_block_unless(light, key, |_, _, _| true)
+        .expect("the displayed fields match the block");
+    cache.holds(
+        key,
+        &block,
+        Remembered {
+            block: hash,
+            evidence: artifacts.finality_digest(),
+        },
+    )
+}
 
 /// A light block whose block is `light`'s and whose certificate is another block's.
 fn with_certificate_of(light: &LightBlock, other: &LightBlock) -> LightBlock {
@@ -21,7 +40,7 @@ fn revision(deployment: &TestDeployment, height: u64, term: u64, root: u8) -> Li
 }
 
 #[test]
-fn a_verified_revision_is_not_verified_again() {
+fn a_verified_revision_answers_from_the_record_only_with_the_evidence_it_verified() {
     let deployment = TestDeployment::new(7);
     let key = deployment.key();
     let cache = RevisionCache::new(8);
@@ -38,9 +57,16 @@ fn a_verified_revision_is_not_verified_again() {
     let block = cache.under(&key).finalized_block(&first).unwrap();
     assert_eq!(block.module_state_root, B256::repeat_byte(1));
     assert_eq!(cache.len(), 1);
-    // Only the remembered block answers without its certificate.
-    let again = cache.under(&key).finalized_block(&uncertified).unwrap();
-    assert_eq!(again, block);
+    assert!(remembered(&cache, &key, &first));
+    // A remembered block served with another certificate is verified in
+    // full, and refused.
+    assert!(!remembered(&cache, &key, &uncertified));
+    assert!(matches!(
+        cache.under(&key).finalized_block(&uncertified),
+        Err(LightBlockError::ProposalMismatch)
+    ));
+    assert_eq!(cache.under(&key).finalized_block(&first).unwrap(), block);
+    assert_eq!(cache.len(), 1);
 }
 
 #[test]
@@ -111,11 +137,14 @@ fn a_later_term_empties_the_record_and_earlier_terms_are_not_remembered() {
     cache.under(&key).finalized_block(&before).unwrap();
     assert_eq!(cache.len(), 1);
     assert!(cache.under(&key).finalized_block(&uncertified).is_err());
-    // The later term's block is still remembered.
-    cache
-        .under(&key)
-        .finalized_block(&with_certificate_of(&after, &before))
-        .unwrap();
+    // The later term's block is still remembered, with its own certificate.
+    assert!(remembered(&cache, &key, &after));
+    assert!(
+        cache
+            .under(&key)
+            .finalized_block(&with_certificate_of(&after, &before))
+            .is_err()
+    );
 }
 
 #[test]
@@ -149,8 +178,10 @@ fn the_record_keeps_the_newest_revisions_within_its_bound() {
     assert_eq!(cache.len(), 2);
     let oldest = with_certificate_of(&revisions[0], &revisions[2]);
     assert!(cache.under(&key).finalized_block(&oldest).is_err());
+    assert!(!remembered(&cache, &key, &revisions[0]));
+    assert!(remembered(&cache, &key, &revisions[2]));
     let newest = with_certificate_of(&revisions[2], &revisions[0]);
-    cache.under(&key).finalized_block(&newest).unwrap();
+    assert!(cache.under(&key).finalized_block(&newest).is_err());
 
     let disabled = RevisionCache::new(0);
     disabled.under(&key).finalized_block(&revisions[0]).unwrap();

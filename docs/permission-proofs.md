@@ -15,8 +15,12 @@ also applies.
 `VeraClient` verifies the finalization certificate of a revision once. Each
 verified read hashes the returned block, compares every displayed field with it
 and, when the client holds that height and block hash as verified under the same
-consensus key, skips the certificate check; the record, prefix or permission
-evidence is verified against the block's module root on every read.
+consensus key together with the digest of the descendants, finalization and
+epoch material it verified them with (`FinalizedArtifacts::finality_digest`),
+skips the certificate check. A remembered block served with any other evidence
+is verified in full, so every response a reader returns verifies under the key
+on its own and can be relayed. The record, prefix or permission evidence is
+verified against the block's module root on every read.
 
 The client remembers 256 revisions (`VeraClient::with_verified_revisions`; zero
 verifies every certificate) in the newest term it has verified. A block of a

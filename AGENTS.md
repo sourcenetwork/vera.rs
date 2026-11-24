@@ -344,8 +344,9 @@ height and evidence before running the shared ACP evaluator. Callers supply any
 additional freshness policy. The separate `vera_getPermissionProof` endpoint
 requires the requested root to remain available.
 The Rust client verifies a revision's certificate once: it remembers up to 256
-verified revisions by height and block hash under one consensus key and term,
-and a later term, another block at a remembered height or another key empties
+verified revisions by height, block hash and evidence digest under one
+consensus key and term, so a remembered block with another certificate is
+verified in full, and a later term, another block at a remembered height or another key empties
 the record. Evidence is verified against the module root on every read. See
 docs/permission-proofs.md#verified-revisions-in-the-rust-client.
 `vera_getCurrentRecordProof` captures a native record and its certified revision;

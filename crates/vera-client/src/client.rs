@@ -65,8 +65,9 @@ impl VeraClient {
     }
 
     /// Bound the verified revisions this client remembers (default:
-    /// [`DEFAULT_VERIFIED_REVISIONS`]). A remembered revision's finalization
-    /// certificate is not verified again; zero verifies every response's.
+    /// [`DEFAULT_VERIFIED_REVISIONS`]). A remembered revision served with the
+    /// evidence it was verified with is not verified again; other evidence is
+    /// verified in full, and zero verifies every response's.
     #[must_use]
     pub fn with_verified_revisions(mut self, maximum: usize) -> Self {
         self.revisions = RevisionCache::new(maximum);

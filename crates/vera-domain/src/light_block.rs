@@ -357,20 +357,24 @@ pub fn verify_finalized_block(
     light: &LightBlock,
     trusted_key: &ConsensusPublicKey,
 ) -> Result<Block, LightBlockError> {
-    verify_finalized_block_unless(light, trusted_key, |_, _| false).map(|(block, _)| block)
+    verify_finalized_block_unless(light, trusted_key, |_, _, _| false).map(|(block, _)| block)
 }
 
 /// Validate a light block like [`verify_finalized_block`], skipping the
-/// certificate check when `established` says the block with this hash is one
-/// whose finality the caller has verified under `trusted_key` before.
+/// certificate check when `established` says the block with this hash, and
+/// the artifacts it is served with, are ones whose finality the caller has
+/// verified under `trusted_key` before.
 ///
 /// The block bytes are hashed and every displayed field is compared with the
 /// decoded block either way, so a response cannot attach other fields to an
-/// established block. Returns the block with its hash.
+/// established block. `established` receives the decoded artifacts so that it
+/// can compare their [`FinalizedArtifacts::finality_digest`] with the one it
+/// verified; a caller that skips the check on the block alone returns a
+/// response whose certificate nobody checked. Returns the block with its hash.
 pub fn verify_finalized_block_unless(
     light: &LightBlock,
     trusted_key: &ConsensusPublicKey,
-    established: impl FnOnce(&Block, B256) -> bool,
+    established: impl FnOnce(&Block, B256, &FinalizedArtifacts) -> bool,
 ) -> Result<(Block, B256), LightBlockError> {
     let artifacts = light.artifacts()?;
     let block_hash = decode_b256("block_hash", &light.block_hash)?;
@@ -400,7 +404,7 @@ pub fn verify_finalized_block_unless(
     if let Some((_, field)) = checks.into_iter().find(|(matches, _)| !matches) {
         return Err(LightBlockError::BlockFieldMismatch(field));
     }
-    if !established(&block, block_hash) {
+    if !established(&block, block_hash, &artifacts) {
         verify_certified(&block, block_hash, &artifacts, trusted_key)?;
     }
     Ok((block, block_hash))
