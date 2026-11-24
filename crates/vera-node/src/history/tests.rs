@@ -254,18 +254,11 @@ fn execution_record_preserves_receipt_fields_and_rejects_corruption() {
     let mut first = block(1, genesis.id());
     first.txs.push(Tx::new(vec![1, 2, 3].into()));
     let log = Log::new_unchecked(
-        Address::repeat_byte(7),
+        alloy_primitives::Address::repeat_byte(7),
         vec![B256::repeat_byte(8)],
         vec![9, 10].into(),
     );
-    let receipt = ExecutionReceipt::new(
-        B256::repeat_byte(4),
-        false,
-        17,
-        29,
-        vec![log.clone()],
-        Some(Address::repeat_byte(5)),
-    );
+    let receipt = ExecutionReceipt::new(B256::repeat_byte(4), false, 17, 29, vec![log.clone()]);
     first.native_targets = [vera_domain::DbTarget::default(); 4];
     first.receipt_commitment =
         vera_executor::receipt_commitment(31, std::slice::from_ref(&receipt));
@@ -284,24 +277,22 @@ fn execution_record_preserves_receipt_fields_and_rejects_corruption() {
     assert_eq!(restored, first);
     let actual = &receipts[0];
     assert_eq!(actual.tx_hash, receipt.tx_hash);
-    assert_eq!(actual.contract_address, receipt.contract_address);
     assert_eq!(actual.gas_used, 17);
     assert_eq!(actual.cumulative_gas_used(), 29);
     assert!(!actual.success());
     assert_eq!(actual.logs(), &[log]);
     assert_eq!(record.gas_limit, 31);
-    for mutation in 0..9 {
+    for mutation in 0..8 {
         let mut altered: Record = borsh::from_slice(&bytes).unwrap();
         match mutation {
             0 => altered.receipts[0].hash[0] ^= 1,
             1 => altered.receipts[0].success = true,
             2 => altered.receipts[0].gas_used += 1,
             3 => altered.receipts[0].cumulative_gas_used += 1,
-            4 => altered.receipts[0].contract = None,
-            5 => altered.receipts[0].logs.clear(),
-            6 => altered.gas_limit += 1,
-            7 => altered.receipts.clear(),
-            8 => {
+            4 => altered.receipts[0].logs.clear(),
+            5 => altered.gas_limit += 1,
+            6 => altered.receipts.clear(),
+            7 => {
                 let mut missing = first.clone();
                 missing.receipt_commitment.0[0] ^= 1;
                 altered.block = missing.encode().to_vec();
@@ -406,7 +397,7 @@ async fn indirect_proof_survives_reopen_and_uses_the_rpc_history_lookup() {
     let mut first = block(1, genesis.id());
     first.payload = Some(Payload::EpochInfo(info));
     first.txs.push(Tx::new(vec![1].into()));
-    let receipt = ExecutionReceipt::new(B256::repeat_byte(42), false, 3, 3, vec![], None);
+    let receipt = ExecutionReceipt::new(B256::repeat_byte(42), false, 3, 3, vec![]);
     first.receipt_commitment =
         vera_executor::receipt_commitment(100, std::slice::from_ref(&receipt));
 

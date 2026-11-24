@@ -160,7 +160,7 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
                     .is_err()
             );
             changed = (*genesis).clone();
-            changed.allocations[0].balance = "1".into();
+            changed.blocks_per_epoch += 1;
             assert!(
                 load_or_create(&context, directory, &changed, &cache)
                     .await

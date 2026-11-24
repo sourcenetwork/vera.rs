@@ -68,12 +68,12 @@ fn consensus_secret(seed: u64) -> [u8; 32] {
 fn test_validators() -> Vec<ValidatorConfig> {
     vec![
         ValidatorConfig {
-            evm_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
+            address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
             consensus_pubkey: hex::encode(consensus_key(1)),
             p2p_address: "127.0.0.1:30300".to_string(),
         },
         ValidatorConfig {
-            evm_address: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8".to_string(),
+            address: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8".to_string(),
             consensus_pubkey: hex::encode(consensus_key(2)),
             p2p_address: "127.0.0.1:30301".to_string(),
         },
@@ -165,7 +165,7 @@ async fn validator_bootstrap() {
 
     // A2: getValidator for each — verify fields
     for (i, vc) in validators.iter().enumerate() {
-        let addr: Address = vc.evm_address.parse().unwrap();
+        let addr: Address = vc.address.parse().unwrap();
         let calldata = IValidatorRegistry::getValidatorCall { validator: addr }.abi_encode();
         let result = registry_view(&client, &admin_signer, calldata).await;
         let decoded = IValidatorRegistry::getValidatorCall::abi_decode_returns(&result)
@@ -175,7 +175,7 @@ async fn validator_bootstrap() {
         let info = info.expect("validator should exist");
         assert_eq!(
             info.address.to_lowercase(),
-            vc.evm_address.to_lowercase(),
+            vc.address.to_lowercase(),
             "validator {i} address mismatch"
         );
         assert_eq!(
@@ -787,7 +787,7 @@ async fn validator_registry_adversarial() {
 
     // ── N13: a party without the validator's consensus key cannot move it
 
-    let member: Address = validators[0].evm_address.parse().unwrap();
+    let member: Address = validators[0].address.parse().unwrap();
     for (label, forged) in [
         (
             "another member's key",

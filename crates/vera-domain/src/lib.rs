@@ -62,9 +62,6 @@ pub use gossip::GossipHeader;
 mod tx;
 pub use tx::{Tx, TxCfg};
 
-#[cfg(feature = "evm")]
-pub mod evm;
-
 mod receipt;
 pub use receipt::ExecutionReceipt;
 mod refusal;

@@ -159,7 +159,7 @@ mod tests {
         let mut next = block(height, parent);
         next.txs
             .push(vera_domain::Tx::new(vec![height as u8].into()));
-        let receipt = ExecutionReceipt::new(submission, height != 2, 3, 3, vec![], None);
+        let receipt = ExecutionReceipt::new(submission, height != 2, 3, 3, vec![]);
         next.native_targets = [vera_domain::DbTarget::default(); 4];
         next.receipt_commitment =
             vera_executor::receipt_commitment(100, std::slice::from_ref(&receipt));

@@ -384,8 +384,8 @@ fn receipt_evidence_binds_results_to_finality_and_submission() {
     let first = B256::repeat_byte(1);
     let second = B256::repeat_byte(2);
     let receipts = vec![
-        ExecutionReceipt::new(first, true, 0, 0, vec![], None),
-        ExecutionReceipt::new(second, false, 0, 0, vec![], None),
+        ExecutionReceipt::new(first, true, 0, 0, vec![]),
+        ExecutionReceipt::new(second, false, 0, 0, vec![]),
     ];
     let revision = light_fixture_with(42, |block| {
         block
@@ -423,21 +423,17 @@ fn receipt_evidence_binds_results_to_finality_and_submission() {
             .to_string()
             .contains("too many execution receipts")
     );
-    for mutation in 0..7 {
+    for mutation in 0..6 {
         let mut changed = response.clone();
         match mutation {
             0 => changed.gas_limit += 1,
-            1 => changed.receipts[0].receipt.status = false.into(),
+            1 => changed.receipts[0].success = false,
             2 => changed.receipts.swap(0, 1),
             3 => {
                 changed.receipts.pop();
             }
             4 => changed.receipts[0].tx_hash = B256::ZERO,
             5 => changed.revision.height += 1,
-            6 => {
-                changed.receipts[0].receipt.status =
-                    alloy_consensus::Eip658Value::PostState(B256::ZERO)
-            }
             _ => unreachable!(),
         }
         assert!(
@@ -566,7 +562,7 @@ fn receipt_evidence_commits_the_refusal_kind_but_not_its_message() {
     let submission = B256::repeat_byte(1);
     let refusal = |kind, message: &str| Refusal::new(RefusingModule::Acp, kind, message);
     let receipts = vec![
-        ExecutionReceipt::new(submission, false, 5_000, 5_000, vec![], None)
+        ExecutionReceipt::new(submission, false, 5_000, 5_000, vec![])
             .with_refusal(Some(refusal(RefusalKind::InvalidPolicy, "invalid policy"))),
     ];
     let response = ReceiptResponse {
@@ -595,7 +591,7 @@ fn receipt_evidence_commits_the_refusal_kind_but_not_its_message() {
     assert!(dropped.verify(submission, &trusted_key()).is_err());
 
     let succeeded = vec![
-        ExecutionReceipt::new(submission, true, 5_000, 5_000, vec![], None)
+        ExecutionReceipt::new(submission, true, 5_000, 5_000, vec![])
             .with_refusal(Some(refusal(RefusalKind::InvalidPolicy, ""))),
     ];
     let contradictory = ReceiptResponse {

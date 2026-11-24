@@ -51,7 +51,7 @@ pub(super) fn revision(height: u64, parent: BlockId) -> (Block, ExecutionReceipt
     let mut next = block(height, parent);
     next.context.round = Round::new(Epoch::new(height / EPOCH), View::new(height));
     next.txs.push(Tx::new(height.to_be_bytes().to_vec().into()));
-    let receipt = ExecutionReceipt::new(submission(height), true, 3, 3, vec![], None);
+    let receipt = ExecutionReceipt::new(submission(height), true, 3, 3, vec![]);
     next.native_targets = [DbTarget::default(); 4];
     next.receipt_commitment =
         vera_executor::receipt_commitment(100, std::slice::from_ref(&receipt));

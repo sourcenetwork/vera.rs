@@ -57,8 +57,8 @@ fn fixture() -> Fixture {
     };
     // Receipts follow execution order, which need not be block order.
     let receipts = vec![
-        ExecutionReceipt::new(hashes[1], true, 1, 1, vec![log(3)], None),
-        ExecutionReceipt::new(hashes[0], true, 1, 2, vec![log(1), log(2)], None),
+        ExecutionReceipt::new(hashes[1], true, 1, 1, vec![log(3)]),
+        ExecutionReceipt::new(hashes[0], true, 1, 2, vec![log(1), log(2)]),
     ];
     Fixture {
         block,
@@ -107,9 +107,8 @@ fn indexing_keeps_why_a_native_request_was_refused() {
         vera_domain::RefusalKind::InvalidPolicy,
         "invalid policy",
     );
-    fixture.receipts[0] =
-        ExecutionReceipt::new(fixture.hashes[1], false, 5_000, 5_000, vec![], None)
-            .with_refusal(Some(refusal.clone()));
+    fixture.receipts[0] = ExecutionReceipt::new(fixture.hashes[1], false, 5_000, 5_000, vec![])
+        .with_refusal(Some(refusal.clone()));
     let index = BlockIndex::new();
     index_finalized_block(
         &index,

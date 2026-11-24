@@ -34,14 +34,11 @@ pub(crate) fn deployment(chain_id: u64, seed: u64) -> SoloDeployment {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs(),
-        allocations: Vec::new(),
         validators: vec![ValidatorConfig {
-            evm_address: format!("{:?}", vera_node::validator_address(&local)),
+            address: format!("{:?}", vera_node::validator_address(&local)),
             consensus_pubkey: hex::encode(local.encode()),
             p2p_address: "127.0.0.1:0".into(),
         }],
-        contracts: Vec::new(),
-        extra_storage: Vec::new(),
         policies: Vec::new(),
         placed_policies: Vec::new(),
         node_demerits: Vec::new(),

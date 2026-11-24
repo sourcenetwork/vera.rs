@@ -21,13 +21,8 @@ commonware-glue.workspace = true
 commonware-parallel.workspace = true
 commonware-utils.workspace = true
 
-# Execution
-alloy-evm = { workspace = true, features = ["std"] }
-alloy-primitives = { workspace = true, features = ["serde"] }
-alloy-consensus = { workspace = true, features = ["serde"] }
-alloy-eips = { workspace = true, optional = true }
-k256 = { workspace = true, optional = true }
-k256-native = { package = "k256", version = "0.14", features = ["ecdsa"], optional = true }
+# Primitives
+alloy-primitives = { workspace = true, features = ["serde", "rlp"] }
 
 # RLP encoding
 alloy-rlp = { workspace = true }
@@ -42,9 +37,7 @@ serde.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
-alloy-eips.workspace = true
 
 [features]
-evm = ["dep:alloy-eips", "dep:k256", "dep:k256-native"]
 # A deployment that finalizes blocks with a dealt key, for other crates' tests.
 testing = []

@@ -59,7 +59,6 @@ impl VeraApiImpl {
                         .iter()
                         .map(|l| Log::new_unchecked(l.address, l.topics.clone(), l.data.clone()))
                         .collect(),
-                    None,
                 )
                 .with_refusal(r.refusal.clone())
             })

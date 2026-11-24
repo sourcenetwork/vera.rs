@@ -33,7 +33,7 @@ fn largest(parent: &Block) -> (Block, Vec<ExecutionReceipt>) {
     let receipts = next
         .txs
         .iter()
-        .map(|tx| ExecutionReceipt::new(tx.id().0, true, 1, 1, vec![], None))
+        .map(|tx| ExecutionReceipt::new(tx.id().0, true, 1, 1, vec![]))
         .collect::<Vec<_>>();
     next.receipt_commitment = vera_executor::receipt_commitment(100, &receipts);
     (next, receipts)

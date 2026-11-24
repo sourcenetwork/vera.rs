@@ -232,7 +232,7 @@ fn configure_devnet_membership(
     let consensus_pubkey = hex::encode(commonware_codec::Encode::encode(local));
     if genesis.validators.is_empty() {
         genesis.validators.push(ValidatorConfig {
-            evm_address: format!("{:?}", vera_node::validator_address(local)),
+            address: format!("{:?}", vera_node::validator_address(local)),
             consensus_pubkey,
             p2p_address: listen_addr.into(),
         });

@@ -316,7 +316,6 @@ fn decode_record(mut input: &[u8], limits: HistoryLimits) -> Result<Block> {
     for _ in 0..count {
         let hash = <[u8; 32]>::deserialize(&mut input)?;
         let gas = u64::deserialize(&mut input)?;
-        let contract = Option::<[u8; 20]>::deserialize(&mut input)?;
         let success = bool::deserialize(&mut input)?;
         let cumulative = u64::deserialize(&mut input)?;
         let count = u32::deserialize(&mut input)? as usize;
@@ -336,15 +335,8 @@ fn decode_record(mut input: &[u8], limits: HistoryLimits) -> Result<Block> {
             .map(super::StoredRefusal::decode)
             .transpose()?;
         receipts.push(
-            ExecutionReceipt::new(
-                hash.into(),
-                success,
-                gas,
-                cumulative,
-                logs,
-                contract.map(Address::from),
-            )
-            .with_refusal(refusal),
+            ExecutionReceipt::new(hash.into(), success, gas, cumulative, logs)
+                .with_refusal(refusal),
         );
     }
     ensure!(input.is_empty(), "trailing history record bytes");

@@ -156,7 +156,7 @@ pub(crate) fn run(
             .iter()
             .zip(&p2p_ports)
             .map(|(public_key, port)| ValidatorConfig {
-                evm_address: format!("{:?}", vera_node::validator_address(public_key)),
+                address: format!("{:?}", vera_node::validator_address(public_key)),
                 consensus_pubkey: hex::encode(Encode::encode(public_key)),
                 p2p_address: format!("127.0.0.1:{port}"),
             })

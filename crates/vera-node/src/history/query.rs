@@ -173,7 +173,7 @@ mod tests {
         let genesis = block(0, BlockId(B256::ZERO));
         let mut first = block(1, genesis.id());
         first.txs.push(vera_domain::Tx::new(vec![1].into()));
-        let receipt = ExecutionReceipt::new(B256::repeat_byte(7), true, 3, 3, vec![], None);
+        let receipt = ExecutionReceipt::new(B256::repeat_byte(7), true, 3, 3, vec![]);
         first.native_targets = [vera_domain::DbTarget::default(); 4];
         first.receipt_commitment =
             vera_executor::receipt_commitment(100, std::slice::from_ref(&receipt));
@@ -209,13 +209,12 @@ mod tests {
         let genesis = block(0, BlockId(B256::ZERO));
         let mut first = block(1, genesis.id());
         first.txs.push(vera_domain::Tx::new(vec![1].into()));
-        let receipt =
-            ExecutionReceipt::new(B256::repeat_byte(7), false, 5_000, 5_000, vec![], None)
-                .with_refusal(Some(vera_domain::Refusal::new(
-                    vera_domain::RefusingModule::Vera,
-                    vera_domain::RefusalKind::NotFound,
-                    "JWS token not found: missing",
-                )));
+        let receipt = ExecutionReceipt::new(B256::repeat_byte(7), false, 5_000, 5_000, vec![])
+            .with_refusal(Some(vera_domain::Refusal::new(
+                vera_domain::RefusingModule::Vera,
+                vera_domain::RefusalKind::NotFound,
+                "JWS token not found: missing",
+            )));
         first.native_targets = [vera_domain::DbTarget::default(); 4];
         first.receipt_commitment =
             vera_executor::receipt_commitment(100, std::slice::from_ref(&receipt));

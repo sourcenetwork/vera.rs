@@ -1,6 +1,6 @@
 //! Identifiers
 
-use alloy_evm::revm::primitives::B256;
+use alloy_primitives::B256;
 use bytes::{Buf, BufMut};
 use commonware_codec::{Error as CodecError, FixedSize, Read, Write};
 
@@ -71,7 +71,7 @@ impl Read for TxId {
 
 #[cfg(test)]
 mod tests {
-    use alloy_evm::revm::primitives::{B256, Bytes, keccak256};
+    use alloy_primitives::{B256, Bytes, keccak256};
     use commonware_codec::{Decode as _, DecodeExt as _, Encode as _};
 
     use super::*;

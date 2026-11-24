@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use alloy_primitives::{Address, B256, Log};
+use alloy_primitives::{B256, Log};
 use alloy_rlp::Decodable as _;
 use anyhow::{Context as _, Result, ensure};
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -75,7 +75,6 @@ use validated::VALIDATED;
 struct StoredReceipt {
     hash: [u8; 32],
     gas_used: u64,
-    contract: Option<[u8; 20]>,
     success: bool,
     cumulative_gas_used: u64,
     logs: Vec<Vec<u8>>,
@@ -140,7 +139,6 @@ impl Record {
                     r.gas_used,
                     r.cumulative_gas_used,
                     logs,
-                    r.contract.map(Address::from),
                 )
                 .with_refusal(refusal))
             })
@@ -305,7 +303,6 @@ impl FinalizedHistory {
                 .map(|r| StoredReceipt {
                     hash: r.tx_hash.0,
                     gas_used: r.gas_used,
-                    contract: r.contract_address.map(|a| a.0.0),
                     success: r.success(),
                     cumulative_gas_used: r.cumulative_gas_used(),
                     logs: r.logs().iter().map(alloy_rlp::encode).collect(),

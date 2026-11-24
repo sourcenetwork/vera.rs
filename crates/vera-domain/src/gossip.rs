@@ -1,6 +1,6 @@
 //! Gossip header type for finalized block header propagation.
 
-use alloy_evm::revm::primitives::B256;
+use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};
 
 use crate::Block;

@@ -216,7 +216,7 @@ fn tables(directory: &Path) -> Vec<PathBuf> {
 fn revision(height: u64, parent: BlockId) -> (Block, ExecutionReceipt) {
     let mut block = block(height, parent);
     let transaction = Tx::new(vec![u8::try_from(height).unwrap(); 256].into());
-    let receipt = ExecutionReceipt::new(transaction.id().0, height % 2 == 1, 10, 10, vec![], None);
+    let receipt = ExecutionReceipt::new(transaction.id().0, height % 2 == 1, 10, 10, vec![]);
     block.txs.push(transaction);
     block.native_targets = [vera_domain::DbTarget::default(); 4];
     block.receipt_commitment =

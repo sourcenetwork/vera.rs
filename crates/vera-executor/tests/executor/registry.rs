@@ -318,7 +318,7 @@ fn a_validator_moves_itself_with_its_consensus_key_through_any_signer() {
         executor.clone(),
     );
     assert!(outcome.receipts[0].success());
-    assert_eq!(outcome.receipts[0].receipt.logs.len(), 1);
+    assert_eq!(outcome.receipts[0].logs.len(), 1);
     assert_eq!(address(&executor), ("127.0.0.1:4000".to_owned(), 1));
 
     // The same signature does not apply twice, and the next sequence does.

@@ -47,7 +47,5 @@ ed25519-dalek.workspace = true
 vera-domain = { workspace = true, features = ["testing"] }
 k256.workspace = true
 p256.workspace = true
-alloy-signer.workspace = true
-alloy-signer-local = { workspace = true, default-features = false }
 ark-std.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }

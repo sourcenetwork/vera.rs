@@ -209,7 +209,6 @@ impl VeraExecutor {
             outcome.gas_used,
             0, // cumulative gas set by caller
             outcome.logs,
-            None,
         )
         .with_refusal(outcome.refusal))
     }
@@ -317,7 +316,7 @@ impl VeraExecutor {
 
             executed_indices.push(i);
             let mut receipt = receipt;
-            receipt.receipt.cumulative_gas_used = gas_budget.used();
+            receipt.cumulative_gas_used = gas_budget.used();
             outcome.receipts.push(receipt);
         }
 

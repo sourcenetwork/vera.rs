@@ -7,10 +7,7 @@ mod node_config;
 pub use node_config::{ConsensusParams, ConsensusPreset, NodeConfigBuilder};
 
 mod genesis;
-pub use genesis::{
-    GenesisAllocation, GenesisBuilder, GenesisContract, GenesisStorage, ValidatorConfig,
-    VeraGenesis,
-};
+pub use genesis::{GenesisBuilder, ValidatorConfig, VeraGenesis};
 
 mod builder;
 pub use builder::{TestClusterBuilder, resolve_binary};

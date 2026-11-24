@@ -56,8 +56,6 @@ commonware-resolver.workspace = true
 commonware-storage.workspace = true
 commonware-utils.workspace = true
 
-alloy-consensus.workspace = true
-alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 anyhow.workspace = true
@@ -81,8 +79,6 @@ libc.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
-alloy-signer.workspace = true
-alloy-signer-local.workspace = true
 alloy-sol-types.workspace = true
 ed25519-dalek.workspace = true
 p256.workspace = true

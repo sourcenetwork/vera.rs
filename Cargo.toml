@@ -96,16 +96,8 @@ vera-zanzibar = { path = "crates/vera-zanzibar", version = "=0.1.2" }
 
 # Alloy
 alloy-primitives = "1.7"
-alloy-consensus = { version = "2.4", features = ["k256"] }
-alloy-eips = "2.4"
 alloy-rlp = { version = "0.3.16", features = ["derive"] }
-alloy-evm = { version = "0.39.0", default-features = false }
-alloy-signer = "2.4"
-alloy-signer-local = { version = "2.4", default-features = false }
 alloy-sol-types = "1.7"
-
-# Execution
-revm = { version = "43.0.0", default-features = false, features = ["optional_balance_check"] }
 
 # Async
 tokio = { version = "1.50", features = ["full"] }

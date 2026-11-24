@@ -2,7 +2,7 @@
 
 use std::{collections::HashSet, str::FromStr};
 
-use alloy_evm::revm::primitives::Address;
+use alloy_primitives::Address;
 use commonware_codec::ReadExt as _;
 use vera_modules::validator_registry::validate_p2p_address;
 
@@ -17,7 +17,7 @@ pub(crate) fn registry_members(
     let mut keys = HashSet::new();
     let mut members = Vec::with_capacity(validators.len());
     for validator in validators {
-        let address = Address::from_str(&validator.evm_address)
+        let address = Address::from_str(&validator.address)
             .map_err(|e| VeraGenesisError::Parse(format!("invalid validator address: {e}")))?;
         if address == Address::ZERO {
             return Err(VeraGenesisError::Parse(

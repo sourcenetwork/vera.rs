@@ -2,15 +2,15 @@
 
 Native revisions include `Block::receipt_commitment`, a Keccak-256 commitment to
 the ordered execution receipts and execution gas limit. Proposal verification
-re-executes the operations and requires the same commitment. Missing commitments
-are rejected by the native application and native checkpoint verifier.
+re-executes the operations and requires the same commitment. A block does not
+decode without one.
 
 `vera_executor::receipt_commitment` computes the commitment without constructing
 an intermediate receipt buffer. Its input encoding is:
 
 | Field | Encoding |
 |---|---|
-| Domain | Literal bytes `vera/receipts/v2` |
+| Domain | Literal bytes `vera/receipts/v3` |
 | Execution gas limit | Big-endian u64 |
 | Receipt count | Big-endian u64 |
 | Each receipt | Fields below, in execution order |
@@ -25,8 +25,6 @@ Each receipt contributes:
 | Success | One byte, 0 or 1 |
 | Refusal presence | One byte, 0 or 1 |
 | Refusal | Module code (one byte) and kind code (one byte), only when present |
-| Contract address presence | One byte, 0 or 1 |
-| Contract address | 20 bytes, only when present |
 | Log count | Big-endian u64 |
 | Each log | Address (20 bytes), topic count (big-endian u64), ordered topics (32 bytes each), data length (big-endian u64), data bytes |
 
@@ -41,8 +39,7 @@ revision; existing receipt RPC responses do not perform that verification.
 
 A native request a module refuses has a failed receipt naming why: the module it
 was addressed to, a refusal kind and the module's message. A successful receipt
-and every EVM receipt carry no refusal; verification rejects a successful
-receipt that names one.
+carries no refusal; verification rejects a successful receipt that names one.
 
 The module and kind are committed. The message is not: it is the module's
 error text, which embeds parser and library wording (for example a YAML
@@ -171,18 +168,14 @@ need above the recovery anchor. A later authenticated selection can restart the
 descending cursor while retaining the original committed-prefix boundary.
 Record bytes remain unchanged. Any other store format is refused.
 
-## Canonical encoding and existing data
+## Canonical block encoding
 
-Commitment tag 3 encodes the optional DKG payload, optional four native storage
-targets, 32-byte receipt commitment and existing execution storage targets.
-Tags 0, 1 and 2 preserve their previous bytes and remain decodable. Tag 3 adds
-33 bytes to a revision that already has native targets. Unknown tags and
-truncated encodings are rejected.
+A block encodes, in order: consensus context, parent, height, timestamp, term,
+module state root, requests, the optional DKG payload, the four native storage
+targets and the 32-byte receipt commitment. Every field is required, there is
+one encoding, and a truncated block is rejected.
 
-Fresh native genesis uses the empty receipt list with gas limit zero because
-genesis has no executed operations. Native startup rejects a persisted genesis
-with missing or invalid receipt commitments and preserves its files. Releases
-start with fresh state; incompatible development history is unsupported.
-Legacy library execution and history can still read revisions without native
-targets or receipt commitments, but those receipts have no authenticated
-commitment.
+Native genesis uses the empty receipt list with gas limit zero because genesis
+has no executed operations. Startup rejects a persisted genesis whose receipt
+commitment is not that value and preserves its files. Releases start with
+fresh state.

@@ -77,14 +77,6 @@ impl ReceiptResponse {
         if self.receipts.len() != block.txs.len() {
             return Err(ReceiptResponseError::Invalid("receipt count"));
         }
-        // The commitment encodes a boolean result, not legacy state-root statuses.
-        if self
-            .receipts
-            .iter()
-            .any(|r| !matches!(r.receipt.status, alloy_consensus::Eip658Value::Eip658(_)))
-        {
-            return Err(ReceiptResponseError::Invalid("receipt status"));
-        }
         if self
             .receipts
             .iter()

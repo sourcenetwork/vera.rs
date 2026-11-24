@@ -1,6 +1,6 @@
 //! Block types
 
-use alloy_evm::revm::primitives::{B256, keccak256};
+use alloy_primitives::{B256, keccak256};
 use bytes::{Buf, BufMut};
 use commonware_codec::{Encode, EncodeSize, Error as CodecError, RangeCfg, Read, ReadExt, Write};
 use commonware_consensus::types::{Epoch, Round, View};

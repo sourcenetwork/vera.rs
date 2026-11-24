@@ -40,7 +40,6 @@ fn fixture(revisions: usize, submissions_per_revision: usize) -> Fixture {
                 1,
                 position as u64 + 1,
                 vec![],
-                None,
             ));
         }
         next.native_targets = [vera_domain::DbTarget::default(); 4];

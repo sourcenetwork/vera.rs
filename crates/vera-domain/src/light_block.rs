@@ -1,6 +1,6 @@
 //! Self-contained BLS light blocks and standalone finality verification.
 
-use alloy_evm::revm::primitives::{B256, keccak256};
+use alloy_primitives::{B256, keccak256};
 use bytes::BufMut;
 use commonware_codec::{
     Decode as _, DecodeExt as _, Encode as _, EncodeSize, Error as CodecError, RangeCfg, Read,
