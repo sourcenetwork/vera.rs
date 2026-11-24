@@ -284,8 +284,9 @@ fn an_epochs_capacity_bounds_additions_and_reactivation() {
     assert_eq!(members(&executor).len(), usize::from(capacity) + 1);
 }
 
+/// An update signed for a member that the deployment admitted first.
 fn update(signer: u8, validator: u8, sequence: u64, to: &str) -> Vec<u8> {
-    let digest = address_update_digest(&GENESIS, member(validator), sequence, to);
+    let digest = address_update_digest(&GENESIS, member(validator), 0, sequence, to);
     IValidatorRegistry::updateP2PAddressCall {
         validator: member(validator),
         p2pAddr: to.into(),

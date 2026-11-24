@@ -9,11 +9,12 @@ const DOMAIN: &[u8] = b"vera/registry/p2p-address/v1";
 
 /// The digest a member's consensus key signs to move it to `p2p_address`.
 ///
-/// It binds the deployment's genesis record, the member, the sequence its
-/// record expects and the new address.
+/// It binds the deployment's genesis record, the member, the admission its
+/// record was created by, the sequence the record expects and the new address.
 pub fn address_update_digest(
     genesis_id: &[u8; 32],
     validator: Address,
+    admission: u64,
     sequence: u64,
     p2p_address: &str,
 ) -> [u8; 32] {
@@ -22,6 +23,7 @@ pub fn address_update_digest(
             DOMAIN,
             genesis_id,
             validator.as_slice(),
+            &admission.to_be_bytes(),
             &sequence.to_be_bytes(),
             p2p_address.as_bytes(),
         ]
@@ -35,7 +37,9 @@ impl VeraModule {
     ///
     /// `signature` is the Ed25519 signature of the member's consensus key over
     /// [`address_update_digest`]. Whoever submits it needs no authority of its
-    /// own, and `sequence` lets each signature apply once.
+    /// own. `sequence` lets each signature apply once, and the record's
+    /// admission keeps a signature made before the member was removed from
+    /// applying after it is admitted again.
     pub fn update_p2p_address(
         &mut self,
         genesis_id: &[u8; 32],
@@ -57,7 +61,13 @@ impl VeraModule {
         }
         let signer = vera_crypto::actor::ed25519_did(&member.consensus_key)
             .map_err(|_| ValidatorRegistryError::Corrupt("invalid consensus key".into()))?;
-        let digest = address_update_digest(genesis_id, validator, sequence, p2p_address);
+        let digest = address_update_digest(
+            genesis_id,
+            validator,
+            member.admission,
+            sequence,
+            p2p_address,
+        );
         vera_crypto::actor::verify_digest(&signer, &digest, signature)
             .map_err(|_| unauthorized("signature is not the validator's consensus key's"))?;
         member.p2p_address = p2p_address.to_owned();

@@ -105,8 +105,11 @@ VERAD_BINARY=/path/to/verad cargo test -p vera-e2e --test native_membership
 The registry (module address `0x0813`) keeps one record per member in the vera
 module's partition under `registry/member/<20-byte address>`: the Ed25519
 consensus key, the socket address peers dial (at most 64 bytes), whether the
-member is active, and the sequence its next address update must carry. Genesis
-seeds the records from `validators`; reads return members in address order. A
+member is active, the admission that created the record, and the sequence its
+next address update must carry. Every admission, a genesis member or an
+`addValidator`, takes the next number from a count under `registry/admissions`
+that removal never lowers. Genesis seeds the records from `validators` in the
+order listed; reads return members in address order. A
 record that does not decode is a fault of the node and fails the block that
 reads it.
 
@@ -123,13 +126,17 @@ signature of the member's consensus key over
 
 ```
 keccak256("vera/registry/p2p-address/v1" || genesis id || validator address
-          || sequence (u64, big endian) || new address bytes)
+          || admission (u64, big endian) || sequence (u64, big endian)
+          || new address bytes)
 ```
 
 Any native signer may submit it. The sequence must equal the record's and then
 advances, so a signature applies once, and the genesis record identifier keeps
-it to one deployment. `vera_client::ValidatorAddressUpdate::sign` builds it from
-the 32-byte secret in the validator's key file. An inactive member may still
+it to one deployment. Removing a member deletes its record and admitting it
+again starts the sequence at zero under a new admission, so no signature made
+before the removal applies to the new record. `vera_client::ValidatorAddressUpdate::sign` builds it from
+the 32-byte secret in the validator's key file and the record's admission and
+sequence, which `getValidator` returns. An inactive member may still
 update its address.
 
 ### Operator keys

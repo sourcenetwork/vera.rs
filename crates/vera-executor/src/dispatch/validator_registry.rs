@@ -62,6 +62,7 @@ fn info(address: Address, member: MemberRecord) -> ValidatorInfo {
         consensus_pubkey: hex::encode(member.consensus_key),
         p2p_address: member.p2p_address,
         active: member.active,
+        admission: member.admission,
         address_sequence: member.address_sequence,
     }
 }

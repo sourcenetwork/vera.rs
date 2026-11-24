@@ -8,6 +8,7 @@ use crate::kv_store::ModuleKvStore as _;
 use crate::vera::VeraModule;
 
 const MEMBER_PREFIX: &[u8] = b"registry/member/";
+const ADMISSIONS_KEY: &[u8] = b"registry/admissions";
 
 /// Longest network address a record stores, in bytes. Every IPv4 and IPv6
 /// socket address without a zone fits.
@@ -22,6 +23,10 @@ pub struct MemberRecord {
     pub p2p_address: String,
     /// Whether the member is selected into future committees.
     pub active: bool,
+    /// Admission this record was created by. Every admission, at genesis or
+    /// by `addValidator`, takes the next number, so a member removed and
+    /// admitted again signs its address updates under a new one.
+    pub admission: u64,
     /// Sequence the member's next signed address update must carry.
     pub address_sequence: u64,
 }
@@ -86,6 +91,21 @@ impl VeraModule {
     pub(super) fn put_member(&mut self, address: Address, record: &MemberRecord) {
         let value = borsh::to_vec(record).expect("member records serialize");
         self.store.put(&member_key(address), value);
+    }
+
+    /// Take the next admission number. The count is never reset.
+    pub(super) fn next_admission(&mut self) -> Result<u64, ValidatorRegistryError> {
+        let admission = match self.store.get_ref(ADMISSIONS_KEY) {
+            None => 0,
+            Some(value) => u64::from_be_bytes(value.try_into().map_err(|_| {
+                ValidatorRegistryError::Corrupt("admission count does not decode".into())
+            })?),
+        };
+        let next = admission
+            .checked_add(1)
+            .ok_or_else(|| ValidatorRegistryError::State("admissions are exhausted".into()))?;
+        self.store.put(ADMISSIONS_KEY, next.to_be_bytes().to_vec());
+        Ok(admission)
     }
 
     pub(super) fn delete_member(&mut self, address: Address) {

@@ -13,6 +13,9 @@ pub struct ValidatorInfo {
     pub p2p_address: String,
     /// Whether the validator is currently active.
     pub active: bool,
+    /// Admission the validator's record was created by; its address updates
+    /// sign it.
+    pub admission: u64,
     /// Sequence the validator's next signed address update must carry.
     pub address_sequence: u64,
 }

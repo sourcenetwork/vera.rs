@@ -116,6 +116,16 @@ async fn registry_view(client: &VeraClient, reader: &BlsSigner, calldata: Vec<u8
     simulation.output.to_vec()
 }
 
+/// A member's record as the registry's `getValidator` view returns it.
+async fn validator_info(client: &VeraClient, reader: &BlsSigner, member: Address) -> ValidatorInfo {
+    let calldata = IValidatorRegistry::getValidatorCall { validator: member }.abi_encode();
+    let result = registry_view(client, reader, calldata).await;
+    let decoded = IValidatorRegistry::getValidatorCall::abi_decode_returns(&result)
+        .expect("abi decode getValidator");
+    let info: Option<ValidatorInfo> = serde_json::from_slice(&decoded).expect("validator JSON");
+    info.expect("validator should exist")
+}
+
 #[tokio::test]
 async fn validator_bootstrap() {
     let _guard = validator_test_lock().lock().await;
@@ -187,7 +197,11 @@ async fn validator_bootstrap() {
             "validator {i} p2p address mismatch"
         );
         assert!(info.active, "validator {i} should be active");
-        assert_eq!(info.address_sequence, 0, "validator {i} address sequence");
+        assert_eq!(
+            (info.admission, info.address_sequence),
+            (i as u64, 0),
+            "validator {i} admission and address sequence"
+        );
     }
 
     // A3: getActiveValidatorCount equals 2
@@ -372,10 +386,17 @@ async fn validator_bootstrap() {
     // no registry permission submits it.
     let genesis_id = administration::genesis_id(&client).await;
     let worker = BlsSigner::random(chain_id).expect("random BLS signer");
+    let admitted = validator_info(&client, &admin_signer, new_validator_addr).await;
+    assert_eq!(
+        (admitted.admission, admitted.address_sequence),
+        (2, 0),
+        "the added validator takes the admission after the genesis members'"
+    );
     let moved = ValidatorAddressUpdate::sign(
         &consensus_secret(3),
         genesis_id,
         new_validator_addr,
+        admitted.admission,
         0,
         "127.0.0.1:30399",
     );
@@ -775,6 +796,7 @@ async fn validator_registry_adversarial() {
         genesis_id,
         fake_addr,
         0,
+        0,
         "10.0.0.1:1234",
     );
     let refused = client
@@ -788,6 +810,9 @@ async fn validator_registry_adversarial() {
     // ── N13: a party without the validator's consensus key cannot move it
 
     let member: Address = validators[0].address.parse().unwrap();
+    let admission = validator_info(&client, &admin_signer, member)
+        .await
+        .admission;
     for (label, forged) in [
         (
             "another member's key",
@@ -795,13 +820,21 @@ async fn validator_registry_adversarial() {
                 &consensus_secret(2),
                 genesis_id,
                 member,
+                admission,
                 0,
                 "10.0.0.1:1234",
             ),
         ),
         (
             "a key that is no member's",
-            ValidatorAddressUpdate::sign(&[0x5a; 32], genesis_id, member, 0, "10.0.0.1:1234"),
+            ValidatorAddressUpdate::sign(
+                &[0x5a; 32],
+                genesis_id,
+                member,
+                admission,
+                0,
+                "10.0.0.1:1234",
+            ),
         ),
         (
             "the member's key for another deployment",
@@ -809,6 +842,18 @@ async fn validator_registry_adversarial() {
                 &consensus_secret(1),
                 B256::repeat_byte(0xEE),
                 member,
+                admission,
+                0,
+                "10.0.0.1:1234",
+            ),
+        ),
+        (
+            "the member's key under another admission",
+            ValidatorAddressUpdate::sign(
+                &consensus_secret(1),
+                genesis_id,
+                member,
+                admission + 1,
                 0,
                 "10.0.0.1:1234",
             ),

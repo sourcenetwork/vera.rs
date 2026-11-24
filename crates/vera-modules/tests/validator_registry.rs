@@ -254,16 +254,29 @@ fn commands_need_the_membership_policys_manage_permission() {
     ));
 }
 
-fn signed(signer: u8, genesis: &[u8; 32], member: u8, sequence: u64, to: &str) -> Vec<u8> {
+fn signed_under(
+    signer: u8,
+    genesis: &[u8; 32],
+    member: u8,
+    admission: u64,
+    sequence: u64,
+    to: &str,
+) -> Vec<u8> {
     consensus(signer)
         .sign(&address_update_digest(
             genesis,
             address(member),
+            admission,
             sequence,
             to,
         ))
         .to_bytes()
         .to_vec()
+}
+
+/// A signature for a member admitted first, as member 1 is in these tests.
+fn signed(signer: u8, genesis: &[u8; 32], member: u8, sequence: u64, to: &str) -> Vec<u8> {
+    signed_under(signer, genesis, member, 0, sequence, to)
 }
 
 #[test]
@@ -323,6 +336,68 @@ fn a_consensus_key_moves_its_own_member_once_per_signature() {
         vera.update_p2p_address(&GENESIS, address(1), &long, 2, &[0; 64]),
         Err(ValidatorRegistryError::InvalidP2PAddress(_))
     ));
+}
+
+#[test]
+fn an_update_signed_before_removal_does_not_apply_after_readmission() {
+    let (mut vera, acp) = managed();
+    add(&mut vera, &acp, 1).unwrap();
+    add(&mut vera, &acp, 2).unwrap();
+    let old = signed(1, &GENESIS, 1, 0, "10.0.0.1:1");
+    vera.update_p2p_address(&GENESIS, address(1), "10.0.0.1:1", 0, &old)
+        .unwrap();
+    vera.remove_validator(&acp, &manager(), address(1)).unwrap();
+    add(&mut vera, &acp, 1).unwrap();
+    let readmitted = vera.registry_member(address(1)).unwrap().unwrap();
+    assert_eq!(
+        (
+            readmitted.p2p_address.as_str(),
+            readmitted.admission,
+            readmitted.address_sequence
+        ),
+        ("127.0.0.1:3000", 2, 0)
+    );
+
+    assert!(matches!(
+        vera.update_p2p_address(&GENESIS, address(1), "10.0.0.1:1", 0, &old),
+        Err(ValidatorRegistryError::Unauthorized(_))
+    ));
+    assert_eq!(
+        vera.registry_member(address(1)).unwrap().unwrap(),
+        readmitted
+    );
+
+    let fresh = signed_under(1, &GENESIS, 1, 2, 0, "10.0.0.1:1");
+    vera.update_p2p_address(&GENESIS, address(1), "10.0.0.1:1", 0, &fresh)
+        .unwrap();
+    let moved = vera.registry_member(address(1)).unwrap().unwrap();
+    assert_eq!(
+        (moved.p2p_address.as_str(), moved.address_sequence),
+        ("10.0.0.1:1", 1)
+    );
+}
+
+#[test]
+fn every_admission_takes_a_new_number() {
+    let (mut vera, acp) = managed();
+    vera.seed_validators([
+        (address(3), key(3), "127.0.0.1:1".to_owned()),
+        (address(1), key(1), "127.0.0.1:1".to_owned()),
+    ])
+    .unwrap();
+    add(&mut vera, &acp, 2).unwrap();
+    vera.remove_validator(&acp, &manager(), address(2)).unwrap();
+    add(&mut vera, &acp, 2).unwrap();
+    let admissions: Vec<_> = vera
+        .registry_members()
+        .unwrap()
+        .into_iter()
+        .map(|(member, record)| (member, record.admission))
+        .collect();
+    assert_eq!(
+        admissions,
+        [(address(1), 1), (address(2), 3), (address(3), 0)]
+    );
 }
 
 #[test]

@@ -283,12 +283,15 @@ commitment.
 validators need distinct addresses and consensus keys, and a node does not start
 without at least one. The validator registry keeps one record per member in
 the vera module's store (`registry/member/<address>`: consensus key, network
-address, active flag, address sequence), seeded at genesis and read in address
-order; a record that does not read back fails the block. Membership commands
-need the membership policy's `manage` permission. A validator changes its
-network address itself: `updateP2PAddress` carries its Ed25519 consensus key's
-signature over the genesis record, its address, the record's sequence and the
-new address, any native signer submits it, and it applies once
+address, active flag, admission, address sequence), seeded at genesis and read
+in address order; a record that does not read back fails the block. Every
+admission takes the next number of a count that removal never lowers.
+Membership commands need the membership policy's `manage` permission. A
+validator changes its network address itself: `updateP2PAddress` carries its
+Ed25519 consensus key's signature over the genesis record, its address, the
+record's admission and sequence and the new address, any native signer submits
+it, and it applies once; a member removed and admitted again signs under a new
+admission
 (`vera_client::ValidatorAddressUpdate`). See docs/consensus-membership.md#validator-records.
 
 Four authenticated peer resolvers (channels 9 to 12) serve bounded operation-log ranges. Fetches

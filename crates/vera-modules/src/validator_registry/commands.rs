@@ -90,12 +90,14 @@ impl VeraModule {
         {
             return Err(ValidatorRegistryError::DuplicateConsensusKey);
         }
+        let admission = self.next_admission()?;
         self.put_member(
             address,
             &MemberRecord {
                 consensus_key,
                 p2p_address: p2p_address.to_owned(),
                 active: true,
+                admission,
                 address_sequence: 0,
             },
         );
@@ -194,12 +196,14 @@ impl VeraModule {
             if !keys.insert(consensus_key) {
                 return Err(ValidatorRegistryError::DuplicateConsensusKey);
             }
+            let admission = self.next_admission()?;
             self.put_member(
                 address,
                 &MemberRecord {
                     consensus_key,
                     p2p_address,
                     active: true,
+                    admission,
                     address_sequence: 0,
                 },
             );

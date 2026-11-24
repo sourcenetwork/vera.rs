@@ -30,16 +30,21 @@ impl ValidatorAddressUpdate {
     /// Sign an update with the validator's consensus key.
     ///
     /// `consensus_key` is the 32-byte Ed25519 secret the validator's key file
-    /// holds, and `genesis_id` the deployment's genesis record identifier.
+    /// holds, `genesis_id` the deployment's genesis record identifier, and
+    /// `admission` and `sequence` the validator record's current values. A
+    /// signature made under one admission does not apply to a record created
+    /// by a later one.
     #[must_use]
     pub fn sign(
         consensus_key: &[u8; 32],
         genesis_id: B256,
         validator: Address,
+        admission: u64,
         sequence: u64,
         p2p_address: &str,
     ) -> Self {
-        let digest = address_update_digest(&genesis_id.0, validator, sequence, p2p_address);
+        let digest =
+            address_update_digest(&genesis_id.0, validator, admission, sequence, p2p_address);
         Self {
             validator,
             p2p_address: p2p_address.to_owned(),
@@ -86,6 +91,7 @@ mod tests {
             &secret,
             B256::repeat_byte(7),
             Address::repeat_byte(1),
+            2,
             3,
             "127.0.0.1:30300",
         );
@@ -93,7 +99,8 @@ mod tests {
             .verifying_key()
             .to_bytes();
         let signer = vera_crypto::actor::ed25519_did(&public).unwrap();
-        let digest = address_update_digest(&[7; 32], Address::repeat_byte(1), 3, "127.0.0.1:30300");
+        let digest =
+            address_update_digest(&[7; 32], Address::repeat_byte(1), 2, 3, "127.0.0.1:30300");
         vera_crypto::actor::verify_digest(&signer, &digest, &update.signature).unwrap();
         let call =
             IValidatorRegistry::updateP2PAddressCall::abi_decode(&update.calldata()).unwrap();
