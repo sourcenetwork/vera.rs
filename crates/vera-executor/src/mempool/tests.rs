@@ -528,4 +528,59 @@ mod anchors {
             }
         )));
     }
+
+    #[test]
+    fn pending_anchor_requests_count_against_the_signers_quota_until_reset() {
+        let (sk, pk_bytes) = test_bls_keypair();
+        let signer = bls::did_from_compressed_pubkey(&pk_bytes).unwrap();
+        let key = vec![6u8; 96];
+        let deployment = deployment_id(&key);
+        let granted = committed(vec![
+            AdministrativeCommand::RegisterDeployment(DeploymentRegistration {
+                consensus_key: hex::encode(&key),
+                genesis_id: [9; 32],
+                operators: OperatorPolicy {
+                    threshold: 1,
+                    keys: vec![
+                        "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798".into(),
+                    ],
+                },
+            }),
+            AdministrativeCommand::SetAnchorSubmitter(AnchorSubmitterGrant {
+                deployment: deployment.0,
+                submitter: signer,
+                quota: 2,
+            }),
+        ]);
+        let mut validator = MempoolValidator::new(test_config()).with_committed_modules(granted);
+        let requests: Vec<_> = (0..3)
+            .map(|nonce| anchor_tx(&sk, &pk_bytes, nonce, call(deployment)))
+            .collect();
+
+        // A request refused for its sequence takes no quota.
+        assert!(matches!(
+            validator.validate_tx(&requests[1]),
+            Err(ExecutionError::NonceMismatch { .. })
+        ));
+        validator.validate_tx(&requests[0]).unwrap();
+        validator.validate_tx(&requests[1]).unwrap();
+        assert!(matches!(
+            validator.validate_tx(&requests[2]),
+            Err(ExecutionError::AnchorNotAdmitted { .. })
+        ));
+        // Other requests of the signer are not held back by the quota.
+        validator
+            .validate_tx(&signed_native_tx(&sk, &pk_bytes, 2))
+            .unwrap();
+
+        // Nothing was committed: after a reset the retained requests fit again,
+        // and a third still does not.
+        validator.reset(NativeNonceStore::default());
+        validator.recheck_pending_tx(&requests[0]).unwrap();
+        validator.recheck_pending_tx(&requests[1]).unwrap();
+        assert!(matches!(
+            validator.recheck_pending_tx(&requests[2]),
+            Err(ExecutionError::AnchorNotAdmitted { .. })
+        ));
+    }
 }

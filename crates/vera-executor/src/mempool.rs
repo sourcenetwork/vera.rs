@@ -3,6 +3,8 @@
 //! Sequential validations from the same signer see each other's sequence
 //! increments.
 
+use std::collections::HashMap;
+
 use alloy_primitives::B256;
 use vera_crypto::bls;
 use vera_domain::NativeTx;
@@ -57,13 +59,16 @@ fn anchor_target(native_tx: &NativeTx) -> Option<AnchorTarget> {
 /// Stateful request validator — mempool admission gate.
 ///
 /// Maintains branched state across calls so sequential validations
-/// from the same signer see each other's nonce increments.
+/// from the same signer see each other's nonce increments and pending
+/// anchor submissions.
 /// Call [`MempoolValidator::reset`] after each block finalization.
 #[derive(Clone, Debug)]
 pub struct MempoolValidator {
     config: ExecutionConfig,
     native_nonces: NativeNonceStore,
     committed: Option<SharedModuleState>,
+    /// Anchor requests admitted since the last reset, per deployment and signer.
+    pending_anchors: HashMap<(B256, String), u32>,
 }
 
 impl MempoolValidator {
@@ -73,6 +78,7 @@ impl MempoolValidator {
             config,
             native_nonces: NativeNonceStore::default(),
             committed: None,
+            pending_anchors: HashMap::new(),
         }
     }
 
@@ -86,10 +92,15 @@ impl MempoolValidator {
     }
 
     /// Refuse an anchor request whose signer has no grant for the deployment
-    /// it names, or no quota left today by this node's clock.
-    fn admit_anchor(&self, pre: &PreValidatedNativeTx) -> Result<(), ExecutionError> {
+    /// it names, or no quota left today by this node's clock once its
+    /// requests already admitted since the last reset are counted. Returns
+    /// the pending count to raise when the request is admitted.
+    fn admit_anchor(
+        &self,
+        pre: &PreValidatedNativeTx,
+    ) -> Result<Option<(B256, String)>, ExecutionError> {
         let (Some(target), Some(committed)) = (pre.anchored, &self.committed) else {
-            return Ok(());
+            return Ok(None);
         };
         let refused = |deployment, reason: &dyn std::fmt::Display| {
             Err(ExecutionError::AnchorNotAdmitted {
@@ -104,9 +115,11 @@ impl MempoolValidator {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_secs());
+        let pending_key = (deployment, pre.signer_did.clone());
+        let pending = self.pending_anchors.get(&pending_key).copied().unwrap_or(0);
         let modules = committed.read().expect("module state lock poisoned");
         match modules.vera.anchor_submitter(&deployment, &pre.signer_did) {
-            Ok(Some(grant)) if grant.remaining(now) > 0 => Ok(()),
+            Ok(Some(grant)) if grant.remaining(now) > pending => Ok(Some(pending_key)),
             Ok(Some(grant)) => refused(
                 deployment,
                 &AnchorError::QuotaExceeded { quota: grant.quota },
@@ -120,10 +133,12 @@ impl MempoolValidator {
     ///
     /// Native nonces are loaded from the finalized module state so the
     /// validator correctly rejects replayed nonces and accepts the next
-    /// valid nonce for each BLS identity. Recheck retained transactions in
-    /// admission order before accepting new requests.
+    /// valid nonce for each BLS identity. Pending anchor submissions are
+    /// cleared with them. Recheck retained transactions in admission order
+    /// before accepting new requests, which counts them again.
     pub fn reset(&mut self, native_nonces: NativeNonceStore) {
         self.native_nonces = native_nonces;
+        self.pending_anchors.clear();
     }
 
     /// Recheck an immutable request already authenticated at admission.
@@ -178,9 +193,12 @@ impl MempoolValidator {
         &mut self,
         pre: &PreValidatedNativeTx,
     ) -> Result<TxValidationResult, ExecutionError> {
-        self.admit_anchor(pre)?;
+        let anchor = self.admit_anchor(pre)?;
         self.native_nonces
             .check_and_increment(&pre.signer_did, pre.nonce)?;
+        if let Some(key) = anchor {
+            *self.pending_anchors.entry(key).or_default() += 1;
+        }
 
         Ok(TxValidationResult {
             sender: pre.signer_did.clone(),

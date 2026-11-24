@@ -157,7 +157,11 @@ pub(super) fn dispatch(
             Err(internal_fault(AnchorError::MalformedRecord))
         }
         Err(error) => {
-            // Every validator decoded and verified the submission before refusing it.
+            // A refusal costs the full price whichever check raised it. One
+            // raised in `authorize` (an unregistered deployment, no grant, a
+            // used quota) comes before the artifacts are verified, but the
+            // request still took its place in the block, and a flat price
+            // keeps a signer from probing for the cheaper refusals.
             let mut refused = err_dispatch(error);
             refused.output.gas_used = ANCHOR_GAS;
             Ok(refused)

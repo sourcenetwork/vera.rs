@@ -54,15 +54,18 @@ since the Unix epoch by S's block time) and the submissions counted on it.
 
 - A node admits an anchor request to its pool only when committed state holds
   a grant of the signer for the deployment the request names, with quota left
-  today by the node's clock. Other requests are refused with the reason, and
-  a pending one is dropped when its grant goes.
+  today by the node's clock after the signer's anchor requests for that
+  deployment already in the pool are counted. Other requests are refused with
+  the reason, and a pending one is dropped when its grant goes.
 - Execution checks the same against block time and counts the submission,
   whether it is then recorded or refused: a refusal rolls the module back, and
   the executor counts it afterwards. A signer without a grant is refused with
   `unauthorized`, one past its quota with `work_limit_exceeded`, and a
   deployment that is not registered with `not_found`.
 - Every submission costs 250,000 gas, and so does one refused after its
-  arguments decoded: every validator verified it.
+  arguments decoded, whichever check refused it: a refusal for the
+  registration, the grant or the quota comes before the artifacts are
+  verified, and costs the same so that no refusal is a cheaper probe.
 
 ## Anchors
 
