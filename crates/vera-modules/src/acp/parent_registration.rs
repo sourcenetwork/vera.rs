@@ -199,7 +199,7 @@ mod tests {
         };
         let cmd = PolicyCmd::RegisterUnderParent {
             object: child,
-            parent: parent.clone(),
+            parent,
         };
         assert!(matches!(
             module.direct_policy_cmd(&owner, &policy, cmd.clone()),
