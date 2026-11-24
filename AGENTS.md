@@ -268,6 +268,13 @@ First boot records a durable initialization intent before changing journals, the
 publishes `native-genesis.bin` after all four partitions are durable. Interrupted
 initialization can rewind and retry only with the same genesis configuration.
 Foreign state layouts and incompatible genesis records are rejected.
+Formats are versioned: a block leads with `BLOCK_FORMAT_VERSION`, the genesis
+record and intent with `STATE_LAYOUT_VERSION` (also hashed into the genesis
+fingerprint), a native request with its type byte, and each is refused with a
+typed error (`vera_domain::UnsupportedVersion`, `NativeTxDecodeError`,
+`UnsupportedHistoryFormat`) under any other value. A release that adds a
+component raises the versions it changes; modules keep their addresses and call
+encodings. See `docs/receipt-commitments.md#format-versions`.
 Missing genesis records alongside finalized history are rejected instead of
 resetting state. A persisted native genesis must contain the expected receipt
 commitment.
@@ -369,9 +376,10 @@ their narrower byte limits. Cancelling a lookup does not release its
 slot until its blocking task finishes.
 See `docs/permission-proofs.md` for formats and limits.
 
-A block has one encoding: consensus context, parent, height, timestamp, term,
-module state root, requests, optional DKG payload, the four module log targets
-and the receipt commitment. Every field is required. A block carrying a target
+A block has one encoding per format version: the version byte, consensus
+context, parent, height, timestamp, term, module state root, requests, optional
+DKG payload, the four module log targets and the receipt commitment. Every
+field is required. A block carrying a target
 with an empty range is rejected by the application without executing it. Proofs
 use Commonware QMDB only.
 

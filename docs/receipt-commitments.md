@@ -170,12 +170,65 @@ Record bytes remain unchanged. Any other store format is refused.
 
 ## Canonical block encoding
 
-A block encodes, in order: consensus context, parent, height, timestamp, term,
-module state root, requests, the optional DKG payload, the four native storage
-targets and the 32-byte receipt commitment. Every field is required, there is
-one encoding, and a truncated block is rejected.
+A block encodes, in order: the format version byte, consensus context, parent,
+height, timestamp, term, module state root, requests, the optional DKG payload,
+the four native storage targets and the 32-byte receipt commitment. Every field
+is required, there is one encoding per format version, and a truncated block is
+rejected. The block identifier hashes the whole encoding, so it covers the
+version.
 
 Native genesis uses the empty receipt list with gas limit zero because genesis
 has no executed operations. Startup rejects a persisted genesis whose receipt
 commitment is not that value and preserves its files. Releases start with
 fresh state.
+
+## Format versions
+
+Each format below names its version, and a reader refuses a version it does not
+implement with a typed error. No reader interprets bytes under another
+version's rules, and none falls back to a default.
+
+| Format | Marker | Current | Refusal |
+|--------|--------|---------|---------|
+| Block encoding | First byte, `vera_domain::BLOCK_FORMAT_VERSION` | 1 | `UnsupportedVersion`, the source of the codec error |
+| State layout | First byte of `native-genesis.bin` and `native-genesis.intent`, `vera_backend::native::STATE_LAYOUT_VERSION` | 1 | `UnsupportedVersion`; the marker and journals are left unchanged |
+| Native request | First byte, `vera_domain::NATIVE_TX_TYPE` | `0x45` | `NativeTxDecodeError::UnsupportedType` |
+| Receipt commitment | Hash domain | `vera/receipts/v3` | Re-execution and history reject the block's commitment |
+| Genesis fingerprint | Hash domain | `vera/native-genesis/v3` | The genesis record does not match the node's configuration |
+| Finalized history | `format` key | 1 (appended), 3 (imported) | `UnsupportedHistoryFormat` |
+| Module records | Key namespace, such as `relationship/v5/` | Per record family | A key outside the namespace is not read |
+
+Light blocks, history records, block backfill and snapshot handoffs carry
+encoded blocks and take the block's version with them. A finality certificate
+signs the block identifier, so it binds the version as well.
+
+State layout 1 is four ordered current-QMDB partitions, `acp`, `bulletin`,
+`vera` and `nonces`, sealed into each block in that order. The genesis
+fingerprint hashes the layout version between its domain and the serialized
+configuration; the genesis block names the fingerprint as its parent, so the
+layout is part of the deployment identity and of every block identifier.
+
+The request type fixes a native request's signing scheme and field layout. The
+type byte leads both the wire encoding and the signed bytes, so a signature
+under one type does not verify under another.
+
+### Adding a component
+
+A release that adds an execution path, state or block fields takes new
+versions; releases start with fresh state, so no reader of an earlier version
+is kept.
+
+- A block that gains, loses or reorders a field raises `BLOCK_FORMAT_VERSION`.
+- A partition set that changes raises `STATE_LAYOUT_VERSION` and names the new
+  set where the constant is defined. Each partition has its own journals under
+  `vera-native-<name>` and its own state-transfer channel, and its
+  operation-log target joins the block's targets, which raises the block
+  version too.
+- A second signing scheme or request layout takes its own request type byte
+  beside `0x45`.
+- Receipt fields that change take the next `vera/receipts/v<n>` domain.
+- A record whose encoding changes takes the next key namespace of its family.
+
+Modules keep their addresses and call encodings. A new execution shim decodes
+its own request form and calls the same `module.method(args)` as the native
+shim; module logic and module state do not change with the shim.

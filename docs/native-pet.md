@@ -70,8 +70,8 @@ a zero byte; participant signatures use `vera/orbis/ring-participant/v2` followe
 by a zero byte. Ring records use `orbis/ring/v2/`. Ordinary rings also change ID
 because their canonical configuration includes `requires_pet: false`.
 
-Native genesis fingerprints use `vera/native-genesis/v3` followed by a zero byte
-and serialized genesis configuration. Every native genesis block binds this
+Native genesis fingerprints use `vera/native-genesis/v3` followed by a zero byte,
+the state layout version byte and serialized genesis configuration. Every native genesis block binds this
 fingerprint into its identity. Startup rejects prior genesis records and
 interrupted initialization markers without rewriting them. Validators and SDK
 consumers must use the same schema and a new deployment root; old ring state,

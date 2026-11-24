@@ -65,7 +65,7 @@ dual reader, automatic migration or index backfill. Validators and consumers nee
 matching keys and proof verification; updating key builders alone is insufficient.
 
 Native genesis fingerprints use `vera/native-genesis/v3` followed by one zero
-byte and the serialized genesis configuration. The [native PET format](native-pet.md)
+byte, the state layout version byte and the serialized genesis configuration. The [native PET format](native-pet.md)
 binds that fingerprint into every native deployment identity and rejects prior
 genesis records and initialization intents. Receipt and finality formats are
 unchanged.
