@@ -152,8 +152,9 @@ impl FinalizedHistory {
             "history import already staged"
         );
         let block = decode_record(bytes, limits)?;
+        let id = block.id().0.0;
         ensure!(
-            (block.height, block.id().0.0) == import.next,
+            (block.height, id) == import.next,
             "history import ancestry mismatch"
         );
         let trusted =
@@ -173,6 +174,7 @@ impl FinalizedHistory {
         )?;
         self.stage_finality(proof, &block, anchor.height, &mut batch)?;
         batch.put(key(RECORD, block.height), bytes);
+        batch.put(key(BLOCK_ID, block.height), id);
         // Imported proofs supply finality without consulting the local marshal archive.
         batch.put(
             key(CERTIFICATE, block.height),
@@ -244,6 +246,7 @@ impl FinalizedHistory {
         let id = alloy_primitives::keccak256(&self.record(floor)?.block);
         let mut batch = WriteBatch::default();
         batch.delete_range(key(RECORD, 0), key(RECORD, floor - 1));
+        batch.delete_range(key(BLOCK_ID, 0), key(BLOCK_ID, floor - 1));
         for prefix in [CERTIFICATE, IMPORTED_FINALITY, PROOF_BLOCK] {
             batch.delete_range(key(prefix, 0), key(prefix, floor));
         }

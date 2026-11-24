@@ -550,7 +550,8 @@ A block carries the peaks of a Commonware Merkle mountain range over its
 ancestors' identifiers (`vera_domain::Ancestry`, block format 2). Voters check
 that a candidate's ancestry extends its parent's, `Block::has_ancestor`
 verifies an `AncestryProof`, and `vera_getAncestryProof` rebuilds one from
-retained history without storing the range. See
+the block identifiers finalized history keeps by height, reading two records
+whatever the span, without storing the range. See
 `docs/receipt-commitments.md#ancestry`.
 
 ### Terms and the active device

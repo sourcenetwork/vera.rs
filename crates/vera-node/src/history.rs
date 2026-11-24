@@ -31,6 +31,9 @@ const IMPORTED_FINALITY: u8 = 3;
 const PROOF_BLOCK: u8 = 4;
 const BLOCK_HASH: u8 = 5;
 const SUBMISSION_HASH: u8 = 6;
+/// Identifier of the block at each height, which ancestry proofs read
+/// without the record.
+const BLOCK_ID: u8 = 7;
 const QUERY_HEAD: &[u8] = b"query_head";
 const GENESIS: &[u8] = b"genesis";
 const HEAD: &[u8] = b"head";
@@ -352,6 +355,7 @@ impl FinalizedHistory {
         let id = BlockId(alloy_primitives::keccak256(&record.block));
         query::index_execution(&mut batch, block.height, &id, &record.receipts);
         batch.put(key(RECORD, block.height), bytes);
+        batch.put(key(BLOCK_ID, block.height), id.0.0);
         batch.delete(key(PROOF_BLOCK, block.height));
         let head_bytes = borsh::to_vec(&(block.height, id.0.0))?;
         batch.put(HEAD, &head_bytes);
@@ -528,7 +532,7 @@ impl FinalizedHistory {
         let mut batch = query_batch;
         batch.put(QUERY_HEAD, &anchor_bytes);
         self.retain_proof_suffix(anchor.height, head.0, &mut batch)?;
-        for prefix in [RECORD, CERTIFICATE] {
+        for prefix in [RECORD, CERTIFICATE, BLOCK_ID] {
             if let Some(next) = anchor.height.checked_add(1) {
                 batch.delete_range(key(prefix, next).as_slice(), &[prefix + 1]);
             }

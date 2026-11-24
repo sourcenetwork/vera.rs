@@ -252,8 +252,8 @@ pruned. The records left below the floor's parent are removed afterwards by a
 sweep driven by the `sweep` key, the lowest height whose record may remain. Each
 sweep batch is one atomic write over at most 256 heights that ends after the
 record bringing its mapping deletes to 4,096: it removes the block-hash and
-submission mappings that still name those records, then the records, and
-advances the cursor. A submission hash that a retained revision repeats keeps its
+submission mappings that still name those records, then the records with the
+block identifiers kept under their heights, and advances the cursor. A submission hash that a retained revision repeats keeps its
 mapping. A crash after the floor write or between sweep batches resumes from the
 cursor, and the sweep never reaches the floor's parent.
 
@@ -310,8 +310,8 @@ import with `HistoryPruned`, the snapshot handoff fails and the node stops with
 that error.
 
 Finishing is one atomic write. It removes every record below the floor's parent,
-including older records the importer held of its own, with their certificates
-and imported finality, and every hash mapping; it stores the floor, a sweep
+including older records the importer held of its own, with their block
+identifiers, certificates and imported finality, and every hash mapping; it stores the floor, a sweep
 cursor at the floor's parent and the selected block as head, and completes the
 import at the floor's parent. Dropping records of the importer's own logs a
 warning naming their heights. The

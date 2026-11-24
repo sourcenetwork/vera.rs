@@ -133,7 +133,13 @@ impl FinalizedHistory {
         };
         let mut batch = WriteBatch::default();
         let next = height + 1;
-        for prefix in [RECORD, CERTIFICATE, IMPORTED_FINALITY, PROOF_BLOCK] {
+        for prefix in [
+            RECORD,
+            CERTIFICATE,
+            IMPORTED_FINALITY,
+            PROOF_BLOCK,
+            BLOCK_ID,
+        ] {
             batch.delete_range(key(prefix, next).as_slice(), &[prefix + 1]);
         }
         batch.delete_range([BLOCK_HASH], [SUBMISSION_HASH + 1]);

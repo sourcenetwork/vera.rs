@@ -18,6 +18,9 @@ mod recovery_cache_tests;
 #[path = "start_cost_tests.rs"]
 mod start_cost_tests;
 
+#[path = "ancestry_cost_tests.rs"]
+mod ancestry_cost_tests;
+
 #[path = "retention_cost_tests.rs"]
 mod retention_cost_tests;
 

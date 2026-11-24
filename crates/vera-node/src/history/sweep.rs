@@ -61,6 +61,7 @@ impl FinalizedHistory {
                 next += 1;
             }
             batch.delete_range(key(RECORD, cursor), key(RECORD, next));
+            batch.delete_range(key(BLOCK_ID, cursor), key(BLOCK_ID, next));
             batch.put(SWEEP, next.to_be_bytes());
             persist(&self.db, batch)?;
             remaining -= next - cursor;

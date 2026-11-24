@@ -2,7 +2,8 @@
 //!
 //! A block carries the peaks of the range over its ancestors, so the proof is
 //! rebuilt from the ancestor's own block and the identifiers of the blocks
-//! after it. Nothing beyond the retained records is stored.
+//! after it. History keeps each block's identifier under its height, 32 bytes
+//! beside the record, so a proof reads two records whatever the span.
 
 use vera_domain::{Ancestry, AncestryProof};
 
@@ -46,11 +47,16 @@ pub(crate) fn ancestry_rpc_error(error: &anyhow::Error) -> vera_jsonrpc::RpcErro
 impl FinalizedHistory {
     /// Prove that the block at `ancestor` is an ancestor of the block at `height`.
     ///
-    /// Reads every record between the two. An ancestor below the floor fails
-    /// with [`HistoryPruned`], and a pair the store cannot relate with
-    /// [`AncestryUnavailable`].
+    /// Reads the ancestor's and the block's records and the identifier of
+    /// every block between them, from one snapshot of the store, and checks
+    /// the proof against the block before returning it. An ancestor below the
+    /// floor fails with [`HistoryPruned`], and a pair the store cannot relate
+    /// with [`AncestryUnavailable`].
     pub(crate) fn ancestry_proof(&self, ancestor: u64, height: u64) -> Result<AncestryProof> {
-        let head = self.head.lock().0;
+        let (head, snapshot) = {
+            let head = self.head.lock();
+            (head.0, self.db.snapshot())
+        };
         if ancestor >= height || height > head {
             return Err(AncestryUnavailable::Order {
                 ancestor,
@@ -63,15 +69,42 @@ impl FinalizedHistory {
             return Err(AncestryUnavailable::Span { ancestor, height }.into());
         }
         check_cut(ancestor, self.floor_height()?)?;
+        let block_at = |height: u64| -> Result<Block> {
+            let bytes = snapshot
+                .get(key(RECORD, height))?
+                .with_context(|| format!("missing finalized record {height}"))?;
+            let record: Record = borsh::from_slice(&bytes)?;
+            Ok(Block::decode_cfg(
+                commonware_codec::Copying(record.block.as_slice()),
+                &crate::node::block_cfg(),
+            )?)
+        };
+        let id_at = |height: u64| -> Result<BlockId> {
+            let bytes = if height == 0 {
+                snapshot.get(GENESIS)?
+            } else {
+                snapshot.get(key(BLOCK_ID, height))?
+            }
+            .with_context(|| format!("missing block identifier {height}"))?;
+            let id: [u8; 32] = bytes
+                .as_slice()
+                .try_into()
+                .context("block identifier is not 32 bytes")?;
+            Ok(BlockId(B256::from(id)))
+        };
         let base = if ancestor == 0 {
             Ancestry::genesis()
         } else {
-            self.block(ancestor)?.ancestry
+            block_at(ancestor)?.ancestry
         };
-        let ids = (ancestor + 1..=height)
-            .map(|height| Ok(self.block(height)?.parent))
-            .collect::<Result<Vec<_>>>()?;
-        Ok(base.prove(ancestor, &ids, ancestor)?)
+        let ids = (ancestor..height).map(id_at).collect::<Result<Vec<_>>>()?;
+        let proof = base.prove(ancestor, &ids, ancestor)?;
+        let block = block_at(height)?;
+        ensure!(
+            Some(&block.parent) == ids.last() && block.has_ancestor(ancestor, &ids[0], &proof),
+            "stored block identifiers do not match revision {height}"
+        );
+        Ok(proof)
     }
 }
 
@@ -102,5 +135,51 @@ mod tests {
             let error = history.ancestry_proof(ancestor, height).unwrap_err();
             assert!(error.is::<AncestryUnavailable>(), "{ancestor} in {height}");
         }
+    }
+
+    #[test]
+    fn a_proof_reads_the_identifiers_between_and_not_their_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocks = chain(12);
+        let history = FinalizedHistory::open(dir.path(), &blocks[0]).unwrap();
+        for block in &blocks[1..] {
+            history.append_finalized(block, &[], 100, None).unwrap();
+        }
+        for height in 3..10 {
+            history.db.delete(key(RECORD, height)).unwrap();
+        }
+        let proof = history.ancestry_proof(2, 10).unwrap();
+        assert!(blocks[10].has_ancestor(2, &blocks[2].id(), &proof));
+
+        // An identifier that is not the block's is caught before the proof leaves.
+        history
+            .db
+            .put(key(BLOCK_ID, 6), blocks[7].id().0.0)
+            .unwrap();
+        let error = history.ancestry_proof(2, 10).unwrap_err();
+        assert!(error.to_string().contains("do not match"), "{error}");
+        history.db.delete(key(BLOCK_ID, 6)).unwrap();
+        let error = history.ancestry_proof(2, 10).unwrap_err();
+        assert!(
+            error.to_string().contains("missing block identifier"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_rewind_drops_the_identifiers_above_its_cut() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocks = chain(8);
+        let history = FinalizedHistory::open(dir.path(), &blocks[0]).unwrap();
+        for block in &blocks[1..] {
+            history.append_finalized(block, &[], 100, None).unwrap();
+        }
+        history.rewind_to(5).unwrap();
+        assert!(history.db.get(key(BLOCK_ID, 5)).unwrap().is_some());
+        for height in 6..=8 {
+            assert!(history.db.get(key(BLOCK_ID, height)).unwrap().is_none());
+        }
+        let proof = history.ancestry_proof(1, 5).unwrap();
+        assert!(blocks[5].has_ancestor(1, &blocks[1].id(), &proof));
     }
 }

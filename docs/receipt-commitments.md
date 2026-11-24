@@ -194,10 +194,17 @@ block's own peaks: at most 122 digests, about `2 * log2(h)` in practice. A
 verifier needs only the later block, which a light block carries, so the
 proof serves light clients and anchors alike.
 
-A node stores no part of the range. `vera_getAncestryProof(ancestor, height)`
-rebuilds the proof from the ancestor's block and the identifiers of the blocks
-after it, reading each retained record between the two: at most 65,536
-revisions, and none below the history floor.
+A node stores no part of the range. Finalized history keeps each block's
+identifier under its height, 32 bytes written in the same batch as the record
+and removed with it by a rewind, a cut or the history floor.
+`vera_getAncestryProof(ancestor, height)` rebuilds the proof from the
+ancestor's block and the identifiers of the blocks after it, read from one
+snapshot of the store, and checks it against the block at `height` before
+returning it. It reads two records and at most 65,536 identifiers (2 MiB),
+whatever the size of the blocks between, and none below the history floor.
+Over a full span on a history of 16 KiB or 128 KiB revisions it takes about
+35 ms in a release build, against 0.5 s and 3.3 s when it read every record
+(`ancestry_cost_tests`).
 
 Native genesis uses the empty receipt list with gas limit zero because genesis
 has no executed operations. Startup rejects a persisted genesis whose receipt
