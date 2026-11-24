@@ -81,7 +81,7 @@ impl FinalizedHistory {
         Ok(borsh::from_slice(&bytes)?)
     }
 
-    fn block(&self, height: u64) -> Result<Block> {
+    pub(super) fn block(&self, height: u64) -> Result<Block> {
         Ok(Block::decode_cfg(
             commonware_codec::Copying(self.record(height)?.block.as_slice()),
             &crate::node::block_cfg(),

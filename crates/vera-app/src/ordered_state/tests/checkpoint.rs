@@ -31,6 +31,7 @@ pub(super) async fn block(source: &OrderedState, height: u64) -> Block {
         context,
         parent: BlockId(B256::ZERO),
         height,
+        ancestry: vera_domain::testing::ancestry(height),
         timestamp: 1000 + height,
         term: 0,
         module_state_root,

@@ -68,7 +68,7 @@ show the message as that node's explanation.
 | `unauthenticated` | 6 | A method needing a signer called without one |
 | `unauthorized` | 7 | `Unauthorized` errors of every module and Bulletin's non-collaborator |
 | `invalid_token` | 8 | Invalid bearer tokens and JWS, or a token already invalidated |
-| `invalid_proof` | 9 | An ACP proof, or an anchored revision's finality, that does not verify |
+| `invalid_proof` | 9 | An ACP proof, an anchored revision's finality or a term certificate that does not verify, or a fork report of a block that does not conflict |
 | `not_found` | 10 | A missing policy, commitment, namespace, post, collaborator, token or validator |
 | `object_not_registered` | 11 | An ACP object that is not registered |
 | `already_exists` | 12 | An existing object, namespace, post, collaborator, validator or consensus key |
@@ -79,7 +79,8 @@ show the message as that node's explanation.
 | `out_of_gas` | 17 | A call that exhausted its allowance, including ACP work allowances carved from it |
 | `state_error` | 18 | Module state the call needed could not be used (`State` errors) |
 | `module_failed` | 19 | A module panic |
-| `not_newer` | 20 | An anchor at or below the height of the deployment's latest anchor, or in a lower term |
+| `not_newer` | 20 | An anchor at or below the tip of the deployment's anchors or in a term below the certified one, or a term certificate that is not above the term recorded last |
+| `not_descendant` | 21 | An anchor that is not shown to descend from the tip of the deployment's anchors |
 
 The kind follows from the module error's variant, so every node classifies a
 refusal the same way. Codes outside these tables do not decode. Faults of the
@@ -171,11 +172,32 @@ Record bytes remain unchanged. Any other store format is refused.
 ## Canonical block encoding
 
 A block encodes, in order: the format version byte, consensus context, parent,
-height, timestamp, term, module state root, requests, the optional DKG payload,
-the four native storage targets and the 32-byte receipt commitment. Every field
-is required, there is one encoding per format version, and a truncated block is
-rejected. The block identifier hashes the whole encoding, so it covers the
-version.
+height, ancestry, timestamp, term, module state root, requests, the optional
+DKG payload, the four native storage targets and the 32-byte receipt
+commitment. Every field is required, there is one encoding per format version,
+and a truncated block is rejected. The block identifier hashes the whole
+encoding, so it covers the version.
+
+### Ancestry
+
+The ancestry of the block at height `h` is the list of peaks, oldest first, of
+a Commonware Merkle mountain range (SHA-256, forward-folded root) over the
+identifiers of the blocks at heights `0..h`; the genesis block's is empty. It
+has one 32-byte peak for each set bit of `h`, and a block whose peak count
+differs does not decode. A child's ancestry is its parent's with the parent's
+identifier appended (`Block::extends_ancestry`), which every voter checks
+before it votes; a finalized block is replayed on its certificate.
+
+`AncestryProof` shows that the block with a given identifier at a given height
+is an ancestor of a block, and `Block::has_ancestor` checks it against the
+block's own peaks: at most 122 digests, about `2 * log2(h)` in practice. A
+verifier needs only the later block, which a light block carries, so the
+proof serves light clients and anchors alike.
+
+A node stores no part of the range. `vera_getAncestryProof(ancestor, height)`
+rebuilds the proof from the ancestor's block and the identifiers of the blocks
+after it, reading each retained record between the two: at most 65,536
+revisions, and none below the history floor.
 
 Native genesis uses the empty receipt list with gas limit zero because genesis
 has no executed operations. Startup rejects a persisted genesis whose receipt
@@ -190,7 +212,7 @@ version's rules, and none falls back to a default.
 
 | Format | Marker | Current | Refusal |
 |--------|--------|---------|---------|
-| Block encoding | First byte, `vera_domain::BLOCK_FORMAT_VERSION` | 1 | `UnsupportedVersion`, the source of the codec error |
+| Block encoding | First byte, `vera_domain::BLOCK_FORMAT_VERSION` | 2 | `UnsupportedVersion`, the source of the codec error |
 | State layout | First byte of `native-genesis.bin` and `native-genesis.intent`, `vera_backend::native::STATE_LAYOUT_VERSION` | 1 | `UnsupportedVersion`; the marker and journals are left unchanged |
 | Native request | First byte, `vera_domain::NATIVE_TX_TYPE` | `0x45` | `NativeTxDecodeError::UnsupportedType` |
 | Receipt commitment | Hash domain | `vera/receipts/v3` | Re-execution and history reject the block's commitment |

@@ -85,6 +85,11 @@ approvals. `approve_term`, `external_term_approval` and
   certified state, as `read_administration` does, and checks the certificate
   against it. It returns the revision the policy was read at.
 
+A deployment that anchors this one verifies a certificate against the
+operator policy its own operators registered for it, records the term, and
+continues this deployment's chain of anchors from the cut
+([anchoring.md](anchoring.md#terms)).
+
 The policy must come from state the verifier has authenticated. A verified
 certificate says who may propose from its term on. It does not prove that its
 cut is a finalized block; a verifier compares the cut with the blocks it has

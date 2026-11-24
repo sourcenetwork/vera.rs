@@ -84,6 +84,7 @@ mod tests {
             context: Block::genesis_context(),
             parent: BlockId(B256::repeat_byte(0x01)),
             height: 42,
+            ancestry: crate::testing::ancestry(42),
             timestamp: 1_700_000_000,
             term: 3,
             module_state_root: B256::repeat_byte(0xef),

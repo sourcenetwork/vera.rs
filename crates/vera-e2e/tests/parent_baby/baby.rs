@@ -4,7 +4,7 @@ use std::{net::SocketAddr, path::Path, time::Duration};
 
 use alloy_primitives::B256;
 use vera_client::{BlsSigner, VeraClient};
-use vera_domain::{ConsensusPublicKey, LightBlock};
+use vera_domain::{ConsensusPublicKey, LightBlock, TermCertificate, TermChange};
 use vera_modules::vera::administration::OperatorPolicy;
 use vera_node::{EmbeddedConfig, EmbeddedNode, SoloDeployment, SoloGenesis};
 
@@ -32,15 +32,32 @@ fn loopback() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 0))
 }
 
+/// A term change approved by the operator whose secret key is `secret`; the
+/// account key of every baby is the public key of secret 1.
+pub(crate) fn certify(change: TermChange, secret: u8) -> TermCertificate {
+    let mut bytes = [0u8; 32];
+    bytes[31] = secret;
+    let key = vera_client::Secp256k1SigningKey::from_bytes((&bytes).into()).unwrap();
+    TermCertificate {
+        change,
+        approvals: vec![vera_client::term::approve_term(&change, 0, &key).unwrap()],
+    }
+}
+
+/// The operator policy of every baby: its owner's account key.
+pub(crate) fn operators() -> OperatorPolicy {
+    OperatorPolicy {
+        threshold: 1,
+        keys: vec![ACCOUNT_KEY.into()],
+    }
+}
+
 /// A new deployment dealt in memory, as a host keeps it in its keystore.
 pub(crate) fn deal(chain_id: u64) -> SoloDeployment {
     let identity = SoloGenesis {
         policies: Vec::new(),
         chain_id,
-        operators: OperatorPolicy {
-            threshold: 1,
-            keys: vec![ACCOUNT_KEY.into()],
-        },
+        operators: operators(),
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

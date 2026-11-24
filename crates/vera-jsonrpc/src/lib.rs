@@ -16,7 +16,9 @@ pub use tx_submit::TxSubmitCallback;
 mod header_subscribe;
 
 mod vera_api;
-pub use vera_api::{LightBlockLookup, ReceiptProofLookup, VeraApiImpl, VeraApiServer};
+pub use vera_api::{
+    AncestryProofLookup, LightBlockLookup, ReceiptProofLookup, VeraApiImpl, VeraApiServer,
+};
 
 #[cfg(feature = "nuclei-rpc")]
 mod nuclei_transport;

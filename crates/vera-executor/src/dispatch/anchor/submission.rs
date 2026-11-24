@@ -1,11 +1,13 @@
 //! An anchor submission and its verification against the anchored deployment's key.
 //!
-//! The identity module records anchors without consensus types; finality is
-//! verified here, before the module sees the revision.
+//! The identity module records anchors without consensus types; finality and
+//! ancestry are verified here, before the module sees the revision.
 
-use commonware_codec::{DecodeExt as _, Encode as _, FixedSize as _};
+use alloy_primitives::B256;
+use commonware_codec::{DecodeExt as _, FixedSize as _};
 use vera_domain::{
-    ConsensusPublicKey, FinalizedArtifacts, LightBlockError, verify_finalized_artifacts,
+    AncestryProof, Block, BlockId, ConsensusPublicKey, FinalizedArtifacts, LightBlockError,
+    TermError, verify_finalized_artifacts,
 };
 use vera_modules::vera::anchors::{
     AnchorError, CONSENSUS_KEY_BYTES, MAX_ANCHOR_ARTIFACT_BYTES, VerifiedRevision,
@@ -13,22 +15,22 @@ use vera_modules::vera::anchors::{
 
 const _: () = assert!(ConsensusPublicKey::SIZE == CONSENSUS_KEY_BYTES);
 
-/// A deployment's key and the finality artifacts of the revision to anchor.
+/// A deployment and the finality artifacts of one of its revisions.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct AnchorSubmission {
-    /// Encoding of the deployment's consensus key.
-    pub(crate) consensus_key: Vec<u8>,
+    /// The deployment's identifier.
+    pub(crate) deployment: B256,
     /// The revision and its finalization.
     pub(crate) artifacts: FinalizedArtifacts,
 }
 
-/// A verified submission: the key's canonical encoding and the revision to record.
+/// A verified submission: the finalized block.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct VerifiedSubmission {
-    /// Canonical encoding of the deployment's consensus key.
-    pub(crate) consensus_key: Vec<u8>,
-    /// The finalized revision.
-    pub(crate) revision: VerifiedRevision,
+    /// The finalized block.
+    pub(crate) block: Block,
+    /// The block's identifier.
+    pub(crate) block_hash: B256,
 }
 
 /// Why an anchor submission is refused.
@@ -40,26 +42,42 @@ pub(crate) enum AnchorRefusal {
     /// The revision is not finalized under the consensus key.
     #[error("revision is not finalized under the deployment's key: {0}")]
     Finality(#[from] LightBlockError),
+    /// The term certificate is not approved under the deployment's operator policy.
+    #[error("term certificate does not verify: {0}")]
+    Term(#[from] TermError),
+    /// The term certificate does not decode.
+    #[error("term certificate does not decode")]
+    Certificate,
 }
 
 impl AnchorSubmission {
-    /// Check the size, decode the key and verify the revision's finalization under it.
-    pub(crate) fn verify(&self) -> Result<VerifiedSubmission, AnchorRefusal> {
+    /// Check the size and verify the revision's finalization under
+    /// `consensus_key`, the key the deployment is registered with.
+    pub(crate) fn verify(&self, consensus_key: &[u8]) -> Result<VerifiedSubmission, AnchorRefusal> {
         if self.artifacts.encoded_len() > MAX_ANCHOR_ARTIFACT_BYTES {
             return Err(AnchorError::TooLarge.into());
         }
-        let key = ConsensusPublicKey::decode(commonware_codec::Copying(&self.consensus_key[..]))
+        let key = ConsensusPublicKey::decode(commonware_codec::Copying(consensus_key))
             .map_err(|_| AnchorError::InvalidConsensusKey)?;
         let (block, block_hash) = verify_finalized_artifacts(&self.artifacts, &key)?;
-        Ok(VerifiedSubmission {
-            consensus_key: key.encode().to_vec(),
-            revision: VerifiedRevision {
-                height: block.height,
-                block_hash,
-                term: block.term,
-                timestamp: block.timestamp,
-                module_state_root: block.module_state_root,
-            },
-        })
+        Ok(VerifiedSubmission { block, block_hash })
+    }
+}
+
+impl VerifiedSubmission {
+    /// The revision to record. Its ancestor is the block `ancestor` at
+    /// `height` when `proof` shows that block to be an ancestor of the
+    /// finalized one, and absent otherwise.
+    pub(crate) fn revision(&self, height: u64, ancestor: B256, proof: &[u8]) -> VerifiedRevision {
+        let proven = AncestryProof::decode(proof)
+            .is_ok_and(|proof| self.block.has_ancestor(height, &BlockId(ancestor), &proof));
+        VerifiedRevision {
+            height: self.block.height,
+            block_hash: self.block_hash,
+            term: self.block.term,
+            timestamp: self.block.timestamp,
+            module_state_root: self.block.module_state_root,
+            ancestor: proven.then_some((height, ancestor)),
+        }
     }
 }

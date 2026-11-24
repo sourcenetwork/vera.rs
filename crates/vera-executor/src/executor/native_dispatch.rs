@@ -9,7 +9,9 @@ use vera_modules::types::{BlockExecCtx, TxExecCtx};
 use vera_modules::validator_registry::MembershipLimits;
 use vera_modules::vera::VeraModule;
 
-use crate::dispatch::{DispatchReturn, dispatch_to_module, storage_bounds_dispatch};
+use crate::dispatch::{
+    ANCHOR_ADDRESS, DispatchReturn, dispatch_to_module, storage_bounds_dispatch,
+};
 
 /// Gas budget for native BLS transactions dispatched to modules.
 pub(crate) const NATIVE_TX_GAS_LIMIT: u64 = 1_000_000;
@@ -70,6 +72,9 @@ pub(crate) fn dispatch_native_call(
     // An exhausted allowance is a failure like a refusal: it commits nothing.
     if !succeeded(&dispatch_result) {
         (*acp, *bulletin, *vera) = before;
+        if call.target == ANCHOR_ADDRESS {
+            crate::dispatch::anchor::charge_refused(vera, block_ctx, tx_ctx, call.calldata);
+        }
     }
     dispatch_result
 }

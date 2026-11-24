@@ -75,6 +75,7 @@ fn artifacts(seed: u64, configure: impl FnOnce(&mut Block)) -> (Block, Vec<u8>, 
         },
         parent: BlockId(B256::repeat_byte(0x07)),
         height: 100,
+        ancestry: crate::testing::ancestry(100),
         timestamp: 1_700_000_000,
         term: 0,
         module_state_root: B256::repeat_byte(0x02),
@@ -237,6 +238,7 @@ fn indirect_fixture(count: usize) -> LightBlock {
         let mut child = parent.clone();
         child.parent = parent.id();
         child.height += 1;
+        child.ancestry = crate::testing::ancestry(child.height);
         child.timestamp += 1;
         child.module_state_root = B256::repeat_byte(0x40);
         child.context.parent = (parent.context.round.view(), parent.digest());
@@ -343,6 +345,7 @@ fn signed_height_gaps_and_untrusted_descendant_certificates_are_rejected() {
         Err(LightBlockError::InvalidCertificate)
     );
     child.height += 1;
+    child.ancestry = crate::testing::ancestry(child.height);
     light.descendants[0] = encode_hex(&child.encode());
     light.finalization = signed_finalization(&child, 42);
     assert_eq!(

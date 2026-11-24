@@ -45,7 +45,7 @@ commonware-p2p.workspace = true
 commonware-codec.workspace = true
 vera-client.workspace = true
 alloy-sol-types.workspace = true
-vera-domain.workspace = true
+vera-domain = { workspace = true, features = ["testing"] }
 alloy-primitives.workspace = true
 k256.workspace = true
 tempfile.workspace = true

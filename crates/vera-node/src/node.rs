@@ -1203,7 +1203,8 @@ pub async fn run_node_with_options(
         // Hold the module read lock through publication so finalization cannot
         // advance nonces between loading them and enabling admission.
         let recovered_modules = modules.read().expect("module state lock poisoned");
-        let mut admission = MempoolValidator::new(ExecutionConfig::new(chain_id));
+        let mut admission = MempoolValidator::new(ExecutionConfig::new(chain_id))
+            .with_committed_modules(modules.clone());
         admission.reset(recovered_modules.nonces.clone());
         let _ = validator.set(::tokio::sync::Mutex::new(Admission::new(admission)));
     }
@@ -1367,6 +1368,14 @@ pub async fn run_node_with_options(
                 history.receipt_proof(hash, &epochs).map_err(|error| {
                     crate::history::rpc_error(&error, vera_jsonrpc::RpcError::Internal)
                 })
+            })
+        })
+        .with_vera_ancestry_proof_lookup({
+            let history = history.clone();
+            Arc::new(move |ancestor, height| {
+                history
+                    .ancestry_proof(ancestor, height)
+                    .map_err(|error| crate::history::ancestry_rpc_error(&error))
             })
         })
         .with_vera_light_block_lookup({
