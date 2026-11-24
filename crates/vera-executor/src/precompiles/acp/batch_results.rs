@@ -2,7 +2,7 @@
 
 use alloy_primitives::Log;
 
-use super::PrecompileError;
+use super::ModuleError;
 
 /// Reuse the request envelope allowance for cumulative encoded results and logs.
 pub(super) const MAX_RESULT_BYTES: usize = vera_domain::MAX_TX_BYTES;
@@ -21,7 +21,7 @@ impl Budget {
         }
     }
 
-    pub(super) fn begin_batch(&mut self, calls: usize) -> Result<(), PrecompileError> {
+    pub(super) fn begin_batch(&mut self, calls: usize) -> Result<(), ModuleError> {
         // Return tuple offset + array length, then an offset and byte length per result.
         let bytes = calls
             .checked_mul(64)
@@ -30,7 +30,7 @@ impl Budget {
         self.reserve(bytes)
     }
 
-    pub(super) fn retain(&mut self, output: &[u8], logs: &[Log]) -> Result<(), PrecompileError> {
+    pub(super) fn retain(&mut self, output: &[u8], logs: &[Log]) -> Result<(), ModuleError> {
         let mut bytes = output.len().checked_add(31).ok_or_else(limit)? & !31;
         for log in logs {
             bytes = log
@@ -46,7 +46,7 @@ impl Budget {
         self.reserve(bytes)
     }
 
-    pub(super) fn revert(&mut self, prefix: &str, output: &[u8]) -> Result<(), PrecompileError> {
+    pub(super) fn revert(&mut self, prefix: &str, output: &[u8]) -> Result<(), ModuleError> {
         let bytes = output
             .utf8_chunks()
             .try_fold(prefix.len(), |bytes, chunk| {
@@ -64,13 +64,13 @@ impl Budget {
         )
     }
 
-    fn reserve(&mut self, bytes: usize) -> Result<(), PrecompileError> {
+    fn reserve(&mut self, bytes: usize) -> Result<(), ModuleError> {
         self.remaining = self.remaining.checked_sub(bytes).ok_or_else(limit)?;
         Ok(())
     }
 }
 
-fn limit() -> PrecompileError {
+fn limit() -> ModuleError {
     crate::precompiles::refusal::refused(
         vera_domain::RefusalKind::WorkLimitExceeded,
         "ACP batch result byte limit exceeded",

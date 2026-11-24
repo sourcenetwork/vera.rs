@@ -1,17 +1,12 @@
 //! Execution error types.
 
-use alloy_primitives::{Address, B256};
-use revm::database_interface::DBErrorMarker;
+use alloy_primitives::Address;
 use thiserror::Error;
 use vera_modules::native_account::NonceError;
 
 /// Errors that can occur during block execution.
 #[derive(Debug, Error)]
 pub enum ExecutionError {
-    /// State database error.
-    #[error("state error: {0}")]
-    State(#[from] vera_traits::StateDbError),
-
     /// Transaction decoding failed.
     #[error("failed to decode transaction: {0}")]
     TxDecode(String),
@@ -28,17 +23,9 @@ pub enum ExecutionError {
     #[error("block validation failed: {0}")]
     BlockValidation(String),
 
-    /// Code not found for hash.
-    #[error("code not found: {0}")]
-    CodeNotFound(B256),
-
     /// BLS signature verification, public key deserialization, or DID derivation failed.
     #[error("BLS verification failed: {0}")]
     BlsVerification(String),
-
-    /// secp256k1 signer DID recovery failed.
-    #[error("signer DID recovery failed: {0}")]
-    SignerDidRecovery(String),
 
     /// Native transaction chain ID does not match the executor's configured chain ID.
     #[error("chain ID mismatch: expected {expected}, got {got}")]
@@ -49,7 +36,7 @@ pub enum ExecutionError {
         got: u64,
     },
 
-    /// Native transaction targets an address that is not a known precompile.
+    /// Native transaction targets an address that is not a module.
     #[error("unknown native tx target: {0}")]
     UnknownNativeTarget(Address),
 
@@ -65,8 +52,6 @@ pub enum ExecutionError {
     },
 }
 
-impl DBErrorMarker for ExecutionError {}
-
 impl From<NonceError> for ExecutionError {
     fn from(error: NonceError) -> Self {
         match error {
@@ -81,55 +66,9 @@ impl From<NonceError> for ExecutionError {
     }
 }
 
-impl ExecutionError {
-    /// Whether execution failed because local state could not be read reliably.
-    #[must_use]
-    pub const fn is_local_state_failure(&self) -> bool {
-        matches!(
-            self,
-            Self::State(
-                vera_traits::StateDbError::Storage(_) | vera_traits::StateDbError::CodeNotFound(_)
-            )
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::Address;
-    use vera_traits::StateDbError;
-
     use super::*;
-
-    #[test]
-    fn test_state_error_display() {
-        let inner = StateDbError::AccountNotFound(Address::ZERO);
-        let err = ExecutionError::State(inner);
-        assert!(err.to_string().contains("state error"));
-    }
-
-    #[test]
-    fn test_state_error_from() {
-        let inner = StateDbError::Storage("disk error".into());
-        let err: ExecutionError = inner.into();
-        assert!(matches!(err, ExecutionError::State(_)));
-    }
-
-    #[test]
-    fn local_state_failures_are_distinct_from_invalid_transactions() {
-        assert!(
-            ExecutionError::State(StateDbError::Storage("disk error".into()))
-                .is_local_state_failure()
-        );
-        assert!(
-            ExecutionError::State(StateDbError::CodeNotFound(B256::ZERO)).is_local_state_failure()
-        );
-        assert!(!ExecutionError::InvalidTx("bad nonce".into()).is_local_state_failure());
-        assert!(
-            !ExecutionError::State(StateDbError::AccountNotFound(Address::ZERO))
-                .is_local_state_failure()
-        );
-    }
 
     #[test]
     fn test_tx_decode_display() {
@@ -153,14 +92,6 @@ mod tests {
     fn test_block_validation_display() {
         let err = ExecutionError::BlockValidation("wrong parent".to_string());
         assert_eq!(err.to_string(), "block validation failed: wrong parent");
-    }
-
-    #[test]
-    fn test_code_not_found_display() {
-        let hash = B256::ZERO;
-        let err = ExecutionError::CodeNotFound(hash);
-        assert!(err.to_string().contains("code not found"));
-        assert!(err.to_string().contains(&hash.to_string()));
     }
 
     #[test]

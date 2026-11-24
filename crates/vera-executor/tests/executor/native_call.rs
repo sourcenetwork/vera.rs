@@ -42,16 +42,14 @@ pub(super) fn member_request(target: Address, sequence: u64, calldata: Vec<u8>) 
 
 /// Execute the member's next request and publish its module values.
 pub(super) fn execute_native(
-    state: &MockStateDb,
     target: Address,
     calldata: Vec<u8>,
     executor: VeraExecutor,
 ) -> (ExecutionOutcome, ModuleState) {
-    try_execute_native(state, target, calldata, executor).unwrap()
+    try_execute_native(target, calldata, executor).unwrap()
 }
 
 pub(super) fn try_execute_native(
-    state: &MockStateDb,
     target: Address,
     calldata: Vec<u8>,
     executor: VeraExecutor,
@@ -63,17 +61,10 @@ pub(super) fn try_execute_native(
         .nonces
         .get_nonce(member_did().as_ref())
         .unwrap();
-    let context = BlockContext::new(
-        Header {
-            number: 1,
-            gas_limit: 30_000_000,
-            ..Default::default()
-        },
-        B256::ZERO,
-    );
+    let context = BlockContext::new(1, 0, 30_000_000);
     let request = member_request(target, sequence, calldata);
     let (outcome, modules) =
-        executor.execute_with_modules(state, &context, &[request], executor.snapshot())?;
+        executor.execute_with_modules(&context, &[request], executor.snapshot())?;
     executor.publish_snapshot(modules);
     let modules = executor.modules().read().unwrap().clone();
     Ok((outcome, modules))

@@ -310,7 +310,7 @@ mod tests {
             WRITE_GAS,
         )
         .unwrap();
-        assert!(!result.precompile.status.is_revert());
+        assert!(!result.output.status.is_revert());
         let create = IBulletin::createPostCall {
             namespace: "posts".into(),
             payload: b"payload".to_vec().into(),
@@ -326,13 +326,13 @@ mod tests {
             WRITE_GAS,
         )
         .unwrap();
-        assert!(!result.precompile.status.is_revert());
+        assert!(!result.output.status.is_revert());
         let posts = module.query_namespace_posts("posts").unwrap();
         assert_eq!(posts.len(), 1);
         let expected: B256 = posts[0].id.parse().unwrap();
         assert_ne!(expected, B256::ZERO);
         assert_eq!(
-            IBulletin::createPostCall::abi_decode_returns(&result.precompile.bytes).unwrap(),
+            IBulletin::createPostCall::abi_decode_returns(&result.output.bytes).unwrap(),
             expected
         );
         assert_eq!(result.logs.len(), 1);
@@ -355,7 +355,7 @@ mod tests {
         let mut topics = Vec::new();
         let mut call = |input: Vec<u8>| {
             let result = dispatch(&mut module, &mut acp, &block, &tx, &input, WRITE_GAS).unwrap();
-            assert!(!result.precompile.status.is_revert());
+            assert!(!result.output.status.is_revert());
             assert_eq!(result.logs.len(), 1);
             topics.push(result.logs[0].topics()[1]);
         };

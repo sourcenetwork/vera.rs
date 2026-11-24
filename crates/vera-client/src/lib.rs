@@ -76,6 +76,8 @@ pub use policy_operation::{PolicyOperation, PolicyOperationLead};
 mod token_revocation;
 pub use token_revocation::TokenRevocation;
 mod unsigned_token;
+mod validator_address;
+pub use validator_address::ValidatorAddressUpdate;
 mod worker;
 pub use worker::NativeWorker;
 

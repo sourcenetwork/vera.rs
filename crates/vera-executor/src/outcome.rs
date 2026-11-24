@@ -2,13 +2,10 @@
 
 use alloy_primitives::B256;
 pub use vera_domain::ExecutionReceipt;
-use vera_qmdb::ChangeSet;
 
 /// Result of executing a block's transactions.
 #[derive(Clone, Debug, Default)]
 pub struct ExecutionOutcome {
-    /// Registry storage changes from execution.
-    pub changes: ChangeSet,
     /// Transaction receipts.
     pub receipts: Vec<ExecutionReceipt>,
     /// Total gas used by all transactions.
@@ -35,9 +32,8 @@ pub struct ExecutionOutcome {
 impl ExecutionOutcome {
     /// Create a new empty execution outcome.
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
-            changes: ChangeSet::new(),
             receipts: Vec::new(),
             gas_used: 0,
             module_state_root: B256::ZERO,
@@ -54,7 +50,6 @@ mod tests {
     #[test]
     fn execution_outcome_default() {
         let outcome = ExecutionOutcome::new();
-        assert!(outcome.changes.is_empty());
         assert!(outcome.receipts.is_empty());
         assert_eq!(outcome.gas_used, 0);
     }

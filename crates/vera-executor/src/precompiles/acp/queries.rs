@@ -62,7 +62,7 @@ pub(super) fn dispatch(module: &AcpModule, input: &[u8], gas_limit: u64) -> Disp
         IAcp::getRelationshipsPageCall::SELECTOR => {
             let call = IAcp::getRelationshipsPageCall::abi_decode(input).map_err(decode_error)?;
             let request = serde_json::from_slice(&call.request).map_err(|error| {
-                PrecompileError::Fatal(format!("invalid relationship query: {error}"))
+                ModuleError::invalid(format!("invalid relationship query: {error}"))
             })?;
             output(
                 module.query_relationships_page_with_budget(
@@ -152,7 +152,7 @@ fn output<T>(
         Ok(value) => Ok(ok_dispatch(gas_used, encode(value), vec![])),
         Err(error) => {
             let mut result = err_dispatch(error);
-            result.precompile.gas_used = gas_used;
+            result.output.gas_used = gas_used;
             Ok(result)
         }
     }

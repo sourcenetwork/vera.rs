@@ -36,22 +36,9 @@ fn native(target: Address, calldata: Vec<u8>) -> Bytes {
 
 fn execute(target: Address, calldata: Vec<u8>) -> ExecutionReceipt {
     let executor = VeraExecutor::new(9001);
-    let context = BlockContext::new(
-        Header {
-            number: 1,
-            timestamp: 100,
-            gas_limit: NATIVE_LIMIT,
-            ..Default::default()
-        },
-        B256::ZERO,
-    );
+    let context = BlockContext::new(1, 100, NATIVE_LIMIT);
     let (mut outcome, _) = executor
-        .execute_with_modules(
-            &MockStateDb::new(),
-            &context,
-            &[native(target, calldata)],
-            executor.snapshot(),
-        )
+        .execute_with_modules(&context, &[native(target, calldata)], executor.snapshot())
         .unwrap();
     assert_eq!(outcome.executed_tx_indices, Some(vec![0]));
     outcome.receipts.pop().unwrap()
@@ -156,8 +143,8 @@ fn each_module_names_its_refusal() {
     assert_refused(
         &execute(
             VALIDATOR_REGISTRY_ADDRESS,
-            IValidatorRegistry::setPolicyCall {
-                policyId: B256::repeat_byte(1),
+            IValidatorRegistry::removeValidatorCall {
+                validator: Address::repeat_byte(1),
             }
             .abi_encode(),
         ),

@@ -309,8 +309,8 @@ mod tests {
         let mut genesis = VeraGenesis::devnet();
         configure_devnet_membership(&mut genesis, &key, "127.0.0.1:3000").unwrap();
         assert_eq!(
-            genesis.to_genesis_state().unwrap().participant_addresses,
-            vec![vera_node::validator_address(&key)]
+            genesis.registry_members().unwrap()[0].0,
+            vera_node::validator_address(&key)
         );
         configure_devnet_membership(&mut genesis, &key, "127.0.0.1:3000").unwrap();
         assert_eq!(genesis.validators.len(), 1);

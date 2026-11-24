@@ -2,9 +2,6 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-mod adapter;
-pub use adapter::StateDbAdapter;
-
 mod config;
 pub use config::ExecutionConfig;
 
@@ -20,9 +17,6 @@ pub use module_snapshot::ModuleSnapshot;
 pub use outcome::{ExecutionOutcome, ExecutionReceipt};
 
 pub use vera_domain::receipt_commitment;
-
-mod revm;
-pub use revm::{SpecId, extract_changes};
 
 mod executor;
 #[cfg(feature = "fault-injection")]

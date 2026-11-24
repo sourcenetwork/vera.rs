@@ -105,7 +105,7 @@ fn output<T>(
         Ok(value) => Ok(ok_dispatch(gas, encode(value), vec![])),
         Err(error) => {
             let mut result = err_dispatch(error);
-            result.precompile.gas_used = gas;
+            result.output.gas_used = gas;
             Ok(result)
         }
     }

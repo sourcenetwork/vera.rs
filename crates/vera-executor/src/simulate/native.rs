@@ -6,7 +6,6 @@ use vera_domain::Refusal;
 use vera_identity::Did;
 use vera_modules::ModuleState;
 use vera_modules::types::TxExecCtx;
-use vera_traits::StateDbRead;
 
 use super::SimulationContext;
 use crate::ExecutionError;
@@ -98,8 +97,7 @@ pub enum NativeSimulateError {
 /// The call runs as it would in a block at the context's height and time,
 /// under the signer's next sequence and a zero submission identifier, without
 /// a signature or a sequence check. Its effects are discarded.
-pub fn simulate_native_call<S: StateDbRead>(
-    state: &S,
+pub fn simulate_native_call(
     context: &SimulationContext,
     request: &NativeSimulateRequest,
     modules: &ModuleState,
@@ -118,7 +116,7 @@ pub fn simulate_native_call<S: StateDbRead>(
         &NativeCall {
             target: request.target,
             calldata: &request.calldata,
-            max_active_members: context.max_active_members,
+            limits: context.limits,
             gas_limit: NATIVE_TX_GAS_LIMIT,
         },
         &context.block(),
@@ -126,7 +124,6 @@ pub fn simulate_native_call<S: StateDbRead>(
         &mut acp,
         &mut bulletin,
         &mut vera,
-        &mut context.journal(state),
     );
 
     let outcome = native_outcome(request.target, dispatch)?;

@@ -41,11 +41,11 @@ hex.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+ed25519-dalek.workspace = true
 
 [dev-dependencies]
 vera-domain = { workspace = true, features = ["testing"] }
 k256.workspace = true
-ed25519-dalek.workspace = true
 p256.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local = { workspace = true, default-features = false }

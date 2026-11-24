@@ -112,7 +112,7 @@ impl Fixture {
     fn refusal(&mut self, operation: &str) -> Option<RefusalKind> {
         let before = (self.vera.store().serialize(), self.acp.store().serialize());
         let result = self.submit(operation).unwrap();
-        assert!(result.precompile.status.is_revert());
+        assert!(result.output.status.is_revert());
         assert_eq!(
             (self.vera.store().serialize(), self.acp.store().serialize()),
             before
@@ -126,10 +126,10 @@ fn a_worker_carries_the_issuers_revocation_and_the_event_names_the_issuer() {
     let mut fixture = Fixture::new();
     let hash = fixture.hash.clone();
     let result = fixture.submit(&operation(42, 9001, 1, &hash)).unwrap();
-    assert!(!result.precompile.status.is_revert());
+    assert!(!result.output.status.is_revert());
     assert_eq!(result.refusal, None);
     let output =
-        IVera::invalidateJWSByIssuerCall::abi_decode_returns(&result.precompile.bytes).unwrap();
+        IVera::invalidateJWSByIssuerCall::abi_decode_returns(&result.output.bytes).unwrap();
     let returned: JWSTokenRecord = serde_json::from_slice(&output).unwrap();
     let stored = fixture.vera.get_jws_token(&hash).unwrap().unwrap();
     assert_eq!(returned, stored);
@@ -143,8 +143,8 @@ fn a_worker_carries_the_issuers_revocation_and_the_event_names_the_issuer() {
     );
 
     let retried = fixture.submit(&operation(42, 9001, 1, &hash)).unwrap();
-    assert!(!retried.precompile.status.is_revert());
-    assert_eq!(retried.precompile.bytes, result.precompile.bytes);
+    assert!(!retried.output.status.is_revert());
+    assert_eq!(retried.output.bytes, result.output.bytes);
 }
 
 #[test]

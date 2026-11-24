@@ -7178,7 +7178,6 @@ dependencies = [
 name = "vera-executor"
 version = "0.1.2"
 dependencies = [
- "alloy-consensus",
  "alloy-primitives",
  "alloy-sol-types",
  "ark-bls12-381 0.4.0",
@@ -7189,24 +7188,20 @@ dependencies = [
  "base64",
  "commonware-codec",
  "commonware-parallel",
- "futures",
+ "ed25519-dalek",
  "hex",
  "k256 0.13.4",
- "revm",
  "rstest",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
- "tokio",
  "tracing",
  "vera-acp",
  "vera-crypto",
  "vera-domain",
  "vera-identity",
  "vera-modules",
- "vera-qmdb",
- "vera-traits",
 ]
 
 [[package]]

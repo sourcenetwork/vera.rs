@@ -60,7 +60,7 @@ type Result<T> = std::result::Result<T, VeraError>;
 /// the full record lives only in the primary 0x01 store.
 #[derive(Clone, Debug, Default)]
 pub struct VeraModule {
-    store: InMemoryKvStore,
+    pub(crate) store: InMemoryKvStore,
 }
 
 impl VeraModule {

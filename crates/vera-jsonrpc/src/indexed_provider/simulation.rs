@@ -63,9 +63,8 @@ impl<S: StateDbRead> IndexedStateProvider<S> {
         let request = NativeSimulateRequest::new(&request.signer, request.target, request.calldata)
             .map_err(|error: NativeSimulateError| RpcError::InvalidParams(error.to_string()))?;
         let (result, context) = self
-            .simulate(move |state, context, modules| {
-                simulate_native_call(state, context, &request, modules)
-                    .map(|result| (result, *context))
+            .simulate(move |_, context, modules| {
+                simulate_native_call(context, &request, modules).map(|result| (result, *context))
             })
             .await?;
         Ok(NativeCallSimulation {
@@ -96,8 +95,8 @@ impl<S: StateDbRead> IndexedStateProvider<S> {
         let call = ViewCall::new(target, calldata)
             .map_err(|error: ViewCallError| RpcError::InvalidParams(error.to_string()))?;
         let (result, context) = self
-            .simulate(move |state, context, modules| {
-                view_call(state, context, &call, modules).map(|result| (result, *context))
+            .simulate(move |_, context, modules| {
+                view_call(context, &call, modules).map(|result| (result, *context))
             })
             .await?;
         Ok(ViewCallResult {

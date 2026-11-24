@@ -46,7 +46,6 @@ fn native_gas_used(tx: &Bytes) -> u64 {
     let executor = VeraExecutor::new(9001);
     let (outcome, _) = executor
         .execute_with_modules(
-            &MockStateDb::new(),
             &context(NATIVE_LIMIT),
             std::slice::from_ref(tx),
             executor.snapshot(),
@@ -59,16 +58,8 @@ fn native_gas_used(tx: &Bytes) -> u64 {
     outcome.gas_used
 }
 
-fn context(gas_limit: u64) -> BlockContext {
-    BlockContext::new(
-        Header {
-            number: 1,
-            timestamp: 100,
-            gas_limit,
-            ..Default::default()
-        },
-        B256::ZERO,
-    )
+const fn context(gas_limit: u64) -> BlockContext {
+    BlockContext::new(1, 100, gas_limit)
 }
 
 fn module_state(snapshot: &ModuleSnapshot) -> vera_executor::ModuleState {
@@ -79,7 +70,6 @@ fn module_state(snapshot: &ModuleSnapshot) -> vera_executor::ModuleState {
 
 fn verify_selected(
     executor: &VeraExecutor,
-    state: &MockStateDb,
     context: &BlockContext,
     txs: &[Bytes],
     outcome: &vera_executor::ExecutionOutcome,
@@ -94,7 +84,6 @@ fn verify_selected(
         .collect();
     let (verified, restored) = executor
         .execute_with_modules(
-            state,
             &context.clone().with_verification(),
             &selected,
             executor.snapshot(),
@@ -125,10 +114,9 @@ fn native_limit_is_reserved_before_nonce_or_module_changes(
     let creation_gas = native_gas_used(&first);
     let (second, _) = native(1, policy(true));
     let txs = [first, second];
-    let state = MockStateDb::new();
     let context = context(limit);
     let (outcome, next) = executor
-        .execute_with_modules(&state, &context, &txs, parent)
+        .execute_with_modules(&context, &txs, parent)
         .unwrap();
     assert_eq!(
         outcome.executed_tx_indices,
@@ -143,14 +131,9 @@ fn native_limit_is_reserved_before_nonce_or_module_changes(
         accepted as usize
     );
     assert_eq!(outcome.gas_used, accepted * creation_gas);
-    verify_selected(&executor, &state, &context, &txs, &outcome, &next);
+    verify_selected(&executor, &context, &txs, &outcome, &next);
     assert!(matches!(
-        executor.execute_with_modules(
-            &state,
-            &context.with_verification(),
-            &txs,
-            executor.snapshot()
-        ),
+        executor.execute_with_modules(&context.with_verification(), &txs, executor.snapshot()),
         Err(ExecutionError::BlockValidation(_))
     ));
     assert_eq!(
@@ -159,7 +142,7 @@ fn native_limit_is_reserved_before_nonce_or_module_changes(
     );
     let (deferred, _) = native(accepted, policy(true));
     let (_, resumed) = executor
-        .execute_with_modules(&state, &self::context(NATIVE_LIMIT), &[deferred], next)
+        .execute_with_modules(&self::context(NATIVE_LIMIT), &[deferred], next)
         .unwrap();
     assert_eq!(
         module_state(&resumed).nonces.get_nonce(&actor).unwrap(),
@@ -183,10 +166,9 @@ fn failed_native_and_reverted_batch_are_charged_what_they_used(#[case] batch: bo
     let (failed, actor) = native(0, failing);
     let (deferred, _) = native(1, policy(true));
     let txs = [failed, deferred];
-    let state = MockStateDb::new();
     let context = context(NATIVE_LIMIT);
     let (outcome, next) = executor
-        .execute_with_modules(&state, &context, &txs, executor.snapshot())
+        .execute_with_modules(&context, &txs, executor.snapshot())
         .unwrap();
     // The refusal leaves less than a full allowance, so the next request waits.
     assert_eq!(outcome.executed_tx_indices, Some(vec![0]));
@@ -210,14 +192,9 @@ fn failed_native_and_reverted_batch_are_charged_what_they_used(#[case] batch: bo
             .is_empty()
     );
     assert_eq!(module_state(&next).nonces.get_nonce(&actor).unwrap(), 1);
-    verify_selected(&executor, &state, &context, &txs, &outcome, &next);
+    verify_selected(&executor, &context, &txs, &outcome, &next);
     assert!(matches!(
-        executor.execute_with_modules(
-            &state,
-            &context.with_verification(),
-            &txs,
-            executor.snapshot()
-        ),
+        executor.execute_with_modules(&context.with_verification(), &txs, executor.snapshot()),
         Err(ExecutionError::BlockValidation(_))
     ));
 }

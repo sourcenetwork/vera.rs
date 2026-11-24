@@ -1,5 +1,5 @@
 use super::*;
-use revm::precompile::{PrecompileHalt, PrecompileStatus};
+use crate::precompiles::ModuleStatus;
 use vera_modules::acp::{
     pages::{RecordPage, RelationshipPageRequest},
     theorem::TheoremReport,
@@ -48,11 +48,11 @@ impl Fixture {
         )
         .unwrap();
         assert!(
-            !output.precompile.status.is_revert(),
+            !output.output.status.is_revert(),
             "{:?}",
-            output.precompile.bytes
+            output.output.bytes
         );
-        output.precompile.bytes
+        output.output.bytes
     }
     fn command(&mut self, policy: B256, command: PolicyCmd) -> PolicyCmdResult {
         let output = self.call(IAcp::executePolicyCommandCall {
@@ -182,7 +182,7 @@ fn native_lifecycle_dispatch_preserves_metadata_and_enforces_ownership() {
     let before = f.acp.store().serialize();
     let call = IAcp::deletePolicyCall { policyId: policy }.abi_encode();
     let rejected = dispatch(&mut f.acp, &mut f.vera, &f.block, &f.tx, &call, 1_000_000).unwrap();
-    assert!(rejected.precompile.status.is_revert());
+    assert!(rejected.output.status.is_revert());
     assert_eq!(f.acp.store().serialize(), before);
     f.tx.signer = "did:key:owner".into();
     let output = f.call(IAcp::deletePolicyCall { policyId: policy });
@@ -257,7 +257,7 @@ fn failed_batch_restores_deleted_policy_and_low_gas_cannot_mutate() {
             &deletion,
             WRITE_GAS - 1
         ),
-        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+        Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
     ));
     let batch = IAcp::batchCallsCall {
         calls: vec![
@@ -267,7 +267,7 @@ fn failed_batch_restores_deleted_policy_and_low_gas_cannot_mutate() {
     }
     .abi_encode();
     let result = dispatch(&mut f.acp, &mut f.vera, &f.block, &f.tx, &batch, 1_000_000).unwrap();
-    assert!(result.precompile.status.is_revert());
+    assert!(result.output.status.is_revert());
     assert!(result.logs.is_empty());
     assert_eq!(f.acp.store().serialize(), before);
     f.acp.validate_restored_state().unwrap();

@@ -28,7 +28,6 @@ bs58 = "0.5"
 unsigned-varint.workspace = true
 
 # secp256k1 DID recovery
-alloy-primitives.workspace = true
 k256.workspace = true
 p256.workspace = true
 ed25519-dalek.workspace = true
@@ -43,5 +42,6 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+alloy-primitives.workspace = true
 ark-std.workspace = true
 hex.workspace = true

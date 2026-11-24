@@ -39,7 +39,7 @@ pub(super) fn dispatch(module: &AcpModule, input: &[u8], gas_limit: u64) -> Disp
         Ok(result) => result,
         Err(error) => {
             let mut result = err_dispatch(error);
-            result.precompile.gas_used = gas;
+            result.output.gas_used = gas;
             return Ok(result);
         }
     };

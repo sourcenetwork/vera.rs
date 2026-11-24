@@ -50,7 +50,7 @@ pub(super) fn dispatch(
         Ok(record) => record,
         Err(error) => {
             let mut result = err_dispatch(error);
-            result.precompile.gas_used = gas;
+            result.output.gas_used = gas;
             return Ok(result);
         }
     };
@@ -94,7 +94,7 @@ enum CreationError {
     Refused(RefusalKind, String),
     /// The node's own fault, which fails the block.
     #[error("{0}")]
-    Fault(PrecompileError),
+    Fault(ModuleError),
 }
 
 impl Refuse for CreationError {
@@ -111,16 +111,13 @@ fn refused(error: impl Refuse) -> CreationError {
 }
 
 /// A refusal raised as an error, reported as revm displays it.
-fn refused_by(error: &PrecompileError) -> CreationError {
-    CreationError::Refused(
-        kind_of(error),
-        format!("fatal: {}", recoverable_message(error)),
-    )
+fn refused_by(error: &ModuleError) -> CreationError {
+    CreationError::Refused(kind_of(error), format!("fatal: {error}"))
 }
 
 fn creator(tx: &TxExecCtx) -> Result<Did, CreationError> {
     did_from_signer(&tx.signer).map_err(|error| {
-        if internal_fault_reason(&error).is_some() {
+        if matches!(error, ModuleError::Fault(_)) {
             CreationError::Fault(error)
         } else {
             refused_by(&error)

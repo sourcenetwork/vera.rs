@@ -1,11 +1,11 @@
 //! Borrowed batch validation before ABI decoding allocates nested payloads.
 
-use super::{IAcp, PrecompileError, SolCall, batch_error, leaf};
+use super::{IAcp, ModuleError, SolCall, batch_error, leaf};
 
 pub(super) const MAX_DEPTH: usize = 16;
 pub(super) const MAX_CALLS: usize = 256;
 
-pub(super) fn validate(input: &[u8]) -> Result<(), PrecompileError> {
+pub(super) fn validate(input: &[u8]) -> Result<(), ModuleError> {
     if input.len() > vera_domain::MAX_TX_BYTES {
         return Err(limit("calldata bytes"));
     }
@@ -22,7 +22,7 @@ struct Budget {
 }
 
 impl Budget {
-    fn visit(&mut self, input: &[u8], depth: usize) -> Result<(), PrecompileError> {
+    fn visit(&mut self, input: &[u8], depth: usize) -> Result<(), ModuleError> {
         self.calls = self
             .calls
             .checked_sub(1)
@@ -50,12 +50,7 @@ impl Budget {
         Ok(())
     }
 
-    fn child(
-        &mut self,
-        elements: &[u8],
-        index: usize,
-        depth: usize,
-    ) -> Result<(), PrecompileError> {
+    fn child(&mut self, elements: &[u8], index: usize, depth: usize) -> Result<(), ModuleError> {
         let offset = word(elements, index.checked_mul(32).ok_or_else(invalid)?)?;
         let tail = elements.get(offset..).ok_or_else(invalid)?;
         let length = word(tail, 0)?;
@@ -72,7 +67,7 @@ impl Budget {
     }
 }
 
-fn word(input: &[u8], offset: usize) -> Result<usize, PrecompileError> {
+fn word(input: &[u8], offset: usize) -> Result<usize, ModuleError> {
     let end = offset.checked_add(32).ok_or_else(invalid)?;
     input
         .get(offset..end)
@@ -86,14 +81,14 @@ fn word(input: &[u8], offset: usize) -> Result<usize, PrecompileError> {
         })
 }
 
-fn invalid() -> PrecompileError {
+fn invalid() -> ModuleError {
     crate::precompiles::refusal::refused(
         vera_domain::RefusalKind::UndecodableInput,
         "invalid ACP batch ABI",
     )
 }
 
-fn limit(resource: &str) -> PrecompileError {
+fn limit(resource: &str) -> ModuleError {
     crate::precompiles::refusal::refused(
         vera_domain::RefusalKind::ArgumentOutOfBounds,
         format!("ACP batch {resource} limit exceeded"),

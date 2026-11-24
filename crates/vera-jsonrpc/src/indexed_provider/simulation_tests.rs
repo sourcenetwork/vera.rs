@@ -117,12 +117,13 @@ pub(super) fn committed() -> (SharedModuleState, B256) {
             tx_hash: vec![1; 32],
             sequence: 0,
         },
+        vera_executor::ExecutionConfig::new(CHAIN).membership_limits(),
         1_000_000,
     )
     .unwrap()
     .unwrap();
-    assert!(created.precompile.status.is_success());
-    let returned = &created.precompile.bytes;
+    assert!(created.output.status.is_success());
+    let returned = &created.output.bytes;
     let length = U256::from_be_slice(&returned[32..64]).to::<usize>();
     let record: PolicyRecord = serde_json::from_slice(&returned[64..64 + length]).unwrap();
     (

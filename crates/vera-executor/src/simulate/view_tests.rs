@@ -1,10 +1,9 @@
-use alloy_primitives::{B256, KECCAK256_EMPTY, U256};
+use alloy_primitives::B256;
 use alloy_sol_types::SolCall;
 use vera_domain::{RefusalKind, RefusingModule};
 use vera_modules::acp::abi::IAcp;
 use vera_modules::acp::types::PolicyRecord;
 use vera_modules::types::{BlockExecCtx, Timestamp};
-use vera_traits::StateDbError;
 
 use super::*;
 use crate::ExecutionConfig;
@@ -12,27 +11,6 @@ use crate::precompiles::{ACP_ADDRESS, dispatch_to_module};
 
 const POLICY: &str = "name: files\nresources:\n  - name: file\n";
 const OWNER: &str = "did:key:owner";
-
-#[derive(Clone, Debug)]
-struct EmptyState;
-
-impl StateDbRead for EmptyState {
-    async fn nonce(&self, _address: &Address) -> Result<u64, StateDbError> {
-        Ok(0)
-    }
-    async fn balance(&self, _address: &Address) -> Result<U256, StateDbError> {
-        Ok(U256::ZERO)
-    }
-    async fn code_hash(&self, _address: &Address) -> Result<B256, StateDbError> {
-        Ok(KECCAK256_EMPTY)
-    }
-    async fn code(&self, _code_hash: &B256) -> Result<Bytes, StateDbError> {
-        Ok(Bytes::new())
-    }
-    async fn storage(&self, _address: &Address, _slot: &U256) -> Result<U256, StateDbError> {
-        Ok(U256::ZERO)
-    }
-}
 
 fn context() -> SimulationContext {
     SimulationContext::at_block(&ExecutionConfig::new(9001), 30_000_000, 41, 1_800_000_000)
@@ -71,13 +49,14 @@ fn committed() -> (ModuleState, B256) {
         &create_policy(),
         &block,
         &tx,
+        crate::ExecutionConfig::new(9001).membership_limits(),
         1_000_000,
     )
     .unwrap()
     .unwrap();
-    assert!(created.precompile.status.is_success());
+    assert!(created.output.status.is_success());
     let record: PolicyRecord = serde_json::from_slice(
-        &IAcp::createPolicyCall::abi_decode_returns(&created.precompile.bytes).unwrap(),
+        &IAcp::createPolicyCall::abi_decode_returns(&created.output.bytes).unwrap(),
     )
     .unwrap();
     (modules, record.policy.id.parse().unwrap())
@@ -85,7 +64,7 @@ fn committed() -> (ModuleState, B256) {
 
 fn view(modules: &ModuleState, calldata: Vec<u8>) -> ViewCallResult {
     let call = ViewCall::new(ACP_ADDRESS, calldata.into()).unwrap();
-    view_call(&EmptyState, &context(), &call, modules).unwrap()
+    view_call(&context(), &call, modules).unwrap()
 }
 
 #[test]

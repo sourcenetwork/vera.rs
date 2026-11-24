@@ -54,7 +54,7 @@ pub(super) fn dispatch(
             let call = IAcp::editPolicyMetadataCall::abi_decode(input).map_err(decode_error)?;
             let metadata: SuppliedMetadata =
                 serde_json::from_slice(&call.metadata).map_err(|error| {
-                    PrecompileError::Fatal(format!("invalid policy metadata: {error}"))
+                    ModuleError::invalid(format!("invalid policy metadata: {error}"))
                 })?;
             let actor = did_from_signer(&tx.signer)?;
             match module.edit_policy_metadata(
@@ -98,7 +98,7 @@ pub(super) fn dispatch(
                 )),
                 Err(error) => {
                     let mut result = err_dispatch(error);
-                    result.precompile.gas_used = gas;
+                    result.output.gas_used = gas;
                     Ok(result)
                 }
             }

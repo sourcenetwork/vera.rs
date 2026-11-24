@@ -1,6 +1,6 @@
 //! Borrowed bounds for leaf dynamic values before Alloy allocates owned values.
 
-use super::{IAcp, PrecompileError, READ_GAS, SolCall, WRITE_GAS};
+use super::{IAcp, ModuleError, READ_GAS, SolCall, WRITE_GAS};
 use vera_modules::acp::{MAX_REGISTRATION_OBJECTS, decision::MAX_ACCESS_OPERATIONS};
 
 pub(super) fn required_gas(input: &[u8]) -> Option<u64> {
@@ -36,7 +36,7 @@ pub(super) fn required_gas(input: &[u8]) -> Option<u64> {
     }
 }
 
-pub(super) fn validate(input: &[u8], remaining: &mut usize) -> Result<(), PrecompileError> {
+pub(super) fn validate(input: &[u8], remaining: &mut usize) -> Result<(), ModuleError> {
     if input.starts_with(&IAcp::createPolicyCall::SELECTOR)
         || input.starts_with(&IAcp::bearerCreatePolicyCall::SELECTOR)
         || input.starts_with(&IAcp::createPolicyWithOptionsCall::SELECTOR)
@@ -76,7 +76,7 @@ pub(super) fn validate(input: &[u8], remaining: &mut usize) -> Result<(), Precom
             ));
         }
         if count.is_some_and(|expected| expected != length) {
-            return Err(PrecompileError::Fatal("array length mismatch".to_string()));
+            return Err(ModuleError::invalid("array length mismatch".to_string()));
         }
         count = Some(length);
         *head = array.get(32..).ok_or_else(invalid)?;
@@ -100,7 +100,7 @@ pub(super) fn validate(input: &[u8], remaining: &mut usize) -> Result<(), Precom
     charge(remaining, allowance - fields_remaining)
 }
 
-fn bearer_access(input: &[u8], remaining: &mut usize) -> Result<(), PrecompileError> {
+fn bearer_access(input: &[u8], remaining: &mut usize) -> Result<(), ModuleError> {
     let body = &input[4..];
     body.get(..3 * 32).ok_or_else(invalid)?;
     let request = bytes(body, 64)?;
@@ -116,7 +116,7 @@ fn bearer_access(input: &[u8], remaining: &mut usize) -> Result<(), PrecompileEr
     charge(remaining, 16 * 1024 - token_bytes)
 }
 
-fn policy_create(input: &[u8], remaining: &mut usize) -> Result<(), PrecompileError> {
+fn policy_create(input: &[u8], remaining: &mut usize) -> Result<(), ModuleError> {
     let bearer = input.starts_with(&IAcp::bearerCreatePolicyCall::SELECTOR);
     let options = input.starts_with(&IAcp::createPolicyWithOptionsCall::SELECTOR);
     let body = &input[4..];
@@ -148,7 +148,7 @@ fn policy_create(input: &[u8], remaining: &mut usize) -> Result<(), PrecompileEr
 
 // Match the compiler/JWT hard limits before owned ABI decoding. These bounds
 // remain separate from deterministic edit work accounting and YAML expansion limits.
-fn policy_edit(input: &[u8], remaining: &mut usize) -> Result<(), PrecompileError> {
+fn policy_edit(input: &[u8], remaining: &mut usize) -> Result<(), ModuleError> {
     let bearer = input.starts_with(&IAcp::bearerEditPolicyCall::SELECTOR);
     let body = &input[4..];
     let fields = if bearer { 4 } else { 3 };
@@ -170,7 +170,7 @@ fn policy_edit(input: &[u8], remaining: &mut usize) -> Result<(), PrecompileErro
     Ok(())
 }
 
-pub(super) fn bytes(input: &[u8], offset: usize) -> Result<&[u8], PrecompileError> {
+pub(super) fn bytes(input: &[u8], offset: usize) -> Result<&[u8], ModuleError> {
     let tail = input.get(word(input, offset)?..).ok_or_else(invalid)?;
     let length = word(tail, 0)?;
     tail.get(32..)
@@ -178,7 +178,7 @@ pub(super) fn bytes(input: &[u8], offset: usize) -> Result<&[u8], PrecompileErro
         .ok_or_else(invalid)
 }
 
-fn string(input: &[u8], offset: usize, remaining: &mut usize) -> Result<(), PrecompileError> {
+fn string(input: &[u8], offset: usize, remaining: &mut usize) -> Result<(), ModuleError> {
     let bytes = bytes(input, offset)?;
     let length = bytes.len();
     charge(remaining, length)?;
@@ -192,7 +192,7 @@ fn string(input: &[u8], offset: usize, remaining: &mut usize) -> Result<(), Prec
     Ok(())
 }
 
-fn charge(remaining: &mut usize, bytes: usize) -> Result<(), PrecompileError> {
+fn charge(remaining: &mut usize, bytes: usize) -> Result<(), ModuleError> {
     *remaining = remaining.checked_sub(bytes).ok_or_else(|| {
         crate::precompiles::refusal::refused(
             vera_domain::RefusalKind::ArgumentOutOfBounds,
@@ -202,7 +202,7 @@ fn charge(remaining: &mut usize, bytes: usize) -> Result<(), PrecompileError> {
     Ok(())
 }
 
-fn word(input: &[u8], offset: usize) -> Result<usize, PrecompileError> {
+fn word(input: &[u8], offset: usize) -> Result<usize, ModuleError> {
     let end = offset.checked_add(32).ok_or_else(invalid)?;
     input
         .get(offset..end)
@@ -216,7 +216,7 @@ fn word(input: &[u8], offset: usize) -> Result<usize, PrecompileError> {
         })
 }
 
-fn invalid() -> PrecompileError {
+fn invalid() -> ModuleError {
     crate::precompiles::refusal::refused(
         vera_domain::RefusalKind::UndecodableInput,
         "invalid ACP string-array ABI",

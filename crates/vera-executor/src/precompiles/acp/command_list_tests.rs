@@ -1,7 +1,7 @@
 use super::*;
+use crate::precompiles::ModuleStatus;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use k256::ecdsa::{Signature, SigningKey, signature::Signer as _};
-use revm::precompile::{PrecompileHalt, PrecompileStatus};
 use vera_crypto::{
     jwt::{DelegationScope, JwtClaims},
     operation::{OperationClaim, OperationId},
@@ -138,7 +138,7 @@ impl Fixture {
         let (mut acp, mut vera) = (self.acp.clone(), self.vera.clone());
         dispatch(&mut acp, &mut vera, &self.block, &self.tx, input, gas)
             .unwrap()
-            .precompile
+            .output
             .gas_used
     }
 
@@ -158,17 +158,17 @@ fn a_signed_list_applies_every_command_and_its_replay_returns_the_same_bytes() {
     let mut fixture = Fixture::new();
     let input = fixture.signed();
     let applied = fixture.dispatch(&input, 10_000_000);
-    assert!(applied.precompile.status.is_success());
-    assert!(applied.precompile.gas_used > 2 * WRITE_GAS);
+    assert!(applied.output.status.is_success());
+    assert!(applied.output.gas_used > 2 * WRITE_GAS);
     let results: Vec<vera_modules::acp::types::PolicyCmdResult> = serde_json::from_slice(
-        &IAcp::bearerPolicyCmdsCall::abi_decode_returns(&applied.precompile.bytes).unwrap(),
+        &IAcp::bearerPolicyCmdsCall::abi_decode_returns(&applied.output.bytes).unwrap(),
     )
     .unwrap();
     assert_eq!(results.len(), 2);
     let before = fixture.state();
     let replayed = fixture.dispatch(&input, 10_000_000);
-    assert!(replayed.precompile.status.is_success());
-    assert_eq!(replayed.precompile.bytes, applied.precompile.bytes);
+    assert!(replayed.output.status.is_success());
+    assert_eq!(replayed.output.bytes, applied.output.bytes);
     assert_eq!(fixture.state(), before);
 }
 
@@ -200,7 +200,7 @@ fn an_altered_or_undecodable_list_is_a_refusal_that_changes_nothing() {
     let before = fixture.state();
     for (input, kind) in cases {
         let refused = fixture.dispatch(&input, 10_000_000);
-        assert!(refused.precompile.status.is_revert());
+        assert!(refused.output.status.is_revert());
         assert_eq!(refused.refusal, Some(kind));
         assert_eq!(fixture.state(), before);
     }
@@ -215,7 +215,7 @@ fn each_further_command_pays_the_write_base_and_exhaustion_changes_nothing() {
             fixture.token(commands),
             &serde_json::to_vec(commands).unwrap(),
         );
-        fixture.dispatch(&input, 10_000_000).precompile.gas_used
+        fixture.dispatch(&input, 10_000_000).output.gas_used
     };
     let mut fixture = Fixture::new();
     let input = fixture.signed();
@@ -223,15 +223,12 @@ fn each_further_command_pays_the_write_base_and_exhaustion_changes_nothing() {
     assert!(measured > single + WRITE_GAS);
     let before = fixture.state();
     let exhausted = fixture.dispatch(&input, measured - 1);
-    assert!(matches!(
-        exhausted.precompile.status,
-        PrecompileStatus::Halt(PrecompileHalt::OutOfGas)
-    ));
+    assert!(matches!(exhausted.output.status, ModuleStatus::OutOfGas));
     assert_eq!(fixture.state(), before);
     assert!(
         fixture
             .dispatch(&input, measured)
-            .precompile
+            .output
             .status
             .is_success()
     );
@@ -252,6 +249,6 @@ fn an_enclosing_batch_revert_leaves_no_list_effect_or_outcome() {
     .abi_encode();
     let before = fixture.state();
     let reverted = fixture.dispatch(&input, 10_000_000);
-    assert!(reverted.precompile.status.is_revert());
+    assert!(reverted.output.status.is_revert());
     assert_eq!(fixture.state(), before);
 }

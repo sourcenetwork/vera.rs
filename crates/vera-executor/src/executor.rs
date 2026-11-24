@@ -1,20 +1,13 @@
 //! VeraExecutor — runs a block's native BLS requests against the modules.
 
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 
 use crate::{
     BlockContext, ExecutionConfig, ExecutionError, ExecutionOutcome, ExecutionReceipt,
-    ModuleSnapshot, StateDbAdapter, extract_changes,
+    ModuleSnapshot,
 };
-use alloy_primitives::{Bytes, U256, keccak256};
+use alloy_primitives::{Bytes, keccak256};
 use commonware_parallel::{Rayon, Sequential, Strategy};
-use revm::{
-    Context, Journal,
-    context::block::BlockEnv,
-    context_interface::{ContextTr, JournalTr},
-    database::State,
-    primitives::hardfork::SpecId,
-};
 use tracing::warn;
 #[cfg(test)]
 use vera_crypto::bls;
@@ -25,7 +18,6 @@ use vera_modules::module_state::{ModuleState, SharedModuleState};
 use vera_modules::native_account::NativeNonceStore;
 use vera_modules::types::{BlockExecCtx, Timestamp, TxExecCtx};
 use vera_modules::vera::VeraModule;
-use vera_traits::StateDbRead;
 
 mod gas_budget;
 pub(crate) mod native_authentication;
@@ -55,11 +47,6 @@ pub struct VeraExecutor {
 }
 
 impl VeraExecutor {
-    /// The revision of the journal that hosts registry storage.
-    pub const fn spec_id(&self) -> SpecId {
-        self.config.spec_id
-    }
-
     /// Configure a one-shot process crash marker for persistence tests.
     #[cfg(feature = "fault-injection")]
     #[must_use]
@@ -159,7 +146,7 @@ impl VeraExecutor {
     /// Execute a native BLS transaction: verify signature, derive DID, dispatch to module.
     #[allow(clippy::too_many_arguments)]
     #[cfg(test)]
-    fn execute_native_tx<CTX: ContextTr>(
+    fn execute_native_tx(
         &self,
         tx_bytes: &[u8],
         block_ctx: &BlockExecCtx,
@@ -167,7 +154,6 @@ impl VeraExecutor {
         bulletin: &mut BulletinModule,
         vera: &mut VeraModule,
         nonce_store: &mut NativeNonceStore,
-        journal: &mut CTX,
     ) -> Result<ExecutionReceipt, ExecutionError> {
         self.execute_authenticated_native_tx(
             authenticate_native_tx(self.config.chain_id, tx_bytes)?,
@@ -176,12 +162,11 @@ impl VeraExecutor {
             bulletin,
             vera,
             nonce_store,
-            journal,
         )
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn execute_authenticated_native_tx<CTX: ContextTr>(
+    fn execute_authenticated_native_tx(
         &self,
         authenticated: AuthenticatedNativeTx,
         block_ctx: &BlockExecCtx,
@@ -189,7 +174,6 @@ impl VeraExecutor {
         bulletin: &mut BulletinModule,
         vera: &mut VeraModule,
         nonce_store: &mut NativeNonceStore,
-        journal: &mut CTX,
     ) -> Result<ExecutionReceipt, ExecutionError> {
         let AuthenticatedNativeTx {
             native_tx,
@@ -208,7 +192,7 @@ impl VeraExecutor {
             &NativeCall {
                 target: native_tx.target,
                 calldata: &native_tx.calldata,
-                max_active_members: self.config.max_active_members(),
+                limits: self.config.membership_limits(),
                 gas_limit: NATIVE_TX_GAS_LIMIT,
             },
             block_ctx,
@@ -216,7 +200,6 @@ impl VeraExecutor {
             acp,
             bulletin,
             vera,
-            journal,
         );
 
         let outcome = native_outcome(native_tx.target, dispatch_result)?;
@@ -250,9 +233,8 @@ impl VeraExecutor {
 
 impl VeraExecutor {
     /// Execute against an owned parent snapshot without replacing query state.
-    pub fn execute_with_modules<S: StateDbRead>(
+    pub fn execute_with_modules(
         &self,
-        state: &S,
         context: &BlockContext,
         txs: &[Bytes],
         parent: ModuleSnapshot,
@@ -263,34 +245,16 @@ impl VeraExecutor {
             genesis_id: self.config.genesis_id,
             deployment_id: self.config.chain_id,
             timestamp: Timestamp {
-                seconds: context.header.timestamp,
-                block_height: context.header.number,
+                seconds: context.timestamp,
+                block_height: context.height,
             },
         };
 
         let mut outcome = ExecutionOutcome::new();
-        let mut gas_budget = BlockGasBudget::new(context.header.gas_limit);
+        let mut gas_budget = BlockGasBudget::new(context.gas_limit);
         let building = !context.is_verification;
         let mut executed_indices: Vec<usize> = Vec::new();
         let mut rejected_indices: Vec<usize> = Vec::new();
-
-        let state_failure = Arc::new(Mutex::new(None));
-        let adapter = StateDbAdapter::new(state.clone()).track_failures(state_failure.clone());
-        let db = State::builder().with_database_ref(adapter).build();
-
-        type Db<S> = State<revm::database::WrapDatabaseRef<StateDbAdapter<S>>>;
-        let ctx: Context<BlockEnv, revm::context::TxEnv, _, Db<S>, Journal<Db<S>>, ()> =
-            Context::new(db, self.config.spec_id);
-        let mut ctx = ctx
-            .modify_cfg_chained(|cfg| {
-                cfg.chain_id = self.config.chain_id;
-            })
-            .modify_block_chained(|blk: &mut BlockEnv| {
-                blk.number = U256::from(context.header.number);
-                blk.timestamp = U256::from(context.header.timestamp);
-                blk.beneficiary = context.header.beneficiary;
-                blk.gas_limit = context.header.gas_limit;
-            });
 
         let native_started = tracing::enabled!(target: "vera_diagnostics", tracing::Level::DEBUG)
             .then(std::time::Instant::now);
@@ -336,16 +300,8 @@ impl VeraExecutor {
                     &mut modules.bulletin,
                     &mut modules.vera,
                     &mut modules.nonces,
-                    &mut ctx,
                 )
             });
-            if let Some(error) = state_failure
-                .lock()
-                .expect("state failure lock poisoned")
-                .take()
-            {
-                return Err(error.into());
-            }
             let receipt = match execution {
                 Ok(r) => r,
                 Err(error @ ExecutionError::TxExecution(_)) => return Err(error),
@@ -358,20 +314,6 @@ impl VeraExecutor {
             };
 
             gas_budget.charge(NATIVE_TX_GAS_LIMIT, receipt.gas_used)?;
-            let journaled = ctx.journal_mut().finalize();
-            outcome.changes.merge(extract_changes(&journaled));
-            // Registry storage is retained even though its account has no balance or code.
-            for (address, account) in journaled {
-                if account.is_touched() {
-                    ctx.journal_mut()
-                        .db_mut()
-                        .cache
-                        .accounts
-                        .get_mut(&address)
-                        .expect("journaled account was loaded into the proposal cache")
-                        .change(std::borrow::Cow::Owned(account));
-                }
-            }
 
             executed_indices.push(i);
             let mut receipt = receipt;
@@ -380,27 +322,21 @@ impl VeraExecutor {
         }
 
         if let Some((started, authentication)) = native_started.zip(authentication_elapsed) {
-            tracing::debug!(target: "vera_diagnostics", height = context.header.number,
+            tracing::debug!(target: "vera_diagnostics", height = context.height,
                 native_count, authentication_us = authentication.as_micros(),
                 dispatch_us = (started.elapsed() - authentication).as_micros(),
                 "native execution stages");
         }
 
         if let Some(length) = self.config.membership_epoch_length {
-            let height = context.header.number;
+            let height = context.height;
             if height % length.get() == length.get() - 1 {
                 let epoch = (height / length.get()).checked_add(3).ok_or_else(|| {
                     ExecutionError::TxExecution("membership epoch overflow".into())
                 })?;
-                let keys = crate::precompiles::validator_registry::active_consensus_keys(&mut ctx);
-                if let Some(error) = state_failure
-                    .lock()
-                    .expect("state failure lock poisoned")
-                    .take()
-                {
-                    return Err(error.into());
-                }
-                let keys = keys.map_err(|error| ExecutionError::TxExecution(error.to_string()))?;
+                let keys =
+                    crate::precompiles::validator_registry::active_consensus_keys(&modules.vera)
+                        .map_err(|error| ExecutionError::TxExecution(error.to_string()))?;
                 modules
                     .vera
                     .record_consensus_roster(epoch, &keys)
@@ -423,32 +359,10 @@ impl VeraExecutor {
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{Address, B256, Bytes, FixedBytes, KECCAK256_EMPTY};
-    use vera_traits::{StateDbError, StateDbRead};
+    use alloy_primitives::{Address, B256, Bytes, FixedBytes};
 
     use super::*;
     use crate::precompiles::{ACP_ADDRESS, BULLETIN_ADDRESS, VERA_ADDRESS};
-
-    #[derive(Clone, Debug, Default)]
-    struct MockStateDb;
-
-    impl StateDbRead for MockStateDb {
-        async fn nonce(&self, _address: &Address) -> Result<u64, StateDbError> {
-            Ok(0)
-        }
-        async fn balance(&self, _address: &Address) -> Result<U256, StateDbError> {
-            Ok(U256::ZERO)
-        }
-        async fn code_hash(&self, _address: &Address) -> Result<B256, StateDbError> {
-            Ok(KECCAK256_EMPTY)
-        }
-        async fn code(&self, _code_hash: &B256) -> Result<Bytes, StateDbError> {
-            Ok(Bytes::new())
-        }
-        async fn storage(&self, _address: &Address, _slot: &U256) -> Result<U256, StateDbError> {
-            Ok(U256::ZERO)
-        }
-    }
 
     fn execute(
         executor: &VeraExecutor,
@@ -456,7 +370,7 @@ mod tests {
         txs: &[Bytes],
     ) -> Result<ExecutionOutcome, ExecutionError> {
         executor
-            .execute_with_modules(&MockStateDb, context, txs, executor.snapshot())
+            .execute_with_modules(context, txs, executor.snapshot())
             .map(|(outcome, _)| outcome)
     }
 
@@ -475,14 +389,6 @@ mod tests {
         }
     }
 
-    fn test_journal()
-    -> Context<BlockEnv, revm::context::TxEnv, revm::context::CfgEnv, revm::database::EmptyDB> {
-        Context::new(
-            revm::database::EmptyDB::default(),
-            revm::primitives::hardfork::SpecId::default(),
-        )
-    }
-
     #[test]
     fn vera_executor_new() {
         let executor = test_executor();
@@ -491,17 +397,8 @@ mod tests {
 
     #[test]
     fn vera_executor_execute_empty_block() {
-        use alloy_consensus::Header;
-
         let executor = test_executor();
-        let header = Header {
-            number: 1,
-            timestamp: 1_700_000_000,
-            gas_limit: 30_000_000,
-            base_fee_per_gas: Some(0),
-            ..Default::default()
-        };
-        let context = BlockContext::new(header, B256::ZERO);
+        let context = BlockContext::new(1, 1_700_000_000, 30_000_000);
         let txs: Vec<Bytes> = vec![];
         let outcome = execute(&executor, &context, &txs).unwrap();
         assert_eq!(outcome.gas_used, 0);
@@ -583,25 +480,15 @@ mod tests {
         for (offset, remaining) in [129, 1, 0].into_iter().enumerate() {
             let before = parent.modules.serialize_stores();
             let context = BlockContext::new(
-                alloy_consensus::Header {
-                    number: offset as u64 + 101,
-                    timestamp: issued.timestamp.seconds + offset as u64 + 2,
-                    gas_limit: 30_000_000,
-                    base_fee_per_gas: Some(0),
-                    ..Default::default()
-                },
-                B256::ZERO,
+                offset as u64 + 101,
+                issued.timestamp.seconds + offset as u64 + 2,
+                30_000_000,
             );
             let (proposed, next) = executor
-                .execute_with_modules(&MockStateDb, &context, &[], parent.clone())
+                .execute_with_modules(&context, &[], parent.clone())
                 .unwrap();
             let (verified, verified_state) = executor
-                .execute_with_modules(
-                    &MockStateDb,
-                    &context.with_verification(),
-                    &[],
-                    parent.clone(),
-                )
+                .execute_with_modules(&context.with_verification(), &[], parent.clone())
                 .unwrap();
             assert_eq!(verified.gas_used, proposed.gas_used);
             assert_eq!(
@@ -672,19 +559,10 @@ mod tests {
             let before = parent.modules.serialize_stores();
             let published = executor.snapshot().modules.serialize_stores();
             for verification in [false, true] {
-                let mut context = BlockContext::new(
-                    alloy_consensus::Header {
-                        number: 1,
-                        timestamp: 100,
-                        gas_limit: 30_000_000,
-                        base_fee_per_gas: Some(0),
-                        ..Default::default()
-                    },
-                    B256::ZERO,
-                );
+                let mut context = BlockContext::new(1, 100, 30_000_000);
                 context.is_verification = verification;
                 let error = executor
-                    .execute_with_modules(&MockStateDb, &context, &[], parent.clone())
+                    .execute_with_modules(&context, &[], parent.clone())
                     .unwrap_err();
                 assert!(error.to_string().contains(expected), "{error}");
                 assert_eq!(parent.modules.serialize_stores(), before);
@@ -708,18 +586,11 @@ mod tests {
         txs.insert(3, invalid.encode_wire().into());
         txs.insert(5, signed_native_tx(&sk, &pk, 0).into());
         txs.insert(7, Bytes::new());
-        let context = BlockContext::new(
-            alloy_consensus::Header {
-                number: 1,
-                gas_limit: 100_000_000,
-                ..Default::default()
-            },
-            B256::ZERO,
-        );
+        let context = BlockContext::new(1, 0, 100_000_000);
         let before = parallel.snapshot().modules.serialize_stores();
         let run = |executor: &VeraExecutor, context: &BlockContext, txs: &[Bytes]| {
             executor
-                .execute_with_modules(&MockStateDb, context, txs, executor.snapshot())
+                .execute_with_modules(context, txs, executor.snapshot())
                 .map(|(outcome, state)| (outcome, state.modules.serialize_stores()))
         };
         let (expected, expected_state) = run(&sequential, &context, &txs).unwrap();
@@ -775,7 +646,6 @@ mod tests {
             &mut bulletin,
             &mut vera,
             &mut nonces,
-            &mut test_journal(),
         );
         assert!(matches!(result, Err(ExecutionError::TxDecode(_))));
     }
@@ -806,7 +676,6 @@ mod tests {
             &mut bulletin,
             &mut vera,
             &mut nonces,
-            &mut test_journal(),
         );
         match result {
             Err(ExecutionError::ChainIdMismatch { expected, got }) => {
@@ -843,7 +712,6 @@ mod tests {
             &mut bulletin,
             &mut vera,
             &mut nonces,
-            &mut test_journal(),
         );
         assert!(matches!(result, Err(ExecutionError::BlsVerification(_))));
     }
@@ -896,7 +764,6 @@ mod tests {
             &mut bulletin,
             &mut vera,
             &mut nonces,
-            &mut test_journal(),
         );
         assert!(matches!(
             result,
@@ -910,18 +777,9 @@ mod tests {
 
     #[test]
     fn native_tx_building_mode_skips_invalid() {
-        use alloy_consensus::Header;
-
         let executor = test_executor();
-        let header = Header {
-            number: 1,
-            timestamp: 1_700_000_000,
-            gas_limit: 30_000_000,
-            base_fee_per_gas: Some(0),
-            ..Default::default()
-        };
         // Building mode (is_verification = false)
-        let context = BlockContext::new(header, B256::ZERO);
+        let context = BlockContext::new(1, 1_700_000_000, 30_000_000);
 
         // Malformed native tx: 0x45 + garbage
         let bad_native = Bytes::from(vec![0x45, 0xFF, 0xFF]);
@@ -940,14 +798,7 @@ mod tests {
     fn a_request_that_is_not_native_is_dropped_when_building_and_fails_verification() {
         let executor = test_executor();
         let (sk, pk) = test_bls_keypair();
-        let context = BlockContext::new(
-            alloy_consensus::Header {
-                number: 1,
-                gas_limit: 30_000_000,
-                ..Default::default()
-            },
-            B256::ZERO,
-        );
+        let context = BlockContext::new(1, 0, 30_000_000);
         let txs: Vec<Bytes> = vec![
             Bytes::from_static(&[0x02, 0xc0]),
             signed_native_tx(&sk, &pk, 0).into(),
@@ -969,17 +820,8 @@ mod tests {
 
     #[test]
     fn empty_block_runs_end_hooks() {
-        use alloy_consensus::Header;
-
         let executor = test_executor();
-        let header = Header {
-            number: 1,
-            timestamp: 1_700_000_000,
-            gas_limit: 30_000_000,
-            base_fee_per_gas: Some(0),
-            ..Default::default()
-        };
-        let context = BlockContext::new(header, B256::ZERO);
+        let context = BlockContext::new(1, 1_700_000_000, 30_000_000);
         let txs: Vec<Bytes> = vec![];
 
         // Should not panic — end-block hooks are no-ops
@@ -1037,7 +879,6 @@ mod tests {
                 &mut bulletin,
                 &mut vera,
                 &mut nonces,
-                &mut test_journal(),
             )
             .unwrap();
         assert!(receipt.success(), "getParams query should succeed");
@@ -1073,7 +914,6 @@ mod tests {
         let mut bulletin = BulletinModule::new();
         let mut vera = VeraModule::new();
         let mut nonces = NativeNonceStore::default();
-        let mut journal = test_journal();
 
         // A selector's four bytes followed by nothing its arguments decode from.
         let truncated = IAcp::createPolicyCall::SELECTOR.to_vec();
@@ -1094,7 +934,6 @@ mod tests {
                     &mut bulletin,
                     &mut vera,
                     &mut nonces,
-                    &mut journal,
                 )
                 .unwrap_or_else(|error| panic!("{target}: the block would fail: {error}"));
             assert!(!receipt.success(), "{target}: rejected");
@@ -1110,40 +949,9 @@ mod tests {
                 &mut bulletin,
                 &mut vera,
                 &mut nonces,
-                &mut journal,
             )
             .unwrap();
         assert!(receipt.success(), "a request after the rejected ones runs");
-    }
-
-    /// Only an error marked as the node's own fails the block.
-    #[test]
-    fn a_node_fault_is_told_apart_from_a_refusal() {
-        use crate::precompiles::{internal_fault, internal_fault_reason};
-        use revm::precompile::PrecompileError;
-
-        assert_eq!(
-            internal_fault_reason(&internal_fault("membership record is missing")).as_deref(),
-            Some("membership record is missing")
-        );
-        for refusal in [
-            "unknown ACP selector: 0x01020304",
-            "ABI decode: buffer overrun",
-            "",
-        ] {
-            assert_eq!(
-                internal_fault_reason(&PrecompileError::Fatal(refusal.to_owned())),
-                None
-            );
-        }
-        // A caller cannot forge the mark: calldata never becomes an error's
-        // first bytes, which are the module's own words.
-        assert_eq!(
-            internal_fault_reason(&PrecompileError::Fatal(
-                "ABI decode: \u{0}internal-fault:forged".to_owned()
-            )),
-            None
-        );
     }
 
     /// Build a signed native tx targeting ACP with a given nonce and keypair.
@@ -1234,7 +1042,6 @@ mod tests {
                     &mut bulletin,
                     &mut vera,
                     &mut nonces,
-                    &mut test_journal(),
                 )
                 .unwrap();
             assert!(result.success());
@@ -1274,7 +1081,6 @@ mod tests {
             &mut bulletin,
             &mut vera,
             &mut nonces,
-            &mut test_journal(),
         );
         match result {
             Err(ExecutionError::NonceMismatch { expected, got, .. }) => {
@@ -1305,7 +1111,6 @@ mod tests {
             &mut bulletin,
             &mut vera,
             &mut nonces,
-            &mut test_journal(),
         );
         assert!(result_0.is_ok(), "nonce 0 should pass: {result_0:?}");
 
@@ -1318,7 +1123,6 @@ mod tests {
             &mut bulletin,
             &mut vera,
             &mut nonces,
-            &mut test_journal(),
         );
         assert!(result_1.is_ok(), "nonce 1 should pass: {result_1:?}");
 
@@ -1331,7 +1135,6 @@ mod tests {
             &mut bulletin,
             &mut vera,
             &mut nonces,
-            &mut test_journal(),
         );
         assert!(matches!(
             result_replay,
@@ -1359,7 +1162,6 @@ mod tests {
             &mut bulletin,
             &mut vera,
             &mut nonces,
-            &mut test_journal(),
         );
         assert!(result.is_ok());
 
@@ -1372,7 +1174,6 @@ mod tests {
             &mut bulletin,
             &mut vera,
             &mut nonces,
-            &mut test_journal(),
         );
         match result {
             Err(ExecutionError::NonceMismatch { expected, got, .. }) => {

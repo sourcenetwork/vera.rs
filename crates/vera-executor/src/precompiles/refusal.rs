@@ -1,18 +1,14 @@
 //! The committed kind of each refusal a module call can produce.
 //!
-//! A module error's variant decides its kind. A refusal raised as a
-//! precompile error carries its kind in a sentinel prefix, as an internal
-//! fault does, because revm's error has no field for it. The prefix never
-//! reaches a caller: [`super::recoverable_message`] removes it.
+//! A module error's variant decides its kind.
 
-use revm::precompile::PrecompileError;
 use vera_domain::RefusalKind;
 use vera_modules::acp::error::AcpError;
 use vera_modules::bulletin::error::BulletinError;
 use vera_modules::validator_registry::error::ValidatorRegistryError;
 use vera_modules::vera::error::VeraError;
 
-const REFUSAL: &str = "\u{0}refusal:";
+use super::ModuleError;
 
 /// A caller-facing refusal of a module call.
 pub(crate) trait Refuse: core::fmt::Display {
@@ -21,38 +17,26 @@ pub(crate) trait Refuse: core::fmt::Display {
 }
 
 /// A refusal raised as an error rather than returned as a revert.
-pub(crate) fn refused(kind: RefusalKind, reason: impl core::fmt::Display) -> PrecompileError {
-    PrecompileError::Fatal(format!("{REFUSAL}{}:{reason}", kind.code()))
-}
-
-/// The kind and message of a refusal raised as an error. An untagged error
-/// is a request the call could not use, so it is an invalid argument.
-pub(crate) fn split(message: &str) -> (RefusalKind, &str) {
-    message
-        .strip_prefix(REFUSAL)
-        .and_then(|rest| rest.split_once(':'))
-        .and_then(|(code, message)| {
-            let kind = RefusalKind::from_code(code.parse().ok()?)?;
-            Some((kind, message))
-        })
-        .unwrap_or((RefusalKind::InvalidArgument, message))
+pub(crate) fn refused(kind: RefusalKind, reason: impl core::fmt::Display) -> ModuleError {
+    ModuleError::Refused {
+        kind,
+        message: reason.to_string(),
+    }
 }
 
 /// The kind of a refusal raised as an error.
-pub(crate) fn kind_of(error: &PrecompileError) -> RefusalKind {
+pub(crate) const fn kind_of(error: &ModuleError) -> RefusalKind {
     match error {
-        PrecompileError::Fatal(message) => split(message).0,
-        PrecompileError::FatalAny(_) => RefusalKind::InvalidArgument,
+        ModuleError::Refused { kind, .. } => *kind,
+        ModuleError::OutOfGas => RefusalKind::OutOfGas,
+        ModuleError::Fault(_) => RefusalKind::ModuleFailed,
     }
 }
 
 /// Prefix a refusal raised as an error with `context`, keeping its kind.
-pub(crate) fn with_context(error: PrecompileError, context: &str) -> PrecompileError {
+pub(crate) fn with_context(error: ModuleError, context: &str) -> ModuleError {
     match error {
-        PrecompileError::Fatal(message) => {
-            let (kind, message) = split(&message);
-            refused(kind, format!("{context}{message}"))
-        }
+        ModuleError::Refused { kind, message } => refused(kind, format!("{context}{message}")),
         other => other,
     }
 }
@@ -139,7 +123,7 @@ impl Refuse for ValidatorRegistryError {
             Self::EmptyCommittee | Self::MembershipLimit(_) | Self::EpochCapacity(_) => {
                 RefusalKind::MembershipConstraint
             }
-            Self::State(_) => RefusalKind::StateError,
+            Self::State(_) | Self::Corrupt(_) => RefusalKind::StateError,
         }
     }
 }
@@ -164,18 +148,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_tagged_error_keeps_its_kind_through_context_and_an_untagged_one_is_an_argument() {
+    fn a_refusal_keeps_its_kind_through_context() {
         let error = refused(RefusalKind::UndecodableInput, "ABI decode: short");
         let error = with_context(error, "batch call 2: ");
         assert_eq!(kind_of(&error), RefusalKind::UndecodableInput);
-        assert_eq!(
-            super::super::recoverable_message(&error),
-            "batch call 2: ABI decode: short"
-        );
-        let untagged = PrecompileError::Fatal("array length mismatch".into());
-        assert_eq!(kind_of(&untagged), RefusalKind::InvalidArgument);
-        let forged = PrecompileError::Fatal("\u{0}refusal:99:x".into());
-        assert_eq!(split("\u{0}refusal:99:x").1, "\u{0}refusal:99:x");
-        assert_eq!(kind_of(&forged), RefusalKind::InvalidArgument);
+        assert_eq!(error.to_string(), "batch call 2: ABI decode: short");
+        let unqualified = ModuleError::invalid("array length mismatch");
+        assert_eq!(kind_of(&unqualified), RefusalKind::InvalidArgument);
     }
 }

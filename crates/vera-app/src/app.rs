@@ -7,8 +7,6 @@ use std::{
 };
 
 use crate::{ApplicationState, ordered_state::OrderedState};
-use alloy_consensus::Header;
-use alloy_primitives::{Address, B256};
 use commonware_consensus::{Handoff, marshal::ancestry::Ancestry};
 use commonware_cryptography::Digestible as _;
 use commonware_glue::stateful::{Application, Finality, Input, Proposed};
@@ -18,7 +16,7 @@ use std::marker::PhantomData;
 use tracing::{info, warn};
 use vera_backend::Ctx;
 use vera_consensus::{Mempool as _, TxId, components::InMemoryMempool};
-use vera_domain::{Block, ConsensusContext, PublicKey, Tx};
+use vera_domain::{Block, ConsensusContext, Tx};
 use vera_executor::{BlockContext, ExecutionReceipt, VeraExecutor, receipt_commitment};
 
 use crate::{AppError, ConsensusScheme, FinalizedSink, ReshareInput};
@@ -38,7 +36,6 @@ pub struct StatefulVeraApp<S: FinalizedSink, D: ApplicationState = OrderedState>
     sink: S,
     max_txs: usize,
     gas_limit: u64,
-    participant_addresses: Arc<Vec<(PublicKey, Address)>>,
     proposal_batch_wait: std::time::Duration,
     settled_batch_wait: Option<std::time::Duration>,
     timestamp_step: u64,
@@ -76,7 +73,6 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
             sink,
             max_txs,
             gas_limit,
-            participant_addresses: Arc::new(Vec::new()),
             proposal_batch_wait: std::time::Duration::ZERO,
             settled_batch_wait: None,
             timestamp_step: MAX_TIMESTAMP_STEP_SECS,
@@ -95,13 +91,6 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
     fn admits_term(&self, block: &Block, parent: &Block) -> bool {
         vera_domain::term_extends(parent.term, block.term)
             && self.term.admits(block.height, block.term)
-    }
-
-    /// Map consensus leaders to the EVM address credited as block beneficiary.
-    #[must_use]
-    pub fn with_participant_addresses(mut self, addrs: Vec<(PublicKey, Address)>) -> Self {
-        self.participant_addresses = Arc::new(addrs);
-        self
     }
 
     /// Wait up to `batch_wait` for requests before building a proposal.
@@ -132,23 +121,8 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
         self
     }
 
-    fn beneficiary_for(&self, leader: &PublicKey) -> Address {
-        self.participant_addresses
-            .iter()
-            .find(|(pk, _)| pk == leader)
-            .map_or(Address::ZERO, |(_, addr)| *addr)
-    }
-
-    fn block_context(&self, height: u64, timestamp: u64, leader: &PublicKey) -> BlockContext {
-        let header = Header {
-            number: height,
-            timestamp,
-            gas_limit: self.gas_limit,
-            beneficiary: self.beneficiary_for(leader),
-            base_fee_per_gas: Some(0),
-            ..Default::default()
-        };
-        BlockContext::new(header, B256::ZERO)
+    const fn block_context(&self, height: u64, timestamp: u64) -> BlockContext {
+        BlockContext::new(height, timestamp, self.gas_limit)
     }
 
     async fn re_execute(
@@ -160,7 +134,7 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
             return Err(AppError::RootMismatch("storage layout"));
         }
         let context = self
-            .block_context(block.height, block.timestamp, &block.context.leader)
+            .block_context(block.height, block.timestamp)
             .with_verification()
             .with_expected_module_state_root(block.module_state_root);
         let executed = Box::pin(D::execute(&self.executor, batches, &context, &block.txs)).await?;
@@ -288,7 +262,7 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         let timestamp = now_secs()
             .max(parent.timestamp)
             .min(parent.timestamp.saturating_add(self.timestamp_step));
-        let block_context = self.block_context(height, timestamp, &consensus_context.leader);
+        let block_context = self.block_context(height, timestamp);
         let exec_start = Instant::now();
         let executed =
             match Box::pin(D::execute(&self.executor, batches, &block_context, &txs)).await {

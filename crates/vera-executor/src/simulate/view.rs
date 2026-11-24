@@ -5,7 +5,6 @@ use thiserror::Error;
 use vera_domain::Refusal;
 use vera_modules::ModuleState;
 use vera_modules::types::TxExecCtx;
-use vera_traits::StateDbRead;
 
 use super::SimulationContext;
 use crate::ExecutionError;
@@ -67,8 +66,7 @@ pub enum ViewCallError {
 /// The call observes the context's height and time and may use the context's
 /// view allowance. A method that needs a signer refuses it as
 /// unauthenticated. Every effect is discarded, and no gas is charged.
-pub fn view_call<S: StateDbRead>(
-    state: &S,
+pub fn view_call(
     context: &SimulationContext,
     call: &ViewCall,
     modules: &ModuleState,
@@ -87,7 +85,7 @@ pub fn view_call<S: StateDbRead>(
         &NativeCall {
             target: call.target,
             calldata: &call.calldata,
-            max_active_members: context.max_active_members,
+            limits: context.limits,
             gas_limit: context.view_gas_limit,
         },
         &context.block(),
@@ -95,7 +93,6 @@ pub fn view_call<S: StateDbRead>(
         &mut acp,
         &mut bulletin,
         &mut vera,
-        &mut context.journal(state),
     );
 
     let outcome = native_outcome(call.target, dispatch)?;

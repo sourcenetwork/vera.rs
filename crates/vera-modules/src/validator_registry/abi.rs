@@ -1,44 +1,43 @@
-//! Solidity ABI interface for the ValidatorRegistry precompile at `0x0813`.
+//! Solidity ABI of the validator registry at module address `0x0813`.
 
 use alloy_sol_types::sol;
 
 sol! {
-    /// Solidity interface for the ValidatorRegistry precompile at `0x0813`.
+    /// Calls and events of the validator registry.
     interface IValidatorRegistry {
         // ── Events ──────────────────────────────────────────────────────
 
-        event ValidatorAdded(address indexed evmAddr, bytes32 consensusPubkey);
-        event ValidatorRemoved(address indexed evmAddr);
-        event ValidatorStatusChanged(address indexed evmAddr, bool active);
-        event ValidatorUpdated(address indexed evmAddr);
+        event ValidatorAdded(address indexed validator, bytes32 consensusPubkey);
+        event ValidatorRemoved(address indexed validator);
+        event ValidatorStatusChanged(address indexed validator, bool active);
+        event ValidatorUpdated(address indexed validator);
 
         // ── Write methods (ACP-gated) ───────────────────────────────────
 
         function addValidator(
-            address evmAddr,
+            address validator,
             bytes32 consensusPubkey,
             string calldata p2pAddr
         ) external;
 
-        function removeValidator(address evmAddr) external;
+        function removeValidator(address validator) external;
 
-        function setValidatorStatus(address evmAddr, bool active) external;
+        function setValidatorStatus(address validator, bool active) external;
 
-        function setValidatorStatusByIndex(uint256 index, bool active) external;
+        // ── Address update (signed by the validator's consensus key) ────
 
-        // ── Bootstrap (one-time, only when no policy is set) ─────────────
-
-        function setPolicy(bytes32 policyId) external;
-
-        // ── Self-update (caller must be the validator) ──────────────────
-
-        function updateP2PAddress(string calldata p2pAddr) external;
+        function updateP2PAddress(
+            address validator,
+            string calldata p2pAddr,
+            uint64 sequence,
+            bytes calldata signature
+        ) external;
 
         // ── Query methods ───────────────────────────────────────────────
 
         function getValidators() external view returns (bytes);
 
-        function getValidator(address evmAddr) external view returns (bytes);
+        function getValidator(address validator) external view returns (bytes);
 
         function getActiveValidatorCount() external view returns (uint256);
     }

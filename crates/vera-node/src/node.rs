@@ -772,7 +772,6 @@ pub async fn run_node_with_options(
         let index = block_index.clone();
         move || index.head_block_number()
     });
-    let participant_addresses = crate::beneficiaries::from_genesis(&genesis)?;
     // A device that announced a handover and now follows refuses the blocks
     // it would itself have built above the final one.
     if let (true, Some(change)) = (is_backup, &term_record.handed_over) {
@@ -795,7 +794,6 @@ pub async fn run_node_with_options(
         MAX_BLOCK_TXS,
         gas_limit,
     )
-    .with_participant_addresses(participant_addresses)
     .with_proposal_batch_wait(solo_pacing.map_or_else(
         || (leader_timeout / 4).min(Duration::from_millis(100)),
         |pacing| pacing.batch,

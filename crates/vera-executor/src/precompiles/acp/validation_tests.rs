@@ -1,5 +1,5 @@
 use super::*;
-use revm::precompile::{PrecompileHalt, PrecompileStatus};
+use crate::precompiles::{ModuleError, ModuleStatus};
 
 const YAML: &str = "name: validation\nresources:\n  - name: file\n";
 
@@ -43,18 +43,17 @@ fn policy_validation_charges_exact_input_work_and_preserves_results() {
         let input = call(policy.as_bytes(), format);
         let gas = expected_gas(&input, policy.as_bytes());
         let result = dispatch_call(&mut module, &input, gas).unwrap();
-        assert!(!result.precompile.status.is_revert());
-        assert_eq!(result.precompile.gas_used, gas);
+        assert!(!result.output.status.is_revert());
+        assert_eq!(result.output.gas_used, gas);
         assert!(result.logs.is_empty());
-        let result =
-            IAcp::validatePolicyCall::abi_decode_returns(&result.precompile.bytes).unwrap();
+        let result = IAcp::validatePolicyCall::abi_decode_returns(&result.output.bytes).unwrap();
         let (valid, reason, _) = module
             .query_validate_policy(policy, marshal_type_from_u8(format))
             .unwrap();
         assert_eq!((result.valid, result.reason), (valid, reason));
         assert!(matches!(
             dispatch_call(&mut module, &input, gas - 1),
-            Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+            Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
         ));
     }
     assert_eq!(module.store().serialize(), before);
@@ -68,7 +67,7 @@ fn policy_validation_reserves_before_decode_and_bounds_oversized_definitions() {
     let raw_cost = (malformed.len() as u64).div_ceil(16) * 8;
     assert!(matches!(
         dispatch_call(&mut module, &malformed, READ_GAS + raw_cost - 1),
-        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+        Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
     ));
     for input in [
         malformed,
@@ -77,7 +76,7 @@ fn policy_validation_reserves_before_decode_and_bounds_oversized_definitions() {
     ] {
         assert!(matches!(
             dispatch_call(&mut module, &input, 1_000_000),
-            Err(PrecompileError::Fatal(_))
+            Err(ModuleError::Refused { .. })
         ));
     }
 
@@ -85,22 +84,22 @@ fn policy_validation_reserves_before_decode_and_bounds_oversized_definitions() {
     let input = call(oversized.as_bytes(), 1);
     let gas = expected_gas(&input, oversized.as_bytes());
     let result = dispatch_call(&mut module, &input, gas).unwrap();
-    assert!(!result.precompile.status.is_revert());
-    assert_eq!(result.precompile.gas_used, gas);
-    let result = IAcp::validatePolicyCall::abi_decode_returns(&result.precompile.bytes).unwrap();
+    assert!(!result.output.status.is_revert());
+    assert_eq!(result.output.gas_used, gas);
+    let result = IAcp::validatePolicyCall::abi_decode_returns(&result.output.bytes).unwrap();
     let (valid, reason, _) = module
         .query_validate_policy(&oversized, PolicyMarshalingType::ShortYaml)
         .unwrap();
     assert_eq!((result.valid, result.reason), (valid, reason));
     assert!(matches!(
         dispatch_call(&mut module, &input, gas - 1),
-        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+        Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
     ));
     let mut oversized_utf8 = oversized.into_bytes();
     oversized_utf8[0] = 0xff;
     assert!(matches!(
         dispatch_call(&mut module, &call(&oversized_utf8, 1), 1_000_000),
-        Err(PrecompileError::Fatal(_))
+        Err(ModuleError::Refused { .. })
     ));
 }
 
@@ -121,10 +120,9 @@ fn policy_validation_borrowed_fields_preserve_alloy_decoding() {
         assert_eq!(decoded.marshalType, 1);
         let gas = expected_gas(&input, &decoded.policy);
         let result = dispatch_call(&mut module, &input, gas).unwrap();
-        assert!(!result.precompile.status.is_revert());
-        assert_eq!(result.precompile.gas_used, gas);
-        let result =
-            IAcp::validatePolicyCall::abi_decode_returns(&result.precompile.bytes).unwrap();
+        assert!(!result.output.status.is_revert());
+        assert_eq!(result.output.gas_used, gas);
+        let result = IAcp::validatePolicyCall::abi_decode_returns(&result.output.bytes).unwrap();
         assert!(result.valid);
         assert!(result.reason.is_empty());
     }
@@ -144,10 +142,10 @@ fn policy_validation_nested_batches_share_the_remaining_allowance() {
     .abi_encode();
     let gas = READ_GAS * 2 + expected_gas(&validation, YAML.as_bytes()) * 2;
     let result = dispatch_call(&mut module, &input, gas).unwrap();
-    assert!(!result.precompile.status.is_revert());
-    assert_eq!(result.precompile.gas_used, gas);
+    assert!(!result.output.status.is_revert());
+    assert_eq!(result.output.gas_used, gas);
     assert!(matches!(
         dispatch_call(&mut module, &input, gas - 1),
-        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+        Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
     ));
 }

@@ -23,7 +23,10 @@ use alloy_primitives::{Address, B256, FixedBytes, U256};
 use alloy_sol_types::{SolCall, SolEvent};
 
 use tokio::sync::Mutex;
-use vera_client::{ACP_ADDRESS, TransactionReceipt, VALIDATOR_REGISTRY_ADDRESS, VeraClient};
+use vera_client::{
+    ACP_ADDRESS, ClientError, TransactionReceipt, VALIDATOR_REGISTRY_ADDRESS,
+    ValidatorAddressUpdate, VeraClient,
+};
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, TestCluster, ValidatorConfig};
 use vera_modules::acp::abi::IAcp;
 use vera_modules::validator_registry::abi::IValidatorRegistry;
@@ -45,6 +48,21 @@ resources:
 
 fn consensus_key(seed: u64) -> B256 {
     B256::from_slice(ed25519::PrivateKey::from_seed(seed).public_key().as_ref())
+}
+
+/// The 32-byte secret of the consensus key `seed` derives, as a validator's key file holds it.
+fn consensus_secret(seed: u64) -> [u8; 32] {
+    let secret: [u8; 32] = commonware_codec::Encode::encode(&ed25519::PrivateKey::from_seed(seed))
+        .as_ref()
+        .try_into()
+        .expect("an Ed25519 secret is 32 bytes");
+    assert_eq!(
+        ed25519_dalek::SigningKey::from_bytes(&secret)
+            .verifying_key()
+            .to_bytes(),
+        consensus_key(seed).0
+    );
+    secret
 }
 
 fn test_validators() -> Vec<ValidatorConfig> {
@@ -148,7 +166,7 @@ async fn validator_bootstrap() {
     // A2: getValidator for each — verify fields
     for (i, vc) in validators.iter().enumerate() {
         let addr: Address = vc.evm_address.parse().unwrap();
-        let calldata = IValidatorRegistry::getValidatorCall { evmAddr: addr }.abi_encode();
+        let calldata = IValidatorRegistry::getValidatorCall { validator: addr }.abi_encode();
         let result = registry_view(&client, &admin_signer, calldata).await;
         let decoded = IValidatorRegistry::getValidatorCall::abi_decode_returns(&result)
             .expect("abi decode getValidator");
@@ -156,7 +174,7 @@ async fn validator_bootstrap() {
             serde_json::from_slice(&decoded).expect("parse validator JSON");
         let info = info.expect("validator should exist");
         assert_eq!(
-            info.evm_address.to_lowercase(),
+            info.address.to_lowercase(),
             vc.evm_address.to_lowercase(),
             "validator {i} address mismatch"
         );
@@ -169,7 +187,7 @@ async fn validator_bootstrap() {
             "validator {i} p2p address mismatch"
         );
         assert!(info.active, "validator {i} should be active");
-        assert_eq!(info.index, i as u64, "validator {i} index mismatch");
+        assert_eq!(info.address_sequence, 0, "validator {i} address sequence");
     }
 
     // A3: getActiveValidatorCount equals 2
@@ -251,7 +269,7 @@ async fn validator_bootstrap() {
     let new_validator_addr: Address = ADDED_VALIDATOR.parse().unwrap();
     let new_consensus_key = consensus_key(3);
     let calldata = IValidatorRegistry::addValidatorCall {
-        evmAddr: new_validator_addr,
+        validator: new_validator_addr,
         consensusPubkey: new_consensus_key,
         p2pAddr: "127.0.0.1:30302".to_string(),
     }
@@ -292,7 +310,7 @@ async fn validator_bootstrap() {
 
     // C1: Deactivate the new validator
     let calldata = IValidatorRegistry::setValidatorStatusCall {
-        evmAddr: new_validator_addr,
+        validator: new_validator_addr,
         active: false,
     }
     .abi_encode();
@@ -324,7 +342,7 @@ async fn validator_bootstrap() {
 
     // C3: Reactivate
     let calldata = IValidatorRegistry::setValidatorStatusCall {
-        evmAddr: new_validator_addr,
+        validator: new_validator_addr,
         active: true,
     }
     .abi_encode();
@@ -348,11 +366,58 @@ async fn validator_bootstrap() {
         "active count should be 3 after reactivation"
     );
 
+    // ── D: A validator moves its own network address ──────────────
+
+    // D1: the validator's consensus key signs the update; a worker that holds
+    // no registry permission submits it.
+    let genesis_id = administration::genesis_id(&client).await;
+    let worker = BlsSigner::random(chain_id).expect("random BLS signer");
+    let moved = ValidatorAddressUpdate::sign(
+        &consensus_secret(3),
+        genesis_id,
+        new_validator_addr,
+        0,
+        "127.0.0.1:30399",
+    );
+    let receipt = client
+        .native_update_validator_address(&worker, &moved)
+        .await
+        .expect("the validator's own update should be accepted");
+    assert_eq!(
+        receipt.logs[0].topics[0],
+        IValidatorRegistry::ValidatorUpdated::SIGNATURE_HASH,
+        "event should be ValidatorUpdated"
+    );
+
+    // D2: the record carries the new address and the next sequence
+    let calldata = IValidatorRegistry::getValidatorCall {
+        validator: new_validator_addr,
+    }
+    .abi_encode();
+    let result = registry_view(&client, &admin_signer, calldata).await;
+    let decoded = IValidatorRegistry::getValidatorCall::abi_decode_returns(&result)
+        .expect("abi decode getValidator");
+    let info: Option<ValidatorInfo> = serde_json::from_slice(&decoded).expect("validator JSON");
+    let info = info.expect("validator should exist");
+    assert_eq!(
+        (info.p2p_address.as_str(), info.address_sequence),
+        ("127.0.0.1:30399", 1)
+    );
+
+    // D3: the same signature does not apply a second time
+    let replayed = client
+        .native_update_validator_address(&worker, &moved)
+        .await;
+    assert!(
+        matches!(replayed, Err(ClientError::Refused { .. })),
+        "a replayed update should be refused: {replayed:?}"
+    );
+
     // ── E: Remove validator ───────────────────────────────────────
 
     // E1: Remove the validator we added in section B
     let calldata = IValidatorRegistry::removeValidatorCall {
-        evmAddr: new_validator_addr,
+        validator: new_validator_addr,
     }
     .abi_encode();
     let receipt = broadcast_native_tx(
@@ -460,7 +525,7 @@ async fn validator_registry_adversarial() {
     // ── N1: Write before policy is set → revert ─────────────────
 
     let calldata = IValidatorRegistry::addValidatorCall {
-        evmAddr: rogue_validator,
+        validator: rogue_validator,
         consensusPubkey: consensus_key(4),
         p2pAddr: "127.0.0.1:40000".to_string(),
     }
@@ -477,22 +542,6 @@ async fn validator_registry_adversarial() {
         !receipt.success,
         "N1: addValidator without policy should revert"
     );
-
-    // ── N2: setPolicy with zero policy ID → revert ──────────────
-
-    let calldata = IValidatorRegistry::setPolicyCall {
-        policyId: B256::ZERO,
-    }
-    .abi_encode();
-    let receipt = broadcast_native_tx(
-        &cluster,
-        &client,
-        &admin_signer,
-        VALIDATOR_REGISTRY_ADDRESS,
-        calldata,
-    )
-    .await;
-    assert!(!receipt.success, "N2: setPolicy with zero ID should revert");
 
     // ── Set up ACP policy (required for remaining tests) ────────
 
@@ -549,42 +598,10 @@ async fn validator_registry_adversarial() {
         .expect("initialize membership policy");
     assert!(receipt.success);
 
-    // ── N3: setPolicy again → revert (immutable) ────────────────
-
-    let calldata = IValidatorRegistry::setPolicyCall {
-        policyId: B256::repeat_byte(0xFF),
-    }
-    .abi_encode();
-    let receipt = broadcast_native_tx(
-        &cluster,
-        &client,
-        &admin_signer,
-        VALIDATOR_REGISTRY_ADDRESS,
-        calldata,
-    )
-    .await;
-    assert!(!receipt.success, "N3: setPolicy twice should revert");
-    let repeated = administration::approve(
-        &client,
-        AdministrativeCommand::InitializeMembershipPolicy(policy_id.0),
-        1,
-    )
-    .await;
-    assert!(matches!(
-        client
-            .native_apply_administration(
-                &BlsSigner::new(43u64.into(), chain_id).unwrap(),
-                &repeated,
-            )
-            .await,
-        Err(vera_client::ClientError::Refused { .. })
-    ));
-    assert_eq!(client.administration().await.unwrap().unwrap().sequence, 1);
-
     // ── N4: Unauthorized caller → revert ────────────────────────
 
     let calldata = IValidatorRegistry::addValidatorCall {
-        evmAddr: rogue_validator,
+        validator: rogue_validator,
         consensusPubkey: consensus_key(4),
         p2pAddr: "127.0.0.1:40000".to_string(),
     }
@@ -605,7 +622,7 @@ async fn validator_registry_adversarial() {
     // ── N5: addValidator with Address::ZERO → revert ────────────
 
     let calldata = IValidatorRegistry::addValidatorCall {
-        evmAddr: Address::ZERO,
+        validator: Address::ZERO,
         consensusPubkey: consensus_key(4),
         p2pAddr: "127.0.0.1:40000".to_string(),
     }
@@ -626,7 +643,7 @@ async fn validator_registry_adversarial() {
     // ── N6: addValidator with zero consensus key → revert ───────
 
     let calldata = IValidatorRegistry::addValidatorCall {
-        evmAddr: "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
+        validator: "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
             .parse()
             .unwrap(),
         consensusPubkey: B256::ZERO,
@@ -649,7 +666,7 @@ async fn validator_registry_adversarial() {
     // ── N7: addValidator with invalid p2p address → revert ──────
 
     let calldata = IValidatorRegistry::addValidatorCall {
-        evmAddr: "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
+        validator: "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
             .parse()
             .unwrap(),
         consensusPubkey: consensus_key(5),
@@ -672,7 +689,7 @@ async fn validator_registry_adversarial() {
     // ── N8: addValidator with p2p > 32 bytes → revert ───────────
 
     let calldata = IValidatorRegistry::addValidatorCall {
-        evmAddr: "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
+        validator: "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
             .parse()
             .unwrap(),
         consensusPubkey: consensus_key(5),
@@ -695,7 +712,7 @@ async fn validator_registry_adversarial() {
     // ── Add a valid validator for subsequent negative tests ──────
 
     let calldata = IValidatorRegistry::addValidatorCall {
-        evmAddr: rogue_validator,
+        validator: rogue_validator,
         consensusPubkey: consensus_key(4),
         p2pAddr: "127.0.0.1:40000".to_string(),
     }
@@ -713,7 +730,7 @@ async fn validator_registry_adversarial() {
     // ── N9: Duplicate addValidator → revert ─────────────────────
 
     let calldata = IValidatorRegistry::addValidatorCall {
-        evmAddr: rogue_validator,
+        validator: rogue_validator,
         consensusPubkey: consensus_key(6),
         p2pAddr: "127.0.0.1:40001".to_string(),
     }
@@ -733,7 +750,10 @@ async fn validator_registry_adversarial() {
     let fake_addr: Address = "0x000000000000000000000000000000000000dEaD"
         .parse()
         .unwrap();
-    let calldata = IValidatorRegistry::removeValidatorCall { evmAddr: fake_addr }.abi_encode();
+    let calldata = IValidatorRegistry::removeValidatorCall {
+        validator: fake_addr,
+    }
+    .abi_encode();
     let receipt = broadcast_native_tx(
         &cluster,
         &client,
@@ -747,49 +767,70 @@ async fn validator_registry_adversarial() {
         "N10: removeValidator for non-existent should revert"
     );
 
-    // ── N11: setValidatorStatusByIndex out of bounds → revert ───
+    // ── N12: an address update for an address that is no member → refused
 
-    let calldata = IValidatorRegistry::setValidatorStatusByIndexCall {
-        index: U256::from(999),
-        active: false,
-    }
-    .abi_encode();
-    let receipt = broadcast_native_tx(
-        &cluster,
-        &client,
-        &admin_signer,
-        VALIDATOR_REGISTRY_ADDRESS,
-        calldata,
-    )
-    .await;
+    let genesis_id = administration::genesis_id(&client).await;
+    let unknown = ValidatorAddressUpdate::sign(
+        &consensus_secret(1),
+        genesis_id,
+        fake_addr,
+        0,
+        "10.0.0.1:1234",
+    );
+    let refused = client
+        .native_update_validator_address(&rogue_signer, &unknown)
+        .await;
     assert!(
-        !receipt.success,
-        "N11: setValidatorStatusByIndex out of bounds should revert"
+        matches!(refused, Err(ClientError::Refused { .. })),
+        "N12: an update for a non-member should be refused: {refused:?}"
     );
 
-    // ── N12: A signer without a registered address calls updateP2PAddress → revert
+    // ── N13: a party without the validator's consensus key cannot move it
 
-    let calldata = IValidatorRegistry::updateP2PAddressCall {
-        p2pAddr: "10.0.0.1:1234".to_string(),
+    let member: Address = validators[0].evm_address.parse().unwrap();
+    for (label, forged) in [
+        (
+            "another member's key",
+            ValidatorAddressUpdate::sign(
+                &consensus_secret(2),
+                genesis_id,
+                member,
+                0,
+                "10.0.0.1:1234",
+            ),
+        ),
+        (
+            "a key that is no member's",
+            ValidatorAddressUpdate::sign(&[0x5a; 32], genesis_id, member, 0, "10.0.0.1:1234"),
+        ),
+        (
+            "the member's key for another deployment",
+            ValidatorAddressUpdate::sign(
+                &consensus_secret(1),
+                B256::repeat_byte(0xEE),
+                member,
+                0,
+                "10.0.0.1:1234",
+            ),
+        ),
+    ] {
+        let refused = client
+            .native_update_validator_address(&rogue_signer, &forged)
+            .await;
+        assert!(
+            matches!(
+                &refused,
+                Err(ClientError::Refused { refusal, .. })
+                    if refusal.kind == vera_domain::RefusalKind::Unauthorized
+            ),
+            "N13: {label} should be refused as unauthorized: {refused:?}"
+        );
     }
-    .abi_encode();
-    let receipt = broadcast_native_tx(
-        &cluster,
-        &client,
-        &rogue_signer,
-        VALIDATOR_REGISTRY_ADDRESS,
-        calldata,
-    )
-    .await;
-    assert!(
-        !receipt.success,
-        "N12: updateP2PAddress from a non-validator should revert"
-    );
 
     // ── N14: setValidatorStatus for non-existent → revert ───────
 
     let calldata = IValidatorRegistry::setValidatorStatusCall {
-        evmAddr: fake_addr,
+        validator: fake_addr,
         active: false,
     }
     .abi_encode();

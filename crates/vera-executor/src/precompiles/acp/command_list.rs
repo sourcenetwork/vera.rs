@@ -1,7 +1,7 @@
 //! Delegated command lists: one authorization over ordered commands.
 
-use super::out_of_gas_error;
 use super::*;
+use crate::precompiles::ModuleError;
 use vera_modules::acp::CommandBudget;
 
 /// Decode `bearerPolicyCmds` and apply its commands in order, all or none. Each
@@ -24,7 +24,7 @@ pub(super) fn dispatch(
         })?;
     let further = u64::try_from(commands.len().saturating_sub(1)).unwrap_or(u64::MAX);
     if budget.reserve(further.saturating_mul(WRITE_GAS)).is_err() {
-        return Err(out_of_gas_error());
+        return Err(ModuleError::OutOfGas);
     }
     match module.bearer_policy_cmds_with_budget(
         vera,

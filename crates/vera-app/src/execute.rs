@@ -39,11 +39,8 @@ pub async fn execute_block(
     txs: &[Tx],
     modules: ModuleSnapshot,
 ) -> Result<Executed, AppError> {
-    let state = BatchState::new(batches);
     let tx_bytes: Vec<Bytes> = txs.iter().map(|tx| tx.bytes.clone()).collect();
-    let (outcome, modules) = executor.execute_with_modules(&state, context, &tx_bytes, modules)?;
-    let batches = state.into_batches().await?;
-    let batches = BatchState::apply_changes(batches, &outcome.changes).await?;
+    let (outcome, modules) = executor.execute_with_modules(context, &tx_bytes, modules)?;
     let merkleized = BatchState::merkleize(batches).await?;
     Ok(Executed {
         state_root: StateRoot(combined_root(&merkleized)),

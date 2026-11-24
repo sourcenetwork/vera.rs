@@ -41,22 +41,14 @@ fn anchor_call(deployment: &TestDeployment, height: u64, root: u8) -> Vec<u8> {
 
 fn execute(calls: Vec<Vec<u8>>) -> Vec<ExecutionReceipt> {
     let executor = VeraExecutor::new(9001);
-    let context = BlockContext::new(
-        Header {
-            number: 1,
-            timestamp: 100,
-            gas_limit: 30_000_000,
-            ..Default::default()
-        },
-        B256::ZERO,
-    );
+    let context = BlockContext::new(1, 100, 30_000_000);
     let txs: Vec<Bytes> = calls
         .into_iter()
         .enumerate()
         .map(|(nonce, call)| native(nonce as u64, call))
         .collect();
     let (outcome, _) = executor
-        .execute_with_modules(&MockStateDb::new(), &context, &txs, executor.snapshot())
+        .execute_with_modules(&context, &txs, executor.snapshot())
         .unwrap();
     outcome.receipts
 }

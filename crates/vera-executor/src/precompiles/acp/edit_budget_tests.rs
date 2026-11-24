@@ -1,7 +1,7 @@
 use super::*;
+use crate::precompiles::ModuleStatus;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use k256::ecdsa::{Signature, SigningKey, signature::Signer as _};
-use revm::precompile::{PrecompileHalt, PrecompileStatus};
 use vera_crypto::{
     jwt::{DelegationScope, JwtClaims},
     operation::{OperationClaim, OperationId},
@@ -162,24 +162,24 @@ fn direct_and_bearer_policy_edit_accept_exact_work_gas_and_reject_one_less() {
         let input = fixture.edit(EDITED, bearer, false);
         let mut measured = fixture.clone();
         let output = measured.dispatch(&input, 1_000_000).unwrap();
-        assert!(!output.precompile.status.is_revert());
-        assert!(output.precompile.gas_used > WRITE_GAS);
+        assert!(!output.output.status.is_revert());
+        assert!(output.output.gas_used > WRITE_GAS);
         assert_eq!(output.logs.len(), 1);
         // The direct and bearer methods have the same return ABI.
-        let decoded = IAcp::editPolicyCall::abi_decode_returns(&output.precompile.bytes).unwrap();
+        let decoded = IAcp::editPolicyCall::abi_decode_returns(&output.output.bytes).unwrap();
         assert_eq!(decoded.relationshipsRemoved, 1);
         let record: PolicyRecord = serde_json::from_slice(&decoded.record).unwrap();
         assert_eq!(record.last_modified, Some(fixture.block.timestamp.clone()));
         let mut exact = fixture.clone();
-        let result = exact.dispatch(&input, output.precompile.gas_used).unwrap();
-        assert_eq!(result.precompile.gas_used, output.precompile.gas_used);
-        assert_eq!(result.precompile.bytes, output.precompile.bytes);
+        let result = exact.dispatch(&input, output.output.gas_used).unwrap();
+        assert_eq!(result.output.gas_used, output.output.gas_used);
+        assert_eq!(result.output.bytes, output.output.bytes);
         assert_eq!(exact.state(), measured.state());
-        for gas in [WRITE_GAS, output.precompile.gas_used - 1] {
+        for gas in [WRITE_GAS, output.output.gas_used - 1] {
             let mut low = fixture.clone();
             assert!(matches!(
                 low.dispatch(&input, gas),
-                Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+                Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
             ));
             assert_eq!(low.state(), fixture.state());
         }
@@ -193,19 +193,19 @@ fn ordinary_failed_edits_charge_completed_work_and_preserve_state() {
         let input = fixture.edit("resources: [", bearer, false);
         let mut measured = fixture.clone();
         let failure = measured.dispatch(&input, 1_000_000).unwrap();
-        assert!(failure.precompile.status.is_revert());
-        assert!(failure.precompile.gas_used > WRITE_GAS);
+        assert!(failure.output.status.is_revert());
+        assert!(failure.output.gas_used > WRITE_GAS);
         assert!(failure.logs.is_empty());
         assert_eq!(measured.state(), fixture.state());
         let mut exact = fixture.clone();
-        let result = exact.dispatch(&input, failure.precompile.gas_used).unwrap();
-        assert!(result.precompile.status.is_revert());
-        assert_eq!(result.precompile.gas_used, failure.precompile.gas_used);
-        assert_eq!(result.precompile.bytes, failure.precompile.bytes);
+        let result = exact.dispatch(&input, failure.output.gas_used).unwrap();
+        assert!(result.output.status.is_revert());
+        assert_eq!(result.output.gas_used, failure.output.gas_used);
+        assert_eq!(result.output.bytes, failure.output.bytes);
         let mut low = fixture.clone();
         assert!(matches!(
-            low.dispatch(&input, failure.precompile.gas_used - 1),
-            Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+            low.dispatch(&input, failure.output.gas_used - 1),
+            Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
         ));
         assert_eq!(low.state(), fixture.state());
     }
@@ -218,7 +218,7 @@ fn nested_policy_edit_work_uses_remaining_gas_and_rolls_back_preceding_writes() 
         .clone()
         .dispatch(&earlier_write(), 1_000_000)
         .unwrap()
-        .precompile
+        .output
         .gas_used;
     let input = batch(vec![
         earlier_write(),
@@ -226,24 +226,24 @@ fn nested_policy_edit_work_uses_remaining_gas_and_rolls_back_preceding_writes() 
     ]);
     let mut measured = fixture.clone();
     let output = measured.dispatch(&input, 1_000_000).unwrap();
-    assert!(!output.precompile.status.is_revert());
+    assert!(!output.output.status.is_revert());
     assert_eq!(output.logs.len(), 2);
     let mut edit_only = fixture.clone();
     let edit = edit_only
         .dispatch(&fixture.edit(EDITED, false, false), 1_000_000)
         .unwrap();
     assert_eq!(
-        output.precompile.gas_used,
-        2 * READ_GAS + creation_gas + edit.precompile.gas_used
+        output.output.gas_used,
+        2 * READ_GAS + creation_gas + edit.output.gas_used
     );
     let mut exact = fixture.clone();
-    let result = exact.dispatch(&input, output.precompile.gas_used).unwrap();
-    assert!(!result.precompile.status.is_revert());
+    let result = exact.dispatch(&input, output.output.gas_used).unwrap();
+    assert!(!result.output.status.is_revert());
     assert_eq!(exact.state(), measured.state());
     let mut low = fixture.clone();
     assert!(matches!(
-        low.dispatch(&input, output.precompile.gas_used - 1),
-        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+        low.dispatch(&input, output.output.gas_used - 1),
+        Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
     ));
     assert_eq!(low.state(), fixture.state());
 }
@@ -255,7 +255,7 @@ fn nested_failed_edit_keeps_work_charges_but_no_writes_or_logs() {
         .clone()
         .dispatch(&earlier_write(), 1_000_000)
         .unwrap()
-        .precompile
+        .output
         .gas_used;
     let edit = fixture.edit("resources: [", true, false);
     let mut single = fixture.clone();
@@ -263,10 +263,10 @@ fn nested_failed_edit_keeps_work_charges_but_no_writes_or_logs() {
     let input = batch(vec![earlier_write(), batch(vec![edit])]);
     let mut nested = fixture.clone();
     let result = nested.dispatch(&input, 1_000_000).unwrap();
-    assert!(result.precompile.status.is_revert());
+    assert!(result.output.status.is_revert());
     assert_eq!(
-        result.precompile.gas_used,
-        2 * READ_GAS + creation_gas + failure.precompile.gas_used
+        result.output.gas_used,
+        2 * READ_GAS + creation_gas + failure.output.gas_used
     );
     assert!(result.logs.is_empty());
     assert_eq!(nested.state(), fixture.state());
@@ -278,9 +278,9 @@ fn bearer_retry_after_retirement_is_metered_without_reading_current_policy() {
     let input = fixture.edit(EDITED, true, true);
     let first = fixture.dispatch(&input, 1_000_000).unwrap();
     assert!(
-        !first.precompile.status.is_revert(),
+        !first.output.status.is_revert(),
         "{}",
-        String::from_utf8_lossy(&first.precompile.bytes)
+        String::from_utf8_lossy(&first.output.bytes)
     );
     let delete = IAcp::deletePolicyCall {
         policyId: fixture.policy,
@@ -290,7 +290,7 @@ fn bearer_retry_after_retirement_is_metered_without_reading_current_policy() {
         !fixture
             .dispatch(&delete, 1_000_000)
             .unwrap()
-            .precompile
+            .output
             .status
             .is_revert()
     );
@@ -298,21 +298,21 @@ fn bearer_retry_after_retirement_is_metered_without_reading_current_policy() {
     let mut measured = fixture.clone();
     let retry = measured.dispatch(&input, 1_000_000).unwrap();
     assert!(
-        !retry.precompile.status.is_revert(),
+        !retry.output.status.is_revert(),
         "{}",
-        String::from_utf8_lossy(&retry.precompile.bytes)
+        String::from_utf8_lossy(&retry.output.bytes)
     );
-    assert!(retry.precompile.gas_used > WRITE_GAS);
-    assert_eq!(retry.precompile.bytes, first.precompile.bytes);
+    assert!(retry.output.gas_used > WRITE_GAS);
+    assert_eq!(retry.output.bytes, first.output.bytes);
     assert_eq!(measured.state(), before);
     let mut exact = fixture.clone();
-    let output = exact.dispatch(&input, retry.precompile.gas_used).unwrap();
-    assert!(!output.precompile.status.is_revert());
-    assert_eq!(output.precompile.bytes, first.precompile.bytes);
+    let output = exact.dispatch(&input, retry.output.gas_used).unwrap();
+    assert!(!output.output.status.is_revert());
+    assert_eq!(output.output.bytes, first.output.bytes);
     assert_eq!(exact.state(), before);
     assert!(matches!(
-        fixture.dispatch(&input, retry.precompile.gas_used - 1),
-        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+        fixture.dispatch(&input, retry.output.gas_used - 1),
+        Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
     ));
     assert_eq!(fixture.state(), before);
 }

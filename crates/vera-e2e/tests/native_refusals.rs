@@ -137,8 +137,8 @@ async fn each_module_names_its_refusal_through_the_receipt_proof() {
     let wire = signer
         .sign_native_tx(
             vera_client::VALIDATOR_REGISTRY_ADDRESS,
-            IValidatorRegistry::setPolicyCall {
-                policyId: B256::repeat_byte(1),
+            IValidatorRegistry::removeValidatorCall {
+                validator: alloy_primitives::Address::repeat_byte(1),
             }
             .abi_encode()
             .into(),

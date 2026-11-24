@@ -1,5 +1,5 @@
 use super::*;
-use revm::precompile::{PrecompileHalt, PrecompileStatus};
+use crate::precompiles::ModuleStatus;
 use vera_modules::acp::theorem::TheoremReport;
 
 const POLICY: &str = "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n    permissions:\n      - name: read\n        expr: reader\n";
@@ -56,8 +56,8 @@ fn evaluate(acp: &AcpModule, policy: B256, assertions: usize, gas: u64) -> Dispa
 #[test]
 fn theorem_evaluation_charges_every_assertion_and_halts_when_the_allowance_ends() {
     let (acp, policy) = fixture();
-    let one = evaluate(&acp, policy, 1, 1_000_000).precompile;
-    let many = evaluate(&acp, policy, 32, 1_000_000).precompile;
+    let one = evaluate(&acp, policy, 1, 1_000_000).output;
+    let many = evaluate(&acp, policy, 32, 1_000_000).output;
     assert!(one.gas_used > READ_GAS);
     assert!(many.gas_used > one.gas_used + 31 * 32);
     let report: TheoremReport = serde_json::from_slice(
@@ -67,13 +67,13 @@ fn theorem_evaluation_charges_every_assertion_and_halts_when_the_allowance_ends(
     assert!(report.ok);
     assert_eq!(report.theorem_count, 33);
 
-    let exact = evaluate(&acp, policy, 32, many.gas_used).precompile;
+    let exact = evaluate(&acp, policy, 32, many.gas_used).output;
     assert_eq!(exact.bytes, many.bytes);
     assert_eq!(exact.gas_used, many.gas_used);
     for gas in [many.gas_used - 1, one.gas_used, READ_GAS, READ_GAS - 1] {
         assert!(matches!(
-            evaluate(&acp, policy, 32, gas).precompile.status,
-            PrecompileStatus::Halt(PrecompileHalt::OutOfGas)
+            evaluate(&acp, policy, 32, gas).output.status,
+            ModuleStatus::OutOfGas
         ));
     }
 }
@@ -99,7 +99,7 @@ fn rejected_theorem_sources_pay_for_their_bytes() {
             1_000_000,
         )
         .unwrap()
-        .precompile
+        .output
     };
     let short = dispatch("?".into());
     let long = dispatch("?".repeat(16 << 10));

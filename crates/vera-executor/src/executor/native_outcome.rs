@@ -1,14 +1,14 @@
 //! What a native module call's receipt records: its charge, effects and refusal.
 
+use crate::precompiles::{ModuleError, ModuleStatus};
 use alloy_primitives::{Address, Bytes, Log};
-use revm::precompile::PrecompileStatus;
 use vera_domain::{Refusal, RefusalKind, RefusingModule};
 
 use super::native_dispatch::NATIVE_TX_GAS_LIMIT;
 use crate::ExecutionError;
 use crate::precompiles::{
     ACP_ADDRESS, ANCHOR_ADDRESS, BULLETIN_ADDRESS, DispatchReturn, VALIDATOR_REGISTRY_ADDRESS,
-    VERA_ADDRESS, internal_fault_reason, is_out_of_gas, recoverable_message, refusal::kind_of,
+    VERA_ADDRESS,
 };
 
 /// Least gas a refused native request is charged: the base charge of a module
@@ -56,29 +56,23 @@ pub(crate) fn native_outcome(
         }
     };
     Ok(match dispatch {
-        Ok(Ok(result)) => match result.precompile.status {
-            PrecompileStatus::Success => NativeOutcome {
-                gas_used: result.precompile.gas_used,
-                output: result.precompile.bytes,
+        Ok(Ok(result)) => match result.output.status {
+            ModuleStatus::Success => NativeOutcome {
+                gas_used: result.output.gas_used,
+                output: result.output.bytes,
                 logs: result.logs,
                 refusal: None,
             },
-            PrecompileStatus::Revert => refused(
+            ModuleStatus::Revert => refused(
                 result.refusal.unwrap_or(RefusalKind::InvalidArgument),
-                String::from_utf8_lossy(&result.precompile.bytes).into_owned(),
-                result.precompile.gas_used,
+                String::from_utf8_lossy(&result.output.bytes).into_owned(),
+                result.output.gas_used,
             ),
-            PrecompileStatus::Halt(_) => refused(RefusalKind::OutOfGas, OUT_OF_GAS.into(), 0),
+            ModuleStatus::OutOfGas => refused(RefusalKind::OutOfGas, OUT_OF_GAS.into(), 0),
         },
-        Ok(Err(error)) if is_out_of_gas(&error) => {
-            refused(RefusalKind::OutOfGas, OUT_OF_GAS.into(), 0)
-        }
-        Ok(Err(error)) => {
-            if let Some(fault) = internal_fault_reason(&error) {
-                return Err(ExecutionError::TxExecution(fault));
-            }
-            refused(kind_of(&error), recoverable_message(&error), 0)
-        }
+        Ok(Err(ModuleError::OutOfGas)) => refused(RefusalKind::OutOfGas, OUT_OF_GAS.into(), 0),
+        Ok(Err(ModuleError::Fault(fault))) => return Err(ExecutionError::TxExecution(fault)),
+        Ok(Err(ModuleError::Refused { kind, message })) => refused(kind, message, 0),
         Err(_) => {
             tracing::warn!("native module call panicked");
             refused(RefusalKind::ModuleFailed, MODULE_FAILED.into(), 0)

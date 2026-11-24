@@ -1,7 +1,7 @@
 use super::*;
+use crate::precompiles::ModuleStatus;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use k256::ecdsa::{Signature, SigningKey, signature::Signer as _};
-use revm::precompile::{PrecompileHalt, PrecompileStatus};
 use vera_crypto::{
     jwt::{DelegationScope, JwtClaims},
     operation::{OperationClaim, OperationId},
@@ -236,21 +236,21 @@ fn command_budget_all_management_routes_accept_exact_allowance_and_reject_one_le
         let mut measured = fixture.clone();
         let output = measured.dispatch(&input, 1_000_000).unwrap();
         assert!(
-            !output.precompile.status.is_revert(),
+            !output.output.status.is_revert(),
             "{:?}",
-            output.precompile.bytes
+            output.output.bytes
         );
-        let required = output.precompile.gas_used;
+        let required = output.output.gas_used;
         let mut exact = fixture.clone();
         let result = exact.dispatch(&input, required).unwrap();
-        assert!(!result.precompile.status.is_revert());
-        assert_eq!(result.precompile.bytes, output.precompile.bytes);
-        assert_eq!(result.precompile.gas_used, required);
+        assert!(!result.output.status.is_revert());
+        assert_eq!(result.output.bytes, output.output.bytes);
+        assert_eq!(result.output.gas_used, required);
         assert_eq!(exact.state(), measured.state());
         let mut low = fixture.clone();
         assert!(matches!(
             low.dispatch(&input, required - 1),
-            Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+            Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
         ));
         assert_eq!(low.state(), fixture.state());
     }
@@ -261,37 +261,35 @@ fn management_denials_retain_dispatch_work_and_nested_batches_rollback() {
     let fixture = Fixture::new();
     let query = fixture.query("did:key:stranger");
     let denied = fixture.clone().dispatch(&query, 1_000_000).unwrap();
-    assert!(
-        !IAcp::checkManagementAuthorityCall::abi_decode_returns(&denied.precompile.bytes).unwrap()
-    );
-    assert!(denied.precompile.gas_used > READ_GAS + 60_000 / 16);
+    assert!(!IAcp::checkManagementAuthorityCall::abi_decode_returns(&denied.output.bytes).unwrap());
+    assert!(denied.output.gas_used > READ_GAS + 60_000 / 16);
     let creation_gas = fixture
         .clone()
         .dispatch(&create(), 1_000_000)
         .unwrap()
-        .precompile
+        .output
         .gas_used;
     for input in [fixture.set(), fixture.generic()] {
         let mut stranger = fixture.clone();
         stranger.tx.signer = "did:key:stranger".into();
         let failure = stranger.dispatch(&input, 1_000_000).unwrap();
-        assert!(failure.precompile.status.is_revert());
-        assert!(failure.precompile.gas_used > WRITE_GAS);
+        assert!(failure.output.status.is_revert());
+        assert!(failure.output.gas_used > WRITE_GAS);
         let result = stranger
             .dispatch(&batch(vec![create(), batch(vec![input])]), 1_000_000)
             .unwrap();
-        assert!(result.precompile.status.is_revert());
+        assert!(result.output.status.is_revert());
         // Creation cost includes signer bytes; compare the same actor's measured leaf.
         let mut other = fixture.clone();
         other.tx.signer = stranger.tx.signer.clone();
         let same_actor_creation = other
             .dispatch(&create(), 1_000_000)
             .unwrap()
-            .precompile
+            .output
             .gas_used;
         assert_eq!(
-            result.precompile.gas_used,
-            same_actor_creation + 2 * READ_GAS + failure.precompile.gas_used
+            result.output.gas_used,
+            same_actor_creation + 2 * READ_GAS + failure.output.gas_used
         );
         assert!(result.logs.is_empty());
         assert_eq!(stranger.state(), fixture.state());
@@ -302,7 +300,7 @@ fn management_denials_retain_dispatch_work_and_nested_batches_rollback() {
         .clone()
         .dispatch(&owner_query, 1_000_000)
         .unwrap()
-        .precompile
+        .output
         .gas_used;
     let input = batch(vec![
         create(),
@@ -314,14 +312,14 @@ fn management_denials_retain_dispatch_work_and_nested_batches_rollback() {
             .clone()
             .dispatch(&input, exact)
             .unwrap()
-            .precompile
+            .output
             .status
             .is_revert()
     );
     let mut low = fixture.clone();
     assert!(matches!(
         low.dispatch(&input, exact - 1),
-        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+        Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
     ));
     assert_eq!(low.state(), fixture.state());
 }
@@ -335,11 +333,11 @@ fn command_input_is_reserved_before_json_and_aliased_abi_decoding() {
     }
     .abi_encode();
     let failure = fixture.clone().dispatch(&malformed, 1_000_000).unwrap();
-    assert!(failure.precompile.status.is_revert());
-    assert!(failure.precompile.gas_used > WRITE_GAS + (128 << 10) / 2);
+    assert!(failure.output.status.is_revert());
+    assert!(failure.output.gas_used > WRITE_GAS + (128 << 10) / 2);
     assert!(matches!(
         fixture.clone().dispatch(&malformed, WRITE_GAS + 1_000),
-        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+        Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
     ));
     let mut alias = fixture.set();
     // Give each dynamic string the same invalid UTF-8 tail. Low allowance must
@@ -353,15 +351,15 @@ fn command_input_is_reserved_before_json_and_aliased_abi_decoding() {
     alias.extend(vec![255; 32 << 10]);
     let raw_cost = (alias.len() as u64).div_ceil(16) * 8;
     let invalid_actor = fixture.clone().dispatch(&alias, 1_000_000).unwrap();
-    assert!(invalid_actor.precompile.status.is_revert());
+    assert!(invalid_actor.output.status.is_revert());
     assert_eq!(
-        invalid_actor.precompile.gas_used,
+        invalid_actor.output.gas_used,
         WRITE_GAS + raw_cost + 4 * 3 * (32 << 10) / 2
     );
     let mut low = fixture.clone();
     assert!(matches!(
         low.dispatch(&alias, WRITE_GAS + raw_cost + (32 << 10)),
-        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+        Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
     ));
     assert_eq!(low.state(), fixture.state());
 }
@@ -372,18 +370,18 @@ fn bearer_command_outcome_is_atomic_metered_and_survives_policy_retirement() {
     let call = fixture.bearer();
     let mut measured = fixture.clone();
     let first = measured.dispatch(&call, 1_000_000).unwrap();
-    assert!(!first.precompile.status.is_revert());
-    let required = first.precompile.gas_used;
+    assert!(!first.output.status.is_revert());
+    let required = first.output.gas_used;
     assert!(matches!(
         fixture.dispatch(&call, required - 1),
-        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+        Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
     ));
     assert_eq!(
         fixture.vera.store().serialize(),
         VeraModule::new().store().serialize()
     );
     let success = fixture.dispatch(&call, required).unwrap();
-    assert_eq!(success.precompile.bytes, first.precompile.bytes);
+    assert_eq!(success.output.bytes, first.output.bytes);
     assert_eq!(fixture.state(), measured.state());
     fixture
         .acp
@@ -391,13 +389,13 @@ fn bearer_command_outcome_is_atomic_metered_and_survives_policy_retirement() {
         .unwrap();
     let before = fixture.state();
     let retry = fixture.dispatch(&call, 1_000_000).unwrap();
-    assert!(!retry.precompile.status.is_revert());
-    assert_eq!(retry.precompile.bytes, first.precompile.bytes);
-    assert!(retry.precompile.gas_used > WRITE_GAS);
+    assert!(!retry.output.status.is_revert());
+    assert_eq!(retry.output.bytes, first.output.bytes);
+    assert!(retry.output.gas_used > WRITE_GAS);
     assert_eq!(fixture.state(), before);
     assert!(matches!(
-        fixture.dispatch(&call, retry.precompile.gas_used - 1),
-        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+        fixture.dispatch(&call, retry.output.gas_used - 1),
+        Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
     ));
     assert_eq!(fixture.state(), before);
     // A retained outcome does not authorize a different worker to use the token.
@@ -406,7 +404,7 @@ fn bearer_command_outcome_is_atomic_metered_and_survives_policy_retirement() {
         fixture
             .dispatch(&call, 1_000_000)
             .unwrap()
-            .precompile
+            .output
             .status
             .is_revert()
     );

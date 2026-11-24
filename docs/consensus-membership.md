@@ -1,17 +1,15 @@
 # Consensus membership
 
-Consensus membership changes accept native signed submissions. They use the
-existing registry rules and storage, including ACP authorization, through the
-shared command dispatcher. Admission and proposal rechecking accept the registry
-target. A rejected command consumes its submission sequence and leaves membership
-unchanged. A storage failure aborts proposal execution; it cannot become a
-certified rejection or leave a partial member entry.
+Consensus membership changes are native signed submissions to the validator
+registry, authorized by ACP. A rejected command consumes its submission sequence
+and leaves membership unchanged. A member record that does not read back aborts
+proposal execution; it cannot become a certified rejection or leave a partial
+member entry.
 
 The registry holds at most 64 entries, matching the current protocol's DKG
 participant bound. Inactive entries count toward that limit. A consensus public
-key can belong to only one registered entry, including inactive entries. Stored
-counts, indexes and route lengths are checked at their full encoded width;
-malformed values and inconsistent array/record links are errors.
+key can belong to only one registered entry, including inactive entries. See
+[validator records](#validator-records) for the stored form.
 
 The active committee is also bounded by the configured epoch length. Commonware
 requires its dealer quorum to fit between the dealing phase and the final epoch
@@ -101,6 +99,38 @@ qualification.
 ```sh
 VERAD_BINARY=/path/to/verad cargo test -p vera-e2e --test native_membership
 ```
+
+### Validator records
+
+The registry (module address `0x0813`) keeps one record per member in the vera
+module's partition under `registry/member/<20-byte address>`: the Ed25519
+consensus key, the socket address peers dial (at most 64 bytes), whether the
+member is active, and the sequence its next address update must carry. Genesis
+seeds the records from `validators`; reads return members in address order. A
+record that does not decode is a fault of the node and fails the block that
+reads it.
+
+`addValidator`, `removeValidator` and `setValidatorStatus` require the
+submitting signer to hold `manage` on the `registry/registry` object of the
+membership policy operators selected. The registry holds at most 64 members,
+keeps at least one active, admits no more active members than an epoch has
+leader terms for, and never registers one consensus key twice, including the
+key of an inactive member.
+
+A validator moves its own network address without that permission.
+`updateP2PAddress(validator, p2pAddr, sequence, signature)` carries the Ed25519
+signature of the member's consensus key over
+
+```
+keccak256("vera/registry/p2p-address/v1" || genesis id || validator address
+          || sequence (u64, big endian) || new address bytes)
+```
+
+Any native signer may submit it. The sequence must equal the record's and then
+advances, so a signature applies once, and the genesis record identifier keeps
+it to one deployment. `vera_client::ValidatorAddressUpdate::sign` builds it from
+the 32-byte secret in the validator's key file. An inactive member may still
+update its address.
 
 ### Operator keys
 

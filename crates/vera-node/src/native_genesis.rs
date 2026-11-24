@@ -92,6 +92,7 @@ pub(super) async fn load_or_create(
     if let Some(policy) = &genesis.operators {
         modules.vera.initialize_administration(policy.clone())?;
     }
+    modules.vera.seed_validators(genesis.registry_members()?)?;
     if !genesis.policies.is_empty() {
         // Attribution and the policy ids: nothing else checks this DID; the
         // live `ring_policy` object/`creator` relation a ring actually needs

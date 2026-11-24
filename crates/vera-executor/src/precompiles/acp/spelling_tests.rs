@@ -87,13 +87,13 @@ impl Fixture {
         )
         .unwrap();
         assert!(
-            !output.precompile.status.is_revert(),
+            !output.output.status.is_revert(),
             "{}",
-            String::from_utf8_lossy(&output.precompile.bytes)
+            String::from_utf8_lossy(&output.output.bytes)
         );
         assert_eq!(output.logs.len(), 1);
         (
-            C::abi_decode_returns(&output.precompile.bytes).unwrap(),
+            C::abi_decode_returns(&output.output.bytes).unwrap(),
             E::decode_log(&output.logs[0]).unwrap().data,
         )
     }

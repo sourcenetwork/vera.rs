@@ -35,9 +35,9 @@ mod validation;
 #[cfg(test)]
 mod validation_tests;
 
+use crate::precompiles::{ModuleError, ModuleOutput, ModuleStatus};
 use alloy_primitives::{B256, Bytes};
 use alloy_sol_types::SolCall;
-use revm::precompile::{PrecompileError, PrecompileOutput};
 use vera_identity::Did;
 use vera_modules::acp::abi::IAcp;
 use vera_modules::acp::types::{
@@ -49,8 +49,7 @@ use vera_modules::vera::VeraModule;
 
 use super::{
     ACP_ADDRESS, DispatchResult, DispatchReturn, decode_error, did_from_signer, err_dispatch,
-    event_log, internal_fault_reason, is_out_of_gas, json_bytes, ok_dispatch, oog_dispatch,
-    out_of_gas_error, recoverable_message, refusal_dispatch,
+    event_log, json_bytes, ok_dispatch, oog_dispatch, refusal_dispatch,
 };
 
 /// Base gas cost for reads and each batch wrapper.
@@ -59,13 +58,13 @@ const READ_GAS: u64 = 1000;
 const WRITE_GAS: u64 = 5000;
 
 // Keep work charges on ordinary reverts; snapshots restore state, never spent gas.
-fn edit_gas(budget: &PolicyEditBudget) -> Result<u64, PrecompileError> {
+fn edit_gas(budget: &PolicyEditBudget) -> Result<u64, ModuleError> {
     if budget.is_exhausted() {
-        return Err(out_of_gas_error());
+        return Err(ModuleError::OutOfGas);
     }
     WRITE_GAS
         .checked_add(budget.consumed())
-        .ok_or_else(out_of_gas_error)
+        .ok_or(ModuleError::OutOfGas)
 }
 
 fn edit_error(error: impl super::refusal::Refuse, budget: &PolicyEditBudget) -> DispatchReturn {
@@ -73,11 +72,11 @@ fn edit_error(error: impl super::refusal::Refuse, budget: &PolicyEditBudget) -> 
         return Ok(oog_dispatch());
     };
     let mut result = err_dispatch(error);
-    result.precompile.gas_used = gas_used;
+    result.output.gas_used = gas_used;
     Ok(result)
 }
 
-fn did_from_actor(actor: &str) -> Result<Did, PrecompileError> {
+fn did_from_actor(actor: &str) -> Result<Did, ModuleError> {
     Did::new(actor).map_err(|e| {
         crate::precompiles::refusal::refused(
             vera_domain::RefusalKind::UndecodableInput,
@@ -103,7 +102,7 @@ fn decode_subject(
     resource: &str,
     object_id: &str,
     relation: &str,
-) -> Result<vera_acp::Subject, PrecompileError> {
+) -> Result<vera_acp::Subject, ModuleError> {
     match kind {
         // Entity — DID in object_id; no cross-object fields.
         0 => {
@@ -154,8 +153,8 @@ fn decode_subject(
     }
 }
 
-fn subject_field_error(msg: &str) -> PrecompileError {
-    PrecompileError::Fatal(format!("subject: {msg}"))
+fn subject_field_error(msg: &str) -> ModuleError {
+    ModuleError::invalid(format!("subject: {msg}"))
 }
 
 fn policy_id_to_string(b: &B256) -> String {
@@ -174,9 +173,9 @@ fn build_operations(
     resources: &[String],
     object_ids: &[String],
     permissions: &[String],
-) -> Result<Vec<Operation>, PrecompileError> {
+) -> Result<Vec<Operation>, ModuleError> {
     if resources.len() != object_ids.len() || resources.len() != permissions.len() {
-        return Err(PrecompileError::Fatal("array length mismatch".to_string()));
+        return Err(ModuleError::invalid("array length mismatch".to_string()));
     }
     Ok(resources
         .iter()
@@ -198,7 +197,7 @@ fn batch_revert(
     inner: &DispatchResult,
     budget: &mut batch_results::Budget,
 ) -> DispatchReturn {
-    let bytes = &inner.precompile.bytes;
+    let bytes = &inner.output.bytes;
     let call_number = index + 1;
     let prefix = format!("batch call {call_number} reverted");
     budget.revert(&prefix, bytes)?;
@@ -212,7 +211,7 @@ fn batch_revert(
     };
 
     Ok(DispatchResult {
-        precompile: PrecompileOutput::revert(gas_used, message.into_bytes().into(), 0),
+        output: ModuleOutput::revert(gas_used, message.into_bytes().into()),
         logs: vec![],
         refusal: Some(
             inner
@@ -222,9 +221,9 @@ fn batch_revert(
     })
 }
 
-fn batch_error(index: usize, err: PrecompileError) -> PrecompileError {
+fn batch_error(index: usize, err: ModuleError) -> ModuleError {
     // Both are recognised by their leading sentinel, which a prefix would hide.
-    if is_out_of_gas(&err) || internal_fault_reason(&err).is_some() {
+    if matches!(err, ModuleError::OutOfGas) || matches!(err, ModuleError::Fault(_)) {
         return err;
     }
     super::refusal::with_context(err, &format!("batch call {}: ", index + 1))
@@ -260,7 +259,7 @@ pub(super) fn dispatch(
         &mut batch_results::Budget::new(),
     );
     match result {
-        Err(error) if is_out_of_gas(&error) => Ok(oog_dispatch()),
+        Err(ModuleError::OutOfGas) => Ok(oog_dispatch()),
         other => other,
     }
 }
@@ -323,7 +322,7 @@ fn dispatch_validated(
                     }
                 };
 
-                let inner_gas = match gas_used.checked_add(inner.precompile.gas_used) {
+                let inner_gas = match gas_used.checked_add(inner.output.gas_used) {
                     Some(total) => total,
                     None => {
                         (*module, *vera) = snapshot;
@@ -331,17 +330,12 @@ fn dispatch_validated(
                     }
                 };
 
-                if matches!(
-                    inner.precompile.status,
-                    revm::precompile::PrecompileStatus::Halt(
-                        revm::precompile::PrecompileHalt::OutOfGas
-                    )
-                ) {
+                if matches!(inner.output.status, ModuleStatus::OutOfGas) {
                     (*module, *vera) = snapshot;
                     return Ok(oog_dispatch());
                 }
 
-                if inner.precompile.status.is_revert() {
+                if inner.output.status.is_revert() {
                     (*module, *vera) = snapshot;
                     return batch_revert(index, inner_gas, &inner, result_budget);
                 }
@@ -352,12 +346,12 @@ fn dispatch_validated(
                 } else {
                     inner.logs.as_slice()
                 };
-                if let Err(error) = result_budget.retain(&inner.precompile.bytes, new_logs) {
+                if let Err(error) = result_budget.retain(&inner.output.bytes, new_logs) {
                     (*module, *vera) = snapshot;
                     return Err(batch_error(index, error));
                 }
                 gas_used = inner_gas;
-                results.push(inner.precompile.bytes);
+                results.push(inner.output.bytes);
                 logs.extend(inner.logs);
             }
 
@@ -560,7 +554,7 @@ fn dispatch_validated(
             let actor_did = did_from_actor(&call.actor)?;
 
             if call.resources.len() != call.objectIds.len() {
-                return Err(PrecompileError::Fatal("array length mismatch".to_string()));
+                return Err(ModuleError::invalid("array length mismatch".to_string()));
             }
             let objects: Vec<Object> = call
                 .resources
@@ -605,13 +599,13 @@ fn build_relationship_selector(
     object_id: &str,
     relation: &str,
     actor: &str,
-) -> Result<RelationshipSelector, PrecompileError> {
+) -> Result<RelationshipSelector, ModuleError> {
     use vera_modules::acp::types::{ObjectSelector, RelationSelector, SubjectSelector};
 
     let object_selector = if resource.is_empty() && object_id.is_empty() {
         None
     } else if resource.is_empty() {
-        return Err(PrecompileError::Fatal(
+        return Err(ModuleError::invalid(
             "object selector requires a resource".to_string(),
         ));
     } else if object_id.is_empty() {
@@ -700,12 +694,12 @@ resources:
         match &result {
             Ok(dr) => {
                 assert!(
-                    !dr.precompile.status.is_revert(),
+                    !dr.output.status.is_revert(),
                     "dispatch should not revert, output bytes: {}",
-                    String::from_utf8_lossy(&dr.precompile.bytes)
+                    String::from_utf8_lossy(&dr.output.bytes)
                 );
             }
-            Err(e) => panic!("dispatch returned PrecompileError: {e:?}"),
+            Err(e) => panic!("dispatch returned ModuleError: {e:?}"),
         }
     }
 
@@ -755,7 +749,7 @@ resources:
             1_000_000,
         )
         .unwrap();
-        assert!(!result.precompile.status.is_revert());
+        assert!(!result.output.status.is_revert());
         assert_eq!(result.logs.len(), 2);
         assert_eq!(module.query_policy_ids().unwrap().len(), 2);
     }
@@ -819,9 +813,9 @@ resources:
             1_000_000,
         )
         .unwrap();
-        assert!(result.precompile.status.is_revert());
-        assert!(result.precompile.gas_used > READ_GAS + 2 * WRITE_GAS);
-        let message = std::str::from_utf8(&result.precompile.bytes).unwrap();
+        assert!(result.output.status.is_revert());
+        assert!(result.output.gas_used > READ_GAS + 2 * WRITE_GAS);
+        let message = std::str::from_utf8(&result.output.bytes).unwrap();
         assert!(
             message.starts_with("batch call 2 reverted: actor DID:"),
             "{message}"
@@ -1007,9 +1001,9 @@ resources:
         )
         .unwrap();
         assert!(
-            !dr.precompile.status.is_revert(),
+            !dr.output.status.is_revert(),
             "set subject should not revert: {}",
-            String::from_utf8_lossy(&dr.precompile.bytes)
+            String::from_utf8_lossy(&dr.output.bytes)
         );
 
         let selector = RelationshipSelector {
@@ -1052,7 +1046,7 @@ resources:
         )
         .unwrap();
         assert!(
-            !dr.precompile.status.is_revert(),
+            !dr.output.status.is_revert(),
             "delete subject should not revert"
         );
         let rels = module

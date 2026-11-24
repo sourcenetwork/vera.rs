@@ -310,7 +310,7 @@ async fn admit_member(interrupt: bool, crash_share: bool, long_epochs: bool) {
         &signer,
         &trusted,
         IValidatorRegistry::addValidatorCall {
-            evmAddr: member,
+            validator: member,
             consensusPubkey: B256::from_slice(public.encode().as_ref()),
             p2pAddr: format!("127.0.0.1:{p2p_port}"),
         }
@@ -373,7 +373,7 @@ async fn admit_member(interrupt: bool, crash_share: bool, long_epochs: bool) {
         &signer,
         &trusted,
         IValidatorRegistry::setValidatorStatusCall {
-            evmAddr: member,
+            validator: member,
             active: true,
         }
         .abi_encode(),
@@ -401,7 +401,7 @@ async fn admit_member(interrupt: bool, crash_share: bool, long_epochs: bool) {
         &signer,
         &trusted,
         IValidatorRegistry::setValidatorStatusCall {
-            evmAddr: removed,
+            validator: removed,
             active: false,
         }
         .abi_encode(),
@@ -418,7 +418,7 @@ async fn admit_member(interrupt: bool, crash_share: bool, long_epochs: bool) {
         &joining,
         &signer,
         &trusted,
-        IValidatorRegistry::removeValidatorCall { evmAddr: removed }.abi_encode(),
+        IValidatorRegistry::removeValidatorCall { validator: removed }.abi_encode(),
     )
     .await;
     let current = membership(&origin, &trusted, reduced.height, 4, epoch_deadline).await;
@@ -434,7 +434,7 @@ async fn admit_member(interrupt: bool, crash_share: bool, long_epochs: bool) {
         &signer,
         &trusted,
         IValidatorRegistry::setValidatorStatusCall {
-            evmAddr: member,
+            validator: member,
             active: true,
         }
         .abi_encode(),

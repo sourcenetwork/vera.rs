@@ -275,8 +275,15 @@ commitment.
 
 `genesis.json` and `config.toml` reject keys they do not define. Genesis
 validators need distinct addresses and consensus keys, and a node does not start
-without at least one. The ValidatorRegistry slot layout is defined once, in
-`vera_modules::validator_registry::layout`, for execution and genesis.
+without at least one. The validator registry keeps one record per member in
+the vera module's store (`registry/member/<address>`: consensus key, network
+address, active flag, address sequence), seeded at genesis and read in address
+order; a record that does not read back fails the block. Membership commands
+need the membership policy's `manage` permission. A validator changes its
+network address itself: `updateP2PAddress` carries its Ed25519 consensus key's
+signature over the genesis record, its address, the record's sequence and the
+new address, any native signer submits it, and it applies once
+(`vera_client::ValidatorAddressUpdate`). See docs/consensus-membership.md#validator-records.
 
 Seven authenticated peer resolvers serve bounded operation-log ranges. Fetches
 allow up to 64 operations, with eight-operation inspection batches and responses

@@ -2,14 +2,9 @@
 
 use std::{path::Path, str::FromStr};
 
-use crate::{
-    VeraGenesisError,
-    state::GenesisState,
-    validators::{PRECOMPILE_SENTINEL_BYTECODE, validator_storage_entries},
-};
+use crate::{VeraGenesisError, state::GenesisState, validators::registry_members};
 use alloy_evm::revm::primitives::{Address, U256};
 use serde::{Deserialize, Serialize};
-use vera_modules::validator_registry::layout::ADDRESS as VALIDATOR_REGISTRY_ADDRESS;
 
 /// Vera genesis configuration: the EVM allocations and code together with
 /// the deployment's operators, seeded policies, validators and consensus
@@ -175,7 +170,13 @@ impl VeraGenesis {
         Ok(Some(info))
     }
 
-    /// Build the EVM genesis state: balances, registry storage, and code.
+    /// The validator registry's genesis members: address, consensus key and
+    /// network address, validated.
+    pub fn registry_members(&self) -> Result<Vec<(Address, [u8; 32], String)>, VeraGenesisError> {
+        registry_members(&self.validators)
+    }
+
+    /// Build the genesis account state: balances, storage and code.
     pub fn to_genesis_state(&self) -> Result<GenesisState, VeraGenesisError> {
         if let Some(policy) = &self.operators {
             policy
@@ -191,17 +192,8 @@ impl VeraGenesis {
             genesis_alloc.push((address, balance));
         }
 
-        let (mut genesis_storage, mut genesis_code) = if self.validators.is_empty() {
-            (Vec::new(), Vec::new())
-        } else {
-            let entries = validator_storage_entries(&self.validators)?;
-            let storage = vec![(VALIDATOR_REGISTRY_ADDRESS, entries)];
-            let code = vec![(
-                VALIDATOR_REGISTRY_ADDRESS,
-                PRECOMPILE_SENTINEL_BYTECODE.to_vec(),
-            )];
-            (storage, code)
-        };
+        let mut genesis_storage: Vec<(Address, Vec<(U256, U256)>)> = Vec::new();
+        let mut genesis_code = Vec::new();
 
         for contract in &self.contracts {
             let address = Address::from_str(&contract.address)
@@ -231,20 +223,12 @@ impl VeraGenesis {
             }
         }
 
-        let participant_addresses: Vec<Address> = self
-            .validators
-            .iter()
-            .map(|v| {
-                Address::from_str(&v.evm_address)
-                    .expect("validator address already validated above")
-            })
-            .collect();
+        self.registry_members()?;
 
         Ok(GenesisState {
             genesis_alloc,
             genesis_storage,
             genesis_code,
-            participant_addresses,
         })
     }
 
@@ -310,7 +294,6 @@ mod tests {
         let genesis = VeraGenesis::devnet();
         let state = genesis.to_genesis_state().unwrap();
         assert_eq!(state.genesis_alloc.len(), 2);
-        assert!(state.participant_addresses.is_empty());
     }
 
     #[test]
@@ -506,16 +489,17 @@ mod tests {
     }
 
     #[test]
-    fn genesis_sets_precompile_bytecode() {
+    fn genesis_validators_become_registry_members() {
+        let key = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
         let genesis = genesis_with_validators(vec![ValidatorConfig {
             evm_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
-            consensus_pubkey: "aa".repeat(32),
-            p2p_address: "127.0.0.1:30300".to_string(),
+            consensus_pubkey: key.to_string(),
+            p2p_address: "[2001:db8::1]:30300".to_string(),
         }]);
-        let bootstrap = genesis.to_genesis_state().unwrap();
-        assert_eq!(bootstrap.genesis_code.len(), 1);
-        assert_eq!(bootstrap.genesis_code[0].0, VALIDATOR_REGISTRY_ADDRESS);
-        assert_eq!(bootstrap.genesis_code[0].1, PRECOMPILE_SENTINEL_BYTECODE);
+        let members = genesis.registry_members().unwrap();
+        assert_eq!(members.len(), 1);
+        assert_eq!(hex::encode(members[0].1), key);
+        assert_eq!(members[0].2, "[2001:db8::1]:30300");
     }
 
     #[test]

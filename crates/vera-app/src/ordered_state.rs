@@ -364,7 +364,7 @@ impl OrderedState {
                     ))),
                 ),
                 modules: executed.modules,
-                height: context.header.number,
+                height: context.height,
                 receipts: None,
             },
             executed.outcome,

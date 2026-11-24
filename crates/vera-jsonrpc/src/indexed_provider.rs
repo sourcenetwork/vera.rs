@@ -109,22 +109,12 @@ mod tests {
         Arc::new(RwLock::new(ModuleState::default()))
     }
 
-    type Gate = (
-        tokio::sync::mpsc::UnboundedSender<()>,
-        std::sync::mpsc::Receiver<()>,
-    );
-
-    /// Blocks its first account read until released, as a slow execution would.
+    /// Account state no simulation reads.
     #[derive(Clone)]
-    struct GatedState(Arc<std::sync::Mutex<Option<Gate>>>);
+    struct GatedState;
 
     impl StateDbRead for GatedState {
         async fn nonce(&self, _address: &Address) -> Result<u64, StateDbError> {
-            let gate = self.0.lock().unwrap().take();
-            if let Some((entered, release)) = gate {
-                entered.send(()).unwrap();
-                release.recv().unwrap();
-            }
             Ok(0)
         }
 
@@ -152,12 +142,11 @@ mod tests {
         let modules = default_modules();
         let provider = IndexedStateProvider::new(
             Arc::new(BlockIndex::new()),
-            GatedState(Arc::new(std::sync::Mutex::new(Some((entered, gate))))),
+            GatedState,
             ExecutionConfig::new(1),
             30_000_000,
             modules.clone(),
         );
-        // A registry query reads the registry account, which the gate holds.
         let members = || {
             (
                 VALIDATOR_REGISTRY_ADDRESS,
@@ -166,8 +155,13 @@ mod tests {
         };
         let running = provider.clone();
         let call = tokio::spawn(async move {
-            let (target, calldata) = members();
-            running.view_call(target, calldata).await
+            running
+                .simulate(move |_, _, _| {
+                    entered.send(()).unwrap();
+                    gate.recv().unwrap();
+                    Ok(())
+                })
+                .await
         });
         tokio::time::timeout(std::time::Duration::from_secs(5), entries.recv())
             .await
@@ -209,7 +203,7 @@ mod tests {
         assert_eq!(busy.code(), crate::error::codes::RESOURCE_UNAVAILABLE);
         assert_eq!(busy.data().unwrap().get(), r#"{"retryable":true}"#);
         release.send(()).unwrap();
-        assert_eq!(call.await.unwrap().unwrap().refusal, None);
+        call.await.unwrap().unwrap();
         assert_eq!(waiting.await.unwrap().unwrap().refusal, None);
         drop(others);
         for waiter in waiters {

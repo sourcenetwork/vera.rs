@@ -1,7 +1,7 @@
 use super::*;
+use crate::precompiles::ModuleStatus;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use k256::ecdsa::{Signature, SigningKey, signature::Signer as _};
-use revm::precompile::{PrecompileHalt, PrecompileStatus};
 use vera_crypto::{
     jwt::{DelegationScope, JwtClaims},
     operation::{OperationClaim, OperationId},
@@ -196,23 +196,23 @@ fn permission_budget_all_routes_accept_exact_allowance_and_reject_one_less() {
         let mut measured = fixture.clone();
         let output = measured.dispatch(&input, 1_000_000).unwrap();
         assert!(
-            !output.precompile.status.is_revert(),
+            !output.output.status.is_revert(),
             "{:?}",
-            output.precompile.bytes
+            output.output.bytes
         );
-        let required = output.precompile.gas_used;
+        let required = output.output.gas_used;
         assert!(required > base + 60_000 / 16);
         let mut exact = fixture.clone();
         let result = exact.dispatch(&input, required).unwrap();
-        assert!(!result.precompile.status.is_revert());
-        assert_eq!(result.precompile.bytes, output.precompile.bytes);
-        assert_eq!(result.precompile.gas_used, required);
+        assert!(!result.output.status.is_revert());
+        assert_eq!(result.output.bytes, output.output.bytes);
+        assert_eq!(result.output.gas_used, required);
         assert_eq!(exact.state(), measured.state());
         for gas in [base, required - 1] {
             let mut low = fixture.clone();
             assert!(matches!(
                 low.dispatch(&input, gas),
-                Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+                Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
             ));
             assert_eq!(low.state(), fixture.state());
         }
@@ -227,30 +227,30 @@ fn permission_budget_nested_checks_share_remaining_allowance_and_restore_prior_w
         .clone()
         .dispatch(&query, 1_000_000)
         .unwrap()
-        .precompile
+        .output
         .gas_used;
     let creation_gas = fixture
         .clone()
         .dispatch(&create(), 1_000_000)
         .unwrap()
-        .precompile
+        .output
         .gas_used;
     let input = batch(vec![create(), batch(vec![query.clone(), query.clone()])]);
     let required = creation_gas + 2 * READ_GAS + 2 * cost;
     let result = fixture.clone().dispatch(&input, required).unwrap();
-    assert!(!result.precompile.status.is_revert());
-    assert_eq!(result.precompile.gas_used, required);
+    assert!(!result.output.status.is_revert());
+    assert_eq!(result.output.gas_used, required);
     let mut low = fixture.clone();
     assert!(matches!(
         low.dispatch(&input, required - 1),
-        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+        Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
     ));
     assert_eq!(low.state(), fixture.state());
     let repeated = batch(vec![query; batch::MAX_CALLS - 1]);
     batch::validate(&repeated).unwrap();
     assert!(matches!(
         low.dispatch(&repeated, 1_000_000),
-        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+        Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
     ));
     assert_eq!(low.state(), fixture.state());
 }
@@ -260,34 +260,34 @@ fn permission_budget_denial_retains_work_and_does_not_mask_exhaustion() {
     let fixture = Fixture::new();
     let query = fixture.query("did:key:stranger");
     let output = fixture.clone().dispatch(&query, 1_000_000).unwrap();
-    assert!(!output.precompile.status.is_revert());
-    assert!(!IAcp::verifyAccessRequestCall::abi_decode_returns(&output.precompile.bytes).unwrap());
-    assert!(output.precompile.gas_used > READ_GAS);
+    assert!(!output.output.status.is_revert());
+    assert!(!IAcp::verifyAccessRequestCall::abi_decode_returns(&output.output.bytes).unwrap());
+    assert!(output.output.gas_used > READ_GAS);
     assert!(matches!(
         fixture
             .clone()
-            .dispatch(&query, output.precompile.gas_used - 1),
-        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+            .dispatch(&query, output.output.gas_used - 1),
+        Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
     ));
     let creation_gas = fixture
         .clone()
         .dispatch(&create(), 1_000_000)
         .unwrap()
-        .precompile
+        .output
         .gas_used;
     for bearer in [false, true] {
         let call = fixture.decision(bearer, "did:key:stranger");
         let failure = fixture.clone().dispatch(&call, 1_000_000).unwrap();
-        assert!(failure.precompile.status.is_revert());
-        assert!(failure.precompile.gas_used > WRITE_GAS);
+        assert!(failure.output.status.is_revert());
+        assert!(failure.output.gas_used > WRITE_GAS);
         let mut nested = fixture.clone();
         let result = nested
             .dispatch(&batch(vec![create(), batch(vec![call])]), 1_000_000)
             .unwrap();
-        assert!(result.precompile.status.is_revert());
+        assert!(result.output.status.is_revert());
         assert_eq!(
-            result.precompile.gas_used,
-            creation_gas + 2 * READ_GAS + failure.precompile.gas_used
+            result.output.gas_used,
+            creation_gas + 2 * READ_GAS + failure.output.gas_used
         );
         assert!(result.logs.is_empty());
         assert_eq!(nested.state(), fixture.state());
@@ -299,11 +299,7 @@ fn permission_budget_cached_bearer_decision_survives_retirement_and_remains_mete
     let mut fixture = Fixture::new();
     let call = fixture.decision(true, &issuer());
     let first = fixture.dispatch(&call, 1_000_000).unwrap();
-    assert!(
-        !first.precompile.status.is_revert(),
-        "{:?}",
-        first.precompile.bytes
-    );
+    assert!(!first.output.status.is_revert(), "{:?}", first.output.bytes);
     let delete = IAcp::deletePolicyCall {
         policyId: fixture.policy,
     }
@@ -312,21 +308,21 @@ fn permission_budget_cached_bearer_decision_survives_retirement_and_remains_mete
         !fixture
             .dispatch(&delete, 1_000_000)
             .unwrap()
-            .precompile
+            .output
             .status
             .is_revert()
     );
     let before = fixture.state();
     let retry = fixture.dispatch(&call, 1_000_000).unwrap();
-    assert!(!retry.precompile.status.is_revert());
-    assert_eq!(retry.precompile.bytes, first.precompile.bytes);
-    assert!(retry.precompile.gas_used > WRITE_GAS);
+    assert!(!retry.output.status.is_revert());
+    assert_eq!(retry.output.bytes, first.output.bytes);
+    assert!(retry.output.gas_used > WRITE_GAS);
     assert_eq!(fixture.state(), before);
-    let exact = fixture.dispatch(&call, retry.precompile.gas_used).unwrap();
-    assert_eq!(exact.precompile.bytes, first.precompile.bytes);
+    let exact = fixture.dispatch(&call, retry.output.gas_used).unwrap();
+    assert_eq!(exact.output.bytes, first.output.bytes);
     assert!(matches!(
-        fixture.dispatch(&call, retry.precompile.gas_used - 1),
-        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+        fixture.dispatch(&call, retry.output.gas_used - 1),
+        Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
     ));
     assert_eq!(fixture.state(), before);
 }

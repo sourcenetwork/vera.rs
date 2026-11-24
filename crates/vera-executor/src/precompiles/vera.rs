@@ -387,7 +387,7 @@ pub(super) fn dispatch(
 
 #[test]
 fn threshold_object_requires_gas_before_decoding_or_admission() {
-    use revm::precompile::{PrecompileHalt, PrecompileStatus};
+    use crate::precompiles::ModuleStatus;
     let result = dispatch(
         &mut VeraModule::new(),
         &mut AcpModule::new(),
@@ -402,7 +402,7 @@ fn threshold_object_requires_gas_before_decoding_or_admission() {
     );
     assert!(matches!(
         result,
-        Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+        Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
     ));
 }
 
@@ -461,7 +461,7 @@ mod tests {
             WRITE_GAS,
         )
         .unwrap();
-        assert!(!result.precompile.status.is_revert());
+        assert!(!result.output.status.is_revert());
         let stored = module.get_jws_token(&hash).unwrap().unwrap();
         assert_eq!(stored.status, JWSTokenStatus::Invalid);
         assert_eq!(stored.invalidated_by, account);

@@ -14,30 +14,24 @@ fault-injection = []
 vera-crypto.workspace = true
 vera-domain.workspace = true
 vera-modules.workspace = true
-vera-traits.workspace = true
-vera-qmdb.workspace = true
 
 vera-acp.workspace = true
 commonware-codec.workspace = true
 commonware-parallel.workspace = true
-alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-sol-types.workspace = true
-futures.workspace = true
 hex.workspace = true
 vera-identity.workspace = true
-revm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["rt"] }
 tracing.workspace = true
 
 [dev-dependencies]
 vera-domain = { workspace = true, features = ["testing"] }
 k256.workspace = true
+ed25519-dalek.workspace = true
 base64.workspace = true
-alloy-consensus.workspace = true
 ark-bls12-381.workspace = true
 ark-ec.workspace = true
 ark-ff.workspace = true
@@ -45,7 +39,6 @@ ark-serialize.workspace = true
 ark-std.workspace = true
 rstest.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["rt", "macros"] }
 
 [lints]
 workspace = true

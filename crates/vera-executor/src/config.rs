@@ -1,7 +1,5 @@
 //! Execution configuration.
 
-use revm::primitives::hardfork::SpecId;
-
 /// Execution configuration.
 #[derive(Clone, Debug)]
 pub struct ExecutionConfig {
@@ -13,8 +11,6 @@ pub struct ExecutionConfig {
     pub genesis_id: [u8; 32],
     /// Chain ID for transaction validation.
     pub chain_id: u64,
-    /// Hardfork specification.
-    pub spec_id: SpecId,
 }
 
 impl ExecutionConfig {
@@ -25,7 +21,6 @@ impl ExecutionConfig {
             membership_epoch_length: None,
             membership_term_length: std::num::NonZeroU64::MIN,
             genesis_id: [0; 32],
-            spec_id: SpecId::CANCUN,
         }
     }
 
@@ -37,11 +32,12 @@ impl ExecutionConfig {
             })
     }
 
-    /// Set the hardfork specification.
-    #[must_use]
-    pub const fn with_spec_id(mut self, spec_id: SpecId) -> Self {
-        self.spec_id = spec_id;
-        self
+    /// Bounds membership commands keep the registry within.
+    pub fn membership_limits(&self) -> vera_modules::validator_registry::MembershipLimits {
+        vera_modules::validator_registry::MembershipLimits {
+            members: vera_domain::MAX_DKG_PARTICIPANTS.get(),
+            active: self.max_active_members(),
+        }
     }
 }
 
@@ -59,14 +55,9 @@ mod tests {
     fn config_default() {
         let config = ExecutionConfig::default();
         assert_eq!(config.chain_id, 1);
-        assert_eq!(config.spec_id, SpecId::CANCUN);
-    }
-
-    #[test]
-    fn config_builder() {
-        let config = ExecutionConfig::new(42).with_spec_id(SpecId::PRAGUE);
-
-        assert_eq!(config.chain_id, 42);
-        assert_eq!(config.spec_id, SpecId::PRAGUE);
+        assert_eq!(
+            config.membership_limits().members,
+            vera_domain::MAX_DKG_PARTICIPANTS.get()
+        );
     }
 }

@@ -1,5 +1,5 @@
 use super::*;
-use revm::precompile::{PrecompileHalt, PrecompileStatus};
+use crate::precompiles::{ModuleError, ModuleStatus};
 use vera_modules::acp::{MAX_REGISTRATION_OBJECTS, decision::MAX_ACCESS_OPERATIONS};
 use vera_modules::types::Timestamp;
 
@@ -235,7 +235,7 @@ fn oversized_leaf_arrays_fail_before_standalone_or_nested_mutations() {
             };
             let result =
                 dispatch(&mut module, &mut vera, &block, &tx, &calldata, 1_000_000).unwrap_err();
-            assert!(matches!(result, PrecompileError::Fatal(_)));
+            assert!(matches!(result, ModuleError::Refused { .. }));
             assert!(result.to_string().contains("decoded bytes limit exceeded"));
             assert_eq!(
                 (module.store().serialize(), vera.store().serialize()),
@@ -257,7 +257,7 @@ fn oversized_leaf_arrays_fail_before_standalone_or_nested_mutations() {
                 &selector,
                 leaf::required_gas(&input).unwrap() - 1
             ),
-            Ok(outcome) if matches!(outcome.precompile.status, PrecompileStatus::Halt(PrecompileHalt::OutOfGas))
+            Ok(outcome) if matches!(outcome.output.status, ModuleStatus::OutOfGas)
         ));
     }
 }

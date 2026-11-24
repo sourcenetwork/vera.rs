@@ -82,16 +82,8 @@ fn module_state(snapshot: &ModuleSnapshot) -> ModuleState {
     view.modules().read().unwrap().clone()
 }
 
-fn context() -> BlockContext {
-    BlockContext::new(
-        Header {
-            number: 1,
-            timestamp: 100,
-            gas_limit: 2 * NATIVE_LIMIT,
-            ..Default::default()
-        },
-        B256::ZERO,
-    )
+const fn context() -> BlockContext {
+    BlockContext::new(1, 100, 2 * NATIVE_LIMIT)
 }
 
 #[rstest]
@@ -113,7 +105,6 @@ fn oversized_native_registration_rolls_back_and_allows_next_nonce(#[case] batch:
     };
     let (failed, actor) = native(0, input);
     let (healthy, _) = native(1, register(policy, "healthy"));
-    let state = MockStateDb::new();
     let mut validator = MempoolValidator::new(ExecutionConfig::new(9001));
     for tx in [&failed, &healthy] {
         assert!(tx.len() < vera_domain::MAX_TX_BYTES);
@@ -122,12 +113,7 @@ fn oversized_native_registration_rolls_back_and_allows_next_nonce(#[case] batch:
     }
 
     let (failure, failed_modules) = executor
-        .execute_with_modules(
-            &state,
-            &context(),
-            std::slice::from_ref(&failed),
-            parent.clone(),
-        )
+        .execute_with_modules(&context(), std::slice::from_ref(&failed), parent.clone())
         .unwrap();
     assert_eq!(failure.executed_tx_indices, Some(vec![0]));
     assert_eq!(failure.receipts.len(), 1);
@@ -154,12 +140,7 @@ fn oversized_native_registration_rolls_back_and_allows_next_nonce(#[case] batch:
     );
 
     let (healthy_only, _) = executor
-        .execute_with_modules(
-            &state,
-            &context(),
-            std::slice::from_ref(&healthy),
-            failed_modules,
-        )
+        .execute_with_modules(&context(), std::slice::from_ref(&healthy), failed_modules)
         .unwrap();
     assert_eq!(healthy_only.executed_tx_indices, Some(vec![0]));
     assert!(healthy_only.receipts[0].success());
@@ -167,7 +148,7 @@ fn oversized_native_registration_rolls_back_and_allows_next_nonce(#[case] batch:
 
     let txs = [failed, healthy];
     let (outcome, next) = executor
-        .execute_with_modules(&state, &context(), &txs, parent.clone())
+        .execute_with_modules(&context(), &txs, parent.clone())
         .unwrap();
     assert_eq!(outcome.executed_tx_indices, Some(vec![0, 1]));
     assert_eq!(outcome.receipts.len(), 2);
@@ -198,7 +179,7 @@ fn oversized_native_registration_rolls_back_and_allows_next_nonce(#[case] batch:
         }
     }
     let (verified, verified_modules) = executor
-        .execute_with_modules(&state, &context().with_verification(), &txs, parent.clone())
+        .execute_with_modules(&context().with_verification(), &txs, parent.clone())
         .unwrap();
     assert_eq!(verified.gas_used, outcome.gas_used);
     assert_eq!(
@@ -232,10 +213,9 @@ fn native_batch_that_exhausts_its_allowance_fails_and_commits_nothing(
     }
     .abi_encode();
     let (request, actor) = native(0, batch);
-    let state = MockStateDb::new();
     let txs = [request];
     let (outcome, next) = executor
-        .execute_with_modules(&state, &context(), &txs, parent.clone())
+        .execute_with_modules(&context(), &txs, parent.clone())
         .unwrap();
     assert_eq!(outcome.executed_tx_indices, Some(vec![0]));
     assert_eq!(outcome.receipts.len(), 1);
@@ -252,7 +232,7 @@ fn native_batch_that_exhausts_its_allowance_fails_and_commits_nothing(
         assert!(next.changes_from(&parent)[..3].iter().all(Vec::is_empty));
     }
     let (verified, _) = executor
-        .execute_with_modules(&state, &context().with_verification(), &txs, parent)
+        .execute_with_modules(&context().with_verification(), &txs, parent)
         .unwrap();
     assert_eq!(
         serde_json::to_value(verified.receipts).unwrap(),

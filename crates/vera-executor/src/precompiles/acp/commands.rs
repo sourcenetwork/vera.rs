@@ -1,7 +1,7 @@
 //! Policy command input and management authorization accounting.
 
+use super::oog_dispatch;
 use super::*;
-use super::{is_out_of_gas, oog_dispatch, out_of_gas_error};
 use vera_modules::acp::CommandBudget;
 
 pub(super) const fn handles(selector: [u8; 4]) -> bool {
@@ -60,24 +60,24 @@ pub(super) fn dispatch(
     };
     match result {
         Ok(mut result) => {
-            if !result.precompile.status.is_success() {
+            if !result.output.status.is_success() {
                 (*module, *vera) = snapshot;
             }
-            result.precompile.gas_used = gas;
+            result.output.gas_used = gas;
             Ok(result)
         }
-        Err(error) if is_out_of_gas(&error) => {
+        Err(ModuleError::OutOfGas) => {
             (*module, *vera) = snapshot;
             Ok(oog_dispatch())
         }
-        Err(error) if internal_fault_reason(&error).is_some() => {
+        Err(error @ ModuleError::Fault(_)) => {
             (*module, *vera) = snapshot;
             Err(error)
         }
         Err(error) => {
             (*module, *vera) = snapshot;
             let mut result = super::refusal_dispatch(&error);
-            result.precompile.gas_used = gas;
+            result.output.gas_used = gas;
             Ok(result)
         }
     }
@@ -87,7 +87,7 @@ fn reserve_fields(
     selector: [u8; 4],
     input: &[u8],
     budget: &CommandBudget,
-) -> Result<(), PrecompileError> {
+) -> Result<(), ModuleError> {
     let fields: &[usize] = match selector {
         IAcp::setRelationshipCall::SELECTOR
         | IAcp::deleteRelationshipCall::SELECTOR
@@ -107,7 +107,9 @@ fn reserve_fields(
     };
     for field in fields {
         let value = leaf::bytes(&input[4..], field * 32)?;
-        budget.input(value.len()).map_err(|_| out_of_gas_error())?;
+        budget
+            .input(value.len())
+            .map_err(|_| ModuleError::OutOfGas)?;
         let is_string = match selector {
             IAcp::revealRegistrationCall::SELECTOR
             | IAcp::executePolicyCommandCall::SELECTOR
@@ -129,7 +131,7 @@ fn reserve_fields(
                     }
                 })
                 .sum();
-            budget.input(extra).map_err(|_| out_of_gas_error())?;
+            budget.input(extra).map_err(|_| ModuleError::OutOfGas)?;
         }
     }
     Ok(())
@@ -171,7 +173,7 @@ fn run(
                     record,
                 } => (record_existed, record),
                 _ => {
-                    return Err(PrecompileError::Fatal(
+                    return Err(ModuleError::invalid(
                         "unexpected result variant".to_string(),
                     ));
                 }
@@ -216,7 +218,7 @@ fn run(
                     record_found
                 }
                 _ => {
-                    return Err(PrecompileError::Fatal(
+                    return Err(ModuleError::invalid(
                         "unexpected result variant".to_string(),
                     ));
                 }
@@ -264,7 +266,7 @@ fn run(
                     record,
                 } => (record_existed, record),
                 _ => {
-                    return Err(PrecompileError::Fatal(
+                    return Err(ModuleError::invalid(
                         "unexpected result variant".to_string(),
                     ));
                 }
@@ -323,7 +325,7 @@ fn run(
                     record_found
                 }
                 _ => {
-                    return Err(PrecompileError::Fatal(
+                    return Err(ModuleError::invalid(
                         "unexpected result variant".to_string(),
                     ));
                 }
@@ -365,7 +367,7 @@ fn run(
             let record = match result {
                 vera_modules::acp::types::PolicyCmdResult::RegisterObject { record } => record,
                 _ => {
-                    return Err(PrecompileError::Fatal(
+                    return Err(ModuleError::invalid(
                         "unexpected result variant".to_string(),
                     ));
                 }
@@ -405,7 +407,7 @@ fn run(
                     relationships_removed,
                 } => (found, relationships_removed),
                 _ => {
-                    return Err(PrecompileError::Fatal(
+                    return Err(ModuleError::invalid(
                         "unexpected result variant".to_string(),
                     ));
                 }
@@ -445,7 +447,7 @@ fn run(
                     relationship_modified,
                 } => (record, relationship_modified),
                 _ => {
-                    return Err(PrecompileError::Fatal(
+                    return Err(ModuleError::invalid(
                         "unexpected result variant".to_string(),
                     ));
                 }
@@ -478,7 +480,7 @@ fn run(
                     registrations_commitment,
                 } => registrations_commitment.id,
                 _ => {
-                    return Err(PrecompileError::Fatal(
+                    return Err(ModuleError::invalid(
                         "unexpected result variant".to_string(),
                     ));
                 }
@@ -554,7 +556,7 @@ fn run(
             let event = match result {
                 vera_modules::acp::types::PolicyCmdResult::FlagHijackAttempt { event } => event,
                 _ => {
-                    return Err(PrecompileError::Fatal(
+                    return Err(ModuleError::invalid(
                         "unexpected result variant".to_string(),
                     ));
                 }
@@ -598,7 +600,7 @@ fn run(
         IAcp::executePolicyCommandCall::SELECTOR => {
             let call = IAcp::executePolicyCommandCall::abi_decode(input).map_err(decode_error)?;
             let request = serde_json::from_slice(&call.request).map_err(|error| {
-                PrecompileError::Fatal(format!("invalid policy command: {error}"))
+                ModuleError::invalid(format!("invalid policy command: {error}"))
             })?;
             let actor = did_from_signer(&tx_ctx.signer)?;
             match module.execute_policy_cmd_with_metadata_and_budget(
@@ -687,10 +689,10 @@ fn recorded_relationship(
     module: &AcpModule,
     policy_id: &str,
     relationship: vera_acp::Relationship,
-) -> Result<vera_acp::Relationship, PrecompileError> {
+) -> Result<vera_acp::Relationship, ModuleError> {
     module
         .recorded_relationship(policy_id, relationship)
-        .map_err(|error| PrecompileError::Fatal(format!("recorded relationship: {error}")))
+        .map_err(|error| ModuleError::invalid(format!("recorded relationship: {error}")))
 }
 
 /// The identifier an event reports for a subject: the recorded actor or

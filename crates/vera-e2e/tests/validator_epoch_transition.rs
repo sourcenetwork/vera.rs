@@ -205,7 +205,7 @@ async fn validator_epoch_transition() {
     let new_consensus_key = B256::from_slice(Encode::encode(&new_public_key).as_ref());
 
     let calldata = IValidatorRegistry::addValidatorCall {
-        evmAddr: new_validator_addr,
+        validator: new_validator_addr,
         consensusPubkey: new_consensus_key,
         p2pAddr: "127.0.0.1:30302".to_string(),
     }
@@ -315,7 +315,7 @@ async fn validator_epoch_transition() {
     // ── E: Deactivate a validator → triggers another epoch ────────
 
     let calldata = IValidatorRegistry::setValidatorStatusCall {
-        evmAddr: new_validator_addr,
+        validator: new_validator_addr,
         active: false,
     }
     .abi_encode();
@@ -337,7 +337,7 @@ async fn validator_epoch_transition() {
     // ── F: Remove the validator → triggers another epoch ──────────
 
     let calldata = IValidatorRegistry::removeValidatorCall {
-        evmAddr: new_validator_addr,
+        validator: new_validator_addr,
     }
     .abi_encode();
     let receipt = broadcast_native_tx(

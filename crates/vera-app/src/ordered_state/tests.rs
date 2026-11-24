@@ -1,13 +1,11 @@
 use super::*;
 
-use std::{sync::Arc, time::Duration};
-
-use alloy_consensus::Header;
 use alloy_primitives::B256;
 use alloy_sol_types::SolCall;
 use commonware_consensus::types::{Epoch, Height, Round, View};
 use commonware_runtime::{Runner as _, Supervisor as _, buffer::paged::CacheRef, tokio};
 use commonware_utils::{NZU16, NZU64, NZUsize};
+use std::{sync::Arc, time::Duration};
 use vera_backend::state_set_config;
 use vera_client::{ACP_ADDRESS, BlsSigner};
 use vera_modules::acp::abi::IAcp;
@@ -62,15 +60,7 @@ fn sources(state: &OrderedState) -> Sources {
 }
 
 fn block(height: u64) -> BlockContext {
-    BlockContext::new(
-        Header {
-            number: height,
-            timestamp: 1000 + height,
-            gas_limit: 30_000_000,
-            ..Header::default()
-        },
-        B256::ZERO,
-    )
+    BlockContext::new(height, 1000 + height, 30_000_000)
 }
 
 fn anchor(height: u64) -> Anchor<Digest> {

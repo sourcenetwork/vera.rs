@@ -1,6 +1,7 @@
-//! Vera precompiles — ABI dispatch for ACP, Bulletin, Vera, and ValidatorRegistry modules.
+//! Module call shims: ABI dispatch for the ACP, bulletin, vera, validator
+//! registry and anchor modules.
 //!
-//! L2-convention addresses:
+//! Module addresses:
 //! - `0x0810` — ACP (access control policies)
 //! - `0x0811` — Bulletin (coordination / DKG messages)
 //! - `0x0812` — Vera (identity / JWS token lifecycle)
@@ -10,35 +11,37 @@
 mod acp;
 mod anchor;
 mod bulletin;
+mod output;
 pub(crate) mod refusal;
 pub(crate) mod validator_registry;
 mod vera;
 
+pub use output::{ModuleError, ModuleOutput, ModuleStatus};
 use refusal::{Refuse, Stated};
 use vera_domain::RefusalKind;
 
 use alloy_primitives::{Address, Bytes, Log};
-use revm::precompile::{PrecompileError, PrecompileHalt, PrecompileOutput};
 use vera_identity::Did;
 use vera_modules::acp::AcpModule;
 use vera_modules::bulletin::BulletinModule;
 use vera_modules::types::{BlockExecCtx, TxExecCtx};
+use vera_modules::validator_registry::MembershipLimits;
 use vera_modules::vera::VeraModule;
 
-/// ACP precompile address.
+/// ACP module address.
 pub const ACP_ADDRESS: Address = address_from_last_two_bytes(0x08, 0x10);
 
-/// Bulletin precompile address.
+/// Bulletin module address.
 pub const BULLETIN_ADDRESS: Address = address_from_last_two_bytes(0x08, 0x11);
 
-/// Vera precompile address.
+/// Vera module address.
 pub const VERA_ADDRESS: Address = address_from_last_two_bytes(0x08, 0x12);
 
-/// Anchor precompile address.
+/// Anchor module address.
 pub const ANCHOR_ADDRESS: Address = address_from_last_two_bytes(0x08, 0x14);
 
-/// ValidatorRegistry precompile address.
-pub const VALIDATOR_REGISTRY_ADDRESS: Address = vera_modules::validator_registry::layout::ADDRESS;
+/// Validator registry module address.
+pub const VALIDATOR_REGISTRY_ADDRESS: Address = vera_modules::validator_registry::ADDRESS;
 
 const fn address_from_last_two_bytes(hi: u8, lo: u8) -> Address {
     let mut bytes = [0u8; 20];
@@ -47,7 +50,7 @@ const fn address_from_last_two_bytes(hi: u8, lo: u8) -> Address {
     Address::new(bytes)
 }
 
-pub(super) fn did_from_signer(signer: &str) -> Result<Did, PrecompileError> {
+pub(super) fn did_from_signer(signer: &str) -> Result<Did, ModuleError> {
     // A view call has no signer, which is the caller's doing. A signer the
     // executor derived cannot be malformed.
     if signer.is_empty() {
@@ -61,38 +64,17 @@ pub(super) fn did_from_signer(signer: &str) -> Result<Did, PrecompileError> {
 
 const UNAUTHENTICATED_CALLER: &str = "module call requires an authenticated caller";
 
-/// Sentinel prefix of an error that is the node's own: stored state that does
-/// not read back as what was written, or a value the executor derived that is
-/// not what it must be. revm's precompile error has no variant to tell such a
-/// fault from a refusal of what the caller sent, so the fault is marked.
-///
-/// Only a marked error fails the block. Every other error of a module call
-/// rejects the request that caused it: its sender gets a failed receipt and
-/// the block goes on. The default is the refusal because calldata is the
-/// caller's to choose, and a request that failed its block would fail every
-/// block proposed while it waits in the pool.
-const INTERNAL_FAULT: &str = "\u{0}internal-fault:";
-
 /// A fault of the node, which fails the block.
-pub(crate) fn internal_fault(reason: impl core::fmt::Display) -> PrecompileError {
-    PrecompileError::Fatal(format!("{INTERNAL_FAULT}{reason}"))
+pub(crate) fn internal_fault(reason: impl core::fmt::Display) -> ModuleError {
+    ModuleError::Fault(reason.to_string())
 }
 
-/// The reason of an [`internal_fault`], or `None` for a refusal.
-pub(crate) fn internal_fault_reason(error: &PrecompileError) -> Option<String> {
-    match error {
-        PrecompileError::Fatal(message) => message.strip_prefix(INTERNAL_FAULT).map(str::to_owned),
-        // Not raised by the modules; whatever raises one is not a refusal.
-        PrecompileError::FatalAny(error) => Some(error.to_string()),
-    }
-}
-
-pub(super) fn decode_error(e: alloy_sol_types::Error) -> PrecompileError {
+pub(super) fn decode_error(e: alloy_sol_types::Error) -> ModuleError {
     refusal::refused(RefusalKind::UndecodableInput, format!("ABI decode: {e}"))
 }
 
 /// A call naming no method of its module.
-pub(super) fn unknown_selector(module: &str, selector: [u8; 4]) -> PrecompileError {
+pub(super) fn unknown_selector(module: &str, selector: [u8; 4]) -> ModuleError {
     refusal::refused(
         RefusalKind::UnknownSelector,
         format!("unknown {module} selector: 0x{}", hex::encode(selector)),
@@ -111,49 +93,24 @@ pub(super) fn json_bytes(v: &impl serde::Serialize) -> Bytes {
     Bytes::from(serde_json::to_vec(v).unwrap_or_default())
 }
 
-pub(super) fn ok_output(gas: u64, ret: Vec<u8>) -> PrecompileOutput {
-    PrecompileOutput::new(gas, ret.into(), 0)
-}
-
 pub(super) const fn oog_dispatch() -> DispatchResult {
     DispatchResult {
-        precompile: PrecompileOutput::halt(PrecompileHalt::OutOfGas, 0),
+        output: ModuleOutput::out_of_gas(),
         logs: vec![],
         refusal: None,
     }
 }
 
-/// Sentinels an out-of-gas halt while it propagates through dispatch helpers;
-/// the dispatch boundary converts it back into an out-of-gas halt result.
-pub(super) const OUT_OF_GAS_MESSAGE: &str = "\u{0}out-of-gas";
-
-pub(super) fn out_of_gas_error() -> PrecompileError {
-    PrecompileError::Fatal(OUT_OF_GAS_MESSAGE.to_string())
-}
-
-pub(crate) fn is_out_of_gas(error: &PrecompileError) -> bool {
-    matches!(error, PrecompileError::Fatal(message) if message == OUT_OF_GAS_MESSAGE)
-}
-
-/// Message carried by a recoverable dispatch error, without the fatal-error
-/// display prefix or refusal tag — module-style reverts report the bare cause.
-pub(crate) fn recoverable_message(error: &PrecompileError) -> String {
-    match error {
-        PrecompileError::Fatal(message) => refusal::split(message).1.to_owned(),
-        other => other.to_string(),
-    }
-}
-
 /// A revert carrying a refusal raised as an error, with its kind.
-pub(crate) fn refusal_dispatch(error: &PrecompileError) -> DispatchResult {
-    err_dispatch(Stated(refusal::kind_of(error), recoverable_message(error)))
+pub(crate) fn refusal_dispatch(error: &ModuleError) -> DispatchResult {
+    err_dispatch(Stated(refusal::kind_of(error), error.to_string()))
 }
 
 /// Result of dispatching to a vera module, including any emitted event logs.
 #[derive(Debug)]
 pub struct DispatchResult {
-    /// The precompile output (gas, return data, revert status).
-    pub precompile: PrecompileOutput,
+    /// Status, gas and return data of the call.
+    pub output: ModuleOutput,
     /// Event logs emitted during the dispatch.
     pub logs: Vec<Log>,
     /// What the module refused, for a revert.
@@ -161,11 +118,11 @@ pub struct DispatchResult {
 }
 
 /// Return type for module dispatch functions.
-pub type DispatchReturn = Result<DispatchResult, PrecompileError>;
+pub type DispatchReturn = Result<DispatchResult, ModuleError>;
 
 pub(super) fn ok_dispatch(gas: u64, ret: Vec<u8>, logs: Vec<Log>) -> DispatchResult {
     DispatchResult {
-        precompile: ok_output(gas, ret),
+        output: ModuleOutput::success(gas, ret.into()),
         logs,
         refusal: None,
     }
@@ -174,7 +131,7 @@ pub(super) fn ok_dispatch(gas: u64, ret: Vec<u8>, logs: Vec<Log>) -> DispatchRes
 /// A revert carrying the refusal's message as its data, charging no gas.
 pub(crate) fn err_dispatch(e: impl Refuse) -> DispatchResult {
     DispatchResult {
-        precompile: PrecompileOutput::revert(0, Bytes::from(e.to_string().into_bytes()), 0),
+        output: ModuleOutput::revert(0, Bytes::from(e.to_string().into_bytes())),
         logs: vec![],
         refusal: Some(e.refusal_kind()),
     }
@@ -186,7 +143,7 @@ pub(crate) fn storage_bounds_dispatch(gas_used: u64) -> DispatchResult {
         RefusalKind::StorageBounds,
         "module record exceeds native storage bounds",
     ));
-    rejected.precompile.gas_used = gas_used;
+    rejected.output.gas_used = gas_used;
     rejected
 }
 
@@ -197,7 +154,8 @@ pub(super) fn event_log<E: alloy_sol_types::SolEvent>(address: Address, event: &
     }
 }
 
-/// Route calldata to the module at the target address.
+/// Route calldata to the module at the target address, or `None` when the
+/// target is not a module.
 #[allow(clippy::too_many_arguments)]
 pub fn dispatch_to_module(
     acp: &mut AcpModule,
@@ -207,6 +165,7 @@ pub fn dispatch_to_module(
     calldata: &[u8],
     block_ctx: &BlockExecCtx,
     tx_ctx: &TxExecCtx,
+    limits: MembershipLimits,
     gas_limit: u64,
 ) -> Option<DispatchReturn> {
     if target == ACP_ADDRESS {
@@ -223,6 +182,10 @@ pub fn dispatch_to_module(
         ))
     } else if target == ANCHOR_ADDRESS {
         Some(anchor::dispatch(vera, block_ctx, calldata, gas_limit))
+    } else if target == VALIDATOR_REGISTRY_ADDRESS {
+        Some(validator_registry::dispatch(
+            vera, acp, limits, block_ctx, tx_ctx, calldata, gas_limit,
+        ))
     } else {
         None
     }
@@ -233,17 +196,18 @@ mod tests {
     use super::*;
     #[test]
     fn a_missing_signer_is_a_refusal_and_a_malformed_one_a_fault() {
-        let missing = did_from_signer("").unwrap_err();
-        assert_eq!(internal_fault_reason(&missing), None);
-        assert_eq!(recoverable_message(&missing), UNAUTHENTICATED_CALLER);
-        assert_eq!(refusal::kind_of(&missing), RefusalKind::Unauthenticated);
-
-        let malformed = did_from_signer("not-a-did").unwrap_err();
-        assert!(internal_fault_reason(&malformed).is_some());
+        assert_eq!(
+            did_from_signer("").unwrap_err(),
+            refusal::refused(RefusalKind::Unauthenticated, UNAUTHENTICATED_CALLER)
+        );
+        assert!(matches!(
+            did_from_signer("not-a-did").unwrap_err(),
+            ModuleError::Fault(_)
+        ));
     }
 
     #[test]
-    fn precompile_addresses_are_nonzero() {
+    fn module_addresses_are_nonzero() {
         assert_ne!(ACP_ADDRESS, Address::ZERO);
         assert_ne!(BULLETIN_ADDRESS, Address::ZERO);
         assert_ne!(VERA_ADDRESS, Address::ZERO);
@@ -251,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn precompile_addresses_are_distinct() {
+    fn module_addresses_are_distinct() {
         let addrs = [
             ACP_ADDRESS,
             BULLETIN_ADDRESS,
@@ -266,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn precompile_addresses_are_l2_convention() {
+    fn module_addresses_are_fixed() {
         assert_eq!(
             ACP_ADDRESS,
             "0x0000000000000000000000000000000000000810"
