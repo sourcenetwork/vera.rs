@@ -13,7 +13,8 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 use vera_zanzibar::{
-    Policy, PolicySpecification, Relation, RelationExpression, Resource, SubjectRestriction,
+    CreateRule, Policy, PolicySpecification, Relation, RelationExpression, Resource,
+    SubjectRestriction,
 };
 
 #[derive(Deserialize)]
@@ -37,6 +38,7 @@ pub struct ParsedPolicy {
 #[serde(deny_unknown_fields)]
 pub struct PolicyResource {
     pub name: String,
+    pub create: Option<CreateRule>,
     #[serde(default)]
     pub description: String,
     #[serde(default)]
@@ -220,6 +222,7 @@ pub fn build_policy(parsed: &ParsedPolicy, id: String) -> crate::error::Result<P
         resources.push(Resource {
             name: res.name.clone(),
             description: res.description.clone(),
+            create: res.create.clone(),
             relations,
         });
     }
@@ -232,6 +235,7 @@ pub fn build_policy(parsed: &ParsedPolicy, id: String) -> crate::error::Result<P
         description: parsed.description.clone(),
         actor: Some(Resource {
             name: "actor".into(),
+            create: None,
             description: String::new(),
             relations: parsed
                 .actor
