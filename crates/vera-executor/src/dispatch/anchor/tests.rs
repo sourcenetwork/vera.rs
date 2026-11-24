@@ -22,9 +22,44 @@ fn a_finalized_revision_verifies_to_its_block_fields() {
         deployment_id(&verified.consensus_key),
         deployment_id(&deployment.key().encode())
     );
-    assert_eq!(verified.revision.height, 10);
-    assert_eq!(verified.revision.term, 3);
-    assert_eq!(verified.revision.module_state_root, B256::repeat_byte(1));
+    let revision = verified.revision(0, B256::ZERO, &[]);
+    assert_eq!(revision.height, 10);
+    assert_eq!(revision.term, 3);
+    assert_eq!(revision.module_state_root, B256::repeat_byte(1));
+    assert_eq!(revision.ancestor, None);
+}
+
+#[test]
+fn an_ancestor_is_named_only_when_the_proof_shows_it() {
+    let deployment = TestDeployment::new(2);
+    let chain = deployment.chain(12, 1);
+    let ids: Vec<_> = chain.iter().map(vera_domain::Block::id).collect();
+    let tip = &chain[12];
+    let verified = AnchorSubmission {
+        consensus_key: deployment.key().encode().to_vec(),
+        artifacts: deployment.finalize(tip),
+    }
+    .verify()
+    .unwrap();
+    let proof = chain[5].ancestry.prove(5, &ids[5..12], 5).unwrap().encode();
+    assert_eq!(
+        verified.revision(5, ids[5].0, &proof).ancestor,
+        Some((5, ids[5].0))
+    );
+    // Another block, another height, no proof and bytes that are not a proof.
+    assert_eq!(verified.revision(5, ids[6].0, &proof).ancestor, None);
+    assert_eq!(verified.revision(6, ids[5].0, &proof).ancestor, None);
+    assert_eq!(verified.revision(5, ids[5].0, &[]).ancestor, None);
+    assert_eq!(verified.revision(5, ids[5].0, &[0xff; 40]).ancestor, None);
+    // A history that left this one below the ancestor does not include it.
+    let other = deployment.chain(12, 2);
+    let forked = AnchorSubmission {
+        consensus_key: deployment.key().encode().to_vec(),
+        artifacts: deployment.finalize(&other[12]),
+    }
+    .verify()
+    .unwrap();
+    assert_eq!(forked.revision(5, ids[5].0, &proof).ancestor, None);
 }
 
 #[test]

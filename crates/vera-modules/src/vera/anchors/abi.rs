@@ -13,14 +13,40 @@ sol! {
             bytes32 blockHash
         );
 
+        /// A finalized block of a deployment that does not descend from its latest anchor.
+        event ForkReported(
+            bytes32 indexed deployment,
+            uint64 sequence,
+            bytes32 anchoredBlock,
+            uint64 height,
+            bytes32 blockHash
+        );
+
         /// Record a finalized revision of the deployment with this consensus key.
+        /// `ancestryProof` shows that the deployment's latest anchor is an
+        /// ancestor of the revision; it is empty for the first anchor.
         /// Returns the deployment's latest anchor record as JSON.
         function anchorRevision(
             bytes consensusKey,
             bytes block,
             bytes[] descendants,
             bytes finalization,
-            bytes epochMaterial
+            bytes epochMaterial,
+            bytes ancestryProof
+        ) external returns (bytes record);
+
+        /// Record a finalized revision of the deployment that conflicts with
+        /// its latest anchor: another block at the anchored height, or a block
+        /// above it whose ancestor at the anchored height is `ancestor`, as
+        /// `ancestryProof` shows. Returns the fork record as JSON.
+        function reportFork(
+            bytes consensusKey,
+            bytes block,
+            bytes[] descendants,
+            bytes finalization,
+            bytes epochMaterial,
+            bytes32 ancestor,
+            bytes ancestryProof
         ) external returns (bytes record);
     }
 }

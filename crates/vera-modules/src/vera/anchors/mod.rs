@@ -1,22 +1,26 @@
-//! Anchors: the newest finalized revision of other deployments, recorded in order.
+//! Anchors: the finalized revisions of other deployments, recorded as one chain each.
 //!
-//! A submission carries a deployment's consensus key and the finality
-//! artifacts of one of its revisions. The executor verifies the certificate
-//! against that key; this module then records the revision when it is higher
-//! than the deployment's latest anchor and its term is not lower. The record is
-//! kept in the identity partition under the deployment's identifier, which is
-//! derived from the key, so nobody can record revisions under another
-//! deployment's identifier.
+//! A submission carries a deployment's consensus key, the finality artifacts
+//! of one of its revisions and a proof that the deployment's latest anchor is
+//! an ancestor of it. The executor verifies the certificate against that key
+//! and the proof against the block; this module then records the revision
+//! when it is higher than the latest anchor, descends from it, and its term
+//! is not lower. A finalized block that does not descend from the latest
+//! anchor is recorded as a fork. Records are kept in the identity partition
+//! under the deployment's identifier, which is derived from the key, so
+//! nobody can record revisions under another deployment's identifier.
 
 /// Solidity ABI interface for the anchor precompile.
 pub mod abi;
 mod error;
+mod fork;
 mod record;
 mod revision;
 #[cfg(test)]
 mod tests;
 
 pub use error::AnchorError;
+pub use fork::{ForkRecord, MAX_FORK_RECORD_BYTES, fork_key, fork_prefix};
 pub use record::{
     AnchorRecord, CONSENSUS_KEY_BYTES, MAX_ANCHOR_RECORD_BYTES, anchor_key, deployment_id,
 };
@@ -42,7 +46,10 @@ impl VeraModule {
     /// Record `revision` as the latest anchor of the deployment whose consensus
     /// key has canonical encoding `consensus_key`.
     ///
-    /// The caller must have verified that `revision` is finalized under that key.
+    /// The caller must have verified that `revision` is finalized under that
+    /// key and that `revision.ancestor`, when set, is an ancestor of it. A
+    /// deployment's first anchor needs no ancestor; every later one must name
+    /// the latest anchor.
     pub fn record_anchor(
         &mut self,
         block_ctx: &BlockExecCtx,
@@ -71,6 +78,12 @@ impl VeraModule {
                 return Err(AnchorError::LowerTerm {
                     latest: latest.term,
                     term: revision.term,
+                });
+            }
+            if revision.ancestor != Some((latest.height, latest.block_hash)) {
+                return Err(AnchorError::NotDescendant {
+                    latest: latest.height,
+                    height: revision.height,
                 });
             }
         }

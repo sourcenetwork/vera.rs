@@ -192,7 +192,7 @@ async fn a_relayed_snapshot_verifies_against_the_anchor_and_goes_stale_after_a_r
 
     // The older revision cannot be anchored again.
     let resubmitted = s
-        .submit_anchor(&relay, &first.revision, &owner_key)
+        .submit_anchor(&relay, &first.revision, &owner_key, None)
         .await
         .unwrap();
     assert!(matches!(

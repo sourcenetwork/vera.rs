@@ -1,8 +1,9 @@
 //! A parent deployment of four validators anchors the revisions of two baby
 //! deployments, each one embedded validator. A reader that trusts only the
 //! parent's key verifies relayed policy snapshots and learns when they are
-//! stale; a baby's anchors are ordered by the parent's finalized revisions; a
-//! forked baby cannot replace an anchored block at its height.
+//! stale; a baby's anchors are one chain, each proven to descend from the one
+//! before; a second device's history under the same key is refused and
+//! recorded as a fork.
 //!
 //! Requires `cargo build -p verad` before running.
 
@@ -186,15 +187,13 @@ async fn a_parent_orders_and_attests_the_policies_of_two_babies() {
     let conflicting = fork.revision_at(anchored).await;
     assert_ne!(block_hash(&conflicting), third.record.block_hash);
     assert_eq!(
-        parent
-            .try_anchor(&laptop_relay, &conflicting, &fork.key)
-            .await,
+        parent.try_anchor(&laptop_relay, &fork, &conflicting).await,
         Err(RefusalKind::NotNewer),
         "a conflicting block at an anchored height loses to the first one"
     );
     let below = fork.revision_at(anchored - 1).await;
     assert_eq!(
-        parent.try_anchor(&laptop_relay, &below, &fork.key).await,
+        parent.try_anchor(&laptop_relay, &fork, &below).await,
         Err(RefusalKind::NotNewer),
     );
     let unchanged = parent
@@ -206,29 +205,89 @@ async fn a_parent_orders_and_attests_the_policies_of_two_babies() {
         .unwrap();
     assert_eq!(unchanged, third.record);
 
-    // The parent does not check ancestry between anchors, so the fork's block
-    // above the anchored height is accepted as the laptop's next anchor. A
-    // reader detects the fork only by comparing the two anchored histories.
+    // The fork's block above the anchored height carries a certificate, but
+    // it does not descend from the anchored block: the proof its node gives
+    // names its own block at that height.
     let above = fork.revision_at(anchored + 2).await;
-    let submission = parent
-        .try_anchor(&laptop_relay, &above, &fork.key)
-        .await
-        .expect("a fork above the latest anchor is not detected by the parent");
-    let (event, _) = parent.anchored_event(submission).await;
     assert_eq!(
-        (event.sequence, event.height, event.blockHash.0),
-        (4, anchored + 2, block_hash(&above).0)
+        parent.try_anchor(&laptop_relay, &fork, &above).await,
+        Err(RefusalKind::NotDescendant),
+        "a block of another history is not the laptop's next anchor"
     );
+    let latest = || async {
+        parent
+            .client
+            .read_latest_anchor(&laptop_id, 0, &parent.key)
+            .await
+            .unwrap()
+            .record
+            .unwrap()
+    };
+    assert_eq!(latest().await, third.record);
+
+    // Reported, both of the fork's blocks are evidence that the key finalized
+    // two histories. A third party reads it with the parent's key alone.
+    assert!(
+        parent
+            .client
+            .read_forks(&laptop_id, 0, &parent.key)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    for height in [anchored, anchored + 2] {
+        parent
+            .try_report_fork(&laptop_relay, &fork, height, &third.record)
+            .await
+            .expect("a block of another history is a fork");
+    }
+    assert_eq!(
+        parent
+            .try_report_fork(&laptop_relay, &fork, anchored + 2, &third.record)
+            .await,
+        Err(RefusalKind::AlreadyExists)
+    );
+    // The laptop's own history is no fork of its anchor.
+    assert_eq!(
+        parent
+            .try_report_fork(&laptop_relay, &laptop, anchored, &third.record)
+            .await,
+        Err(RefusalKind::InvalidProof)
+    );
+    let mut forks = parent
+        .client
+        .read_forks(&laptop_id, 0, &parent.key)
+        .await
+        .unwrap();
+    forks.sort_by_key(|fork| fork.height);
+    assert_eq!(forks.len(), 2);
+    for (record, revision) in forks.iter().zip([&conflicting, &above]) {
+        assert_eq!(record.sequence, third.record.sequence);
+        assert_eq!(record.anchored_height, anchored);
+        assert_eq!(record.anchored_block, third.record.block_hash);
+        assert_eq!(record.height, revision.height);
+        assert_eq!(record.block_hash, block_hash(revision));
+        assert_eq!(record.ancestor, block_hash(&conflicting));
+    }
+    assert!(
+        parent
+            .client
+            .read_forks(&phone_id, 0, &parent.key)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    // The fork does not lock the laptop out: its next version is anchored on
+    // top of the third, and the reader learns its snapshot is stale.
+    laptop.revoke(&laptop_author, &laptop_policy, OTHER).await;
+    let fourth = parent
+        .anchor_policy(&laptop, &laptop_relay, &laptop_policy)
+        .await;
+    assert_eq!(fourth.record.sequence, 4);
+    assert!(fourth.record.height > anchored);
     assert!(matches!(
-        newest.ensure_current(
-            &parent
-                .client
-                .read_latest_anchor(&laptop_id, 0, &parent.key)
-                .await
-                .unwrap()
-                .record
-                .unwrap()
-        ),
+        newest.ensure_current(&latest().await),
         Err(AnchoringError::Stale { held: 3, latest: 4 })
     ));
 

@@ -45,11 +45,7 @@ impl Parent {
             .capture_policy_snapshot(policy, 0, &baby.key)
             .await
             .unwrap();
-        let submission = self
-            .client
-            .submit_anchor(relay, &captured.revision, &baby.key)
-            .await
-            .unwrap();
+        let submission = self.submit(relay, baby, &captured.revision).await;
         let parent_height = self
             .client
             .await_anchor(submission, &self.key, DEADLINE)
@@ -106,18 +102,54 @@ impl Parent {
         (event, block.timestamp)
     }
 
-    /// Submit `revision` of the deployment with key `key` and return the refusal, if any.
+    /// Submit `revision` of `baby` with the proof its node gives that the
+    /// deployment's latest anchor is an ancestor of the revision.
+    async fn submit(&self, relay: &BlsSigner, baby: &Baby, revision: &LightBlock) -> B256 {
+        let latest = self
+            .client
+            .read_latest_anchor(&deployment_id(&baby.key), 0, &self.key)
+            .await
+            .unwrap()
+            .record;
+        let proof = baby
+            .client
+            .anchor_proof(latest.as_ref(), revision.height)
+            .await
+            .unwrap();
+        self.client
+            .submit_anchor(relay, revision, &baby.key, proof.as_ref())
+            .await
+            .unwrap()
+    }
+
+    /// Submit `revision` of `baby` and return the refusal, if any.
     pub(crate) async fn try_anchor(
         &self,
         relay: &BlsSigner,
+        baby: &Baby,
         revision: &LightBlock,
-        key: &ConsensusPublicKey,
     ) -> Result<B256, RefusalKind> {
-        let submission = self
+        let submission = self.submit(relay, baby, revision).await;
+        self.outcome(submission).await
+    }
+
+    /// Report `baby`'s revision at `height` as a fork of `latest` and return the refusal, if any.
+    pub(crate) async fn try_report_fork(
+        &self,
+        relay: &BlsSigner,
+        baby: &Baby,
+        height: u64,
+        latest: &AnchorRecord,
+    ) -> Result<B256, RefusalKind> {
+        let submission = baby
             .client
-            .submit_anchor(relay, revision, key)
+            .report_fork(&self.client, relay, height, &baby.key, latest)
             .await
             .unwrap();
+        self.outcome(submission).await
+    }
+
+    async fn outcome(&self, submission: B256) -> Result<B256, RefusalKind> {
         match self
             .client
             .await_anchor(submission, &self.key, DEADLINE)
