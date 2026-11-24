@@ -28,7 +28,7 @@ own certificate.
 
 ## Anchors
 
-An anchor is a native request (or an EVM call) to the anchor precompile at
+An anchor is a native request to the anchor module at
 `0x0814`:
 
 ```solidity

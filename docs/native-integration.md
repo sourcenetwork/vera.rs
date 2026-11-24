@@ -6,7 +6,7 @@ below records the earlier September checks.
 
 This version set passed the focused local integration checks below on macOS
 arm64 on September 19, 2026. Validators, the Go gateway and Rust threshold
-services remain separate processes. Native fixtures disable legacy EVM execution.
+services remain separate processes.
 
 | Component | Revision | Build selection |
 |---|---|---|

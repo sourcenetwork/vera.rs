@@ -51,7 +51,7 @@ operator parameter that can change, and they are removed when the policy is
 deleted. Native recovery rejects a marker that is malformed, has a value, or
 names an unregistered object or an absent policy.
 
-Native and optional EVM execution supply this metadata through the same module
+Native execution supplies this metadata through the module
 command path. Delegated commands preserve the actor as owner and the worker as
 submission signer. Ownership amendment deletes the former owner's relationship
 key and writes the new key, keeping permission checks and certified owner-prefix
