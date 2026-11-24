@@ -80,7 +80,7 @@ impl BulletinCommand {
     pub(super) async fn run(self, ctx: &ClientContext) -> eyre::Result<()> {
         match self {
             Self::RegisterNamespace { namespace } => {
-                let bls = ctx.require_bls_signer()?;
+                let bls = ctx.require_bls_signer().await?;
                 let receipt = ctx
                     .client
                     .native_register_namespace(bls, &namespace)
@@ -98,7 +98,7 @@ impl BulletinCommand {
                 ctx.print_json(&json)?;
             }
             Self::AddCollaborator { namespace, did } => {
-                let bls = ctx.require_bls_signer()?;
+                let bls = ctx.require_bls_signer().await?;
                 let receipt = ctx
                     .client
                     .native_add_collaborator(bls, &namespace, &did)
@@ -106,7 +106,7 @@ impl BulletinCommand {
                 ctx.print_json(&receipt)?;
             }
             Self::RemoveCollaborator { namespace, did } => {
-                let bls = ctx.require_bls_signer()?;
+                let bls = ctx.require_bls_signer().await?;
                 let receipt = ctx
                     .client
                     .native_remove_collaborator(bls, &namespace, &did)
@@ -126,7 +126,7 @@ impl BulletinCommand {
             } => {
                 let payload_bytes = parse_optional_hex(&payload)?;
                 let proof_bytes = parse_optional_hex(&proof)?;
-                let bls = ctx.require_bls_signer()?;
+                let bls = ctx.require_bls_signer().await?;
                 let receipt = ctx
                     .client
                     .native_create_post(bls, &namespace, &payload_bytes, &proof_bytes, &artifact)

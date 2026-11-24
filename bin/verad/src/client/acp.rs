@@ -152,7 +152,7 @@ impl AcpCommand {
         match self {
             Self::CreatePolicy { yaml, file, nonce } => {
                 let policy_bytes = read_policy_input(yaml, file)?;
-                let bls = ctx.require_bls_signer()?;
+                let bls = ctx.require_bls_signer().await?;
                 let receipt = ctx
                     .client
                     .native_create_policy(bls, &policy_bytes, 1, nonce)
@@ -180,7 +180,7 @@ impl AcpCommand {
                 object_id,
             } => {
                 let id = vera_client::parse_policy_id(&policy_id)?;
-                let bls = ctx.require_bls_signer()?;
+                let bls = ctx.require_bls_signer().await?;
                 let receipt = ctx
                     .client
                     .native_register_object(bls, id, &object_id, &resource)
@@ -193,7 +193,7 @@ impl AcpCommand {
                 object_id,
             } => {
                 let id = vera_client::parse_policy_id(&policy_id)?;
-                let bls = ctx.require_bls_signer()?;
+                let bls = ctx.require_bls_signer().await?;
                 let receipt = ctx
                     .client
                     .native_archive_object(bls, id, &object_id, &resource)
@@ -223,7 +223,7 @@ impl AcpCommand {
                 actor,
             } => {
                 let id = vera_client::parse_policy_id(&policy_id)?;
-                let bls = ctx.require_bls_signer()?;
+                let bls = ctx.require_bls_signer().await?;
                 let receipt = ctx
                     .client
                     .native_set_relationship(bls, id, &resource, &object_id, &relation, &actor)
@@ -238,7 +238,7 @@ impl AcpCommand {
                 actor,
             } => {
                 let id = vera_client::parse_policy_id(&policy_id)?;
-                let bls = ctx.require_bls_signer()?;
+                let bls = ctx.require_bls_signer().await?;
                 let receipt = ctx
                     .client
                     .native_delete_relationship(bls, id, &resource, &object_id, &relation, &actor)
@@ -287,7 +287,7 @@ impl AcpCommand {
                 actor,
             } => {
                 let id = vera_client::parse_policy_id(&policy_id)?;
-                let bls = ctx.require_bls_signer()?;
+                let bls = ctx.require_bls_signer().await?;
                 let receipt = ctx
                     .client
                     .native_check_access(
