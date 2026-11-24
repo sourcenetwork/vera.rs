@@ -28,6 +28,15 @@ pub fn fork_key(deployment: &B256, block_hash: &B256) -> Vec<u8> {
     .concat()
 }
 
+/// The conflicting block whose fork record `key` names, when it is a fork key
+/// of `deployment`.
+#[must_use]
+pub fn fork_block_of_key(deployment: &B256, key: &[u8]) -> Option<B256> {
+    let block = key.strip_prefix(fork_prefix(deployment).as_slice())?;
+    let block = B256::from(<[u8; 32]>::try_from(hex::decode(block).ok()?).ok()?);
+    (fork_key(deployment, &block) == key).then_some(block)
+}
+
 /// A finalized block of a deployment that does not descend from the tip of
 /// its chain of anchors when the block was reported: its latest anchor, or
 /// the cut of a term certified since.

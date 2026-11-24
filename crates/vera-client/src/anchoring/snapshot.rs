@@ -134,7 +134,10 @@ impl VerifiedSnapshot {
 
     /// Refuse the snapshot when one of `terms`, the terms of the same
     /// deployment the caller read separately, voided the snapshot's anchor: it
-    /// was recorded before the term, above the term's cut.
+    /// was recorded before the term, above the term's cut. Only terms above
+    /// the anchor's own term can, so
+    /// [`crate::VeraClient::read_anchor_terms_above`] with `anchor.term` reads
+    /// every term this needs.
     pub fn ensure_kept(&self, terms: &[TermRecord]) -> Result<(), AnchoringError> {
         ensure_kept(&self.anchor, terms)
     }

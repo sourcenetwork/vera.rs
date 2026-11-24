@@ -31,7 +31,7 @@ pub use deployment::{
     DeploymentRecord, DeploymentRegistration, MAX_DEPLOYMENT_RECORD_BYTES, deployment_key,
 };
 pub use error::AnchorError;
-pub use fork::{ForkRecord, MAX_FORK_RECORD_BYTES, fork_key, fork_prefix};
+pub use fork::{ForkRecord, MAX_FORK_RECORD_BYTES, fork_block_of_key, fork_key, fork_prefix};
 pub use history::{AnchorEntry, MAX_ANCHOR_ENTRY_BYTES, anchor_entry_key, anchor_history_prefix};
 pub use record::{
     AnchorRecord, CONSENSUS_KEY_BYTES, MAX_ANCHOR_RECORD_BYTES, anchor_key, deployment_id,
@@ -41,7 +41,9 @@ pub use submitter::{
     AnchorSubmitterGrant, AnchorSubmitterRevocation, MAX_SUBMITTER_BYTES,
     MAX_SUBMITTER_RECORD_BYTES, SubmitterRecord, submitter_key, submitter_prefix,
 };
-pub use term::{Lineage, MAX_TERM_RECORD_BYTES, TermRecord, VerifiedTerm, term_key, term_prefix};
+pub use term::{
+    Lineage, MAX_TERM_RECORD_BYTES, TermRecord, VerifiedTerm, term_key, term_of_key, term_prefix,
+};
 
 use super::VeraModule;
 use crate::kv_store::ModuleKvStore as _;

@@ -232,3 +232,33 @@ fn a_block_the_certified_term_voids_is_no_fork_and_one_that_leaves_the_cut_is() 
         (1, 20, B256::repeat_byte(2))
     );
 }
+
+#[test]
+fn a_page_cursor_reads_back_only_canonical_term_and_fork_keys() {
+    let deployment = B256::repeat_byte(4);
+    let other = B256::repeat_byte(5);
+    assert_eq!(
+        term_of_key(&deployment, &term_key(&deployment, 0x2a)),
+        Some(0x2a)
+    );
+    assert_eq!(term_of_key(&deployment, &term_key(&other, 0x2a)), None);
+    let upper = [term_prefix(&deployment).as_slice(), b"000000000000002A"].concat();
+    assert_eq!(term_of_key(&deployment, &upper), None);
+    assert_eq!(term_of_key(&deployment, &term_prefix(&deployment)), None);
+
+    let block = B256::repeat_byte(0xab);
+    assert_eq!(
+        fork_block_of_key(&deployment, &fork_key(&deployment, &block)),
+        Some(block)
+    );
+    assert_eq!(
+        fork_block_of_key(&deployment, &fork_key(&other, &block)),
+        None
+    );
+    let upper = [
+        fork_prefix(&deployment).as_slice(),
+        "AB".repeat(32).as_bytes(),
+    ]
+    .concat();
+    assert_eq!(fork_block_of_key(&deployment, &upper), None);
+}

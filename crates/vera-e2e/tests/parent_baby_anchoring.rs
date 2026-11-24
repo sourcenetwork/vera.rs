@@ -266,9 +266,10 @@ async fn a_parent_orders_and_attests_the_policies_of_two_babies() {
     assert!(
         parent
             .client
-            .read_forks(&laptop_id, 0, &parent.key)
+            .read_forks(&laptop_id, B256::ZERO, 128, 0, &parent.key)
             .await
             .unwrap()
+            .entries
             .is_empty()
     );
     for height in [anchored, anchored + 2] {
@@ -292,9 +293,10 @@ async fn a_parent_orders_and_attests_the_policies_of_two_babies() {
     );
     let mut forks = parent
         .client
-        .read_forks(&laptop_id, 0, &parent.key)
+        .read_forks(&laptop_id, B256::ZERO, 128, 0, &parent.key)
         .await
-        .unwrap();
+        .unwrap()
+        .entries;
     forks.sort_by_key(|fork| fork.height);
     assert_eq!(forks.len(), 2);
     for (record, revision) in forks.iter().zip([&conflicting, &above]) {
@@ -308,9 +310,10 @@ async fn a_parent_orders_and_attests_the_policies_of_two_babies() {
     assert!(
         parent
             .client
-            .read_forks(&phone_id, 0, &parent.key)
+            .read_forks(&phone_id, B256::ZERO, 128, 0, &parent.key)
             .await
             .unwrap()
+            .entries
             .is_empty()
     );
 
@@ -379,9 +382,10 @@ async fn a_parent_orders_and_attests_the_policies_of_two_babies() {
     assert!(
         parent
             .client
-            .read_anchor_terms(&laptop_id, 0, &parent.key)
+            .read_anchor_terms(&laptop_id, 0, 128, 0, &parent.key)
             .await
             .unwrap()
+            .entries
             .is_empty()
     );
     parent
@@ -389,13 +393,23 @@ async fn a_parent_orders_and_attests_the_policies_of_two_babies() {
         .await
         .expect("the baby's operators certify the term");
 
-    // A third party reads the term with the parent's key alone and learns
-    // which snapshots it voided: those of anchors above the cut.
+    // A third party reads the terms above its anchors' term with the
+    // parent's key alone and learns which snapshots they voided: those of
+    // anchors above the cut.
     let terms = parent
         .client
-        .read_anchor_terms(&laptop_id, 0, &parent.key)
+        .read_anchor_terms_above(&laptop_id, 0, 0, &parent.key)
         .await
         .unwrap();
+    assert_eq!(
+        parent
+            .client
+            .read_anchor_terms(&laptop_id, 0, 128, 0, &parent.key)
+            .await
+            .unwrap()
+            .entries,
+        terms
+    );
     let [term] = terms.as_slice() else {
         panic!("one term is recorded");
     };

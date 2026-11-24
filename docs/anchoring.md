@@ -217,11 +217,18 @@ From then on:
   latest anchor record is not rewritten; a reader derives which are void from
   the term records.
 
-`VeraClient::submit_term_change` submits a certificate,
-`read_anchor_terms(deployment, minimum, s_key)` reads every term of a
-deployment as one complete-prefix proof, and `read_anchor_lineage` returns the
-latest anchor with the term certified last, whose `Lineage::tip` is what the
-next anchor must descend from.
+`VeraClient::submit_term_change` submits a certificate.
+`read_anchor_terms(deployment, from, limit, minimum, s_key)` reads up to 128
+consecutive terms from term `from` as one certified prefix page and returns
+the term the next page starts at, like `read_anchor_history`, and
+`read_anchor_terms_above(deployment, term, minimum, s_key)` reads every term
+above `term` page by page. Term records never change once recorded, so pages
+read at increasing revisions together hold every term up to the last one.
+`read_anchor_lineage` returns the latest anchor with the term certified last,
+whose `Lineage::tip` is what the next anchor must descend from. It reads three
+records with proof however many terms there are: the registration, whose
+`term` names the term certified last, that term's record and the latest
+anchor.
 
 A device that cannot prove the tip, because its history starts above it or
 more than 65,536 revisions past it, continues the chain by renewing its term:
@@ -264,8 +271,10 @@ hex(blockHash)`:
 | `reported_at` | Height of S's revision that recorded it |
 
 `VeraClient::report_fork`, called on the device that holds the other history,
-builds the report, and `VeraClient::read_forks(deployment, minimum, s_key)`
-reads every fork of a deployment as one complete-prefix proof, so a reader
+builds the report, and `VeraClient::read_forks(deployment, from, limit,
+minimum, s_key)` reads up to 128 forks of a deployment, ordered by the
+conflicting block's identifier from `from` (zero for the first page), as one
+certified prefix page with the identifier the next page starts at, so a reader
 that trusts only S's key learns that D's key finalized two histories and which
 blocks they are. A fork record does not move the tip or stop later anchors.
 
@@ -347,12 +356,15 @@ S held that revision as D's latest anchor at S's stated revision. A reader:
   snapshot below it: `VerifiedSnapshot::ensure_current(&latest)` returns
   `Stale` when `latest` is newer, and `Conflict` if S ever shows two records
   with one sequence;
-- reads D's terms and refuses a snapshot whose anchor one of them voided:
+- reads D's terms above the snapshot anchor's own term
+  (`read_anchor_terms_above(deployment, anchor.term, ...)`; a term at or
+  below it was recorded before the anchor and cannot void it) and refuses a
+  snapshot whose anchor one of them voided:
   `VerifiedSnapshot::ensure_kept(&terms)` returns `Superseded` with the term.
   The latest anchor record itself can be a superseded one until the new term's
   first anchor lands, so a reader checks both;
 - asks S for the latest anchor and the terms (`read_latest_anchor`,
-  `read_anchor_terms`) whenever it is online, with its last-seen S height as
+  `read_anchor_terms_above`) whenever it is online, with its last-seen S height as
   the minimum;
 - decides how old an anchor it accepts offline, from the anchor's `timestamp`
   and the S revision's timestamp.
@@ -374,7 +386,8 @@ also running elsewhere. A snapshot never reflects changes D has not anchored.
 | `vera_sendNativeTx` to `0x0814` / `report_fork` | D and S | Record a fork |
 | `vera_getCurrentRecordProof` / `read_latest_anchor` | S | Latest anchor with proof |
 | `vera_getCurrentPrefixPageProof` / `read_anchor_history` | S | A page of anchors in order |
-| `vera_getCurrentPrefixProof` / `read_anchor_terms`, `read_anchor_lineage`, `read_forks` | S | Terms, tip and forks with proof |
+| `vera_getCurrentPrefixPageProof` / `read_anchor_terms`, `read_anchor_terms_above`, `read_forks` | S | Pages of terms and forks with proof |
+| `vera_getCurrentRecordProof` / `read_anchor_lineage` | S | Tip: registration, certified term and latest anchor with proof |
 | `publish_policy_snapshot` | D and S | The five steps above |
 | `AnchoredSnapshot::decode`, `verify`; `VerifiedSnapshot::check`, `ensure_current`, `ensure_kept` | Anywhere | Relay, verify and evaluate |
 
@@ -406,7 +419,9 @@ a release that knows them.
 - S decodes one block format. Accepting an older or newer format of D would
   be a second decoder in `vera_domain::light_block::decode_block`, selected by
   the block's first byte; nothing activates a format in protocol.
-- History, terms and forks are never pruned (see above for the size).
+- History, terms and forks are never pruned (see above for the size). Every
+  read of them is a page or a single record, so no read stops working as they
+  grow.
 - The anchor evidence carries S's whole block, so a snapshot is as large as S's
   block at the revision it was read at.
 - Only one policy per snapshot, at most 4,096 records.

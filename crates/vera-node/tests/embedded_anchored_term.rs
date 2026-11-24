@@ -268,9 +268,10 @@ async fn a_device_switch_is_anchored_under_its_certificate_and_continues_from_it
     // The handover lost no block, so the term voids no anchor.
     let terms = anchoring
         .client
-        .read_anchor_terms(&deployment, 0, &anchoring.key)
+        .read_anchor_terms(&deployment, 0, 128, 0, &anchoring.key)
         .await
-        .unwrap();
+        .unwrap()
+        .entries;
     assert_eq!(terms.len(), 1);
     for anchor in [&first_anchor, &latest] {
         assert!(!terms[0].supersedes(anchor.sequence, anchor.height, &anchor.block_hash));

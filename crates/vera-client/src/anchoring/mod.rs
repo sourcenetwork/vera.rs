@@ -26,11 +26,11 @@ use vera_permission::{
 };
 
 pub use error::AnchoringError;
-pub use fork::encode_fork_report;
+pub use fork::{ForkPage, encode_fork_report};
 pub use history::AnchorPage;
 pub use key::{anchored_key, deployment_id};
 pub use snapshot::{ANCHORED_SNAPSHOT_BYTES, AnchoredSnapshot, VerifiedSnapshot};
-pub use term::encode_term_change;
+pub use term::{TermPage, encode_term_change};
 
 use crate::{BlsSigner, ClientError, VeraClient, client::ANCHOR_ADDRESS};
 

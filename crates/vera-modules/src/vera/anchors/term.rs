@@ -34,6 +34,16 @@ pub fn term_key(deployment: &B256, term: u64) -> Vec<u8> {
     .concat()
 }
 
+/// The term whose record `key` names, when it is a term key of `deployment`.
+#[must_use]
+pub fn term_of_key(deployment: &B256, key: &[u8]) -> Option<u64> {
+    key.strip_prefix(term_prefix(deployment).as_slice())
+        .and_then(|term| std::str::from_utf8(term).ok())
+        .filter(|term| term.len() == 16)
+        .and_then(|term| u64::from_str_radix(term, 16).ok())
+        .filter(|term| term_key(deployment, *term) == key)
+}
+
 /// A term change whose certificate the caller verified against the
 /// deployment's registered genesis block and operator policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

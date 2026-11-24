@@ -4,9 +4,10 @@ use alloy_primitives::{B256, Bytes};
 use alloy_sol_types::SolCall as _;
 use vera_domain::{AncestryProof, ConsensusPublicKey, LightBlock, ModuleId};
 use vera_modules::vera::anchors::{
-    ForkRecord, MAX_ANCHOR_ARTIFACT_BYTES, abi::IAnchor, fork_prefix,
+    AnchorError, ForkRecord, MAX_ANCHOR_ARTIFACT_BYTES, abi::IAnchor, fork_block_of_key, fork_key,
+    fork_prefix,
 };
-use vera_permission::RECORD_PROOF_BYTES;
+use vera_permission::{MAX_PAGE_RECORDS, PAGE_PROOF_BYTES, PrefixPageRequest};
 
 use super::AnchoringError;
 use crate::{BlsSigner, ClientError, VeraClient, client::ANCHOR_ADDRESS};
@@ -78,38 +79,68 @@ impl VeraClient {
             .await
     }
 
-    /// Read every fork of `deployment` this deployment recorded, verified
-    /// against its `trusted` key at a revision of at least `minimum_height`.
+    /// Read up to `limit` forks of `deployment` this deployment recorded,
+    /// ordered by the conflicting block's identifier and starting at `from`
+    /// ([`B256::ZERO`] for the first page), verified against its `trusted` key
+    /// at a revision of at least `minimum_height`.
+    ///
+    /// The page's proof shows no fork between its entries. A later page is
+    /// read at a later revision, so pass the returned `revision` as its
+    /// minimum. A fork recorded between two pages appears in a later one only
+    /// when its identifier sorts after the page that was read.
     pub async fn read_forks(
         &self,
         deployment: &B256,
+        from: B256,
+        limit: u16,
         minimum_height: u64,
         trusted: &ConsensusPublicKey,
-    ) -> Result<Vec<ForkRecord>, ClientError> {
-        let prefix = fork_prefix(deployment);
-        let response = self
-            .read_current_prefix(
-                ModuleId::Vera,
-                &prefix,
-                minimum_height,
-                trusted,
-                RECORD_PROOF_BYTES,
-            )
+    ) -> Result<ForkPage, ClientError> {
+        let request = PrefixPageRequest {
+            module: ModuleId::Vera,
+            start: fork_key(deployment, &from).into(),
+            prefix: fork_prefix(deployment).into(),
+            limit: limit.clamp(1, MAX_PAGE_RECORDS),
+        };
+        let (response, page) = self
+            .verified_prefix_page(&request, minimum_height, trusted, PAGE_PROOF_BYTES)
             .await?;
-        let evidence = response.verify(
-            ModuleId::Vera,
-            &prefix,
-            minimum_height,
-            &self.established(trusted),
-            RECORD_PROOF_BYTES,
-        )?;
-        evidence
+        let entries = page
             .entries
             .iter()
             .map(|entry| {
-                ForkRecord::decode(deployment, &entry.value)
-                    .map_err(|error| AnchoringError::from(error).into())
+                let record = ForkRecord::decode(deployment, &entry.value)?;
+                if fork_key(deployment, &record.block_hash) != entry.key {
+                    return Err(AnchorError::MalformedRecord);
+                }
+                Ok(record)
             })
-            .collect()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(AnchoringError::from)?;
+        let next = page
+            .continuation
+            .map(|key| {
+                fork_block_of_key(deployment, &key)
+                    .ok_or(ClientError::InvalidResponse("fork continuation"))
+            })
+            .transpose()?;
+        Ok(ForkPage {
+            entries,
+            next,
+            revision: response.revision.height,
+        })
     }
+}
+
+/// Forks of one deployment, proven at one finalized revision of the
+/// deployment that recorded them.
+#[derive(Clone, Debug)]
+pub struct ForkPage {
+    /// The forks, ordered by the conflicting block's identifier.
+    pub entries: Vec<ForkRecord>,
+    /// Identifier the next page starts at, or `None` when the deployment had
+    /// no later fork at `revision`.
+    pub next: Option<B256>,
+    /// Height of the revision the page was read at.
+    pub revision: u64,
 }
