@@ -16,7 +16,7 @@ use anchor::Parent;
 use baby::{Baby, block_hash};
 use vera_client::{
     AccessRequest, Actor, BlsSigner, Object, Operation, RefusalKind, VeraClient,
-    anchoring::{AnchoredSnapshot, AnchoringError, deployment_id},
+    anchoring::{AnchorEntry, AnchoredSnapshot, AnchoringError, deployment_id},
 };
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, TestCluster};
 
@@ -144,8 +144,8 @@ async fn a_parent_orders_and_attests_the_policies_of_two_babies() {
         .unwrap();
     assert_eq!(recorded.timestamp, third.parent_time);
 
-    // The parent's state holds only the newest anchor. The older ones remain
-    // provable, in order, from the parent's certified receipts.
+    // The certified receipt of each anchor carries its event and the time of
+    // the parent's revision that recorded it.
     for version in versions {
         let (event, time) = parent.anchored_event(version.submission).await;
         assert_eq!(event.sequence, version.record.sequence);
@@ -290,6 +290,37 @@ async fn a_parent_orders_and_attests_the_policies_of_two_babies() {
         newest.ensure_current(&latest().await),
         Err(AnchoringError::Stale { held: 3, latest: 4 })
     ));
+
+    // The parent keeps every anchor. A third party pages through the laptop's
+    // policy versions in order with the parent's key alone.
+    let page = parent
+        .client
+        .read_anchor_history(&laptop_id, 1, 3, 0, &parent.key)
+        .await
+        .unwrap();
+    assert_eq!((page.entries.len(), page.next), (3, Some(4)));
+    let rest = parent
+        .client
+        .read_anchor_history(&laptop_id, 4, 3, page.revision, &parent.key)
+        .await
+        .unwrap();
+    assert_eq!((rest.entries.len(), rest.next), (1, None));
+    assert!(rest.revision >= page.revision);
+    let history = [page.entries, rest.entries].concat();
+    for (entry, version) in history.iter().zip([&first, &second, &third, &fourth]) {
+        assert_eq!(*entry, AnchorEntry::from(&version.record));
+        assert_eq!(entry.anchored_at, version.parent_height);
+    }
+    let phone_history = parent
+        .client
+        .read_anchor_history(&phone_id, 1, 16, 0, &parent.key)
+        .await
+        .unwrap();
+    assert_eq!(
+        phone_history.entries,
+        [AnchorEntry::from(&phone_first.record)]
+    );
+    assert_eq!(phone_history.next, None);
 
     for node in [fork, laptop, phone] {
         node.node.stop().await.unwrap();

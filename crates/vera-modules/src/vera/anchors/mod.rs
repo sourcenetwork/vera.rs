@@ -6,7 +6,8 @@
 //! and the proof against the block; this module then records the revision
 //! when it is higher than the latest anchor, descends from it, and its term
 //! is not lower. A finalized block that does not descend from the latest
-//! anchor is recorded as a fork. Records are kept in the identity partition
+//! anchor is recorded as a fork. Every anchor stays in the deployment's
+//! history, in sequence order. Records are kept in the identity partition
 //! under the deployment's identifier, which is derived from the key, so
 //! nobody can record revisions under another deployment's identifier.
 
@@ -14,6 +15,7 @@
 pub mod abi;
 mod error;
 mod fork;
+mod history;
 mod record;
 mod revision;
 #[cfg(test)]
@@ -21,6 +23,7 @@ mod tests;
 
 pub use error::AnchorError;
 pub use fork::{ForkRecord, MAX_FORK_RECORD_BYTES, fork_key, fork_prefix};
+pub use history::{AnchorEntry, MAX_ANCHOR_ENTRY_BYTES, anchor_entry_key, anchor_history_prefix};
 pub use record::{
     AnchorRecord, CONSENSUS_KEY_BYTES, MAX_ANCHOR_RECORD_BYTES, anchor_key, deployment_id,
 };
@@ -99,6 +102,7 @@ impl VeraModule {
             anchored_at: block_ctx.timestamp.block_height,
         };
         self.store.put(&anchor_key(&deployment), record.encode());
+        self.append_anchor_entry(&record);
         Ok(Anchored {
             record,
             recorded: true,

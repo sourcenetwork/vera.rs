@@ -3,6 +3,7 @@
 
 mod error;
 mod fork;
+mod history;
 mod key;
 mod snapshot;
 #[cfg(test)]
@@ -14,7 +15,7 @@ use alloy_primitives::{B256, Bytes};
 use alloy_sol_types::SolCall as _;
 use commonware_codec::Encode as _;
 use vera_domain::{AncestryProof, ConsensusPublicKey, LightBlock, ModuleId};
-pub use vera_modules::vera::anchors::{AnchorRecord, ForkRecord};
+pub use vera_modules::vera::anchors::{AnchorEntry, AnchorRecord, ForkRecord};
 use vera_modules::vera::anchors::{MAX_ANCHOR_ARTIFACT_BYTES, abi::IAnchor, anchor_key};
 use vera_permission::{
     POLICY_SNAPSHOT_RESPONSE_BYTES, PolicySnapshotResponse, RECORD_PROOF_BYTES, RecordResponse,
@@ -22,6 +23,7 @@ use vera_permission::{
 
 pub use error::AnchoringError;
 pub use fork::encode_fork_report;
+pub use history::AnchorPage;
 pub use key::{anchored_key, deployment_id};
 pub use snapshot::{ANCHORED_SNAPSHOT_BYTES, AnchoredSnapshot, VerifiedSnapshot};
 
