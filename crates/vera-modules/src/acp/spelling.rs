@@ -98,6 +98,13 @@ pub(super) fn command(policy: &Policy, command: &mut PolicyCmd) {
         PolicyCmd::RegisterObject(named)
         | PolicyCmd::ArchiveObject(named)
         | PolicyCmd::UnarchiveObject(named) => object(policy, named),
+        PolicyCmd::RegisterUnderParent {
+            object: child,
+            parent,
+        } => {
+            object(policy, child);
+            object(policy, parent);
+        }
         PolicyCmd::RevealRegistration { proof, .. } => object(policy, &mut proof.object),
         PolicyCmd::CommitRegistrations { .. } | PolicyCmd::FlagHijackAttempt { .. } => {}
     }

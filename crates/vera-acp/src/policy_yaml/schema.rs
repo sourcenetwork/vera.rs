@@ -49,7 +49,62 @@ pub(super) fn validate(policy: &ParsedPolicy) -> Result<()> {
     for resource in &policy.resources {
         validate_references(&resource.relations, &names)?;
     }
-    validate_references(&policy.actor.relations, &names)
+    validate_references(&policy.actor.relations, &names)?;
+    validate_create_rules(policy, &names)
+}
+
+fn validate_create_rules(
+    policy: &ParsedPolicy,
+    names: &HashMap<&str, HashSet<&str>>,
+) -> Result<()> {
+    let mut parents = HashMap::new();
+    for resource in &policy.resources {
+        let Some(rule) = &resource.create else {
+            continue;
+        };
+        let relation = resource
+            .relations
+            .iter()
+            .find(|relation| relation.name == rule.parent)
+            .ok_or_else(|| {
+                invalid(format!(
+                    "unknown parent relation '{}.{}'",
+                    resource.name, rule.parent
+                ))
+            })?;
+        let [parent] = relation.types.as_slice() else {
+            return Err(invalid(
+                "a create rule requires exactly one parent object type",
+            ));
+        };
+        let parent = parent.trim();
+        if parent == "actor" || !names.contains_key(parent) {
+            return Err(invalid(format!("invalid parent object type '{parent}'")));
+        }
+        if !names[parent].contains(rule.requires.as_str()) {
+            return Err(invalid(format!(
+                "unknown parent permission '{parent}.{}'",
+                rule.requires
+            )));
+        }
+        parents.insert(resource.name.as_str(), parent);
+    }
+    let mut complete = HashSet::new();
+    for resource in &policy.resources {
+        let mut path = HashSet::new();
+        let mut current = resource.name.as_str();
+        while let Some(&parent) = parents.get(current) {
+            if complete.contains(current) {
+                break;
+            }
+            if !path.insert(current) {
+                return Err(invalid(format!("cycle in create rules at '{current}'")));
+            }
+            current = parent;
+        }
+        complete.extend(path);
+    }
+    Ok(())
 }
 
 fn relation_names(relations: &[PolicyRelation], with_owner: bool) -> Result<HashSet<&str>> {
@@ -93,4 +148,35 @@ fn validate_references(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::policy_yaml::parse_policy_yaml;
+
+    fn validate_rule(parent_type: &str, requires: &str) -> Result<()> {
+        let yaml = format!(
+            "name: p\nresources:\n- name: node\n  permissions: [{{name: enroll}}]\n- name: job\n  relations: [{{name: parent, types: [{parent_type}]}}]\n  create: {{parent: parent, requires: {requires}}}\n"
+        );
+        validate(&parse_policy_yaml(&yaml).unwrap())
+    }
+
+    #[test]
+    fn a_create_rule_uses_one_parent_object_and_a_known_permission() {
+        assert!(validate_rule("node", "owner").is_ok());
+        assert!(validate_rule("node", "enroll").is_ok());
+        for (parent, requires) in [
+            ("node", "missing"),
+            ("actor", "owner"),
+            ("node->enroll", "owner"),
+            ("node, job", "owner"),
+            ("job", "owner"),
+        ] {
+            assert!(
+                validate_rule(parent, requires).is_err(),
+                "{parent} {requires}"
+            );
+        }
+    }
 }

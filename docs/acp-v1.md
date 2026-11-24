@@ -40,6 +40,33 @@ grant, or revealing a registration. A repeated grant returns its original metada
 Theorem, catalogue and relationship-page queries have `VeraClient` methods; their
 convenience responses do not carry independent finality proofs.
 
+## Registering a child under a parent
+
+A child resource can declare a creation rule. For example, a session can
+require the actor to hold `start_session` on its agent.
+
+```yaml
+name: agents
+resources:
+  - name: agent
+    permissions: [{name: start_session, expr: owner}]
+  - name: session
+    relations: [{name: agent, types: [agent]}]
+    create: {parent: agent, requires: start_session}
+```
+
+Use `VeraClient::native_register_under_parent` with the child and parent
+objects. Vera evaluates the acting identity against the active parent before
+writing either the child's owner or its parent relationship. Both writes
+commit together. Adding a parent link later also requires authority on its
+target. Direct registration and commitment reveals cannot create a gated
+resource without naming the parent. Resources without a creation rule retain
+their existing registration semantics and policy hashes.
+
+A certified receipt attests the command outcome. A proof of a current
+relationship attests its state at the queried revision. Independently
+replaying the original authorization decision requires the pre-command state.
+
 ## Authority and ordering
 
 ```mermaid
