@@ -61,6 +61,17 @@ async fn registration_workflow(pruning: bool) {
         .nodes(4)
         .seed(deployment)
         .chain_id(deployment)
+        // The retention below covers one epoch only when epochs are this short,
+        // and two-view terms give each of the four members a term in one.
+        .genesis(
+            vera_e2e::cluster::GenesisBuilder::devnet()
+                .blocks_per_epoch(20)
+                .simplex(vera_domain::SimplexParameters {
+                    term_length: 2,
+                    optimistic_views: 1,
+                    ..Default::default()
+                }),
+        )
         .preset(ConsensusPreset::Normal)
         .node_initializer(move |dir, _| {
             if pruning {
