@@ -108,6 +108,120 @@ mod tests {
     use super::*;
 
     #[test]
+    fn individual_publisher_rejects_wildcard() {
+        let mut module = AcpModule::new();
+        let owner = Did::new("did:key:first").unwrap();
+        let policy = module.create_policy(&owner,
+            "name: devices\nresources:\n- name: node\n  relations: [{name: publisher, types: [actor:individual]}]\n- name: record\n  relations: [{name: parent, types: [node]}]\n  create: {parent: parent, requires: publisher}\n",
+            PolicyMarshalingType::ShortYaml, Default::default()).unwrap().policy.id;
+        let legacy = module.create_policy(&owner,
+            "name: legacy\nresources:\n- name: node\n  relations: [{name: publisher, types: [actor]}]\n",
+            PolicyMarshalingType::ShortYaml, Default::default()).unwrap().policy.id;
+        module
+            .direct_policy_cmd(
+                &owner,
+                &legacy,
+                PolicyCmd::RegisterObject(Object {
+                    resource: "node".into(),
+                    id: "legacy".into(),
+                }),
+            )
+            .unwrap();
+        let old_wildcard =
+            Relationship::new("node", "legacy", "publisher", vera_acp::Subject::Wildcard);
+        module
+            .direct_policy_cmd(&owner, &legacy, PolicyCmd::SetRelationship(old_wildcard))
+            .unwrap();
+        module
+            .direct_policy_cmd(
+                &owner,
+                &policy,
+                PolicyCmd::RegisterObject(Object {
+                    resource: "node".into(),
+                    id: "a".into(),
+                }),
+            )
+            .unwrap();
+        let wildcard = Relationship::new("node", "a", "publisher", vera_acp::Subject::Wildcard);
+        assert!(
+            module
+                .direct_policy_cmd(&owner, &policy, PolicyCmd::SetRelationship(wildcard))
+                .is_err()
+        );
+        let device = Did::new("did:key:second").unwrap();
+        let individual = Relationship::new(
+            "node",
+            "a",
+            "publisher",
+            vera_acp::Subject::entity(device.clone()),
+        );
+        module
+            .direct_policy_cmd(&owner, &policy, PolicyCmd::SetRelationship(individual))
+            .unwrap();
+        module
+            .direct_policy_cmd(
+                &device,
+                &policy,
+                PolicyCmd::RegisterUnderParent {
+                    object: Object {
+                        resource: "record".into(),
+                        id: "s".into(),
+                    },
+                    parent: Object {
+                        resource: "node".into(),
+                        id: "a".into(),
+                    },
+                },
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn parent_relation_requires_an_explicit_grant() {
+        let mut module = AcpModule::new();
+        let owner = Did::new("did:key:first").unwrap();
+        let publisher = Did::new("did:key:second").unwrap();
+        let policy = module.create_policy(
+            &owner,
+            "name: devices\nresources:\n- name: node\n  relations: [{name: publisher, types: [actor]}]\n- name: record\n  relations: [{name: parent, types: [node]}]\n  create: {parent: parent, requires: publisher}\n",
+            PolicyMarshalingType::ShortYaml, Default::default(),
+        ).unwrap().policy.id;
+        let parent = Object {
+            resource: "node".into(),
+            id: "a".into(),
+        };
+        module
+            .direct_policy_cmd(&owner, &policy, PolicyCmd::RegisterObject(parent.clone()))
+            .unwrap();
+        let child = Object {
+            resource: "record".into(),
+            id: "s".into(),
+        };
+        let cmd = PolicyCmd::RegisterUnderParent {
+            object: child,
+            parent: parent.clone(),
+        };
+        assert!(matches!(
+            module.direct_policy_cmd(&owner, &policy, cmd.clone()),
+            Err(AcpError::Unauthorized { .. })
+        ));
+        assert!(matches!(
+            module.direct_policy_cmd(&publisher, &policy, cmd.clone()),
+            Err(AcpError::Unauthorized { .. })
+        ));
+        let grant = Relationship::new(
+            "node",
+            "a",
+            "publisher",
+            vera_acp::Subject::entity(publisher.clone()),
+        );
+        module
+            .direct_policy_cmd(&owner, &policy, PolicyCmd::SetRelationship(grant))
+            .unwrap();
+        module.direct_policy_cmd(&publisher, &policy, cmd).unwrap();
+    }
+
+    #[test]
     fn only_an_authorized_parent_registration_creates_the_child() {
         let mut module = AcpModule::new();
         let owner = Did::new("did:key:first").unwrap();

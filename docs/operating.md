@@ -524,7 +524,12 @@ workloads and measurement boundaries.
 
 - `validator.key` and `secrets.json` are created with owner-only permissions.
   On Unix, startup rejects symlinks, non-regular files, hard links and group or
-  other access to existing private material. Reads check the opened descriptor
+  other access to existing private material, and require its owner to match the
+  daemon's effective user ID. On macOS, private files must also have no extended
+  ACL, including ACLs inherited from the parent directory; secret writes reject
+  an inherited ACL before writing material. These checks assume the filesystem
+  enforces file ownership and permissions and the data directory is protected
+  against modification by other users. Reads check the opened descriptor
   before decoding; they do not repair permissions. Restore independent files
   with owner-only permissions (`chmod 600`), and protect the data directory and
   its parents from other writers. Keep the data directory off shared storage.

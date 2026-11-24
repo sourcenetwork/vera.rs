@@ -58,10 +58,17 @@ resources:
 Use `VeraClient::native_register_under_parent` with the child and parent
 objects. Vera evaluates the acting identity against the active parent before
 writing either the child's owner or its parent relationship. Both writes
-commit together. Adding a parent link later also requires authority on its
-target. Direct registration and commitment reveals cannot create a gated
+commit together. Registration fixes the child's parent. Subsequent relationship
+commands cannot add a second parent, replace the original, or remove it.
+Direct registration and commitment reveals cannot create a gated
 resource without naming the parent. Resources without a creation rule retain
 their existing registration semantics and policy hashes.
+
+To require individual delegation, declare a direct relation on the parent,
+such as `{name: publisher, types: [actor:individual]}`, and set the child's
+`requires` to `publisher`. Each acting DID needs its own grant. Vera rejects
+a wildcard grant to that relation. Use `[actor]` for relations that also
+accept an all-actors grant.
 
 A certified receipt attests the command outcome. A proof of a current
 relationship attests its state at the queried revision. Independently
