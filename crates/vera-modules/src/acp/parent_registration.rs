@@ -130,7 +130,7 @@ mod tests {
             .unwrap();
         let cmd = PolicyCmd::RegisterUnderParent {
             object: child.clone(),
-            parent: parent.clone(),
+            parent,
         };
         let before = module.store.serialize();
         assert!(
@@ -145,7 +145,7 @@ mod tests {
         let reveal = PolicyCmd::RevealRegistration {
             registrations_commitment_id: 1,
             proof: types::RegistrationProof {
-                object: child.clone(),
+                object: child,
                 leaf_count: 1,
                 leaf_index: 0,
                 merkle_proof: vec![],
