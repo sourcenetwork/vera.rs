@@ -1061,7 +1061,7 @@ Add `commonware_utils::sync=info` only when lock attribution is needed; its
 higher event volume can substantially perturb the workload.
 Span-close events report busy and idle time for database apply/finalize and
 labelled lock acquisition. The database index follows `OrderedDatabases` order:
-accounts, storage, code, ACP, bulletin, identity, native sequences, commitment.
+ACP, bulletin, identity, native sequences, commitment.
 Idle time includes awaited I/O and scheduling; it is not a direct disk-latency
 measurement. Tracing is off by default and recorded in workload provenance.
 Do not treat traced runs as throughput qualification.
@@ -1156,7 +1156,7 @@ measure acquisition, not guard holding. Enabled blob completion spans retain
 parent finalize and start-sync spans beyond function return, so their close events
 may fall outside the originating window. `persistent_finalize_window_samples`
 counts captured persistent-partition finalize closes;
-`incomplete_persistent_finalize_windows` counts windows missing any of the seven
+`incomplete_persistent_finalize_windows` counts windows missing any of the four
 persistent partitions. `persistent_finalize_window_coverage_complete` is false
 when that coverage is incomplete. Missing samples are not zero-duration work or
 evidence comparable to a trace without these retained children.

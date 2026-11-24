@@ -138,7 +138,7 @@ A successful Linux job does not replace the other release gates.
 | `validator.key` | Ed25519 consensus identity (32 bytes, owner-only) |
 | `secrets.json` | BLS shares and DKG state (owner-only, atomic writes) |
 | `history/` | Durable execution and finalization records |
-| `native-genesis.bin` | Published after all seven partitions first seal |
+| `native-genesis.bin` | Published after all four partitions first seal |
 
 `config.toml` and `genesis.json` reject keys they do not define, so a misspelled
 section fails at startup instead of selecting its default. `genesis.json` must
@@ -432,8 +432,8 @@ It restores only its own queue, checks all replica records and requires the
 affected member for a subsequent quorum. This is local transport-fault coverage;
 real WAN latency and capacity measurements still require separate hosts.
 
-The ordered-state recovery unit test separately exercises all 128 durable
-subsets of the seven journals after an interrupted generation. It checks the
+The ordered-state recovery unit test separately exercises all 16 durable
+subsets of the four journals after an interrupted generation. It checks the
 actual persisted targets, rejects unanchored state, recovers the selected anchor
 before publishing query state, and verifies subsequent writes and reopening.
 This models completed partition writes around a process exit; it does not

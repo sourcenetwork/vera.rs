@@ -67,7 +67,10 @@ def source_storage_version(source, revision):
 
 
 def source_block_encoding(source, revision):
-    """The block encoding at this revision: 2 when a block carries its term, else 1.
+    """The block encoding at this revision.
+
+    3 when a block carries its term and no account state root, 2 when it
+    carries both, 1 when it carries no term.
 
     A runner decodes blocks and finality artifacts in its own encoding, so it
     cannot verify a node of the other one.
@@ -79,7 +82,12 @@ def source_block_encoding(source, revision):
     terms = re.findall(r'^[ \t]*pub\s+term\s*:\s*([^,\n]+),', blocks[0], re.MULTILINE)
     if len(terms) > 1 or (terms and terms[0].strip() != 'u64'):
         raise ValueError('unrecognized block term field')
-    return 2 if terms else 1
+    roots = re.findall(r'^[ \t]*pub\s+state_root\s*:', blocks[0], re.MULTILINE)
+    if len(roots) > 1:
+        raise ValueError('unrecognized block state root field')
+    if not terms:
+        return 1
+    return 2 if roots else 3
 
 
 def source_receipt_commitment(source, revision):
@@ -145,7 +153,7 @@ def baseline_incompatible(identity):
             return True
     present = ['block_encoding' in identity[side] for side in ('head', 'base')]
     if any(present):
-        if not all(present) or any(identity[side]['block_encoding'] not in (1, 2) or
+        if not all(present) or any(identity[side]['block_encoding'] not in (1, 2, 3) or
                                    type(identity[side]['block_encoding']) is not int
                                    for side in ('head', 'base')):
             raise ValueError('incomplete block encoding provenance')

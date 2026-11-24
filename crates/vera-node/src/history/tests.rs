@@ -38,7 +38,7 @@ pub(super) fn block(height: u64, parent: BlockId) -> Block {
         txs: Vec::new(),
         payload: None,
         native_targets: Default::default(),
-        receipt_commitment: alloy_primitives::B256::ZERO,
+        receipt_commitment: vera_executor::receipt_commitment(100, &[]),
     }
 }
 

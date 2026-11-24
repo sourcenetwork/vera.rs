@@ -127,11 +127,13 @@ pub struct RelationshipRecord {
 
     def test_block_encoding_is_read_from_the_recorded_revision(self):
         block = 'pub struct Block {\n    pub height: u64,\n    pub timestamp: u64,\n%s    pub txs: Vec<Tx>,\n}\n'
-        for term, expected in (('    pub term: u64,\n', 2), ('', 1)):
-            with patch('protocol.subprocess.check_output', return_value=block % term) as git:
+        term, root = '    pub term: u64,\n', '    pub state_root: StateRoot,\n'
+        for fields, expected in ((term, 3), (term + root, 2), (root, 1), ('', 1)):
+            with patch('protocol.subprocess.check_output', return_value=block % fields) as git:
                 self.assertEqual(source_block_encoding('.', 'revision'), expected)
             self.assertEqual(git.call_args.args[0], ['git', 'show', f'revision:{BLOCK}'])
-        for invalid in ('', block % '    pub term: u32,\n', (block % '') * 2):
+        for invalid in ('', block % '    pub term: u32,\n', block % (root + root),
+                        (block % root) * 2):
             with patch('protocol.subprocess.check_output', return_value=invalid):
                 with self.assertRaisesRegex(ValueError, 'block'):
                     source_block_encoding('.', 'revision')

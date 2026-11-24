@@ -277,7 +277,7 @@ The channel a catching-up device fetches finalized blocks and certificates
 on keeps at least the daemon's burst on every node with a peer, whatever
 `channel_burst` says: with a burst of one, all but one of the answers to its
 parallel requests are dropped and it advances by one fetch timeout per
-block. The seven channels that transfer state and the one that transfers
+block. The four channels that transfer state and the one that transfers
 history keep a burst of at least eight on such a node, the requests a
 transfer keeps outstanding for each database, for the same reason; see
 [snapshot recovery](snapshot-recovery.md).

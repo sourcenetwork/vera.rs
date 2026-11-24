@@ -345,7 +345,7 @@ like the [host-held share](embedded-node.md#the-share-after-the-first-epoch).
   `term_certificate()` the certificate of that term. `vera_getTermCertificate`
   returns the certificate over RPC, and `VeraClient::term_certificate`
   fetches it.
-- Devices ask each other where they stand on p2p channel 17: a question, and
+- Devices ask each other where they stand on p2p channel 14: a question, and
   an answer with the newest block and the newest certificate. The active
   device uses it to confirm a successor is current.
 - A backup that holds a certificate refuses a finalized block above the cut

@@ -282,7 +282,7 @@ print({help_text!r} if sys.argv[1:] == ['validator', '--help'] else {side!r})
         self.measure(workloads=4)
         identity = json.loads((self.output / 'comparison.json').read_text())
         self.assertEqual(identity['base']['block_encoding'], 1)
-        self.assertEqual(identity['head']['block_encoding'], 2)
+        self.assertEqual(identity['head']['block_encoding'], 3)
         for tag in ('base1', 'base2'):
             for objects in (0, 32):
                 directory = self.output / tag / f'objects-{objects}'

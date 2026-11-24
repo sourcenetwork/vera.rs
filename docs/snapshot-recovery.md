@@ -20,7 +20,7 @@ and later consensus progress; they do not request another snapshot.
 ## Startup sequence
 
 1. The DKG probe authenticates a synchronization floor against the provisioned
-   consensus identity. Commonware synchronizes the seven storage partitions and
+   consensus identity. Commonware synchronizes the four storage partitions and
    may advance the selected revision as finalizations arrive.
 2. After storage verifies the final selected roots, its handoff imports history
    through that exact revision. Every record must match the selected ancestry,
@@ -100,7 +100,7 @@ answered at once. A request refused at once is retried after the 100 ms
 retry delay, by when a busy deployment has finalized the next block, so the
 transfer converged only where the deployment paused.
 
-On a node with a peer, the seven state channels and the history channel keep
+On a node with a peer, the four state channels and the history channel keep
 a burst of at least eight, the requests a transfer keeps outstanding for each
 database, whatever `NodeSizing::channel_burst` says. With a burst of one,
 the peer rate limit drops requests and answers sent within a millisecond of
@@ -201,7 +201,7 @@ targets arrive continuously. A finish request delivered during a backpressured
 progress report takes precedence over advancing the engine again. Otherwise,
 queued updates remain eligible; no separate target buffer delays them.
 
-Query modules remain unpublished until all seven partitions converge, their roots
+Query modules remain unpublished until all four partitions converge, their roots
 validate and history handoff completes.
 
 ## Private DKG material

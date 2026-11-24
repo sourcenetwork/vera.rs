@@ -225,10 +225,9 @@ a matching index, and a rewind of at most 1,024 revisions removes only the
 discarded revisions' mappings together with the head rewind. These reads return execution data, with finality verified
 separately by proof consumers.
 
-The node uses `vera-app::OrderedState`: three execution partitions (accounts,
-storage, code) and four ordered Commonware current-QMDB partitions (ACP, bulletin,
-vera, native sequences). `StatefulVeraApp` seals all seven targets into each proposal
-and verifies them by re-execution. An in-memory commitment participates in the same
+The node uses `vera-app::OrderedState`: four ordered Commonware current-QMDB
+partitions (ACP, bulletin, vera, native sequences). `StatefulVeraApp` seals all
+four targets into each proposal and verifies them by re-execution. An in-memory commitment participates in the same
 Commonware coordinator generation, binding the native current-state root to the
 selected operation-log targets. It is reconstructed from the durable recovery
 anchor, not persisted as an independent journal.
@@ -266,7 +265,7 @@ history checks it before persistence and before indexing a recovered record.
 See `docs/receipt-commitments.md` for the canonical encoding.
 
 First boot records a durable initialization intent before changing journals, then
-publishes `native-genesis.bin` after all seven partitions are durable. Interrupted
+publishes `native-genesis.bin` after all four partitions are durable. Interrupted
 initialization can rewind and retry only with the same genesis configuration.
 Foreign state layouts and incompatible genesis records are rejected.
 Missing genesis records alongside finalized history are rejected instead of
@@ -285,11 +284,10 @@ signature over the genesis record, its address, the record's sequence and the
 new address, any native signer submits it, and it applies once
 (`vera_client::ValidatorAddressUpdate`). See docs/consensus-membership.md#validator-records.
 
-Seven authenticated peer resolvers serve bounded operation-log ranges. Fetches
+Four authenticated peer resolvers (channels 9 to 12) serve bounded operation-log ranges. Fetches
 allow up to 64 operations, with eight-operation inspection batches and responses
 below the 4 MiB transport limit. Native keys are limited to 64 KiB; values and
-commit metadata to 1 MiB. Code-partition peer messages cap values at 1 MiB even
-though the older local journal codec permits larger records. A request for a
+commit metadata to 1 MiB. A request for a
 size the server has not reached yet waits for it, without the database lock,
 for up to one second (at most 64 waiting per database) before it is refused.
 
@@ -308,7 +306,7 @@ import API. The import selection and cursor are durable, and imported history
 remains unavailable until recovery at the matching state anchor completes.
 Starting an import marks the store as imported, so recovery keeps the blocks
 its certificates need above the anchor. The node serves chunks through Commonware's
-resolver on authenticated channel 16, producing each chunk on the blocking pool,
+resolver on authenticated channel 13, producing each chunk on the blocking pool,
 two at a time; further requests are dropped and retried by the importer.
 `HistoryPeer::import_next_from` bounds
 record and finality-proof assembly, verifies both before persistence and cancels
@@ -371,12 +369,11 @@ their narrower byte limits. Cancelling a lookup does not release its
 slot until its blocking task finishes.
 See `docs/permission-proofs.md` for formats and limits.
 
-The application uses ordered QMDB partitions for execution and native modules.
-Native blocks select a tagged commitment encoding and carry four additional
-module log targets and a receipt commitment. Blocks lacking these commitments,
-or carrying a target with an empty range, are rejected by the application
-without executing them. Legacy block decoding remains separate from the native application. Proofs
-use Commonware QMDB only; retired JMT proof formats are not supported.
+A block has one encoding: consensus context, parent, height, timestamp, term,
+module state root, requests, optional DKG payload, the four module log targets
+and the receipt commitment. Every field is required. A block carrying a target
+with an empty range is rejected by the application without executing it. Proofs
+use Commonware QMDB only.
 
 ### RPC surfaces
 
@@ -563,7 +560,7 @@ voter with an empty journal starts on that block. See
 docs/active-term.md#consensus-storage-across-a-switch. A lone
 validator signs an epoch whose ceremony it only observed with the share its
 host holds, once the epoch's sharing confirms it. Devices ask each other where
-they stand on channel 17. An active device whose newest block is older than
+they stand on channel 14. An active device whose newest block is older than
 `Switching::freshness` asks the others under its transport key before it
 builds and again before a built block reaches consensus, and an active device
 asks again every `Switching::freshness` in the background. A question carries
@@ -603,7 +600,7 @@ vera.rs/
     bin/verad/                  # CLI binary: validator, devnet, testnet, genesis DKG, client
     crates/
         vera-app/               # Glue stateful Application around the block executor
-        vera-backend/           # Concrete QMDB backend: VeraStateSet, BatchState, DbTargets
+        vera-backend/           # QMDB storage of the native partitions, peer transfer, proofs
         vera-cli/               # CLI utilities (backtrace + SIGSEGV handlers)
         vera-client/            # Rust client library (native requests, verified reads, typed queries)
         vera-config/            # Node configuration types (node, network, rpc, execution)
@@ -611,16 +608,14 @@ vera.rs/
         vera-crypto/            # BLS12-381, actor keys (secp256k1, Ed25519, P-256), JWT
         vera-domain/            # Block, tx, light block, proof, and DKG payload types
         vera-e2e/               # End-to-end test harness (see crates/vera-e2e/README.md)
-        vera-executor/          # Block execution: REVM, precompiles, VeraExecutor
-        vera-genesis/           # Extended genesis configuration (validators, native mint)
+        vera-executor/          # Block execution: native requests, module call shims, VeraExecutor
+        vera-genesis/           # Genesis configuration (operators, policies, validators, consensus)
         vera-harness/           # Node manager, cluster builder, observability (test-only)
         vera-indexer/           # Block/tx/light-block indexes backing RPC queries
         vera-jsonrpc/           # Native vera_* RPC and header subscriptions
         vera-modules/           # ACP, Bulletin, Vera, ValidatorRegistry module logic
         vera-node/              # Validator assembly: p2p, marshal, DKG, stateful glue, RPC
         vera-permission/        # Permission/record/prefix evidence types and verification
-        vera-qmdb/              # EVM change sets, record encodings, combined state root
-        vera-traits/            # StateDbRead trait for EVM state reads
         vera-test-infra/            # Shared test primitives: process, ports, logs, binary resolver
 ```
 

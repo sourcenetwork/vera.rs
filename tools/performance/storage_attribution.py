@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 
 
-PARTITIONS = ('accounts', 'storage', 'code', 'acp', 'bulletin', 'identity', 'native_sequences', 'commitment')
+PARTITIONS = ('acp', 'bulletin', 'identity', 'native_sequences', 'commitment')
 UNITS = {'ns': 1e-6, 'µs': .001, 'us': .001, 'ms': 1, 's': 1000}
 TIMES = re.compile(r'time\.(busy|idle)=(\d+(?:\.\d+)?)(ns|µs|us|ms|s)(?=\s|$)')
 APPLIED = re.compile(r'vera_publication_diagnostics: finalized state apply height=(\d+)\b')
@@ -100,16 +100,16 @@ def closed_span(line):
     match = None
     if ': commonware_utils::sync: close ' in line:
         prefix = line.split(': commonware_utils::sync: close ', 1)[0]
-        match = re.search(r'utils\.rwlock\.(read|write)\{lock="stateful\.db\.([0-7])"\}$', prefix)
+        match = re.search(r'utils\.rwlock\.(read|write)\{lock="stateful\.db\.([0-4])"\}$', prefix)
         operation = match.group(1) if match else None
         index = int(match.group(2)) if match else None
     elif ': commonware_glue::stateful::db: close ' in line:
         prefix = line.split(': commonware_glue::stateful::db: close ', 1)[0]
-        match = re.search(r'stateful\.db\.finalize\{index=([0-7])\}$', prefix)
+        match = re.search(r'stateful\.db\.finalize\{index=([0-4])\}$', prefix)
         operation, index = 'finalize', int(match.group(1)) if match else None
     elif ': commonware_storage::qmdb::any::db: close ' in line:
         prefix = line.split(': commonware_storage::qmdb::any::db: close ', 1)[0]
-        match = re.search(r'stateful\.db\.finalize\{index=([0-7])\}:.*qmdb\.any\.db\.start_sync\{[^{}]*\}$', prefix)
+        match = re.search(r'stateful\.db\.finalize\{index=([0-4])\}:.*qmdb\.any\.db\.start_sync\{[^{}]*\}$', prefix)
         operation, index = 'start_sync', int(match.group(1)) if match else None
     if not match:
         return None
@@ -174,8 +174,8 @@ def span_summary(lines):
             if height == int(started.group(1)):
                 complete += 1
                 finalized = {index for operation, index, _, _ in pending
-                             if operation == 'finalize' and index < 7}
-                incomplete_finalize += int(len(finalized) != 7)
+                             if operation == 'finalize' and index < 4}
+                incomplete_finalize += int(len(finalized) != 4)
                 for operation, index, busy, idle in pending:
                     groups[operation, index].append((busy, idle))
             else:
@@ -195,7 +195,7 @@ def span_summary(lines):
     return {'completed_finalization_windows': complete, 'discarded_windows': discarded,
             'spans_outside_windows': outside,
             'persistent_finalize_window_samples': sum(len(values) for (operation, index), values
-                                                      in groups.items() if operation == 'finalize' and index < 7),
+                                                      in groups.items() if operation == 'finalize' and index < 4),
             'incomplete_persistent_finalize_windows': incomplete_finalize,
             'persistent_finalize_window_coverage_complete': complete > 0 and incomplete_finalize == 0,
             'groups': rows,
@@ -320,7 +320,7 @@ def summarize_run(run_root, publication_only=False):
     result = {
         'format_version': 2,
         'scope': 'Normal is an uninstrumented comparator only. Traced timings include scheduling, tracing and ptrace overhead; neither run establishes capacity or a baseline improvement.',
-        'span_scope': 'Close events are grouped only inside complete apply-to-synchronization-start windows at a matching revision; bootstrap and incomplete windows excluded. Concurrent users and retained child spans prevent exact revision attribution. Coverage reports windows missing any of seven persistent-partition finalize closes; missing samples are not zero-duration work. Finalize and start_sync overlap; do not add them or subtract their percentiles.',
+        'span_scope': 'Close events are grouped only inside complete apply-to-synchronization-start windows at a matching revision; bootstrap and incomplete windows excluded. Concurrent users and retained child spans prevent exact revision attribution. Coverage reports windows missing any of four persistent-partition finalize closes; missing samples are not zero-duration work. Finalize and start_sync overlap; do not add them or subtract their percentiles.',
         'duration_scope': 'Read/write spans end at acquisition. Finalize starts after acquisition, but enabled completion spans retain finalize/start_sync ancestors beyond function return and potentially beyond the originating window. Their close lifetimes do not measure guard holding or initiation alone. The actor completes the previous finalization barrier before starting another. Syscalls cover the whole run, including startup and restart, without revision or partition attribution.',
         'blob_scope': 'Blob groups cover the whole run, including bootstrap and restart, without partition or revision attribution. Write_at includes the awaited write and scheduling. Start_sync close lifetime includes retention by its sync child and does not isolate initiation. Sync measures synchronous sync calls or observation of a returned completion handle, potentially including time before first polling. These overlapping populations do not isolate prior-sync waits or physical I/O; do not add their durations or subtract their percentiles.',
         'publication_scope': 'Only vera_publication_diagnostics events are counted. Scalar timings cover the whole run, including restart, independently of span windows. Preparation ends when finalize returns its barrier; wait starts at barrier polling; since-finalize includes intervening work before polling. Sink history includes blocking-pool scheduling and persistence. Durability false means not durable, not successful storage completion. Missing event groups are unavailable, not zero work. Fields overlap and are not additive or physical disk latency.',

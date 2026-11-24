@@ -107,7 +107,7 @@ before accepting requests; see `snapshot-recovery.md`.
 `FinalizedHistory::record_chunk` copies at most 64 KiB from a pinned Regolith
 snapshot into a response and reports the full record length and offset. The
 caller must bound record assembly before allocating for the advertised length.
-The native node serves these chunks on authenticated peer channel 16 using
+The native node serves these chunks on authenticated peer channel 13 using
 Commonware's resolver. Each request is produced on the blocking pool, two at a
 time per node; a request arriving while both are busy is dropped, which the
 importer sees as a failed fetch and retries. The four most recent finality

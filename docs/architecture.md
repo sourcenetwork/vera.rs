@@ -131,8 +131,8 @@ Successful resharing determines when a selected roster becomes the voting
 committee. See [consensus membership](consensus-membership.md) for the cutoff and
 effective-epoch rules.
 
-QMDB commits seven persistent partitions: accounts, storage, code, ACP, bulletin,
-Vera records, and native signer sequences. A coordinated commitment binds the
+QMDB commits four persistent partitions: ACP, bulletin, Vera records, and native
+signer sequences. A coordinated commitment binds the
 native state root to their selected operation-log targets. Regolith stores finalized
 **history**; it does not replace QMDB's authenticated state. Query module
 views currently materialize live records in memory, so dataset growth still
