@@ -254,7 +254,9 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             );
             return None;
         }
-        let ancestry = match parent.ancestry.extended(parent.height, &parent.id()) {
+        // Hashing a block encodes it whole, so the parent is hashed once.
+        let parent_id = parent.id();
+        let ancestry = match parent.ancestry.extended(parent.height, &parent_id) {
             Ok(ancestry) => ancestry,
             Err(error) => {
                 warn!(height, %error, "propose: the parent's ancestry cannot be extended");
@@ -290,7 +292,7 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         };
         let block = Block {
             context: consensus_context,
-            parent: parent.id(),
+            parent: parent_id,
             height,
             ancestry,
             timestamp,
