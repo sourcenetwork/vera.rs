@@ -182,4 +182,44 @@ mod tests {
         let proof = history.ancestry_proof(1, 5).unwrap();
         assert!(blocks[5].has_ancestor(1, &blocks[1].id(), &proof));
     }
+
+    #[tokio::test]
+    async fn a_rebuilding_recovery_restores_identifiers_that_are_missing_or_wrong() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocks = chain(12);
+        let history = FinalizedHistory::open(dir.path(), &blocks[0]).unwrap();
+        for block in &blocks[1..] {
+            history.append_finalized(block, &[], 100, None).unwrap();
+        }
+        history.db.delete(key(BLOCK_ID, 4)).unwrap();
+        history
+            .db
+            .put(key(BLOCK_ID, 7), blocks[8].id().0.0)
+            .unwrap();
+        assert!(history.ancestry_proof(2, 10).is_err());
+        // Mappings whose head does not match are rebuilt by the next recovery.
+        history.db.delete(QUERY_HEAD).unwrap();
+        drop(history);
+
+        let history = FinalizedHistory::open(dir.path(), &blocks[0]).unwrap();
+        let lookup: crate::FinalizationLookup = std::sync::Arc::new(|_| Box::pin(async { None }));
+        history
+            .recover(
+                &blocks[0],
+                &blocks[12],
+                &BlockIndex::new(),
+                &LightBlockIndex::new(std::num::NonZeroU64::new(20).unwrap()),
+                &lookup,
+            )
+            .await
+            .unwrap();
+        for height in [4, 7] {
+            assert_eq!(
+                history.db.get(key(BLOCK_ID, height)).unwrap().unwrap(),
+                blocks[height as usize].id().0.0.to_vec()
+            );
+        }
+        let proof = history.ancestry_proof(2, 10).unwrap();
+        assert!(blocks[10].has_ancestor(2, &blocks[2].id(), &proof));
+    }
 }

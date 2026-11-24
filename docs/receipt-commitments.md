@@ -195,8 +195,11 @@ verifier needs only the later block, which a light block carries, so the
 proof serves light clients and anchors alike.
 
 A node stores no part of the range. Finalized history keeps each block's
-identifier under its height, 32 bytes written in the same batch as the record
-and removed with it by a rewind, a cut or the history floor.
+identifier under its height, 32 bytes written in the same batch as the record,
+removed with it by a rewind, a cut or the history floor, and rewritten by a
+recovery that rebuilds the hash mappings. A missing identifier, or one the
+block's committed ancestry does not accept, fails the request instead of
+yielding a proof.
 `vera_getAncestryProof(ancestor, height)` rebuilds the proof from the
 ancestor's block and the identifiers of the blocks after it, read from one
 snapshot of the store, and checks it against the block at `height` before

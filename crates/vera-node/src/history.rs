@@ -490,6 +490,7 @@ impl FinalizedHistory {
             }
             if rebuild_queries {
                 query::index_execution(&mut query_batch, height, &id, &record.receipts);
+                query_batch.put(key(BLOCK_ID, height), id.0.0);
                 if query_batch.size_in_bytes() >= 1 << 20 {
                     write(&self.db, std::mem::take(&mut query_batch))?;
                 }
