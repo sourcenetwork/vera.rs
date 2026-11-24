@@ -560,6 +560,7 @@ jobs:
               --test delegation
               --test native_nodes
               --test native_refusals
+              --test parent_baby_anchoring
           - suite: snapshot-catchup
             exact: ""
             binary-features: ""
