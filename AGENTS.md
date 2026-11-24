@@ -20,7 +20,7 @@ Related repositories are independent checkouts; discover their paths rather than
 
 | Repo | Org | Purpose |
 |------|-----|---------|
-| **vera.rs** | sourcenetwork | This repo — SourceHub rewrite on Commonware |
+| **vera.rs** | sourcenetwork | This repo — native Vera on Commonware |
 | **vera** | sourcenetwork | Earlier Go service; its `acp_core` engine is the reference behind `tools/acp-oracle` |
 | **orbis-rs** | sourcenetwork | Application threshold signing and encryption, using native authorization, bulletin and ring records |
 | **defradb.rs** | sourcenetwork | Document storage with native signed submissions and verified ACP evidence |

@@ -18,7 +18,7 @@ The harness's `resolve_binary()` (via `test_infra::BinaryResolver`, `VERAD`
 prefix) looks for the binary in this order:
 
 1. `VERAD_BINARY` — explicit path, no version check
-2. `HUBD_WORKSPACE` — a vera.rs checkout; builds the `verad` package there
+2. `VERAD_WORKSPACE` — a vera.rs checkout; builds the `verad` package there
 3. `verad` on `PATH`
 4. a `backbone.toml` manifest pin
 

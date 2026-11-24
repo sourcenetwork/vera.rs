@@ -12,7 +12,7 @@ services remain separate processes.
 |---|---|---|
 | Vera and shared verifier | `cf5ae4751867b4b8f07f7b31bfc2ca68ff052ca4` | Rust 1.98.0; native-only pipelined genesis |
 | Backbone proof client | `5ad4d5566acec208486041d0c647c859e481dc10` | `acp-light-client` |
-| Defra | `7f4900735af348485575920f163a5954f9fe4a3d` | CLI built with `sourcehub` |
+| Defra | `7f4900735af348485575920f163a5954f9fe4a3d` | CLI built with `vera` |
 | Orbis | `e650290ed98d40b3feb868a8b76503af0a7bf3a8` | Default features disabled; `native,bls12-381,iroh` |
 | Trust API | `fd13157503c95c0cb9b62ebfa63ff81040f2bdfe` | Go 1.26.6; `vera_native` and CGo |
 
@@ -49,9 +49,9 @@ from the corresponding repository and use Rust 1.98.0.
 Defra:
 
 ```sh
-cargo build --frozen -p cli --features sourcehub
+cargo build --frozen -p cli --features vera
 DEFRA_RUST_BINARY=/path/to/defra VERAD_BINARY=/path/to/verad RUST_LOG=info \
-cargo test --frozen -p integration-test --test hubrs -- \
+cargo test --frozen -p integration-test --test verars -- \
   --test-threads=1 --skip p2p --skip smoke --skip compartments
 ```
 

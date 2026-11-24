@@ -45,8 +45,7 @@ pub struct TxExecCtx {
 
 /// A duration expressed either as wall-clock seconds or a block count.
 ///
-/// Matches Go's `sourcehub.acp.Duration` oneof: modules that use
-/// time-based expiration can express it in either unit.
+/// Modules that use time-based expiration can express it in either unit.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 pub enum Duration {
     Seconds(u64),
