@@ -1369,6 +1369,14 @@ pub async fn run_node_with_options(
                 })
             })
         })
+        .with_vera_ancestry_proof_lookup({
+            let history = history.clone();
+            Arc::new(move |ancestor, height| {
+                history
+                    .ancestry_proof(ancestor, height)
+                    .map_err(|error| crate::history::ancestry_rpc_error(&error))
+            })
+        })
         .with_vera_light_block_lookup({
             let epochs = light_block_index.clone();
             Arc::new(move |height| {

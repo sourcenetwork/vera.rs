@@ -40,6 +40,11 @@ use crate::{
 /// `Ok(None)` means the revision has no finalization certificate yet.
 pub type LightBlockLookup = Arc<dyn Fn(u64) -> Result<Option<LightBlock>, RpcError> + Send + Sync>;
 
+/// Proof that the revision at the first height is an ancestor of the revision
+/// at the second, built from durable history on a bounded blocking worker.
+pub type AncestryProofLookup =
+    Arc<dyn Fn(u64, u64) -> Result<vera_domain::AncestryProof, RpcError> + Send + Sync>;
+
 /// Durable receipt evidence lookup, executed on a bounded blocking worker.
 pub type ReceiptProofLookup =
     Arc<dyn Fn(B256) -> Result<Option<vera_domain::ReceiptResponse>, RpcError> + Send + Sync>;
@@ -194,6 +199,18 @@ pub trait VeraApi {
     /// the deployment's authenticated bootstrap configuration.
     #[method(name = "getLightBlock")]
     async fn get_light_block(&self, height: U64) -> RpcResult<LightBlock>;
+
+    /// Returns a proof that the revision at `ancestor` is an ancestor of the
+    /// revision at `height`.
+    ///
+    /// Verify it with `vera_domain::Block::has_ancestor` against the block of
+    /// a verified light block at `height`.
+    #[method(name = "getAncestryProof")]
+    async fn get_ancestry_proof(
+        &self,
+        ancestor: U64,
+        height: U64,
+    ) -> RpcResult<vera_domain::AncestryProof>;
 }
 
 /// Implementation of the vera RPC API.
@@ -205,6 +222,7 @@ pub struct VeraApiImpl {
     native_modules: Option<vera_backend::native::NativeStateSet>,
     light_block_index: Option<Arc<LightBlockIndex>>,
     light_block_lookup: Option<LightBlockLookup>,
+    ancestry_proof_lookup: Option<AncestryProofLookup>,
     receipt_proof_lookup: Option<ReceiptProofLookup>,
     archive: Option<crate::ArchiveReader>,
     simulator: Option<Arc<dyn StateProvider>>,
@@ -236,6 +254,7 @@ impl VeraApiImpl {
             native_modules: None,
             light_block_index: None,
             light_block_lookup: None,
+            ancestry_proof_lookup: None,
             receipt_proof_lookup: None,
             archive: None,
             simulator: None,
@@ -285,6 +304,13 @@ impl VeraApiImpl {
     #[must_use]
     pub fn with_light_block_lookup(mut self, lookup: LightBlockLookup) -> Self {
         self.light_block_lookup = Some(lookup);
+        self
+    }
+
+    /// Serve ancestry proofs from durable history.
+    #[must_use]
+    pub fn with_ancestry_proof_lookup(mut self, lookup: AncestryProofLookup) -> Self {
+        self.ancestry_proof_lookup = Some(lookup);
         self
     }
 
@@ -531,6 +557,24 @@ impl VeraApiServer for VeraApiImpl {
                 .await?
                 .ok_or_else(|| light::certificate_not_found(height)),
         }
+    }
+
+    async fn get_ancestry_proof(
+        &self,
+        ancestor: U64,
+        height: U64,
+    ) -> RpcResult<vera_domain::AncestryProof> {
+        let Some(lookup) = self.ancestry_proof_lookup.clone() else {
+            return Err(RpcError::NotImplemented.into());
+        };
+        let permit = self.state.light_lookup_permit()?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            lookup(ancestor.to(), height.to())
+        })
+        .await
+        .map_err(|error| RpcError::Internal(format!("ancestry proof lookup failed: {error}")))?
+        .map_err(Into::into)
     }
 }
 

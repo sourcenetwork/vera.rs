@@ -43,6 +43,21 @@ pub(super) fn block(height: u64, parent: BlockId) -> Block {
     }
 }
 
+/// A chain of `length` blocks above a genesis block, each committing to its ancestors.
+pub(super) fn chain(length: u64) -> Vec<Block> {
+    let mut blocks = vec![block(0, BlockId(B256::ZERO))];
+    for height in 1..=length {
+        let parent = &blocks[blocks.len() - 1];
+        let mut next = block(height, parent.id());
+        next.ancestry = parent
+            .ancestry
+            .extended(parent.height, &parent.id())
+            .unwrap();
+        blocks.push(next);
+    }
+    blocks
+}
+
 fn artifacts(height: u64) -> FinalizationArtifacts {
     FinalizationArtifacts {
         epoch: 0,

@@ -35,6 +35,8 @@ const QUERY_HEAD: &[u8] = b"query_head";
 const GENESIS: &[u8] = b"genesis";
 const HEAD: &[u8] = b"head";
 
+mod ancestry;
+pub(crate) use ancestry::ancestry_rpc_error;
 mod cut;
 pub use cut::DiscardedSubmission;
 pub(crate) use cut::Standing;

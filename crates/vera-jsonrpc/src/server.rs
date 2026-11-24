@@ -22,7 +22,9 @@ use crate::{
     state::NodeState,
     state_provider::{NoopStateProvider, StateProvider},
     tx_submit::TxSubmitCallback,
-    vera_api::{LightBlockLookup, ReceiptProofLookup, VeraApiImpl, VeraApiServer},
+    vera_api::{
+        AncestryProofLookup, LightBlockLookup, ReceiptProofLookup, VeraApiImpl, VeraApiServer,
+    },
 };
 
 /// Error type for RPC server operations.
@@ -53,6 +55,7 @@ pub struct RpcServer<S: StateProvider = NoopStateProvider> {
     vera_native_modules: Option<(vera_backend::native::NativeStateSet, SharedModuleState)>,
     vera_light_block_index: Option<Arc<LightBlockIndex>>,
     vera_light_block_lookup: Option<LightBlockLookup>,
+    vera_ancestry_proof_lookup: Option<AncestryProofLookup>,
     vera_receipt_proof_lookup: Option<ReceiptProofLookup>,
     vera_archive: Option<crate::ArchiveReader>,
 }
@@ -84,6 +87,7 @@ impl RpcServer<NoopStateProvider> {
             vera_native_modules: None,
             vera_light_block_index: None,
             vera_light_block_lookup: None,
+            vera_ancestry_proof_lookup: None,
             vera_receipt_proof_lookup: None,
             vera_archive: None,
         }
@@ -106,6 +110,7 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
             vera_native_modules: None,
             vera_light_block_index: None,
             vera_light_block_lookup: None,
+            vera_ancestry_proof_lookup: None,
             vera_receipt_proof_lookup: None,
             vera_archive: None,
         }
@@ -172,6 +177,13 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
         self
     }
 
+    /// Serve ancestry proofs from durable history.
+    #[must_use]
+    pub fn with_vera_ancestry_proof_lookup(mut self, lookup: AncestryProofLookup) -> Self {
+        self.vera_ancestry_proof_lookup = Some(lookup);
+        self
+    }
+
     /// Configure durable receipt evidence for cache misses.
     pub fn with_vera_receipt_proof_lookup(mut self, lookup: ReceiptProofLookup) -> Self {
         self.vera_receipt_proof_lookup = Some(lookup);
@@ -202,6 +214,7 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
         let vera_native_modules = self.vera_native_modules;
         let vera_light_block_index = self.vera_light_block_index;
         let vera_light_block_lookup = self.vera_light_block_lookup;
+        let vera_ancestry_proof_lookup = self.vera_ancestry_proof_lookup;
         let vera_receipt_proof_lookup = self.vera_receipt_proof_lookup;
         let vera_archive = self.vera_archive;
         let extra_modules = self.extra_modules;
@@ -223,6 +236,9 @@ impl<S: StateProvider + Clone + 'static> RpcServer<S> {
             }
             if let Some(lookup) = vera_light_block_lookup {
                 api = api.with_light_block_lookup(lookup);
+            }
+            if let Some(lookup) = vera_ancestry_proof_lookup {
+                api = api.with_ancestry_proof_lookup(lookup);
             }
             if let Some(lbi) = vera_light_block_index {
                 api = api.with_light_block_index(lbi);
