@@ -8,13 +8,11 @@ mod tests;
 use alloy_primitives::{B256, FixedBytes};
 use alloy_sol_types::SolCall;
 use vera_domain::{FinalizedArtifacts, RefusalKind};
-use vera_modules::types::BlockExecCtx;
+use vera_modules::types::{BlockExecCtx, TxExecCtx};
 use vera_modules::vera::VeraModule;
-use vera_modules::vera::anchors::{
-    AnchorError, MAX_ANCHOR_ARTIFACT_BYTES, abi::IAnchor, deployment_id,
-};
+use vera_modules::vera::anchors::{AnchorError, MAX_ANCHOR_ARTIFACT_BYTES, abi::IAnchor};
 
-use submission::{AnchorRefusal, AnchorSubmission};
+use submission::{AnchorRefusal, AnchorSubmission, VerifiedSubmission};
 
 use super::refusal::Refuse;
 use super::{
@@ -33,7 +31,10 @@ impl Refuse for AnchorError {
             Self::InvalidConsensusKey => RefusalKind::UndecodableInput,
             Self::NotNewer { .. } | Self::LowerTerm { .. } => RefusalKind::NotNewer,
             Self::NotDescendant { .. } => RefusalKind::NotDescendant,
-            Self::NoAnchor => RefusalKind::NotFound,
+            Self::NoAnchor | Self::NotRegistered => RefusalKind::NotFound,
+            Self::NotGranted => RefusalKind::Unauthorized,
+            Self::QuotaExceeded { .. } => RefusalKind::WorkLimitExceeded,
+            Self::InvalidRegistration | Self::InvalidGrant => RefusalKind::InvalidArgument,
             Self::NotAFork { .. } => RefusalKind::InvalidProof,
             Self::ForkRecorded => RefusalKind::AlreadyExists,
             Self::MalformedRecord => RefusalKind::StateError,
@@ -50,11 +51,38 @@ impl Refuse for AnchorRefusal {
     }
 }
 
+/// The deployment an anchor call names: the first argument of every method.
+pub(crate) fn named_deployment(input: &[u8]) -> Option<B256> {
+    let known = input.get(..4).is_some_and(is_method);
+    input.get(4..36).filter(|_| known).map(B256::from_slice)
+}
+
+fn is_method(selector: &[u8]) -> bool {
+    selector == IAnchor::anchorRevisionCall::SELECTOR
+        || selector == IAnchor::reportForkCall::SELECTOR
+}
+
+/// Count a refused submission against its signer's grant. The refusal rolled
+/// the module back, so the count the call made is gone with it.
+pub(crate) fn charge_refused(
+    module: &mut VeraModule,
+    block_ctx: &BlockExecCtx,
+    tx_ctx: &TxExecCtx,
+    input: &[u8],
+) {
+    if let Some(deployment) = named_deployment(input) {
+        // A signer without a grant or beyond its quota has nothing left to count.
+        let _ = module.charge_anchor_submission(block_ctx, &deployment, &tx_ctx.signer);
+    }
+}
+
 /// Dispatch an ABI-encoded call to the anchor methods of the identity module.
-/// Anchors need no signer: their authority is the anchored deployment's certificate.
+/// The signer needs a grant for the deployment it names; what is recorded
+/// rests on the deployment's certificate.
 pub(super) fn dispatch(
     module: &mut VeraModule,
     block_ctx: &BlockExecCtx,
+    tx_ctx: &TxExecCtx,
     input: &[u8],
     gas_limit: u64,
 ) -> DispatchReturn {
@@ -62,9 +90,7 @@ pub(super) fn dispatch(
         return Ok(super::short_input());
     }
     let selector: [u8; 4] = input[..4].try_into().expect("checked length above");
-    if selector != IAnchor::anchorRevisionCall::SELECTOR
-        && selector != IAnchor::reportForkCall::SELECTOR
-    {
+    if !is_method(&selector) {
         return Err(unknown_selector("anchor", selector));
     }
     if gas_limit < ANCHOR_GAS {
@@ -79,7 +105,7 @@ pub(super) fn dispatch(
     let outcome = if selector == IAnchor::anchorRevisionCall::SELECTOR {
         let call = IAnchor::anchorRevisionCall::abi_decode(input).map_err(decode_error)?;
         let submission = AnchorSubmission {
-            consensus_key: call.consensusKey.to_vec(),
+            deployment: B256::from(call.deployment.0),
             artifacts: FinalizedArtifacts {
                 block: call.block.to_vec(),
                 descendants: call.descendants.iter().map(|d| d.to_vec()).collect(),
@@ -87,11 +113,11 @@ pub(super) fn dispatch(
                 epoch_material: call.epochMaterial.to_vec(),
             },
         };
-        anchor(module, block_ctx, &submission, &call.ancestryProof)
+        anchor(module, block_ctx, tx_ctx, &submission, &call.ancestryProof)
     } else {
         let call = IAnchor::reportForkCall::abi_decode(input).map_err(decode_error)?;
         let submission = AnchorSubmission {
-            consensus_key: call.consensusKey.to_vec(),
+            deployment: B256::from(call.deployment.0),
             artifacts: FinalizedArtifacts {
                 block: call.block.to_vec(),
                 descendants: call.descendants.iter().map(|d| d.to_vec()).collect(),
@@ -102,6 +128,7 @@ pub(super) fn dispatch(
         report_fork(
             module,
             block_ctx,
+            tx_ctx,
             &submission,
             B256::from(call.ancestor.0),
             &call.ancestryProof,
@@ -121,18 +148,32 @@ pub(super) fn dispatch(
     }
 }
 
+/// Check that the deployment is registered and count the submission against
+/// the signer's grant, then verify the revision under the registered key.
+fn admit(
+    module: &mut VeraModule,
+    block_ctx: &BlockExecCtx,
+    tx_ctx: &TxExecCtx,
+    submission: &AnchorSubmission,
+) -> Result<VerifiedSubmission, AnchorRefusal> {
+    let registered = module.registered_deployment(&submission.deployment)?;
+    module.charge_anchor_submission(block_ctx, &submission.deployment, &tx_ctx.signer)?;
+    submission.verify(&registered.consensus_key)
+}
+
 fn anchor(
     module: &mut VeraModule,
     block_ctx: &BlockExecCtx,
+    tx_ctx: &TxExecCtx,
     submission: &AnchorSubmission,
     proof: &[u8],
 ) -> Result<DispatchResult, AnchorRefusal> {
-    let verified = submission.verify()?;
-    let latest = module.latest_anchor(&deployment_id(&verified.consensus_key))?;
-    let (height, ancestor) =
-        latest.map_or((0, B256::ZERO), |latest| (latest.height, latest.block_hash));
+    let verified = admit(module, block_ctx, tx_ctx, submission)?;
+    let (height, ancestor) = module
+        .latest_anchor(&submission.deployment)?
+        .map_or((0, B256::ZERO), |latest| (latest.height, latest.block_hash));
     let revision = verified.revision(height, ancestor, proof);
-    let anchored = module.record_anchor(block_ctx, &verified.consensus_key, &revision)?;
+    let anchored = module.record_anchor(block_ctx, &submission.deployment, &revision)?;
     let record = &anchored.record;
     let logs = if anchored.recorded {
         vec![event_log(
@@ -157,16 +198,17 @@ fn anchor(
 fn report_fork(
     module: &mut VeraModule,
     block_ctx: &BlockExecCtx,
+    tx_ctx: &TxExecCtx,
     submission: &AnchorSubmission,
     ancestor: B256,
     proof: &[u8],
 ) -> Result<DispatchResult, AnchorRefusal> {
-    let verified = submission.verify()?;
+    let verified = admit(module, block_ctx, tx_ctx, submission)?;
     let latest = module
-        .latest_anchor(&deployment_id(&verified.consensus_key))?
+        .latest_anchor(&submission.deployment)?
         .ok_or(AnchorError::NoAnchor)?;
     let revision = verified.revision(latest.height, ancestor, proof);
-    let record = module.record_fork(block_ctx, &verified.consensus_key, &revision)?;
+    let record = module.record_fork(block_ctx, &submission.deployment, &revision)?;
     let log = event_log(
         ANCHOR_ADDRESS,
         &IAnchor::ForkReported {

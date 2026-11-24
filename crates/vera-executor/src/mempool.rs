@@ -3,10 +3,14 @@
 //! Sequential validations from the same signer see each other's sequence
 //! increments.
 
+use alloy_primitives::B256;
 use vera_crypto::bls;
 use vera_domain::NativeTx;
+use vera_modules::module_state::SharedModuleState;
 use vera_modules::native_account::NativeNonceStore;
+use vera_modules::vera::anchors::AnchorError;
 
+use crate::dispatch::{ANCHOR_ADDRESS, anchor::named_deployment};
 use crate::executor::native_authentication::{authenticate_native_tx, decode_native_tx};
 use crate::{ExecutionConfig, ExecutionError};
 
@@ -30,6 +34,24 @@ pub struct PreValidatedNativeTx {
     pub signer_did: String,
     /// Transaction nonce from the wire format.
     pub nonce: u64,
+    /// The deployment an anchor request names; `None` for any other request.
+    pub anchored: Option<AnchorTarget>,
+}
+
+/// What a request to the anchor module is submitted for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AnchorTarget {
+    /// A call that names this deployment.
+    Deployment(B256),
+    /// A call that names none: execution refuses it.
+    Unknown,
+}
+
+fn anchor_target(native_tx: &NativeTx) -> Option<AnchorTarget> {
+    (native_tx.target == ANCHOR_ADDRESS).then(|| {
+        named_deployment(&native_tx.calldata)
+            .map_or(AnchorTarget::Unknown, AnchorTarget::Deployment)
+    })
 }
 
 /// Stateful request validator — mempool admission gate.
@@ -41,6 +63,7 @@ pub struct PreValidatedNativeTx {
 pub struct MempoolValidator {
     config: ExecutionConfig,
     native_nonces: NativeNonceStore,
+    committed: Option<SharedModuleState>,
 }
 
 impl MempoolValidator {
@@ -49,6 +72,47 @@ impl MempoolValidator {
         Self {
             config,
             native_nonces: NativeNonceStore::default(),
+            committed: None,
+        }
+    }
+
+    /// Admit anchor requests against the submitter grants in `modules`, the
+    /// committed module state. Without it, anchor requests are admitted and
+    /// left to execution.
+    #[must_use]
+    pub fn with_committed_modules(mut self, modules: SharedModuleState) -> Self {
+        self.committed = Some(modules);
+        self
+    }
+
+    /// Refuse an anchor request whose signer has no grant for the deployment
+    /// it names, or no quota left today by this node's clock.
+    fn admit_anchor(&self, pre: &PreValidatedNativeTx) -> Result<(), ExecutionError> {
+        let (Some(target), Some(committed)) = (pre.anchored, &self.committed) else {
+            return Ok(());
+        };
+        let refused = |deployment, reason: &dyn std::fmt::Display| {
+            Err(ExecutionError::AnchorNotAdmitted {
+                signer: pre.signer_did.clone(),
+                deployment,
+                reason: reason.to_string(),
+            })
+        };
+        let AnchorTarget::Deployment(deployment) = target else {
+            return refused(B256::ZERO, &"the call names no deployment");
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs());
+        let modules = committed.read().expect("module state lock poisoned");
+        match modules.vera.anchor_submitter(&deployment, &pre.signer_did) {
+            Ok(Some(grant)) if grant.remaining(now) > 0 => Ok(()),
+            Ok(Some(grant)) => refused(
+                deployment,
+                &AnchorError::QuotaExceeded { quota: grant.quota },
+            ),
+            Ok(None) => refused(deployment, &AnchorError::NotGranted),
+            Err(error) => refused(deployment, &error),
         }
     }
 
@@ -77,6 +141,7 @@ impl MempoolValidator {
         self.admit_native(&PreValidatedNativeTx {
             signer_did,
             nonce: native_tx.nonce,
+            anchored: anchor_target(&native_tx),
         })?;
         Ok(())
     }
@@ -96,6 +161,7 @@ impl MempoolValidator {
         native_request(tx_bytes)?;
         let authenticated = authenticate_native_tx(chain_id, tx_bytes)?;
         Ok(PreValidatedNativeTx {
+            anchored: anchor_target(&authenticated.native_tx),
             signer_did: authenticated.signer_did,
             nonce: authenticated.native_tx.nonce,
         })
@@ -103,14 +169,16 @@ impl MempoolValidator {
 
     /// Admit a pre-validated native BLS transaction into branched state.
     ///
-    /// Only performs the nonce check — all expensive crypto was already
-    /// done by [`pre_validate_native`]. Call this inside the mutex.
+    /// Performs the nonce check and, for an anchor request, the grant check:
+    /// all expensive crypto was already done by [`pre_validate_native`]. Call
+    /// this inside the mutex.
     ///
     /// [`pre_validate_native`]: Self::pre_validate_native
     pub fn admit_native(
         &mut self,
         pre: &PreValidatedNativeTx,
     ) -> Result<TxValidationResult, ExecutionError> {
+        self.admit_anchor(pre)?;
         self.native_nonces
             .check_and_increment(&pre.signer_did, pre.nonce)?;
 

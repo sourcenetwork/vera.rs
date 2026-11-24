@@ -7,6 +7,8 @@
 //!
 //! Requires `cargo build -p verad` before running.
 
+#[path = "support/administration.rs"]
+mod administration;
 #[path = "parent_baby/anchor.rs"]
 mod anchor;
 #[path = "parent_baby/baby.rs"]
@@ -53,7 +55,7 @@ async fn start_parent() -> (TestCluster, Parent) {
         .nodes(4)
         .seed(PARENT_CHAIN)
         .chain_id(PARENT_CHAIN)
-        .genesis(GenesisBuilder::devnet())
+        .genesis(GenesisBuilder::devnet().operators(administration::operators()))
         .preset(ConsensusPreset::Normal)
         .build()
         .await
@@ -63,7 +65,12 @@ async fn start_parent() -> (TestCluster, Parent) {
         .await
         .expect("parent cluster should become healthy");
     let client = VeraClient::new(cluster.node(0).rpc_url());
-    (cluster, Parent { client, key })
+    let parent = Parent {
+        client,
+        key,
+        sequence: 0.into(),
+    };
+    (cluster, parent)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -80,6 +87,33 @@ async fn a_parent_orders_and_attests_the_policies_of_two_babies() {
 
     let laptop_policy = laptop.share_notes(&laptop_author, READER).await;
     let phone_policy = phone.share_notes(&phone_author, OTHER).await;
+
+    // The parent's operators admit each baby and the relay that submits for
+    // it. Until then nothing of a baby is anchored, by anyone.
+    let first_revision = laptop.revision_at(1).await;
+    let refused = parent
+        .try_submit(&laptop_relay, &laptop, &first_revision)
+        .await
+        .expect_err("a signer without a grant is refused at admission");
+    assert!(refused.to_string().contains("may not submit anchors"));
+    parent.register(&laptop).await;
+    parent.register(&phone).await;
+    parent.grant(&laptop, &laptop_relay, 64).await;
+    parent.grant(&phone, &phone_relay, 64).await;
+    // A grant is for one deployment: the phone's relay is not the laptop's.
+    assert!(
+        parent
+            .try_submit(&phone_relay, &laptop, &first_revision)
+            .await
+            .is_err()
+    );
+    let registered = parent
+        .client
+        .read_registered_deployment(&deployment_id(&laptop.key), 0, &parent.key)
+        .await
+        .unwrap()
+        .expect("a third party reads the registration");
+    assert_eq!(registered.operators, baby::operators());
     let first = parent
         .anchor_policy(&laptop, &laptop_relay, &laptop_policy)
         .await;

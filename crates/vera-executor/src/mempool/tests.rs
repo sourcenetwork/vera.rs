@@ -367,3 +367,165 @@ fn a_request_that_is_not_native_is_rejected() {
         ));
     }
 }
+
+mod anchors {
+    use alloy_sol_types::SolCall as _;
+    use vera_modules::module_state::{ModuleState, SharedModuleState};
+    use vera_modules::vera::administration::{
+        AdministrativeCommand, AdministrativeRequest, OperatorPolicy, SignedAdministrativeRequest,
+    };
+    use vera_modules::vera::anchors::{
+        AnchorSubmitterGrant, DeploymentRegistration, abi::IAnchor, deployment_id,
+    };
+
+    use super::*;
+    use crate::dispatch::ANCHOR_ADDRESS;
+
+    const GENESIS: [u8; 32] = [7; 32];
+
+    fn anchor_tx(
+        sk: &ark_bls12_381::Fr,
+        pk_bytes: &[u8],
+        nonce: u64,
+        calldata: Vec<u8>,
+    ) -> Vec<u8> {
+        let mut tx = NativeTx {
+            chain_id: CHAIN_ID,
+            nonce,
+            bls_pubkey: FixedBytes::from_slice(pk_bytes),
+            target: ANCHOR_ADDRESS,
+            calldata: calldata.into(),
+            signature: FixedBytes::from([0x00; 96]),
+        };
+        tx.signature = FixedBytes::from_slice(&bls::sign(sk, &tx.signing_data()).unwrap());
+        tx.encode_wire()
+    }
+
+    fn call(deployment: alloy_primitives::B256) -> Vec<u8> {
+        IAnchor::anchorRevisionCall {
+            deployment,
+            block: Bytes::new(),
+            descendants: Vec::new(),
+            finalization: Bytes::new(),
+            epochMaterial: Bytes::new(),
+            ancestryProof: Bytes::new(),
+        }
+        .abi_encode()
+    }
+
+    /// Committed state whose single operator applied `commands` in order.
+    fn committed(commands: Vec<AdministrativeCommand>) -> SharedModuleState {
+        use k256::ecdsa::{Signature, SigningKey, signature::hazmat::PrehashSigner as _};
+        let operator = SigningKey::from_bytes(&[1; 32].into()).unwrap();
+        let mut modules = ModuleState::default();
+        modules
+            .vera
+            .initialize_administration(OperatorPolicy {
+                threshold: 1,
+                keys: vec![hex::encode(operator.verifying_key().to_sec1_bytes())],
+            })
+            .unwrap();
+        for (sequence, command) in commands.into_iter().enumerate() {
+            let request = AdministrativeRequest {
+                genesis_id: GENESIS,
+                sequence: sequence as u64,
+                expires_at: 100,
+                command,
+            };
+            let signature: Signature = operator
+                .sign_prehash(&request.signing_digest().unwrap())
+                .unwrap();
+            let signed = SignedAdministrativeRequest {
+                request,
+                approvals: vec![vera_modules::vera::administration::OperatorApproval {
+                    signer: 0,
+                    signature: hex::encode(signature.to_bytes()),
+                }],
+            };
+            modules
+                .vera
+                .apply_administrative_request(&mut modules.acp, GENESIS, 100, &signed)
+                .unwrap();
+        }
+        std::sync::Arc::new(std::sync::RwLock::new(modules))
+    }
+
+    #[test]
+    fn an_anchor_request_is_admitted_only_from_a_signer_with_a_grant_for_its_deployment() {
+        let (sk, pk_bytes) = test_bls_keypair();
+        let signer = bls::did_from_compressed_pubkey(&pk_bytes).unwrap();
+        let key = vec![5u8; 96];
+        let deployment = deployment_id(&key);
+        let registration = AdministrativeCommand::RegisterDeployment(DeploymentRegistration {
+            consensus_key: hex::encode(&key),
+            genesis_id: [9; 32],
+            operators: OperatorPolicy {
+                threshold: 1,
+                keys: vec![
+                    "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798".into(),
+                ],
+            },
+        });
+        let grant = AdministrativeCommand::SetAnchorSubmitter(AnchorSubmitterGrant {
+            deployment: deployment.0,
+            submitter: signer,
+            quota: 1,
+        });
+        let not_admitted = |result: Result<TxValidationResult, ExecutionError>| {
+            matches!(result, Err(ExecutionError::AnchorNotAdmitted { .. }))
+        };
+
+        let registered = committed(vec![registration.clone()]);
+        let mut validator = MempoolValidator::new(test_config()).with_committed_modules(registered);
+        let request = anchor_tx(&sk, &pk_bytes, 0, call(deployment));
+        assert!(not_admitted(validator.validate_tx(&request)));
+
+        let granted = committed(vec![registration, grant]);
+        let mut validator =
+            MempoolValidator::new(test_config()).with_committed_modules(granted.clone());
+        // Another deployment, a call that names none, and a request to another module.
+        let other = anchor_tx(
+            &sk,
+            &pk_bytes,
+            0,
+            call(alloy_primitives::B256::repeat_byte(1)),
+        );
+        assert!(not_admitted(validator.validate_tx(&other)));
+        let unnamed = anchor_tx(&sk, &pk_bytes, 0, vec![1, 2, 3, 4]);
+        assert!(not_admitted(validator.validate_tx(&unnamed)));
+        // A refused request reserves no sequence.
+        validator.validate_tx(&request).unwrap();
+        validator
+            .validate_tx(&signed_native_tx(&sk, &pk_bytes, 1))
+            .unwrap();
+
+        // Once the day's quota is used in committed state, the signer waits.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let context = vera_modules::types::BlockExecCtx {
+            timestamp: vera_modules::types::Timestamp {
+                seconds: now,
+                block_height: 1,
+            },
+            ..Default::default()
+        };
+        let signer = bls::did_from_compressed_pubkey(&pk_bytes).unwrap();
+        granted
+            .write()
+            .unwrap()
+            .vera
+            .charge_anchor_submission(&context, &deployment, &signer)
+            .unwrap();
+        validator.reset(NativeNonceStore::default());
+        assert!(not_admitted(validator.recheck_pending_tx(&request).map(
+            |()| {
+                TxValidationResult {
+                    sender: String::new(),
+                    nonce: 0,
+                }
+            }
+        )));
+    }
+}

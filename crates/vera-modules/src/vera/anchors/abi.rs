@@ -22,12 +22,12 @@ sol! {
             bytes32 blockHash
         );
 
-        /// Record a finalized revision of the deployment with this consensus key.
-        /// `ancestryProof` shows that the deployment's latest anchor is an
+        /// Record a finalized revision of a registered deployment, submitted by
+        /// a signer with a grant for it. `ancestryProof` shows that the deployment's latest anchor is an
         /// ancestor of the revision; it is empty for the first anchor.
         /// Returns the deployment's latest anchor record as JSON.
         function anchorRevision(
-            bytes consensusKey,
+            bytes32 deployment,
             bytes block,
             bytes[] descendants,
             bytes finalization,
@@ -35,12 +35,12 @@ sol! {
             bytes ancestryProof
         ) external returns (bytes record);
 
-        /// Record a finalized revision of the deployment that conflicts with
-        /// its latest anchor: another block at the anchored height, or a block
+        /// Record a finalized revision of a registered deployment that
+        /// conflicts with its latest anchor: another block at the anchored height, or a block
         /// above it whose ancestor at the anchored height is `ancestor`, as
         /// `ancestryProof` shows. Returns the fork record as JSON.
         function reportFork(
-            bytes consensusKey,
+            bytes32 deployment,
             bytes block,
             bytes[] descendants,
             bytes finalization,

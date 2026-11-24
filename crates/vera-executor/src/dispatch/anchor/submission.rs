@@ -4,7 +4,7 @@
 //! ancestry are verified here, before the module sees the revision.
 
 use alloy_primitives::B256;
-use commonware_codec::{DecodeExt as _, Encode as _, FixedSize as _};
+use commonware_codec::{DecodeExt as _, FixedSize as _};
 use vera_domain::{
     AncestryProof, Block, BlockId, ConsensusPublicKey, FinalizedArtifacts, LightBlockError,
     verify_finalized_artifacts,
@@ -15,20 +15,18 @@ use vera_modules::vera::anchors::{
 
 const _: () = assert!(ConsensusPublicKey::SIZE == CONSENSUS_KEY_BYTES);
 
-/// A deployment's key and the finality artifacts of one of its revisions.
+/// A deployment and the finality artifacts of one of its revisions.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct AnchorSubmission {
-    /// Encoding of the deployment's consensus key.
-    pub(crate) consensus_key: Vec<u8>,
+    /// The deployment's identifier.
+    pub(crate) deployment: B256,
     /// The revision and its finalization.
     pub(crate) artifacts: FinalizedArtifacts,
 }
 
-/// A verified submission: the key's canonical encoding and the finalized block.
+/// A verified submission: the finalized block.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct VerifiedSubmission {
-    /// Canonical encoding of the deployment's consensus key.
-    pub(crate) consensus_key: Vec<u8>,
     /// The finalized block.
     pub(crate) block: Block,
     /// The block's identifier.
@@ -47,19 +45,16 @@ pub(crate) enum AnchorRefusal {
 }
 
 impl AnchorSubmission {
-    /// Check the size, decode the key and verify the revision's finalization under it.
-    pub(crate) fn verify(&self) -> Result<VerifiedSubmission, AnchorRefusal> {
+    /// Check the size and verify the revision's finalization under
+    /// `consensus_key`, the key the deployment is registered with.
+    pub(crate) fn verify(&self, consensus_key: &[u8]) -> Result<VerifiedSubmission, AnchorRefusal> {
         if self.artifacts.encoded_len() > MAX_ANCHOR_ARTIFACT_BYTES {
             return Err(AnchorError::TooLarge.into());
         }
-        let key = ConsensusPublicKey::decode(commonware_codec::Copying(&self.consensus_key[..]))
+        let key = ConsensusPublicKey::decode(commonware_codec::Copying(consensus_key))
             .map_err(|_| AnchorError::InvalidConsensusKey)?;
         let (block, block_hash) = verify_finalized_artifacts(&self.artifacts, &key)?;
-        Ok(VerifiedSubmission {
-            consensus_key: key.encode().to_vec(),
-            block,
-            block_hash,
-        })
+        Ok(VerifiedSubmission { block, block_hash })
     }
 }
 

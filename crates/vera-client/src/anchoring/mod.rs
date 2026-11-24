@@ -5,6 +5,7 @@ mod error;
 mod fork;
 mod history;
 mod key;
+mod registration;
 mod snapshot;
 #[cfg(test)]
 mod tests;
@@ -13,9 +14,11 @@ use std::time::Duration;
 
 use alloy_primitives::{B256, Bytes};
 use alloy_sol_types::SolCall as _;
-use commonware_codec::Encode as _;
 use vera_domain::{AncestryProof, ConsensusPublicKey, LightBlock, ModuleId};
-pub use vera_modules::vera::anchors::{AnchorEntry, AnchorRecord, ForkRecord};
+pub use vera_modules::vera::anchors::{
+    AnchorEntry, AnchorRecord, AnchorSubmitterGrant, AnchorSubmitterRevocation, DeploymentRecord,
+    DeploymentRegistration, ForkRecord, SubmitterRecord,
+};
 use vera_modules::vera::anchors::{MAX_ANCHOR_ARTIFACT_BYTES, abi::IAnchor, anchor_key};
 use vera_permission::{
     POLICY_SNAPSHOT_RESPONSE_BYTES, PolicySnapshotResponse, RECORD_PROOF_BYTES, RecordResponse,
@@ -51,7 +54,7 @@ pub fn encode_anchor(
         return Err(AnchoringError::TooLarge.into());
     }
     Ok(IAnchor::anchorRevisionCall {
-        consensusKey: key.encode().to_vec().into(),
+        deployment: deployment_id(key),
         block: artifacts.block.into(),
         descendants: artifacts.descendants.into_iter().map(Into::into).collect(),
         finalization: artifacts.finalization.into(),
@@ -102,16 +105,15 @@ impl VeraClient {
     }
 
     /// The proof an anchor of this deployment's revision at `height` needs
-    /// when `latest` is the deployment's latest anchor: none for the first.
+    /// when `tip` is the height and identifier of its latest anchor: none for
+    /// the first anchor.
     pub async fn anchor_proof(
         &self,
-        latest: Option<&AnchorRecord>,
+        tip: Option<(u64, B256)>,
         height: u64,
     ) -> Result<Option<AncestryProof>, ClientError> {
-        match latest {
-            Some(latest) if latest.height < height => {
-                Ok(Some(self.ancestry_proof(latest.height, height).await?))
-            }
+        match tip {
+            Some((tip, _)) if tip < height => Ok(Some(self.ancestry_proof(tip, height).await?)),
             _ => Ok(None),
         }
     }
@@ -210,10 +212,10 @@ impl VeraClient {
         let captured = self.capture_policy_snapshot(policy, 0, own_key).await?;
         let latest = anchoring
             .read_latest_anchor(&deployment_id(own_key), 0, anchoring_key)
-            .await?;
-        let proof = self
-            .anchor_proof(latest.record.as_ref(), captured.revision.height)
-            .await?;
+            .await?
+            .record;
+        let tip = latest.map(|latest| (latest.height, latest.block_hash));
+        let proof = self.anchor_proof(tip, captured.revision.height).await?;
         let submission = anchoring
             .submit_anchor(submitter, &captured.revision, own_key, proof.as_ref())
             .await?;

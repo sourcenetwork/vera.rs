@@ -50,6 +50,17 @@ pub enum ExecutionError {
         /// The nonce present in the transaction.
         got: u64,
     },
+
+    /// The signer has no grant, or no quota left, to submit anchors for the deployment.
+    #[error("{signer} may not submit anchors for deployment {deployment}: {reason}")]
+    AnchorNotAdmitted {
+        /// The DID of the signer.
+        signer: String,
+        /// The deployment the request names.
+        deployment: alloy_primitives::B256,
+        /// Why the request is not admitted.
+        reason: String,
+    },
 }
 
 impl From<NonceError> for ExecutionError {

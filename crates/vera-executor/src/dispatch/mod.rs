@@ -9,7 +9,7 @@
 //! - `0x0814` — Anchor (finalized revisions of other deployments)
 
 mod acp;
-mod anchor;
+pub(crate) mod anchor;
 mod bulletin;
 mod output;
 pub(crate) mod refusal;
@@ -181,7 +181,9 @@ pub fn dispatch_to_module(
             vera, acp, block_ctx, tx_ctx, calldata, gas_limit,
         ))
     } else if target == ANCHOR_ADDRESS {
-        Some(anchor::dispatch(vera, block_ctx, calldata, gas_limit))
+        Some(anchor::dispatch(
+            vera, block_ctx, tx_ctx, calldata, gas_limit,
+        ))
     } else if target == VALIDATOR_REGISTRY_ADDRESS {
         Some(validator_registry::dispatch(
             vera, acp, limits, block_ctx, tx_ctx, calldata, gas_limit,

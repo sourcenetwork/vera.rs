@@ -1203,7 +1203,8 @@ pub async fn run_node_with_options(
         // Hold the module read lock through publication so finalization cannot
         // advance nonces between loading them and enabling admission.
         let recovered_modules = modules.read().expect("module state lock poisoned");
-        let mut admission = MempoolValidator::new(ExecutionConfig::new(chain_id));
+        let mut admission = MempoolValidator::new(ExecutionConfig::new(chain_id))
+            .with_committed_modules(modules.clone());
         admission.reset(recovered_modules.nonces.clone());
         let _ = validator.set(::tokio::sync::Mutex::new(Admission::new(admission)));
     }

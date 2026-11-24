@@ -2,10 +2,9 @@
 
 use alloy_primitives::{B256, Bytes};
 use alloy_sol_types::SolCall as _;
-use commonware_codec::Encode as _;
 use vera_domain::{AncestryProof, ConsensusPublicKey, LightBlock, ModuleId};
 use vera_modules::vera::anchors::{
-    AnchorRecord, ForkRecord, MAX_ANCHOR_ARTIFACT_BYTES, abi::IAnchor, fork_prefix,
+    ForkRecord, MAX_ANCHOR_ARTIFACT_BYTES, abi::IAnchor, fork_prefix,
 };
 use vera_permission::RECORD_PROOF_BYTES;
 
@@ -14,7 +13,7 @@ use crate::{BlsSigner, ClientError, VeraClient, client::ANCHOR_ADDRESS};
 
 /// Encode the fork report of `revision`, a revision of the deployment whose
 /// consensus key is `key`. `ancestor` is the revision's ancestor at the height
-/// of the deployment's latest anchor, shown by `proof`; a revision at that
+/// of the tip of the deployment's anchors, shown by `proof`; a revision at that
 /// height is its own ancestor and needs no proof.
 pub fn encode_fork_report(
     revision: &LightBlock,
@@ -27,7 +26,7 @@ pub fn encode_fork_report(
         return Err(AnchoringError::TooLarge.into());
     }
     Ok(IAnchor::reportForkCall {
-        consensusKey: key.encode().to_vec().into(),
+        deployment: super::deployment_id(key),
         block: artifacts.block.into(),
         descendants: artifacts.descendants.into_iter().map(Into::into).collect(),
         finalization: artifacts.finalization.into(),
@@ -42,28 +41,29 @@ pub fn encode_fork_report(
 impl VeraClient {
     /// On a device of the deployment with consensus key `own_key` (this
     /// client), report its revision at `height` to `anchoring` as a fork of
-    /// `latest`, the deployment's latest anchor there. Returns the submission
-    /// identifier; [`Self::await_anchor`] waits for its receipt.
+    /// `tip`, the height and identifier of the deployment's latest anchor
+    /// there. Returns the submission identifier; [`Self::await_anchor`] waits
+    /// for its receipt.
     ///
     /// The report is refused unless this device's history differs from the
-    /// anchored one at the anchored height.
+    /// anchored one at the tip's height.
     pub async fn report_fork(
         &self,
         anchoring: &Self,
         submitter: &BlsSigner,
         height: u64,
         own_key: &ConsensusPublicKey,
-        latest: &AnchorRecord,
+        tip: (u64, B256),
     ) -> Result<B256, ClientError> {
         let revision = self.read_finalized_revision(height, own_key).await?;
-        let (ancestor, proof) = if height > latest.height {
+        let (ancestor, proof) = if height > tip.0 {
             let ancestor = self
-                .read_finalized_revision(latest.height, own_key)
+                .read_finalized_revision(tip.0, own_key)
                 .await?
                 .block_hash
                 .parse()
                 .map_err(|_| ClientError::InvalidResponse("block hash"))?;
-            let proof = self.ancestry_proof(latest.height, height).await?;
+            let proof = self.ancestry_proof(tip.0, height).await?;
             (ancestor, Some(proof))
         } else {
             let own = revision

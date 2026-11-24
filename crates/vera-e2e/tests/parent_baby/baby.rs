@@ -32,15 +32,20 @@ fn loopback() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 0))
 }
 
+/// The operator policy of every baby: its owner's account key.
+pub(crate) fn operators() -> OperatorPolicy {
+    OperatorPolicy {
+        threshold: 1,
+        keys: vec![ACCOUNT_KEY.into()],
+    }
+}
+
 /// A new deployment dealt in memory, as a host keeps it in its keystore.
 pub(crate) fn deal(chain_id: u64) -> SoloDeployment {
     let identity = SoloGenesis {
         policies: Vec::new(),
         chain_id,
-        operators: OperatorPolicy {
-            threshold: 1,
-            keys: vec![ACCOUNT_KEY.into()],
-        },
+        operators: operators(),
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

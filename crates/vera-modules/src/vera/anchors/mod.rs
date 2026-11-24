@@ -1,8 +1,10 @@
 //! Anchors: the finalized revisions of other deployments, recorded as one chain each.
 //!
-//! A submission carries a deployment's consensus key, the finality artifacts
-//! of one of its revisions and a proof that the deployment's latest anchor is
-//! an ancestor of it. The executor verifies the certificate against that key
+//! This deployment's operators register a deployment with its consensus key
+//! and grant native signers the right to submit for it. A submission names a
+//! registered deployment and carries the finality artifacts of one of its
+//! revisions and a proof that the deployment's latest anchor is an ancestor
+//! of it. The executor verifies the certificate against the registered key
 //! and the proof against the block; this module then records the revision
 //! when it is higher than the latest anchor, descends from it, and its term
 //! is not lower. A finalized block that does not descend from the latest
@@ -13,14 +15,19 @@
 
 /// Solidity ABI interface for the anchor precompile.
 pub mod abi;
+mod deployment;
 mod error;
 mod fork;
 mod history;
 mod record;
 mod revision;
+mod submitter;
 #[cfg(test)]
 mod tests;
 
+pub use deployment::{
+    DeploymentRecord, DeploymentRegistration, MAX_DEPLOYMENT_RECORD_BYTES, deployment_key,
+};
 pub use error::AnchorError;
 pub use fork::{ForkRecord, MAX_FORK_RECORD_BYTES, fork_key, fork_prefix};
 pub use history::{AnchorEntry, MAX_ANCHOR_ENTRY_BYTES, anchor_entry_key, anchor_history_prefix};
@@ -28,6 +35,10 @@ pub use record::{
     AnchorRecord, CONSENSUS_KEY_BYTES, MAX_ANCHOR_RECORD_BYTES, anchor_key, deployment_id,
 };
 pub use revision::VerifiedRevision;
+pub use submitter::{
+    AnchorSubmitterGrant, AnchorSubmitterRevocation, MAX_SUBMITTER_BYTES,
+    MAX_SUBMITTER_RECORD_BYTES, SubmitterRecord, submitter_key, submitter_prefix,
+};
 
 use super::VeraModule;
 use crate::kv_store::ModuleKvStore as _;
@@ -46,23 +57,20 @@ pub struct Anchored {
 }
 
 impl VeraModule {
-    /// Record `revision` as the latest anchor of the deployment whose consensus
-    /// key has canonical encoding `consensus_key`.
+    /// Record `revision` as the latest anchor of the registered `deployment`.
     ///
-    /// The caller must have verified that `revision` is finalized under that
-    /// key and that `revision.ancestor`, when set, is an ancestor of it. A
-    /// deployment's first anchor needs no ancestor; every later one must name
-    /// the latest anchor.
+    /// The caller must have verified that `revision` is finalized under the
+    /// deployment's registered key and that `revision.ancestor`, when set, is
+    /// an ancestor of it. A deployment's first anchor needs no ancestor; every
+    /// later one must name the latest anchor.
     pub fn record_anchor(
         &mut self,
         block_ctx: &BlockExecCtx,
-        consensus_key: &[u8],
+        deployment: &alloy_primitives::B256,
         revision: &VerifiedRevision,
     ) -> Result<Anchored, AnchorError> {
-        if consensus_key.len() != CONSENSUS_KEY_BYTES {
-            return Err(AnchorError::InvalidConsensusKey);
-        }
-        let deployment = deployment_id(consensus_key);
+        let registered = self.registered_deployment(deployment)?;
+        let deployment = registered.deployment;
         let latest = self.latest_anchor(&deployment)?;
         if let Some(latest) = &latest {
             if latest.height == revision.height && latest.block_hash == revision.block_hash {
@@ -92,7 +100,7 @@ impl VeraModule {
         }
         let record = AnchorRecord {
             deployment,
-            consensus_key: consensus_key.to_vec().into(),
+            consensus_key: registered.consensus_key,
             sequence: latest.map_or(1, |latest| latest.sequence + 1),
             height: revision.height,
             block_hash: revision.block_hash,

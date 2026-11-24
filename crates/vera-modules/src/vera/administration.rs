@@ -119,6 +119,12 @@ pub enum AdministrativeCommand {
     SetLongOperationBudget(u64),
     /// Set the longest lead, in seconds, an operation identity on a policy command may carry.
     SetPolicyOperationLead(u64),
+    /// Register a deployment for anchoring, or replace its operator policy.
+    RegisterDeployment(super::anchors::DeploymentRegistration),
+    /// Grant a native signer the right to submit anchors of a deployment.
+    SetAnchorSubmitter(super::anchors::AnchorSubmitterGrant),
+    /// Remove a signer's right to submit anchors of a deployment.
+    RevokeAnchorSubmitter(super::anchors::AnchorSubmitterRevocation),
 }
 
 /// The exact administrative request covered by each operator signature.
@@ -260,6 +266,19 @@ impl VeraModule {
         }
         if let AdministrativeCommand::SetPolicyOperationLead(seconds) = &request.command {
             acp.set_policy_operation_lead(*seconds).map_err(invalid)?;
+        }
+        match &request.command {
+            AdministrativeCommand::RegisterDeployment(registration) => {
+                self.register_deployment(registration, now)
+                    .map_err(invalid)?;
+            }
+            AdministrativeCommand::SetAnchorSubmitter(grant) => {
+                self.set_anchor_submitter(grant).map_err(invalid)?;
+            }
+            AdministrativeCommand::RevokeAnchorSubmitter(revocation) => {
+                self.revoke_anchor_submitter(revocation).map_err(invalid)?;
+            }
+            _ => {}
         }
         self.store.put(STATE_KEY, encoded_state);
         Ok(())

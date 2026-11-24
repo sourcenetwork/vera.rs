@@ -5,10 +5,17 @@
 use std::{net::SocketAddr, path::Path, time::Duration};
 
 use alloy_primitives::B256;
-use vera_client::administration::OperatorPolicy;
+use commonware_codec::Encode as _;
+use vera_client::administration::{
+    AdministrativeCommand, AdministrativeRequest, OperatorPolicy, SignedAdministrativeRequest,
+    approve_administration,
+};
 use vera_client::{
     AccessRequest, Actor, BlsSigner, Object, Operation, VeraClient,
-    anchoring::{AnchoredSnapshot, AnchoringError, deployment_id},
+    anchoring::{
+        AnchorSubmitterGrant, AnchoredSnapshot, AnchoringError, DeploymentRegistration,
+        deployment_id,
+    },
 };
 use vera_node::{EmbeddedConfig, EmbeddedNode, SoloGenesis};
 
@@ -25,15 +32,19 @@ resources:
 ";
 const READER: &str = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 const DEADLINE: Duration = Duration::from_secs(60);
+/// The account key of both deployments, and the secret it is the public key of.
+const ACCOUNT_KEY: &str = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+const ACCOUNT_SECRET: [u8; 32] = {
+    let mut secret = [0; 32];
+    secret[31] = 1;
+    secret
+};
 
 fn config(directory: &Path, chain_id: u64) -> EmbeddedConfig {
     let genesis = SoloGenesis {
         policies: Vec::new(),
         chain_id,
-        operators: OperatorPolicy {
-            threshold: 1,
-            keys: vec!["0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798".into()],
-        },
+        operators: operators(),
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -42,6 +53,58 @@ fn config(directory: &Path, chain_id: u64) -> EmbeddedConfig {
     let mut config = EmbeddedConfig::new(directory, genesis, SocketAddr::from(([127, 0, 0, 1], 0)));
     config.rpc_listen = Some(SocketAddr::from(([127, 0, 0, 1], 0)));
     config
+}
+
+fn operators() -> OperatorPolicy {
+    OperatorPolicy {
+        threshold: 1,
+        keys: vec![ACCOUNT_KEY.into()],
+    }
+}
+
+/// The identifier of a deployment's genesis block: the parent of its first block.
+async fn genesis_id(client: &VeraClient, key: &vera_domain::ConsensusPublicKey) -> B256 {
+    let deadline = tokio::time::Instant::now() + DEADLINE;
+    loop {
+        if let Ok(first) = client.read_finalized_revision(1, key).await {
+            return first.parent_hash.parse().unwrap();
+        }
+        assert!(tokio::time::Instant::now() < deadline, "no first revision");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Apply `commands` on the anchoring deployment, approved by its account key.
+async fn administer(
+    anchoring: &VeraClient,
+    key: &vera_domain::ConsensusPublicKey,
+    commands: Vec<AdministrativeCommand>,
+) {
+    let account = vera_client::Secp256k1SigningKey::from_bytes(&ACCOUNT_SECRET.into()).unwrap();
+    let genesis = genesis_id(anchoring, key).await;
+    let operator = BlsSigner::random(anchoring.chain_id().await.unwrap()).unwrap();
+    let first = anchoring.administration().await.unwrap().unwrap().sequence;
+    for (sequence, command) in (first..).zip(commands) {
+        let request = AdministrativeRequest {
+            genesis_id: genesis.0,
+            sequence,
+            expires_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                + 300,
+            command,
+        };
+        let approvals = vec![approve_administration(&request, 0, &account).unwrap()];
+        let receipt = anchoring
+            .native_apply_administration(
+                &operator,
+                &SignedAdministrativeRequest { request, approvals },
+            )
+            .await
+            .unwrap();
+        assert!(receipt.success);
+    }
 }
 
 fn client(node: &EmbeddedNode) -> VeraClient {
@@ -103,6 +166,30 @@ async fn a_relayed_snapshot_verifies_against_the_anchor_and_goes_stale_after_a_r
     assert!(granted.success);
 
     let relay = BlsSigner::new(82u64.into(), anchoring_chain).unwrap();
+    // The anchoring deployment's operators admit the owner's deployment and its relay.
+    assert!(
+        d.publish_policy_snapshot(&s, &relay, &policy, &owner_key, &anchoring_key, DEADLINE)
+            .await
+            .is_err(),
+        "nothing is anchored for a deployment that is not registered"
+    );
+    administer(
+        &s,
+        &anchoring_key,
+        vec![
+            AdministrativeCommand::RegisterDeployment(DeploymentRegistration {
+                consensus_key: hex::encode(owner_key.encode()),
+                genesis_id: genesis_id(&d, &owner_key).await.0,
+                operators: operators(),
+            }),
+            AdministrativeCommand::SetAnchorSubmitter(AnchorSubmitterGrant {
+                deployment: deployment.0,
+                submitter: relay.did().to_owned(),
+                quota: 16,
+            }),
+        ],
+    )
+    .await;
     let first = d
         .publish_policy_snapshot(&s, &relay, &policy, &owner_key, &anchoring_key, DEADLINE)
         .await

@@ -25,7 +25,7 @@ pub use executor::VeraExecutor;
 pub use vera_modules::module_state::{ModuleState, SharedModuleState};
 
 mod mempool;
-pub use mempool::{MempoolValidator, PreValidatedNativeTx, TxValidationResult};
+pub use mempool::{AnchorTarget, MempoolValidator, PreValidatedNativeTx, TxValidationResult};
 
 mod simulate;
 pub use simulate::{

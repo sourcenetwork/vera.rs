@@ -3,7 +3,7 @@
 use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};
 
-use super::{AnchorError, CONSENSUS_KEY_BYTES, VerifiedRevision, deployment_id};
+use super::{AnchorError, VerifiedRevision};
 use crate::kv_store::ModuleKvStore as _;
 use crate::types::BlockExecCtx;
 use crate::vera::VeraModule;
@@ -82,23 +82,20 @@ impl ForkRecord {
 }
 
 impl VeraModule {
-    /// Record `revision` as a fork of the deployment whose consensus key has
-    /// canonical encoding `consensus_key`.
+    /// Record `revision` as a fork of the registered `deployment`.
     ///
-    /// The caller must have verified that `revision` is finalized under that
-    /// key and that `revision.ancestor`, when set, is an ancestor of it. The
+    /// The caller must have verified that `revision` is finalized under the
+    /// deployment's registered key and that `revision.ancestor`, when set, is
+    /// an ancestor of it. The
     /// block conflicts with the latest anchor when it is another block at the
     /// anchored height, or lies above it with another ancestor at that height.
     pub fn record_fork(
         &mut self,
         block_ctx: &BlockExecCtx,
-        consensus_key: &[u8],
+        deployment: &B256,
         revision: &VerifiedRevision,
     ) -> Result<ForkRecord, AnchorError> {
-        if consensus_key.len() != CONSENSUS_KEY_BYTES {
-            return Err(AnchorError::InvalidConsensusKey);
-        }
-        let deployment = deployment_id(consensus_key);
+        let deployment = self.registered_deployment(deployment)?.deployment;
         let latest = self
             .latest_anchor(&deployment)?
             .ok_or(AnchorError::NoAnchor)?;

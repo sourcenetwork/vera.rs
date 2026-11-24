@@ -285,3 +285,77 @@ mod operation_lead;
 
 #[path = "support/long_operation_budget_administration.rs"]
 mod long_operation_budget;
+
+#[test]
+fn operators_register_a_deployment_and_grant_and_revoke_its_submitters() {
+    use vera_modules::vera::anchors::{
+        AnchorSubmitterGrant, AnchorSubmitterRevocation, DeploymentRegistration, deployment_id,
+    };
+    const SUBMITTER: &str = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+    let (policy, keys) = operators();
+    let mut vera = VeraModule::new();
+    let mut acp = AcpModule::new();
+    vera.initialize_administration(policy.clone()).unwrap();
+    let consensus_key = vec![5u8; 96];
+    let deployment = deployment_id(&consensus_key);
+    let grant = AnchorSubmitterGrant {
+        deployment: deployment.0,
+        submitter: SUBMITTER.into(),
+        quota: 4,
+    };
+    let command = |sequence, command| {
+        approve(
+            AdministrativeRequest {
+                command,
+                ..request(sequence)
+            },
+            &keys,
+        )
+    };
+
+    // A grant for a deployment that is not registered is refused and consumes no sequence.
+    let early = command(0, AdministrativeCommand::SetAnchorSubmitter(grant.clone()));
+    assert!(
+        vera.apply_administrative_request(&mut acp, GENESIS, 100, &early)
+            .is_err()
+    );
+    let registration = DeploymentRegistration {
+        consensus_key: hex::encode(&consensus_key),
+        genesis_id: [9; 32],
+        operators: policy,
+    };
+    let register = command(0, AdministrativeCommand::RegisterDeployment(registration));
+    // One operator does not register a deployment.
+    let mut insufficient = register.clone();
+    insufficient.approvals.truncate(1);
+    assert!(
+        vera.apply_administrative_request(&mut acp, GENESIS, 100, &insufficient)
+            .is_err()
+    );
+    assert_eq!(vera.deployment(&deployment), Ok(None));
+    vera.apply_administrative_request(&mut acp, GENESIS, 100, &register)
+        .unwrap();
+    let record = vera.deployment(&deployment).unwrap().unwrap();
+    assert_eq!(record.genesis_id.0, [9; 32]);
+    assert_eq!(record.registered_at, 100);
+
+    let granted = command(1, AdministrativeCommand::SetAnchorSubmitter(grant));
+    vera.apply_administrative_request(&mut acp, GENESIS, 100, &granted)
+        .unwrap();
+    assert_eq!(
+        vera.anchor_submitter(&deployment, SUBMITTER)
+            .unwrap()
+            .unwrap()
+            .quota,
+        4
+    );
+    let revocation = AnchorSubmitterRevocation {
+        deployment: deployment.0,
+        submitter: SUBMITTER.into(),
+    };
+    let revoked = command(2, AdministrativeCommand::RevokeAnchorSubmitter(revocation));
+    vera.apply_administrative_request(&mut acp, GENESIS, 100, &revoked)
+        .unwrap();
+    assert_eq!(vera.anchor_submitter(&deployment, SUBMITTER), Ok(None));
+    assert_eq!(vera.administration().unwrap().unwrap().sequence, 3);
+}
