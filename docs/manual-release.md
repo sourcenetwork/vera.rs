@@ -9,9 +9,28 @@ test harnesses and development tools are not published as crates.
 
 The `0.1.2` crates are published on crates.io. This runbook prepares
 `0.2.0`, which must be published in dependency order before consumers can resolve
-that version. The public client API has changed since `0.1.2`; for example,
-`VeraDocumentACP` is no longer exported. Review compatibility and update consumers
-before release. Every validator of a deployment must run the same version.
+that version. Every validator of a deployment must run the same version.
+
+`0.2.0` is not compatible with `0.1.x`, on the wire or on disk:
+
+- **Native only.** EVM execution, EVM transactions and every `eth_*`, `net_*`
+  and `web3_*` method are removed, as are the rotating VRF consensus mode and the
+  account, storage and code partitions. Native BLS requests are the only
+  transactions; `vera_call` is an unauthenticated read.
+- **Formats.** Blocks carry a format version (2, with block ancestry), the state
+  layout and native request type are versioned, and receipts are committed under
+  `vera/receipts/v3`. Data directories, genesis records and fixtures from `0.1.x`
+  are refused; every deployment starts from fresh state.
+- **Policy ids** are derived from the policy, its creator and a creator-chosen
+  nonce ([policy-ids.md](policy-ids.md)).
+- **Anchoring.** A parent deployment records a proven, authenticated chain of
+  anchors per registered deployment, with fork evidence and term changes
+  ([anchoring.md](anchoring.md)).
+- **Client API.** `VeraDocumentACP` is no longer exported, the anchoring and
+  signing helpers changed, and `ClientError` has new variants. Consumers with
+  exhaustive matches or direct calls need review.
+
+Review compatibility and update consumers before release.
 
 The SDK uses official Commonware `2026.10.0` registry packages. Daemon and
 consumer qualification must identify the exact Vera revision and dependencies.
