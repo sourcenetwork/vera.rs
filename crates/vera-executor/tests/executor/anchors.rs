@@ -355,3 +355,103 @@ fn only_a_granted_signer_anchors_a_registered_deployment_within_its_quota() {
         vera_modules::vera::anchors::SubmitterRecord::decode(&id, &submitter, &record).unwrap();
     assert_eq!((record.quota, record.used), (QUOTA, QUOTA));
 }
+
+/// A term change of the deployment registered with genesis block `[9; 32]`,
+/// approved by the operator with secret `[secret; 32]`.
+fn term_call(
+    deployment: &TestDeployment,
+    genesis: u8,
+    secret: u8,
+    term: u64,
+    cut: &Block,
+) -> Vec<u8> {
+    use k256::ecdsa::{Signature, SigningKey, signature::hazmat::PrehashSigner as _};
+    use vera_domain::{TermApproval, TermCertificate, TermChange, TermCut};
+    let change = TermChange {
+        genesis_id: B256::repeat_byte(genesis),
+        term,
+        holder: B256::repeat_byte(0xd0),
+        cut: TermCut {
+            height: cut.height,
+            block: cut.id().0,
+        },
+    };
+    let operator = SigningKey::from_bytes(&[secret; 32].into()).unwrap();
+    let signature: Signature = operator.sign_prehash(&change.signing_digest()).unwrap();
+    let certificate = TermCertificate {
+        change,
+        approvals: vec![TermApproval {
+            signer: 0,
+            signature: FixedBytes::from_slice(&signature.to_bytes()),
+        }],
+    };
+    IAnchor::changeTermCall {
+        deployment: deployment_id(&deployment.key().encode()),
+        certificate: serde_json::to_vec(&certificate).unwrap().into(),
+    }
+    .abi_encode()
+}
+
+#[test]
+fn a_term_is_anchored_only_under_its_certificate_and_continues_from_its_cut() {
+    let deployment = TestDeployment::new(26);
+    let replaced = deployment.chain(20, 1);
+    // The device that took over built term 1 on the block at height 10.
+    let mut taken = replaced[..=10].to_vec();
+    for _ in 0..5 {
+        let next = deployment.child(&taken[taken.len() - 1], 1, B256::repeat_byte(2));
+        taken.push(next);
+    }
+    let receipts = execute(
+        &[&deployment],
+        vec![
+            anchor_call(&deployment, &replaced, 5, 5),
+            // A block of term 1 that does descend from the anchor, before any certificate.
+            anchor_call(&deployment, &taken, 5, 12),
+            // A certificate by another key, and one for another deployment's genesis block.
+            term_call(&deployment, 9, 2, 1, &replaced[10]),
+            term_call(&deployment, 8, 1, 1, &replaced[10]),
+            anchor_call(&deployment, &replaced, 5, 15),
+            term_call(&deployment, 9, 1, 1, &replaced[10]),
+            // The replaced device's blocks above the cut are void.
+            anchor_call(&deployment, &replaced, 15, 18),
+            fork_call(&deployment, &replaced, 10, 15),
+            // The term's first anchor proves the cut, not an earlier anchor.
+            anchor_call(&deployment, &taken, 5, 12),
+            anchor_call(&deployment, &taken, 10, 12),
+            term_call(&deployment, 9, 1, 1, &replaced[10]),
+            anchor_call(&deployment, &taken, 12, 15),
+        ],
+    );
+
+    assert!(receipts[0].success(), "{:?}", receipts[0].refusal);
+    assert_eq!(
+        refusals(&receipts[1..4]),
+        [
+            RefusalKind::Unauthorized,
+            RefusalKind::InvalidProof,
+            RefusalKind::InvalidProof
+        ]
+    );
+    assert!(receipts[4].success(), "{:?}", receipts[4].refusal);
+    assert!(receipts[5].success(), "{:?}", receipts[5].refusal);
+    let event = IAnchor::TermChanged::decode_log_data(&receipts[5].logs()[0].data).unwrap();
+    assert_eq!((event.term, event.cutHeight, event.sequence), (1, 10, 2));
+    assert_eq!(event.cutBlock.0, replaced[10].id().0.0);
+    assert_eq!(
+        refusals(&receipts[6..9]),
+        [
+            RefusalKind::NotNewer,
+            RefusalKind::InvalidProof,
+            RefusalKind::NotDescendant
+        ]
+    );
+    for (index, sequence, height) in [(9, 3, 12), (11, 4, 15)] {
+        assert!(receipts[index].success(), "{:?}", receipts[index].refusal);
+        let event =
+            IAnchor::RevisionAnchored::decode_log_data(&receipts[index].logs()[0].data).unwrap();
+        assert_eq!((event.sequence, event.height), (sequence, height));
+        assert_eq!(event.blockHash.0, taken[height as usize].id().0.0);
+    }
+    assert_eq!(refusals(&receipts[10..11]), [RefusalKind::NotNewer]);
+}

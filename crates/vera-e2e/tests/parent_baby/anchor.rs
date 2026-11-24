@@ -16,7 +16,7 @@ use vera_client::{
         DeploymentRegistration, deployment_id,
     },
 };
-use vera_domain::{ConsensusPublicKey, LightBlock, verify_finalized_block};
+use vera_domain::{ConsensusPublicKey, LightBlock, TermCertificate, verify_finalized_block};
 use vera_modules::vera::anchors::abi::IAnchor;
 
 use super::administration;
@@ -161,16 +161,14 @@ impl Parent {
         baby: &Baby,
         revision: &LightBlock,
     ) -> Result<B256, ClientError> {
-        let latest = self
+        let lineage = self
             .client
-            .read_latest_anchor(&deployment_id(&baby.key), 0, &self.key)
+            .read_anchor_lineage(&deployment_id(&baby.key), 0, &self.key)
             .await
-            .unwrap()
-            .record;
-        let tip = latest.map(|latest| (latest.height, latest.block_hash));
+            .unwrap();
         let proof = baby
             .client
-            .anchor_proof(tip, revision.height)
+            .anchor_proof(lineage.tip(), revision.height)
             .await
             .unwrap();
         self.client
@@ -206,6 +204,21 @@ impl Parent {
                 &baby.key,
                 (latest.height, latest.block_hash),
             )
+            .await
+            .unwrap();
+        self.outcome(submission).await
+    }
+
+    /// Submit a term certificate of `baby` and return the refusal, if any.
+    pub(crate) async fn try_change_term(
+        &self,
+        relay: &BlsSigner,
+        baby: &Baby,
+        certificate: &TermCertificate,
+    ) -> Result<B256, RefusalKind> {
+        let submission = self
+            .client
+            .submit_term_change(relay, &baby.key, certificate)
             .await
             .unwrap();
         self.outcome(submission).await

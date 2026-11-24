@@ -7,6 +7,7 @@ mod history;
 mod key;
 mod registration;
 mod snapshot;
+mod term;
 #[cfg(test)]
 mod tests;
 
@@ -17,7 +18,7 @@ use alloy_sol_types::SolCall as _;
 use vera_domain::{AncestryProof, ConsensusPublicKey, LightBlock, ModuleId};
 pub use vera_modules::vera::anchors::{
     AnchorEntry, AnchorRecord, AnchorSubmitterGrant, AnchorSubmitterRevocation, DeploymentRecord,
-    DeploymentRegistration, ForkRecord, SubmitterRecord,
+    DeploymentRegistration, ForkRecord, Lineage, SubmitterRecord, TermRecord,
 };
 use vera_modules::vera::anchors::{MAX_ANCHOR_ARTIFACT_BYTES, abi::IAnchor, anchor_key};
 use vera_permission::{
@@ -29,6 +30,7 @@ pub use fork::encode_fork_report;
 pub use history::AnchorPage;
 pub use key::{anchored_key, deployment_id};
 pub use snapshot::{ANCHORED_SNAPSHOT_BYTES, AnchoredSnapshot, VerifiedSnapshot};
+pub use term::encode_term_change;
 
 use crate::{BlsSigner, ClientError, VeraClient, client::ANCHOR_ADDRESS};
 
@@ -105,8 +107,8 @@ impl VeraClient {
     }
 
     /// The proof an anchor of this deployment's revision at `height` needs
-    /// when `tip` is the height and identifier of its latest anchor: none for
-    /// the first anchor.
+    /// when `tip` is the tip of its chain of anchors ([`Lineage::tip`]): none
+    /// for the first anchor.
     pub async fn anchor_proof(
         &self,
         tip: Option<(u64, B256)>,
@@ -198,8 +200,9 @@ impl VeraClient {
     ///
     /// Fails with [`AnchoringError::Refused`] when another anchor at or above the
     /// revision landed first, and capturing again then anchors a newer
-    /// revision; or when the revision does not descend from the latest anchor,
-    /// which another device's history holds.
+    /// revision; when the revision does not descend from the tip of the
+    /// deployment's anchors, which another device's history holds; or when it
+    /// is in a term the anchoring deployment holds no certificate of.
     pub async fn publish_policy_snapshot(
         &self,
         anchoring: &Self,
@@ -210,12 +213,12 @@ impl VeraClient {
         timeout: Duration,
     ) -> Result<AnchoredSnapshot, ClientError> {
         let captured = self.capture_policy_snapshot(policy, 0, own_key).await?;
-        let latest = anchoring
-            .read_latest_anchor(&deployment_id(own_key), 0, anchoring_key)
-            .await?
-            .record;
-        let tip = latest.map(|latest| (latest.height, latest.block_hash));
-        let proof = self.anchor_proof(tip, captured.revision.height).await?;
+        let lineage = anchoring
+            .read_anchor_lineage(&deployment_id(own_key), 0, anchoring_key)
+            .await?;
+        let proof = self
+            .anchor_proof(lineage.tip(), captured.revision.height)
+            .await?;
         let submission = anchoring
             .submit_anchor(submitter, &captured.revision, own_key, proof.as_ref())
             .await?;

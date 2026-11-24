@@ -51,6 +51,9 @@ pub struct DeploymentRecord {
     pub operators: OperatorPolicy,
     /// Block time, in Unix seconds, of the revision of this deployment that first registered it.
     pub registered_at: u64,
+    /// The term certified last, whose record holds its cut; 0 until the
+    /// deployment's first term change is recorded.
+    pub term: u64,
 }
 
 impl DeploymentRecord {
@@ -97,12 +100,12 @@ impl VeraModule {
         }
         let deployment = deployment_id(&consensus_key);
         let genesis_id = B256::from(registration.genesis_id);
-        let registered_at = match self.deployment(&deployment)? {
+        let (registered_at, term) = match self.deployment(&deployment)? {
             Some(existing) if existing.genesis_id != genesis_id => {
                 return Err(AnchorError::InvalidRegistration);
             }
-            Some(existing) => existing.registered_at,
-            None => now,
+            Some(existing) => (existing.registered_at, existing.term),
+            None => (now, 0),
         };
         let record = DeploymentRecord {
             deployment,
@@ -110,6 +113,7 @@ impl VeraModule {
             genesis_id,
             operators: registration.operators.clone(),
             registered_at,
+            term,
         };
         self.store
             .put(&deployment_key(&deployment), record.encode());

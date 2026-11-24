@@ -28,21 +28,23 @@ pub fn fork_key(deployment: &B256, block_hash: &B256) -> Vec<u8> {
     .concat()
 }
 
-/// A finalized block of a deployment that does not descend from the anchor
-/// that was its latest when the block was reported.
+/// A finalized block of a deployment that does not descend from the tip of
+/// its chain of anchors when the block was reported: its latest anchor, or
+/// the cut of a term certified since.
 ///
-/// Both blocks carry the deployment's certificate, so the deployment's key
-/// finalized two histories that part at or below the anchored height.
+/// The block carries the deployment's certificate, and so does the anchored
+/// one, so the deployment's key finalized two histories that part at or below
+/// the anchored height.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ForkRecord {
     /// The deployment's identifier.
     pub deployment: B256,
-    /// Sequence of the anchor the block conflicts with.
+    /// Sequence of the deployment's latest anchor when the fork was reported.
     pub sequence: u64,
-    /// Height of that anchor.
+    /// Height of the tip the block conflicts with.
     pub anchored_height: u64,
-    /// Identifier of the anchored block.
+    /// Identifier of the block at the tip.
     pub anchored_block: B256,
     /// Height of the conflicting block.
     pub height: u64,
@@ -86,42 +88,48 @@ impl VeraModule {
     ///
     /// The caller must have verified that `revision` is finalized under the
     /// deployment's registered key and that `revision.ancestor`, when set, is
-    /// an ancestor of it. The
-    /// block conflicts with the latest anchor when it is another block at the
-    /// anchored height, or lies above it with another ancestor at that height.
+    /// an ancestor of it. The block conflicts with the tip of the
+    /// deployment's [`super::Lineage`] when it is another block at the tip's
+    /// height, or lies above it with another ancestor at that height. A block
+    /// the certified term voids is no fork.
     pub fn record_fork(
         &mut self,
         block_ctx: &BlockExecCtx,
         deployment: &B256,
         revision: &VerifiedRevision,
     ) -> Result<ForkRecord, AnchorError> {
-        let deployment = self.registered_deployment(deployment)?.deployment;
-        let latest = self
-            .latest_anchor(&deployment)?
-            .ok_or(AnchorError::NoAnchor)?;
-        let ancestor = if revision.height == latest.height {
+        let registered = self.registered_deployment(deployment)?;
+        let deployment = registered.deployment;
+        let lineage = self.lineage(&registered)?;
+        let (tip_height, tip_block) = lineage.tip().ok_or(AnchorError::NoAnchor)?;
+        let not_a_fork = AnchorError::NotAFork {
+            latest: tip_height,
+            height: revision.height,
+        };
+        // A block the certified term voids is explained by the term.
+        if lineage.voids(revision.height, revision.term) {
+            return Err(not_a_fork);
+        }
+        let ancestor = if revision.height == tip_height {
             Some(revision.block_hash)
         } else {
             revision
                 .ancestor
-                .filter(|(height, _)| revision.height > latest.height && *height == latest.height)
+                .filter(|(height, _)| revision.height > tip_height && *height == tip_height)
                 .map(|(_, ancestor)| ancestor)
         };
         let ancestor = ancestor
-            .filter(|ancestor| *ancestor != latest.block_hash)
-            .ok_or(AnchorError::NotAFork {
-                latest: latest.height,
-                height: revision.height,
-            })?;
+            .filter(|ancestor| *ancestor != tip_block)
+            .ok_or(not_a_fork)?;
         let key = fork_key(&deployment, &revision.block_hash);
         if self.store.has(&key) {
             return Err(AnchorError::ForkRecorded);
         }
         let record = ForkRecord {
             deployment,
-            sequence: latest.sequence,
-            anchored_height: latest.height,
-            anchored_block: latest.block_hash,
+            sequence: lineage.latest.map_or(0, |latest| latest.sequence),
+            anchored_height: tip_height,
+            anchored_block: tip_block,
             height: revision.height,
             block_hash: revision.block_hash,
             term: revision.term,

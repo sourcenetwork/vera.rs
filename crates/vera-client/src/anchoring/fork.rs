@@ -41,9 +41,9 @@ pub fn encode_fork_report(
 impl VeraClient {
     /// On a device of the deployment with consensus key `own_key` (this
     /// client), report its revision at `height` to `anchoring` as a fork of
-    /// `tip`, the height and identifier of the deployment's latest anchor
-    /// there. Returns the submission identifier; [`Self::await_anchor`] waits
-    /// for its receipt.
+    /// `tip`, the tip of the deployment's anchors there
+    /// ([`super::Lineage::tip`]). Returns the submission identifier;
+    /// [`Self::await_anchor`] waits for its receipt.
     ///
     /// The report is refused unless this device's history differs from the
     /// anchored one at the tip's height.

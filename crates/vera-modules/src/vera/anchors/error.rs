@@ -20,10 +20,10 @@ pub enum AnchorError {
         /// Height of the submitted revision.
         height: u64,
     },
-    /// The revision's term is lower than the latest anchor's.
-    #[error("revision term {term} is below the latest anchor's term {latest}")]
+    /// The revision's term is below the certified one, which voids it.
+    #[error("revision term {term} is below the certified term {latest}")]
     LowerTerm {
-        /// Term of the latest anchor.
+        /// The term certified last.
         latest: u64,
         /// Term of the submitted revision.
         term: u64,
@@ -50,6 +50,22 @@ pub enum AnchorError {
     /// The fork is already recorded.
     #[error("the fork is already recorded")]
     ForkRecorded,
+    /// The revision's term is above the one the deployment's operators certified.
+    #[error("revision term {term} is above the certified term {certified}")]
+    TermNotCertified {
+        /// The term certified last.
+        certified: u64,
+        /// Term of the submitted revision.
+        term: u64,
+    },
+    /// The certificate's term is not above the one recorded last.
+    #[error("term {term} is not above the certified term {certified}")]
+    TermNotNewer {
+        /// The term certified last.
+        certified: u64,
+        /// The certificate's term.
+        term: u64,
+    },
     /// The deployment is not registered for anchoring.
     #[error("the deployment is not registered")]
     NotRegistered,

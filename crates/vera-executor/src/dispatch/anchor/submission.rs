@@ -7,7 +7,7 @@ use alloy_primitives::B256;
 use commonware_codec::{DecodeExt as _, FixedSize as _};
 use vera_domain::{
     AncestryProof, Block, BlockId, ConsensusPublicKey, FinalizedArtifacts, LightBlockError,
-    verify_finalized_artifacts,
+    TermError, verify_finalized_artifacts,
 };
 use vera_modules::vera::anchors::{
     AnchorError, CONSENSUS_KEY_BYTES, MAX_ANCHOR_ARTIFACT_BYTES, VerifiedRevision,
@@ -42,6 +42,12 @@ pub(crate) enum AnchorRefusal {
     /// The revision is not finalized under the consensus key.
     #[error("revision is not finalized under the deployment's key: {0}")]
     Finality(#[from] LightBlockError),
+    /// The term certificate is not approved under the deployment's operator policy.
+    #[error("term certificate does not verify: {0}")]
+    Term(#[from] TermError),
+    /// The term certificate does not decode.
+    #[error("term certificate does not decode")]
+    Certificate,
 }
 
 impl AnchorSubmission {

@@ -6,8 +6,9 @@
 //! revisions and a proof that the deployment's latest anchor is an ancestor
 //! of it. The executor verifies the certificate against the registered key
 //! and the proof against the block; this module then records the revision
-//! when it is higher than the latest anchor, descends from it, and its term
-//! is not lower. A finalized block that does not descend from the latest
+//! when it is higher than the latest anchor, descends from it, and is in the
+//! term the deployment's operators certified last. A certified term moves the
+//! chain's tip to its cut and supersedes the anchors above it. A finalized block that does not descend from the latest
 //! anchor is recorded as a fork. Every anchor stays in the deployment's
 //! history, in sequence order. Records are kept in the identity partition
 //! under the deployment's identifier, which is derived from the key, so
@@ -22,6 +23,7 @@ mod history;
 mod record;
 mod revision;
 mod submitter;
+mod term;
 #[cfg(test)]
 mod tests;
 
@@ -39,6 +41,7 @@ pub use submitter::{
     AnchorSubmitterGrant, AnchorSubmitterRevocation, MAX_SUBMITTER_BYTES,
     MAX_SUBMITTER_RECORD_BYTES, SubmitterRecord, submitter_key, submitter_prefix,
 };
+pub use term::{Lineage, MAX_TERM_RECORD_BYTES, TermRecord, VerifiedTerm, term_key, term_prefix};
 
 use super::VeraModule;
 use crate::kv_store::ModuleKvStore as _;
@@ -61,8 +64,9 @@ impl VeraModule {
     ///
     /// The caller must have verified that `revision` is finalized under the
     /// deployment's registered key and that `revision.ancestor`, when set, is
-    /// an ancestor of it. A deployment's first anchor needs no ancestor; every
-    /// later one must name the latest anchor.
+    /// an ancestor of it. A deployment's first anchor in term 0 needs no
+    /// ancestor; every other one must name the tip of the deployment's
+    /// [`Lineage`] and carry the certified term.
     pub fn record_anchor(
         &mut self,
         block_ctx: &BlockExecCtx,
@@ -71,33 +75,45 @@ impl VeraModule {
     ) -> Result<Anchored, AnchorError> {
         let registered = self.registered_deployment(deployment)?;
         let deployment = registered.deployment;
-        let latest = self.latest_anchor(&deployment)?;
-        if let Some(latest) = &latest {
-            if latest.height == revision.height && latest.block_hash == revision.block_hash {
+        let lineage = self.lineage(&registered)?;
+        let tip = lineage.tip();
+        let certified = lineage.certified_term();
+        if let Some((tip_height, tip_block)) = tip {
+            if let Some(latest) = &lineage.latest
+                && (latest.height, latest.block_hash) == (tip_height, tip_block)
+                && (revision.height, revision.block_hash) == (tip_height, tip_block)
+            {
                 return Ok(Anchored {
                     record: latest.clone(),
                     recorded: false,
                 });
             }
-            if revision.height <= latest.height {
+            if revision.height <= tip_height {
                 return Err(AnchorError::NotNewer {
-                    latest: latest.height,
-                    height: revision.height,
-                });
-            }
-            if revision.term < latest.term {
-                return Err(AnchorError::LowerTerm {
-                    latest: latest.term,
-                    term: revision.term,
-                });
-            }
-            if revision.ancestor != Some((latest.height, latest.block_hash)) {
-                return Err(AnchorError::NotDescendant {
-                    latest: latest.height,
+                    latest: tip_height,
                     height: revision.height,
                 });
             }
         }
+        if revision.term > certified {
+            return Err(AnchorError::TermNotCertified {
+                certified,
+                term: revision.term,
+            });
+        }
+        if revision.term < certified {
+            return Err(AnchorError::LowerTerm {
+                latest: certified,
+                term: revision.term,
+            });
+        }
+        if tip.is_some() && revision.ancestor != tip {
+            return Err(AnchorError::NotDescendant {
+                latest: tip.map_or(0, |(height, _)| height),
+                height: revision.height,
+            });
+        }
+        let latest = lineage.latest;
         let record = AnchorRecord {
             deployment,
             consensus_key: registered.consensus_key,

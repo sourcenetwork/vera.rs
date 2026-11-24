@@ -14,12 +14,14 @@ mod anchor;
 #[path = "parent_baby/baby.rs"]
 mod baby;
 
+use alloy_primitives::B256;
 use anchor::Parent;
 use baby::{Baby, block_hash};
 use vera_client::{
     AccessRequest, Actor, BlsSigner, Object, Operation, RefusalKind, VeraClient,
     anchoring::{AnchorEntry, AnchoredSnapshot, AnchoringError, deployment_id},
 };
+use vera_domain::{TermChange, TermCut};
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, TestCluster};
 
 const PARENT_CHAIN: u64 = 9_611;
@@ -355,6 +357,90 @@ async fn a_parent_orders_and_attests_the_policies_of_two_babies() {
         [AnchorEntry::from(&phone_first.record)]
     );
     assert_eq!(phone_history.next, None);
+
+    // The laptop's owner moves the active role to a device that held the
+    // chain up to the second anchor. Only the laptop's operators certify that.
+    let change = TermChange {
+        genesis_id: administration::genesis_id(&laptop.client).await,
+        term: 1,
+        holder: B256::repeat_byte(0xd1),
+        cut: TermCut {
+            height: second.record.height,
+            block: second.record.block_hash,
+        },
+    };
+    assert_eq!(
+        parent
+            .try_change_term(&laptop_relay, &laptop, &baby::certify(change, 2))
+            .await,
+        Err(RefusalKind::InvalidProof),
+        "a term is recorded only under the baby's operator policy"
+    );
+    assert!(
+        parent
+            .client
+            .read_anchor_terms(&laptop_id, 0, &parent.key)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    parent
+        .try_change_term(&laptop_relay, &laptop, &baby::certify(change, 1))
+        .await
+        .expect("the baby's operators certify the term");
+
+    // A third party reads the term with the parent's key alone and learns
+    // which snapshots it voided: those of anchors above the cut.
+    let terms = parent
+        .client
+        .read_anchor_terms(&laptop_id, 0, &parent.key)
+        .await
+        .unwrap();
+    let [term] = terms.as_slice() else {
+        panic!("one term is recorded");
+    };
+    assert_eq!((term.term, term.sequence), (1, 4));
+    assert_eq!(
+        (term.cut_height, term.cut_block),
+        (second.record.height, second.record.block_hash)
+    );
+    verified.ensure_kept(&terms).unwrap();
+    second
+        .snapshot
+        .verify(&laptop_id, &laptop_policy, &parent.key, 0)
+        .unwrap()
+        .ensure_kept(&terms)
+        .unwrap();
+    assert!(matches!(
+        newest.ensure_kept(&terms),
+        Err(AnchoringError::Superseded { held: 3, term: 1 })
+    ));
+    assert!(matches!(
+        fourth
+            .snapshot
+            .verify(&laptop_id, &laptop_policy, &parent.key, 0)
+            .unwrap()
+            .ensure_kept(&terms),
+        Err(AnchoringError::Superseded { held: 4, term: 1 })
+    ));
+    phone_verified.ensure_kept(&[]).unwrap();
+
+    // The chain continues from the cut in term 1. The laptop still builds in
+    // term 0, so its blocks above the cut are void and anchor nothing.
+    let lineage = parent
+        .client
+        .read_anchor_lineage(&laptop_id, 0, &parent.key)
+        .await
+        .unwrap();
+    assert_eq!(
+        lineage.tip(),
+        Some((second.record.height, second.record.block_hash))
+    );
+    let void = laptop.revision_at(fourth.record.height).await;
+    assert_eq!(
+        parent.try_anchor(&laptop_relay, &laptop, &void).await,
+        Err(RefusalKind::NotNewer)
+    );
 
     for node in [fork, laptop, phone] {
         node.node.stop().await.unwrap();

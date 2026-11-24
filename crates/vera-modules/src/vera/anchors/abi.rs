@@ -22,6 +22,24 @@ sol! {
             bytes32 blockHash
         );
 
+        /// A deployment's operators certified a term, which continues its
+        /// chain of anchors from the cut.
+        event TermChanged(
+            bytes32 indexed deployment,
+            uint64 term,
+            uint64 cutHeight,
+            bytes32 cutBlock,
+            uint64 sequence
+        );
+
+        /// Record a term of a registered deployment. `certificate` is the
+        /// JSON `TermCertificate`, approved under the deployment's registered
+        /// operator policy. Returns the term record as JSON.
+        function changeTerm(
+            bytes32 deployment,
+            bytes certificate
+        ) external returns (bytes record);
+
         /// Record a finalized revision of a registered deployment, submitted by
         /// a signer with a grant for it. `ancestryProof` shows that the deployment's latest anchor is an
         /// ancestor of the revision; it is empty for the first anchor.

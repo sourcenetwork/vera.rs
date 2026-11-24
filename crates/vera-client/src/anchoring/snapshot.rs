@@ -3,7 +3,9 @@
 use alloy_primitives::{B256, keccak256};
 use serde::{Deserialize, Serialize};
 use vera_domain::{ConsensusPublicKey, LightBlock, ModuleId, verify_finalized_block};
-use vera_modules::vera::anchors::{AnchorRecord, MAX_ANCHOR_ARTIFACT_BYTES, anchor_key};
+use vera_modules::vera::anchors::{
+    AnchorRecord, MAX_ANCHOR_ARTIFACT_BYTES, TermRecord, anchor_key,
+};
 use vera_permission::{
     AccessRequest, POLICY_SNAPSHOT_RESPONSE_BYTES, PolicySnapshotProof, PolicyState,
     RECORD_PROOF_BYTES, RECORD_RESPONSE_BYTES, RecordResponse, encoded_size,
@@ -125,14 +127,37 @@ impl AnchoredSnapshot {
 impl VerifiedSnapshot {
     /// Refuse the snapshot when `latest`, an anchor of the same deployment the
     /// caller verified separately, is newer than the snapshot's anchor.
+    /// [`Self::ensure_kept`] tells whether a device switch voided it.
     pub fn ensure_current(&self, latest: &AnchorRecord) -> Result<(), AnchoringError> {
         ensure_not_superseded(&self.anchor, latest)
+    }
+
+    /// Refuse the snapshot when one of `terms`, the terms of the same
+    /// deployment the caller read separately, voided the snapshot's anchor: it
+    /// was recorded before the term, above the term's cut.
+    pub fn ensure_kept(&self, terms: &[TermRecord]) -> Result<(), AnchoringError> {
+        ensure_kept(&self.anchor, terms)
     }
 
     /// Whether the request's actor holds every requested permission at the anchored revision.
     pub fn check(&self, request: &AccessRequest) -> Result<bool, AnchoringError> {
         Ok(self.state.check(request)?)
     }
+}
+
+pub(super) fn ensure_kept(held: &AnchorRecord, terms: &[TermRecord]) -> Result<(), AnchoringError> {
+    for term in terms {
+        if term.deployment != held.deployment {
+            return Err(vera_modules::vera::anchors::AnchorError::MalformedRecord.into());
+        }
+        if term.supersedes(held.sequence, held.height, &held.block_hash) {
+            return Err(AnchoringError::Superseded {
+                held: held.sequence,
+                term: term.term,
+            });
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn ensure_not_superseded(
