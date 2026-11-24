@@ -27,7 +27,7 @@ Related repositories are independent checkouts; discover their paths rather than
 | **trust-api** | sourcenetwork | Separate Go gateway; this repository ships no Go client, C verifier or tests for it |
 | **backbone** | sourcenetwork | Shared Rust clients and verification used by native consumers |
 | **regolith** | sourcenetwork | Defra document storage and Vera finalized-history backend |
-| **bankd-commonware** | mizufinance | Reference: Commonware + REVM chain (infrastructure source for Phase 1) |
+| **bankd-commonware** | mizufinance | Reference Commonware chain (source of the consensus assembly and e2e harness) |
 | **monorepo** | commonwarexyz | Commonware primitives (consensus, crypto, p2p, storage) |
 
 ### Code reuse across repos
@@ -37,7 +37,7 @@ Related repositories are independent checkouts; discover their paths rather than
 | Zanzibar engine (relation-tuple graph) | vendored `crates/vera-zanzibar/` (from defradb.rs 8d34d9c) | ACP policy evaluation |
 | DID types, identity crate | vendored `crates/vera-identity/` (from defradb.rs 8d34d9c) | DID resolution |
 | YAML policy parser, DocumentACP types | vendored `crates/vera-acp/` (from defradb.rs 8d34d9c) | ACP policy creation |
-| Simplex consensus, REVM executor, e2e harness | bankd-commonware | Consensus, EVM execution, testing |
+| Simplex consensus, e2e harness | bankd-commonware | Consensus, testing |
 | BLS12-381 threshold crypto | commonware monorepo | Block signing, native tx verification |
 
 The development toolchain is pinned to Rust 1.99.1 in `rust-toolchain.toml`.
@@ -143,7 +143,7 @@ subscription channels. Block execution goes through `VeraExecutor`:
 A block carries native requests only. Building skips and drops bytes that are
 not a native request; verification rejects a block that carries any.
 
-### Precompile addresses
+### Module addresses
 
 | Address | Module | Purpose |
 |---------|--------|---------|
@@ -155,9 +155,9 @@ not a native request; verification rejects a block that carries any.
 
 ### Shared module pattern
 
-Each module is a plain Rust struct. Two thin shims sit on top:
-- **Precompile shim:** ABI decode calldata → `module.method(args)`
-- **Native tx shim:** BLS verify + deserialize → `module.method(args)`
+Each module is a plain Rust struct. A native request names a module address
+and carries an ABI-encoded call; the executor verifies the BLS signature and
+the dispatch shim decodes the call into `module.method(args)`.
 
 Business logic lives once.
 
@@ -235,15 +235,15 @@ anchor, not persisted as an independent journal.
 A module call that fails on what its caller sent (an unknown selector, calldata
 that does not decode, an argument out of bounds) rejects that request with a
 failed receipt, and the block goes on. Only an error marked as the node's own
-(`precompiles::internal_fault`: stored membership or policy state that does not
+(`ModuleError::Fault`: stored membership or policy state that does not
 read back) fails the block, including inside an ACP batch. A call that exhausts
 its gas allowance is a failure too: nothing it wrote is kept, a native request
-is charged its full limit, and a contract's call returns no gas.
+is charged its full limit.
 A refused native request's receipt names why: `vera_domain::Refusal` carries the
 module, a `RefusalKind` that the receipt commitment binds, and the module's
 message, bounded to 1,024 bytes and not committed because it embeds parser and
 library text. A module error's variant decides its kind
-(`vera_executor::precompiles::refusal`). A refusal is charged what the call
+(`vera_executor::dispatch::refusal`). A refusal is charged what the call
 reported, at least 5,000; `out_of_gas` and a module panic keep the full limit.
 `vera-client` returns `ClientError::Refused` for a refused native request, with
 its receipt. See `docs/receipt-commitments.md#refusals`.
@@ -510,7 +510,7 @@ once.
 
 ### Anchored policy snapshots
 
-The anchor precompile records another deployment's finalized revision when its
+The anchor module records another deployment's finalized revision when its
 certificate verifies against that deployment's consensus key (verified in
 `vera-executor`, recorded by `VeraModule::record_anchor`), keeping one
 record per deployment (identifier: SHA-256 of the key) in the identity

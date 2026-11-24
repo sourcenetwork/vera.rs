@@ -9,7 +9,7 @@ use vera_modules::types::{BlockExecCtx, TxExecCtx};
 use vera_modules::validator_registry::MembershipLimits;
 use vera_modules::vera::VeraModule;
 
-use crate::precompiles::{DispatchReturn, dispatch_to_module, storage_bounds_dispatch};
+use crate::dispatch::{DispatchReturn, dispatch_to_module, storage_bounds_dispatch};
 
 /// Gas budget for native BLS transactions dispatched to modules.
 pub(crate) const NATIVE_TX_GAS_LIMIT: u64 = 1_000_000;

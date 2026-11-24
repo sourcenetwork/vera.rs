@@ -71,7 +71,7 @@ impl Budget {
 }
 
 fn limit() -> ModuleError {
-    crate::precompiles::refusal::refused(
+    crate::dispatch::refusal::refused(
         vera_domain::RefusalKind::WorkLimitExceeded,
         "ACP batch result byte limit exceeded",
     )
@@ -80,7 +80,7 @@ fn limit() -> ModuleError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::precompiles::acp::IAcp;
+    use crate::dispatch::acp::IAcp;
     use alloy_primitives::{B256, Bytes};
     use alloy_sol_types::SolCall;
 

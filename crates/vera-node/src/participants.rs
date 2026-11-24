@@ -14,7 +14,7 @@ use commonware_utils::{ordered::Set, sequence::Unit};
 use vera_domain::PublicKey;
 use vera_executor::SharedModuleState;
 
-/// Derive a stable validator EVM address from its ed25519 consensus key.
+/// Derive a validator's registry address from its ed25519 consensus key.
 #[must_use]
 pub fn validator_address(public_key: &PublicKey) -> Address {
     let encoded = commonware_codec::Encode::encode(public_key);

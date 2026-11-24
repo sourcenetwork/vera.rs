@@ -121,7 +121,7 @@ pub(super) fn dispatch(
             }
         }
 
-        _ => Err(crate::precompiles::refusal::refused(
+        _ => Err(crate::dispatch::refusal::refused(
             vera_domain::RefusalKind::UnknownSelector,
             "unknown ACP lifecycle selector",
         )),

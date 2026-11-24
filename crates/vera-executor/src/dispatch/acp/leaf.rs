@@ -70,7 +70,7 @@ pub(super) fn validate(input: &[u8], remaining: &mut usize) -> Result<(), Module
             .ok_or_else(invalid)?;
         let length = word(array, 0)?;
         if length > maximum {
-            return Err(crate::precompiles::refusal::refused(
+            return Err(crate::dispatch::refusal::refused(
                 vera_domain::RefusalKind::ArgumentOutOfBounds,
                 "ACP string-array count limit exceeded",
             ));
@@ -105,7 +105,7 @@ fn bearer_access(input: &[u8], remaining: &mut usize) -> Result<(), ModuleError>
     body.get(..3 * 32).ok_or_else(invalid)?;
     let request = bytes(body, 64)?;
     if request.len() > 64 << 10 {
-        return Err(crate::precompiles::refusal::refused(
+        return Err(crate::dispatch::refusal::refused(
             vera_domain::RefusalKind::ArgumentOutOfBounds,
             "access request exceeds byte limit",
         ));
@@ -130,7 +130,7 @@ fn policy_create(input: &[u8], remaining: &mut usize) -> Result<(), ModuleError>
     body.get(..fields * 32).ok_or_else(invalid)?;
     let payload = bytes(body, if bearer { 32 } else { 0 })?;
     if !options && payload.len() > vera_modules::acp::MAX_POLICY_DEFINITION_BYTES {
-        return Err(crate::precompiles::refusal::refused(
+        return Err(crate::dispatch::refusal::refused(
             vera_domain::RefusalKind::ArgumentOutOfBounds,
             "policy definition exceeds 64 KiB",
         ));
@@ -155,7 +155,7 @@ fn policy_edit(input: &[u8], remaining: &mut usize) -> Result<(), ModuleError> {
     body.get(..fields * 32).ok_or_else(invalid)?;
     let policy = bytes(body, if bearer { 64 } else { 32 })?;
     if policy.len() > vera_modules::acp::MAX_POLICY_DEFINITION_BYTES {
-        return Err(crate::precompiles::refusal::refused(
+        return Err(crate::dispatch::refusal::refused(
             vera_domain::RefusalKind::ArgumentOutOfBounds,
             "policy definition exceeds 64 KiB",
         ));
@@ -194,7 +194,7 @@ fn string(input: &[u8], offset: usize, remaining: &mut usize) -> Result<(), Modu
 
 fn charge(remaining: &mut usize, bytes: usize) -> Result<(), ModuleError> {
     *remaining = remaining.checked_sub(bytes).ok_or_else(|| {
-        crate::precompiles::refusal::refused(
+        crate::dispatch::refusal::refused(
             vera_domain::RefusalKind::ArgumentOutOfBounds,
             "ACP decoded bytes limit exceeded",
         )
@@ -217,7 +217,7 @@ fn word(input: &[u8], offset: usize) -> Result<usize, ModuleError> {
 }
 
 fn invalid() -> ModuleError {
-    crate::precompiles::refusal::refused(
+    crate::dispatch::refusal::refused(
         vera_domain::RefusalKind::UndecodableInput,
         "invalid ACP string-array ABI",
     )

@@ -8,7 +8,7 @@ use futures::FutureExt as _;
 use std::time::{Duration, SystemTime};
 use vera_crypto::bls;
 use vera_domain::NativeTx;
-use vera_executor::{ExecutionConfig, precompiles::ACP_ADDRESS};
+use vera_executor::{ExecutionConfig, dispatch::ACP_ADDRESS};
 
 const CHAIN_ID: u64 = 9001;
 

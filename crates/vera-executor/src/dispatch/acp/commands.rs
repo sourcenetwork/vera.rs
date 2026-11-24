@@ -500,7 +500,7 @@ fn run(
             let creator = did_from_signer(&tx_ctx.signer)?;
             let proof: vera_modules::acp::types::RegistrationProof =
                 serde_json::from_slice(&call.proof).map_err(|e| {
-                    crate::precompiles::refusal::refused(
+                    crate::dispatch::refusal::refused(
                         vera_domain::RefusalKind::UndecodableInput,
                         format!("proof JSON decode: {e}"),
                     )
@@ -570,7 +570,7 @@ fn run(
             let call = IAcp::bearerPolicyCmdCall::abi_decode(input).map_err(decode_error)?;
             let policy_id = policy_id_to_string(&call.policyId);
             let cmd: PolicyCmd = serde_json::from_slice(&call.cmd).map_err(|e| {
-                crate::precompiles::refusal::refused(
+                crate::dispatch::refusal::refused(
                     vera_domain::RefusalKind::UndecodableInput,
                     format!("cmd JSON decode: {e}"),
                 )

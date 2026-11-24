@@ -12,8 +12,7 @@ pub const NATIVE_TX_TYPE: u8 = 0x45;
 ///
 /// Wire format: `0x45 || RLP([chain_id, nonce, bls_pubkey, target, calldata, signature])`
 ///
-/// The `calldata` field contains ABI-encoded precompile calldata — the same
-/// bytes that would be sent to a precompile via an EVM transaction.
+/// The `calldata` field contains the ABI-encoded call to the target module.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct NativeTx {
     /// Chain identifier for replay protection.
@@ -24,7 +23,7 @@ pub struct NativeTx {
     pub bls_pubkey: FixedBytes<48>,
     /// Precompile target address (0x0810, 0x0811, or 0x0812).
     pub target: Address,
-    /// ABI-encoded calldata, identical to EVM precompile calldata.
+    /// ABI-encoded call to the target module.
     pub calldata: Bytes,
     /// BLS12-381 G2 compressed signature (exactly 96 bytes).
     pub signature: FixedBytes<96>,
@@ -43,7 +42,7 @@ pub struct NativeTxPayload {
     pub bls_pubkey: FixedBytes<48>,
     /// Precompile target address (0x0810, 0x0811, or 0x0812).
     pub target: Address,
-    /// ABI-encoded calldata, identical to EVM precompile calldata.
+    /// ABI-encoded call to the target module.
     pub calldata: Bytes,
 }
 

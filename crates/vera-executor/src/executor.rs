@@ -334,7 +334,7 @@ impl VeraExecutor {
                     ExecutionError::TxExecution("membership epoch overflow".into())
                 })?;
                 let keys =
-                    crate::precompiles::validator_registry::active_consensus_keys(&modules.vera)
+                    crate::dispatch::validator_registry::active_consensus_keys(&modules.vera)
                         .map_err(|error| ExecutionError::TxExecution(error.to_string()))?;
                 modules
                     .vera
@@ -361,7 +361,7 @@ mod tests {
     use alloy_primitives::{Address, B256, Bytes, FixedBytes};
 
     use super::*;
-    use crate::precompiles::{ACP_ADDRESS, BULLETIN_ADDRESS, VERA_ADDRESS};
+    use crate::dispatch::{ACP_ADDRESS, BULLETIN_ADDRESS, VERA_ADDRESS};
 
     fn execute(
         executor: &VeraExecutor,

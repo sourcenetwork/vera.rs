@@ -40,16 +40,13 @@ pub(super) fn dispatch(
             }
             let call = IVera::storeThresholdObjectCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > vera_modules::vera::objects::MAX_OBJECT_REQUEST_BYTES {
-                return Err(crate::precompiles::refusal::refused(
+                return Err(crate::dispatch::refusal::refused(
                     vera_domain::RefusalKind::ArgumentOutOfBounds,
                     "object request is too large",
                 ));
             }
             let object = serde_json::from_slice(&call.request).map_err(|error| {
-                crate::precompiles::refusal::refused(
-                    vera_domain::RefusalKind::UndecodableInput,
-                    error,
-                )
+                crate::dispatch::refusal::refused(vera_domain::RefusalKind::UndecodableInput, error)
             })?;
             match module.store_threshold_object(acp, block_ctx, tx_ctx, &call.bearerToken, &object)
             {
@@ -67,16 +64,13 @@ pub(super) fn dispatch(
             }
             let call = IVera::applyRingCommandCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > vera_modules::vera::rings::MAX_RING_REQUEST_BYTES {
-                return Err(crate::precompiles::refusal::refused(
+                return Err(crate::dispatch::refusal::refused(
                     vera_domain::RefusalKind::ArgumentOutOfBounds,
                     "ring command is too large",
                 ));
             }
             let command = serde_json::from_slice(&call.request).map_err(|error| {
-                crate::precompiles::refusal::refused(
-                    vera_domain::RefusalKind::UndecodableInput,
-                    error,
-                )
+                crate::dispatch::refusal::refused(vera_domain::RefusalKind::UndecodableInput, error)
             })?;
             match module.apply_ring_command(acp, block_ctx, tx_ctx, &call.bearerToken, &command) {
                 Ok(record) => Ok(ok_dispatch(
@@ -94,16 +88,13 @@ pub(super) fn dispatch(
             let call =
                 IVera::applyRingParticipantRequestCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > vera_modules::vera::rings::MAX_RING_REQUEST_BYTES {
-                return Err(crate::precompiles::refusal::refused(
+                return Err(crate::dispatch::refusal::refused(
                     vera_domain::RefusalKind::ArgumentOutOfBounds,
                     "ring request is too large",
                 ));
             }
             let signed = serde_json::from_slice(&call.request).map_err(|error| {
-                crate::precompiles::refusal::refused(
-                    vera_domain::RefusalKind::UndecodableInput,
-                    error,
-                )
+                crate::dispatch::refusal::refused(vera_domain::RefusalKind::UndecodableInput, error)
             })?;
             match module.apply_ring_participant_request(block_ctx, &signed) {
                 Ok(record) => Ok(ok_dispatch(
@@ -122,16 +113,13 @@ pub(super) fn dispatch(
             }
             let call = IVera::finalizeRingReshareCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > vera_modules::vera::rings::MAX_RING_REQUEST_BYTES {
-                return Err(crate::precompiles::refusal::refused(
+                return Err(crate::dispatch::refusal::refused(
                     vera_domain::RefusalKind::ArgumentOutOfBounds,
                     "ring request is too large",
                 ));
             }
             let signed = serde_json::from_slice(&call.request).map_err(|error| {
-                crate::precompiles::refusal::refused(
-                    vera_domain::RefusalKind::UndecodableInput,
-                    error,
-                )
+                crate::dispatch::refusal::refused(vera_domain::RefusalKind::UndecodableInput, error)
             })?;
             match module.finalize_ring_reshare(block_ctx, &signed) {
                 Ok(record) => Ok(ok_dispatch(
@@ -148,16 +136,13 @@ pub(super) fn dispatch(
             }
             let call = IVera::submitRingReportCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > vera_modules::vera::rings::reports::MAX_REPORT_REQUEST_BYTES {
-                return Err(crate::precompiles::refusal::refused(
+                return Err(crate::dispatch::refusal::refused(
                     vera_domain::RefusalKind::ArgumentOutOfBounds,
                     "ring request is too large",
                 ));
             }
             let signed = serde_json::from_slice(&call.request).map_err(|error| {
-                crate::precompiles::refusal::refused(
-                    vera_domain::RefusalKind::UndecodableInput,
-                    error,
-                )
+                crate::dispatch::refusal::refused(vera_domain::RefusalKind::UndecodableInput, error)
             })?;
             match module.submit_ring_report(block_ctx, &signed) {
                 Ok(record) => Ok(ok_dispatch(
@@ -174,16 +159,13 @@ pub(super) fn dispatch(
             }
             let call = IVera::applyNodeRequestCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > vera_modules::vera::nodes::MAX_NODE_BYTES {
-                return Err(crate::precompiles::refusal::refused(
+                return Err(crate::dispatch::refusal::refused(
                     vera_domain::RefusalKind::ArgumentOutOfBounds,
                     "node request is too large",
                 ));
             }
             let signed = serde_json::from_slice(&call.request).map_err(|error| {
-                crate::precompiles::refusal::refused(
-                    vera_domain::RefusalKind::UndecodableInput,
-                    error,
-                )
+                crate::dispatch::refusal::refused(vera_domain::RefusalKind::UndecodableInput, error)
             })?;
             match module.apply_node_request(block_ctx, &signed) {
                 Ok(record) => Ok(ok_dispatch(
@@ -200,14 +182,14 @@ pub(super) fn dispatch(
             }
             let call = IVera::applyAdministrationCall::abi_decode(input).map_err(decode_error)?;
             if call.request.len() > 32_768 {
-                return Err(crate::precompiles::refusal::refused(
+                return Err(crate::dispatch::refusal::refused(
                     vera_domain::RefusalKind::ArgumentOutOfBounds,
                     "administrative request is too large",
                 ));
             }
             let signed: SignedAdministrativeRequest = serde_json::from_slice(&call.request)
                 .map_err(|error| {
-                    crate::precompiles::refusal::refused(
+                    crate::dispatch::refusal::refused(
                         vera_domain::RefusalKind::UndecodableInput,
                         error,
                     )
@@ -335,7 +317,7 @@ pub(super) fn dispatch(
             }
             let call = IVera::getJWSTokensByDidCall::abi_decode(input).map_err(decode_error)?;
             let did = Did::new(&call.did).map_err(|e| {
-                crate::precompiles::refusal::refused(
+                crate::dispatch::refusal::refused(
                     vera_domain::RefusalKind::UndecodableInput,
                     format!("DID parse: {e}"),
                 )
@@ -387,7 +369,7 @@ pub(super) fn dispatch(
 
 #[test]
 fn threshold_object_requires_gas_before_decoding_or_admission() {
-    use crate::precompiles::ModuleStatus;
+    use crate::dispatch::ModuleStatus;
     let result = dispatch(
         &mut VeraModule::new(),
         &mut AcpModule::new(),

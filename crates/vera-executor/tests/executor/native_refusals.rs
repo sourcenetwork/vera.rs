@@ -6,7 +6,7 @@ use ark_serialize::CanonicalSerialize as _;
 use vera_domain::{ExecutionReceipt, RefusalKind, RefusingModule, receipt_commitment};
 use vera_executor::{
     VeraExecutor,
-    precompiles::{ACP_ADDRESS, BULLETIN_ADDRESS, VALIDATOR_REGISTRY_ADDRESS, VERA_ADDRESS},
+    dispatch::{ACP_ADDRESS, BULLETIN_ADDRESS, VALIDATOR_REGISTRY_ADDRESS, VERA_ADDRESS},
 };
 use vera_modules::acp::abi::IAcp;
 use vera_modules::bulletin::abi::IBulletin;

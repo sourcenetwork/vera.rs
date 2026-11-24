@@ -1,5 +1,5 @@
 use super::*;
-use crate::precompiles::ModuleStatus;
+use crate::dispatch::ModuleStatus;
 use vera_modules::acp::{
     pages::{RecordPage, RelationshipPageRequest},
     theorem::TheoremReport,

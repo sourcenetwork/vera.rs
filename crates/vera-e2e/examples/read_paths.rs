@@ -1,4 +1,4 @@
-//! Compares unverified `eth_call` queries with certified reads verified by the client.
+//! Compares unauthenticated `vera_call` queries with certified reads verified by the client.
 //!
 //! `read_paths embedded` serves an embedded lone validator from a child process;
 //! `read_paths cluster` starts a four-node cluster from `VERAD_BINARY`. Both seed

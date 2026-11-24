@@ -5,7 +5,7 @@ use ark_ec::{AffineRepr as _, CurveGroup as _};
 use ark_serialize::CanonicalSerialize as _;
 use commonware_codec::Encode as _;
 use vera_domain::{ExecutionReceipt, RefusalKind, RefusingModule, testing::TestDeployment};
-use vera_executor::precompiles::ANCHOR_ADDRESS;
+use vera_executor::dispatch::ANCHOR_ADDRESS;
 use vera_modules::vera::anchors::{abi::IAnchor, deployment_id};
 
 fn native(nonce: u64, calldata: Vec<u8>) -> Bytes {

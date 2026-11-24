@@ -5,7 +5,7 @@
 //! - `TestClusterBuilder` — BFT-aware cluster setup with key generation
 //! - `KeySet` — deterministic ed25519 identities + trusted-dealer BLS shares
 //! - `ClusterState` — unified observability (log tracking + RPC polling)
-//! - `GenesisBuilder` — EVM-compatible genesis configuration
+//! - `GenesisBuilder` — genesis configuration
 //! - Consensus presets — Fast/Normal/Stress timing profiles
 
 pub mod cluster;

@@ -8,7 +8,7 @@ use super::{
 use alloy_sol_types::SolCall;
 use ed25519_dalek::Signer as _;
 use k256::ecdsa::{Signature, SigningKey, signature::hazmat::PrehashSigner};
-use vera_executor::{ModuleState, VeraExecutor, precompiles::VALIDATOR_REGISTRY_ADDRESS};
+use vera_executor::{ModuleState, VeraExecutor, dispatch::VALIDATOR_REGISTRY_ADDRESS};
 use vera_modules::{
     acp::types::{Object, PolicyCmd, PolicyMarshalingType},
     kv_store::ModuleKvStore as _,

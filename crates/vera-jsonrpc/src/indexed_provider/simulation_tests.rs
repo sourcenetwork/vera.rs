@@ -69,11 +69,11 @@ pub(super) fn committed() -> (SharedModuleState, B256) {
     calldata.extend_from_slice(&word(POLICY.len()));
     calldata.extend_from_slice(POLICY.as_bytes());
     calldata.resize(calldata.len().next_multiple_of(32) + 4, 0);
-    let created = vera_executor::precompiles::dispatch_to_module(
+    let created = vera_executor::dispatch::dispatch_to_module(
         &mut modules.acp,
         &mut modules.bulletin,
         &mut modules.vera,
-        vera_executor::precompiles::ACP_ADDRESS,
+        vera_executor::dispatch::ACP_ADDRESS,
         &calldata,
         &BlockExecCtx {
             timestamp: Timestamp {
@@ -108,7 +108,7 @@ fn delete_policy(signer: &str, policy: B256) -> Vec<serde_json::Value> {
     calldata.extend_from_slice(policy.as_slice());
     vec![serde_json::json!({
         "signer": signer,
-        "target": vera_executor::precompiles::ACP_ADDRESS,
+        "target": vera_executor::dispatch::ACP_ADDRESS,
         "calldata": Bytes::from(calldata),
     })]
 }
@@ -259,7 +259,7 @@ async fn a_call_that_waited_for_a_slot_observes_the_head_published_meanwhile() {
         async move {
             provider
                 .view_call(
-                    vera_executor::precompiles::ACP_ADDRESS,
+                    vera_executor::dispatch::ACP_ADDRESS,
                     selector("getPolicyIds()").into(),
                 )
                 .await

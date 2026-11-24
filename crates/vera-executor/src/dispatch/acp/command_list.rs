@@ -1,7 +1,7 @@
 //! Delegated command lists: one authorization over ordered commands.
 
 use super::*;
-use crate::precompiles::ModuleError;
+use crate::dispatch::ModuleError;
 use vera_modules::acp::CommandBudget;
 
 /// Decode `bearerPolicyCmds` and apply its commands in order, all or none. Each
@@ -17,7 +17,7 @@ pub(super) fn dispatch(
     let call = IAcp::bearerPolicyCmdsCall::abi_decode(input).map_err(decode_error)?;
     let commands: Vec<(String, PolicyCmd)> =
         serde_json::from_slice(&call.commands).map_err(|e| {
-            crate::precompiles::refusal::refused(
+            crate::dispatch::refusal::refused(
                 vera_domain::RefusalKind::UndecodableInput,
                 format!("command list JSON decode: {e}"),
             )

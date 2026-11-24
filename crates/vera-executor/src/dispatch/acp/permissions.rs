@@ -27,7 +27,7 @@ pub(super) fn dispatch(
             let call = IAcp::bearerCheckAccessCall::abi_decode(input).map_err(decode_error)?;
             let request: AccessRequest =
                 serde_json::from_slice(&call.request).map_err(|error| {
-                    crate::precompiles::refusal::refused(
+                    crate::dispatch::refusal::refused(
                         vera_domain::RefusalKind::UndecodableInput,
                         format!("access request JSON decode: {error}"),
                     )
@@ -90,7 +90,7 @@ pub(super) fn dispatch(
 }
 
 fn output<T>(
-    result: Result<T, impl crate::precompiles::refusal::Refuse>,
+    result: Result<T, impl crate::dispatch::refusal::Refuse>,
     budget: &PermissionBudget,
     base: u64,
     encode: impl FnOnce(T) -> Vec<u8>,

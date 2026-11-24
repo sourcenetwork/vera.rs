@@ -1,5 +1,5 @@
 use super::*;
-use crate::precompiles::ModuleStatus;
+use crate::dispatch::ModuleStatus;
 use vera_modules::acp::theorem::TheoremReport;
 
 const POLICY: &str = "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n    permissions:\n      - name: read\n        expr: reader\n";

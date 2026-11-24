@@ -1,5 +1,5 @@
 use super::*;
-use crate::precompiles::{ModuleError, ModuleStatus};
+use crate::dispatch::{ModuleError, ModuleStatus};
 use vera_modules::acp::{MAX_REGISTRATION_OBJECTS, decision::MAX_ACCESS_OPERATIONS};
 use vera_modules::types::Timestamp;
 

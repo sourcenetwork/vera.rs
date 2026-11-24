@@ -1,5 +1,5 @@
 use super::*;
-use crate::precompiles::{ModuleError, ModuleStatus};
+use crate::dispatch::{ModuleError, ModuleStatus};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use k256::ecdsa::{Signature, SigningKey, signature::Signer as _};
 use vera_crypto::{

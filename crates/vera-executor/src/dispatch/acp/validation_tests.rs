@@ -1,5 +1,5 @@
 use super::*;
-use crate::precompiles::{ModuleError, ModuleStatus};
+use crate::dispatch::{ModuleError, ModuleStatus};
 
 const YAML: &str = "name: validation\nresources:\n  - name: file\n";
 

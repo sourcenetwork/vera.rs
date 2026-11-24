@@ -1,7 +1,7 @@
 use alloy_primitives::{Address, Bytes, FixedBytes};
 
 use super::*;
-use crate::precompiles::VALIDATOR_REGISTRY_ADDRESS;
+use crate::dispatch::VALIDATOR_REGISTRY_ADDRESS;
 
 const CHAIN_ID: u64 = 9001;
 

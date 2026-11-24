@@ -1,12 +1,12 @@
 //! What a native module call's receipt records: its charge, effects and refusal.
 
-use crate::precompiles::{ModuleError, ModuleStatus};
+use crate::dispatch::{ModuleError, ModuleStatus};
 use alloy_primitives::{Address, Bytes, Log};
 use vera_domain::{Refusal, RefusalKind, RefusingModule};
 
 use super::native_dispatch::NATIVE_TX_GAS_LIMIT;
 use crate::ExecutionError;
-use crate::precompiles::{
+use crate::dispatch::{
     ACP_ADDRESS, ANCHOR_ADDRESS, BULLETIN_ADDRESS, DispatchReturn, VALIDATOR_REGISTRY_ADDRESS,
     VERA_ADDRESS,
 };

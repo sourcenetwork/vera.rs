@@ -2,7 +2,7 @@
 
 use alloy_primitives::{Address, B256, Bytes, U64, U256};
 use vera_domain::{RefusalKind, RefusingModule, ViewCallResult};
-use vera_executor::precompiles::ACP_ADDRESS;
+use vera_executor::dispatch::ACP_ADDRESS;
 use vera_modules::acp::types::PolicyRecord;
 
 use super::simulation_tests::{

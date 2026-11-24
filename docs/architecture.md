@@ -98,12 +98,11 @@ live; the release starts with fresh state and uses these package names directly.
 | [`vera-identity`](../crates/vera-identity/src/lib.rs) | DID types and validation |
 | [`vera-modules/src/acp`](../crates/vera-modules/src/acp/mod.rs) | ACP commands, ownership, relationships, decisions and stored records |
 | [`vera-permission`](../crates/vera-permission/src/lib.rs) | Authenticate read evidence and replay the shared ACP evaluator for consumers |
-| [`vera-executor/src/precompiles/acp`](../crates/vera-executor/src/precompiles/acp.rs) | Decode commands, charge execution work, call ACP methods and encode outcomes |
+| [`vera-executor/src/dispatch/acp`](../crates/vera-executor/src/dispatch/acp.rs) | Decode commands, charge execution work, call ACP methods and encode outcomes |
 | [`vera-test-infra`](../crates/vera-test-infra/src/lib.rs) | Process, port and log helpers for tests |
 
-The `precompiles` directory name comes from the compatibility executor. Native
-signed requests also call its dispatch functions directly; disabling EVM
-transactions does not bypass this layer or remove its ABI and REVM types.
+The `dispatch` shims decode a native request's ABI-encoded call, charge its
+work and call the module.
 `vera-permission` verifies authenticated records and evaluates the same rules as
 the service. It does not implement a separate policy-mutation engine. Record and
 prefix evidence there also serves identity and bulletin consumers.
@@ -111,7 +110,7 @@ prefix evidence there also serves identity and bulletin consumers.
 ```mermaid
 flowchart LR
     Request[Native signed request] --> Executor[vera-executor<br/>authentication and rollback]
-    Executor --> Dispatch[precompiles/acp<br/>decode and work budget]
+    Executor --> Dispatch[dispatch/acp<br/>decode and work budget]
     Dispatch --> Module[vera-modules/acp<br/>business rules and records]
     Module --> Engine[vera-zanzibar<br/>shared evaluator]
     Evidence[vera-permission<br/>authenticated client evidence] --> Engine
@@ -120,9 +119,9 @@ flowchart LR
 Operator-managed membership is the PoA policy surrounding Commonware Simplex.
 [`vera/administration.rs`](../crates/vera-modules/src/vera/administration.rs)
 checks operator approvals and selects the membership ACP policy.
-[`precompiles/validator_registry.rs`](../crates/vera-executor/src/precompiles/validator_registry.rs)
-authorizes and executes registry changes; `vera-modules/validator_registry`
-provides its ABI, errors and record types. The executor records epoch rosters
+[`dispatch/validator_registry.rs`](../crates/vera-executor/src/dispatch/validator_registry.rs)
+decodes registry calls; `vera-modules/validator_registry` authorizes and
+executes them on records in the vera partition. The executor records epoch rosters
 through [`vera/membership.rs`](../crates/vera-modules/src/vera/membership.rs).
 [`participants.rs`](../crates/vera-node/src/participants.rs) supplies finalized
 rosters to Commonware DKG/resharing, and

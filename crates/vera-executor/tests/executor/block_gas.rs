@@ -3,7 +3,7 @@ use alloy_primitives::FixedBytes;
 use alloy_sol_types::SolCall;
 use ark_ec::{AffineRepr as _, CurveGroup as _};
 use ark_serialize::CanonicalSerialize as _;
-use vera_executor::{ExecutionError, ModuleSnapshot, VeraExecutor, precompiles::ACP_ADDRESS};
+use vera_executor::{ExecutionError, ModuleSnapshot, VeraExecutor, dispatch::ACP_ADDRESS};
 use vera_modules::acp::abi::IAcp;
 
 const NATIVE_LIMIT: u64 = 1_000_000;

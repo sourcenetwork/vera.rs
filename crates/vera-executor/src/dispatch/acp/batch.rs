@@ -82,14 +82,14 @@ fn word(input: &[u8], offset: usize) -> Result<usize, ModuleError> {
 }
 
 fn invalid() -> ModuleError {
-    crate::precompiles::refusal::refused(
+    crate::dispatch::refusal::refused(
         vera_domain::RefusalKind::UndecodableInput,
         "invalid ACP batch ABI",
     )
 }
 
 fn limit(resource: &str) -> ModuleError {
-    crate::precompiles::refusal::refused(
+    crate::dispatch::refusal::refused(
         vera_domain::RefusalKind::ArgumentOutOfBounds,
         format!("ACP batch {resource} limit exceeded"),
     )

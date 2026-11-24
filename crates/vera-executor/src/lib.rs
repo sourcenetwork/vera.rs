@@ -33,5 +33,5 @@ pub use simulate::{
     SimulationContext, ViewCall, ViewCallError, ViewCallResult, simulate_native_call, view_call,
 };
 
-pub mod precompiles;
-pub use precompiles::VALIDATOR_REGISTRY_ADDRESS;
+pub mod dispatch;
+pub use dispatch::VALIDATOR_REGISTRY_ADDRESS;

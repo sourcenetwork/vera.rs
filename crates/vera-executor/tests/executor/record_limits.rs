@@ -5,7 +5,7 @@ use ark_ec::{AffineRepr as _, CurveGroup as _};
 use ark_serialize::CanonicalSerialize as _;
 use vera_executor::{
     ExecutionConfig, MempoolValidator, ModuleSnapshot, ModuleState, VeraExecutor,
-    precompiles::ACP_ADDRESS,
+    dispatch::ACP_ADDRESS,
 };
 use vera_modules::{
     acp::{

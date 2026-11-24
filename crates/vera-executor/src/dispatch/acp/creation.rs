@@ -2,7 +2,7 @@
 
 use super::oog_dispatch;
 use super::*;
-use crate::precompiles::refusal::{Refuse, Stated, kind_of};
+use crate::dispatch::refusal::{Refuse, Stated, kind_of};
 use vera_domain::RefusalKind;
 use vera_modules::acp::{
     PolicyCreateBudget,
@@ -62,7 +62,7 @@ pub(super) fn dispatch(
                 ACP_ADDRESS,
                 &IAcp::DelegatedPolicyCreated {
                     policyId: record.policy.id.parse().map_err(|_| {
-                        crate::precompiles::internal_fault("invalid created policy identifier")
+                        crate::dispatch::internal_fault("invalid created policy identifier")
                     })?,
                     creator: record.metadata.owner_did,
                 },
@@ -110,7 +110,7 @@ fn refused(error: impl Refuse) -> CreationError {
     CreationError::Refused(error.refusal_kind(), error.to_string())
 }
 
-/// A refusal raised as an error, reported as revm displays it.
+/// A refusal raised as an error, reported with its `fatal:` prefix.
 fn refused_by(error: &ModuleError) -> CreationError {
     CreationError::Refused(kind_of(error), format!("fatal: {error}"))
 }

@@ -1,5 +1,5 @@
 use super::*;
-use crate::precompiles::{ModuleError, ModuleStatus};
+use crate::dispatch::{ModuleError, ModuleStatus};
 use vera_modules::acp::types::PolicyRecord;
 use vera_modules::types::Timestamp;
 
@@ -545,7 +545,7 @@ fn oversized_policy_id_listing_keeps_read_charges_and_rolls_back_earlier_batch_w
 
 #[test]
 fn a_batch_keeps_node_faults_and_exhaustion_distinct_from_refusals() {
-    use crate::precompiles::internal_fault;
+    use crate::dispatch::internal_fault;
 
     assert_eq!(
         batch_error(2, internal_fault("stored policy does not read back")),

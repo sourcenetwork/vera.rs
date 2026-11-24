@@ -7,7 +7,7 @@ use vera_modules::types::{BlockExecCtx, Timestamp};
 
 use super::*;
 use crate::ExecutionConfig;
-use crate::precompiles::{ACP_ADDRESS, dispatch_to_module};
+use crate::dispatch::{ACP_ADDRESS, dispatch_to_module};
 
 const POLICY: &str = "name: files\nresources:\n  - name: file\n";
 const OWNER: &str = "did:key:owner";

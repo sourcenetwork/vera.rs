@@ -35,7 +35,7 @@ mod validation;
 #[cfg(test)]
 mod validation_tests;
 
-use crate::precompiles::{ModuleError, ModuleOutput, ModuleStatus};
+use crate::dispatch::{ModuleError, ModuleOutput, ModuleStatus};
 use alloy_primitives::{B256, Bytes};
 use alloy_sol_types::SolCall;
 use vera_identity::Did;
@@ -78,7 +78,7 @@ fn edit_error(error: impl super::refusal::Refuse, budget: &PolicyEditBudget) -> 
 
 fn did_from_actor(actor: &str) -> Result<Did, ModuleError> {
     Did::new(actor).map_err(|e| {
-        crate::precompiles::refusal::refused(
+        crate::dispatch::refusal::refused(
             vera_domain::RefusalKind::UndecodableInput,
             format!("actor DID: {e}"),
         )
@@ -366,7 +366,7 @@ fn dispatch_validated(
             let budget = PolicyEditBudget::new(gas_limit - WRITE_GAS);
             let call = IAcp::bearerEditPolicyCall::abi_decode(input).map_err(decode_error)?;
             let policy = std::str::from_utf8(&call.policy).map_err(|_| {
-                crate::precompiles::refusal::refused(
+                crate::dispatch::refusal::refused(
                     vera_domain::RefusalKind::UndecodableInput,
                     "invalid UTF-8 in policy",
                 )
@@ -412,7 +412,7 @@ fn dispatch_validated(
             let creator = did_from_signer(&tx_ctx.signer)?;
             let policy_id = policy_id_to_string(&call.policyId);
             let policy_str = std::str::from_utf8(&call.policy).map_err(|_| {
-                crate::precompiles::refusal::refused(
+                crate::dispatch::refusal::refused(
                     vera_domain::RefusalKind::UndecodableInput,
                     "invalid UTF-8 in policy",
                 )

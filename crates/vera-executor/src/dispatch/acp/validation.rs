@@ -15,7 +15,7 @@ pub(super) fn dispatch(module: &AcpModule, input: &[u8], gas_limit: u64) -> Disp
     }
     let body = &input[4..];
     body.get(..64).ok_or_else(|| {
-        crate::precompiles::refusal::refused(
+        crate::dispatch::refusal::refused(
             vera_domain::RefusalKind::UndecodableInput,
             "invalid policy validation ABI",
         )
@@ -26,7 +26,7 @@ pub(super) fn dispatch(module: &AcpModule, input: &[u8], gas_limit: u64) -> Disp
     }
     let marshal_type = Uint::<8>::abi_decode(&body[32..64]).map_err(decode_error)?;
     let policy = std::str::from_utf8(policy).map_err(|_| {
-        crate::precompiles::refusal::refused(
+        crate::dispatch::refusal::refused(
             vera_domain::RefusalKind::UndecodableInput,
             "invalid UTF-8 in policy",
         )

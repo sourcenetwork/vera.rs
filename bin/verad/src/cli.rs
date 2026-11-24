@@ -12,7 +12,7 @@ use crate::{run_args::RunArgs, testnet};
 
 #[derive(Parser, Debug)]
 #[command(name = "verad")]
-#[command(about = "SourceHub validator node (commonware + REVM)")]
+#[command(about = "Vera validator node")]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,

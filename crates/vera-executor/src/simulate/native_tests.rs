@@ -8,9 +8,9 @@ use vera_modules::types::{BlockExecCtx, Timestamp};
 
 use super::*;
 use crate::ExecutionConfig;
+use crate::dispatch::{ACP_ADDRESS, dispatch_to_module};
 use crate::executor::native_dispatch::NATIVE_TX_GAS_LIMIT;
 use crate::executor::native_outcome::NATIVE_REFUSAL_GAS;
-use crate::precompiles::{ACP_ADDRESS, dispatch_to_module};
 
 const POLICY: &str = "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n    permissions:\n      - name: read\n        expr: reader\n";
 const OWNER: &str = "did:key:owner";

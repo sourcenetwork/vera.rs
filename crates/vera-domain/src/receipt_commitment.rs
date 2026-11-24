@@ -128,7 +128,7 @@ mod tests {
             &[1; 32],
             &5_000_u64.to_be_bytes(),
             &5_000_u64.to_be_bytes(),
-            &[0, 1, 1, 5, 0],
+            &[0, 1, 1, 5],
             &0_u64.to_be_bytes(),
         ]
         .concat();
