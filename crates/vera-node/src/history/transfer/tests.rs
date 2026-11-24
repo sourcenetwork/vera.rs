@@ -52,8 +52,8 @@ pub(in crate::history) fn revision(height: u64, parent: BlockId) -> (Block, Vec<
             None,
         )]
     };
-    block.native_targets = Some([DbTarget::default(); 4]);
-    block.receipt_commitment = Some(vera_executor::receipt_commitment(100, &receipts));
+    block.native_targets = [DbTarget::default(); 4];
+    block.receipt_commitment = vera_executor::receipt_commitment(100, &receipts);
     (block, receipts)
 }
 
@@ -435,8 +435,8 @@ fn record_decoder_keeps_a_refusal_and_its_kind_is_committed() {
             )),
         ),
     ];
-    block.native_targets = Some([DbTarget::default(); 4]);
-    block.receipt_commitment = Some(vera_executor::receipt_commitment(100, &receipts));
+    block.native_targets = [DbTarget::default(); 4];
+    block.receipt_commitment = vera_executor::receipt_commitment(100, &receipts);
     let encode = |refusal: StoredRefusal| {
         borsh::to_vec(&Record {
             block: block.encode().to_vec(),

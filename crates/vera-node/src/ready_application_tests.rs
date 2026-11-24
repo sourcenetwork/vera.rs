@@ -137,8 +137,8 @@ impl Application<Context> for SlowApp {
     ) -> Option<Digested<Self::Block>> {
         ::tokio::time::sleep(self.0).await;
         let mut block = vera_app::genesis_block(
-            vera_domain::StateRoot(alloy_primitives::B256::ZERO),
-            vera_domain::DbTargets::default(),
+            alloy_primitives::B256::ZERO,
+            Default::default(),
             alloy_primitives::B256::ZERO,
         );
         block.height = STAGED;

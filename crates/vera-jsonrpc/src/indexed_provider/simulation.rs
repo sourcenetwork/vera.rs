@@ -6,12 +6,11 @@ use vera_executor::{
     ExecutionError, ModuleState, NativeSimulateError, NativeSimulateRequest, SimulationContext,
     ViewCall, ViewCallError, simulate_native_call, view_call,
 };
-use vera_traits::StateDbRead;
 
 use super::IndexedStateProvider;
 use crate::error::RpcError;
 
-impl<S> IndexedStateProvider<S> {
+impl IndexedStateProvider {
     /// The deployment and the head revision's height and time. Before a
     /// revision is indexed the height and time are zero.
     pub(super) fn head_context(&self) -> SimulationContext {
@@ -23,7 +22,7 @@ impl<S> IndexedStateProvider<S> {
     }
 }
 
-impl<S: StateDbRead> IndexedStateProvider<S> {
+impl IndexedStateProvider {
     /// Run an execution off the async workers against a module snapshot, so it
     /// neither occupies a worker nor holds the lock finalization publishes under.
     /// A caller waits briefly for a slot behind a bounded queue; the slot stays
@@ -33,9 +32,7 @@ impl<S: StateDbRead> IndexedStateProvider<S> {
     /// so a call that waited does not run newer values at an older height.
     pub(super) async fn simulate<T: Send + 'static>(
         &self,
-        run: impl FnOnce(&S, &SimulationContext, &ModuleState) -> Result<T, ExecutionError>
-        + Send
-        + 'static,
+        run: impl FnOnce(&SimulationContext, &ModuleState) -> Result<T, ExecutionError> + Send + 'static,
     ) -> Result<T, RpcError> {
         let permit = self.simulations.acquire().await?;
         let (context, modules) = {
@@ -45,10 +42,9 @@ impl<S: StateDbRead> IndexedStateProvider<S> {
                 .map_err(|_| RpcError::Internal("lock poisoned".to_string()))?;
             (self.head_context(), modules.clone())
         };
-        let state = self.state.clone();
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            run(&state, &context, &modules)
+            run(&context, &modules)
         })
         .await
         .map_err(|error| RpcError::Internal(error.to_string()))?
@@ -63,7 +59,7 @@ impl<S: StateDbRead> IndexedStateProvider<S> {
         let request = NativeSimulateRequest::new(&request.signer, request.target, request.calldata)
             .map_err(|error: NativeSimulateError| RpcError::InvalidParams(error.to_string()))?;
         let (result, context) = self
-            .simulate(move |_, context, modules| {
+            .simulate(move |context, modules| {
                 simulate_native_call(context, &request, modules).map(|result| (result, *context))
             })
             .await?;
@@ -95,7 +91,7 @@ impl<S: StateDbRead> IndexedStateProvider<S> {
         let call = ViewCall::new(target, calldata)
             .map_err(|error: ViewCallError| RpcError::InvalidParams(error.to_string()))?;
         let (result, context) = self
-            .simulate(move |_, context, modules| {
+            .simulate(move |context, modules| {
                 view_call(context, &call, modules).map(|result| (result, *context))
             })
             .await?;

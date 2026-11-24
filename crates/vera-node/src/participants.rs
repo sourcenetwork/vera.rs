@@ -139,7 +139,7 @@ mod tests {
     fn history() -> (tempfile::TempDir, Arc<crate::FinalizedHistory>) {
         let directory = tempfile::tempdir().unwrap();
         let genesis = vera_app::genesis_block(
-            vera_domain::StateRoot(alloy_primitives::B256::ZERO),
+            alloy_primitives::B256::ZERO,
             Default::default(),
             alloy_primitives::B256::ZERO,
         );

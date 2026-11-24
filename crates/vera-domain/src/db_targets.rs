@@ -1,8 +1,8 @@
-//! Per-database sync targets carried by every block.
+//! The sync target of one partition, carried by every block.
 //!
 //! The stateful actor checks a block's merkleized batches against these
 //! targets, and state sync uses them to know which operation range and root
-//! each EVM partition must reach.
+//! each partition must reach.
 
 use bytes::BufMut;
 use commonware_codec::{Error as CodecError, FixedSize, Read, ReadExt, Write};
@@ -53,67 +53,5 @@ impl Read for DbTarget {
             floor: u64::read(buf)?,
             tip: u64::read(buf)?,
         })
-    }
-}
-
-/// Sync targets for the accounts, storage, and code partitions.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct DbTargets {
-    /// Accounts partition target.
-    pub accounts: DbTarget,
-    /// Storage partition target.
-    pub storage: DbTarget,
-    /// Code partition target.
-    pub code: DbTarget,
-}
-
-impl Write for DbTargets {
-    fn write(&self, buf: &mut impl BufMut) {
-        self.accounts.write(buf);
-        self.storage.write(buf);
-        self.code.write(buf);
-    }
-}
-
-impl FixedSize for DbTargets {
-    const SIZE: usize = DbTarget::SIZE * 3;
-}
-
-impl Read for DbTargets {
-    type Cfg = ();
-
-    fn read_cfg(buf: &mut impl commonware_codec::Buf, _: &Self::Cfg) -> Result<Self, CodecError> {
-        Ok(Self {
-            accounts: DbTarget::read(buf)?,
-            storage: DbTarget::read(buf)?,
-            code: DbTarget::read(buf)?,
-        })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use commonware_codec::{DecodeExt, Encode};
-
-    use super::*;
-
-    #[test]
-    fn roundtrip() {
-        let targets = DbTargets {
-            accounts: DbTarget {
-                root: Digest([1u8; 32]),
-                floor: 3,
-                tip: 9,
-            },
-            storage: DbTarget::default(),
-            code: DbTarget {
-                root: Digest([7u8; 32]),
-                floor: 0,
-                tip: 1,
-            },
-        };
-        let encoded = targets.encode();
-        assert_eq!(encoded.len(), DbTargets::SIZE);
-        assert_eq!(DbTargets::decode(encoded).unwrap(), targets);
     }
 }

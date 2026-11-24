@@ -13,7 +13,6 @@ use vera_client::{ACP_ADDRESS, BlsSigner};
 use vera_consensus::{Mempool as _, components::InMemoryMempool};
 use vera_domain::{Block, Tx};
 use vera_executor::VeraExecutor;
-use vera_genesis::GenesisState;
 use vera_modules::acp::abi::IAcp;
 mod support;
 use support::block_ancestry;
@@ -94,7 +93,7 @@ fn check_pending_branches(handoff: bool) {
             None,
         )
         .await;
-        let genesis = support::genesis(&set, &GenesisState::default()).await;
+        let genesis = support::genesis(&set).await;
         drop(set);
         let set = OrderedState::init(
             context.child("anchored_genesis"),
@@ -138,13 +137,13 @@ fn check_pending_branches(handoff: bool) {
         let target = StatefulVeraApp::<NoopSink>::sync_targets(&a.block);
         assert!(OrderedState::matches_sync_targets(&a.merkleized, &target));
         let mut wrong_bounds = a.block.clone();
-        wrong_bounds.native_targets.as_mut().unwrap()[0].tip += 1;
+        wrong_bounds.native_targets[0].tip += 1;
         assert!(!OrderedState::matches_sync_targets(
             &a.merkleized,
             &StatefulVeraApp::<NoopSink>::sync_targets(&wrong_bounds)
         ));
         let mut wrong_root = target;
-        wrong_root.3.root = b.block.native_targets.as_ref().unwrap()[0].root;
+        wrong_root.0.root = b.block.native_targets[0].root;
         assert!(!OrderedState::matches_sync_targets(
             &a.merkleized,
             &wrong_root

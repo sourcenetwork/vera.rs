@@ -60,9 +60,7 @@ vera-consensus = { path = "crates/vera-consensus", version = "=0.1.2" }
 vera-crypto = { path = "crates/vera-crypto", version = "=0.1.2" }
 vera-domain = { path = "crates/vera-domain", version = "=0.1.2" }
 vera-indexer = { path = "crates/vera-indexer", version = "=0.1.2" }
-vera-qmdb = { path = "crates/vera-qmdb", version = "=0.1.2" }
 vera-jsonrpc = { path = "crates/vera-jsonrpc", version = "=0.1.2" }
-vera-traits = { path = "crates/vera-traits", version = "=0.1.2" }
 
 vera-app = { path = "crates/vera-app", version = "=0.1.2" }
 vera-node = { path = "crates/vera-node", version = "=0.1.2" }

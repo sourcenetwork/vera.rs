@@ -112,7 +112,6 @@ pub fn index_finalized_block(
         hash: block_hash,
         number: block.height,
         parent_hash: block.parent.0,
-        state_root: block.state_root.0,
         module_state_root: block.module_state_root,
         timestamp: block.timestamp,
         gas_limit,

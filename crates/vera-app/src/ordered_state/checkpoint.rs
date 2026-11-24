@@ -27,23 +27,11 @@ impl OrderedCheckpoint {
             return Err(AppError::RootMismatch("native checkpoint commitments"));
         }
         let native = proof.verify(block.module_state_root)?;
-        if let Some(targets) = &block.native_targets
-            && *targets
-                != [&native.0, &native.1, &native.2, &native.3]
-                    .map(crate::targets::target_from_sync)
+        if block.native_targets
+            != [&native.0, &native.1, &native.2, &native.3].map(crate::targets::target_from_sync)
         {
             return Err(AppError::RootMismatch("native checkpoint targets"));
         }
-        let db = &block.db_targets;
-        let root = vera_qmdb::StateRoot::compute(
-            B256::from(db.accounts.root.0),
-            B256::from(db.storage.root.0),
-            B256::from(db.code.root.0),
-        );
-        if root != block.state_root.0 {
-            return Err(AppError::RootMismatch("execution targets"));
-        }
-        let execution = crate::sync_targets(db);
         Ok(Self {
             anchor: Anchor {
                 height: Height::new(block.height),
@@ -51,9 +39,6 @@ impl OrderedCheckpoint {
                 digest: block.digest(),
             },
             targets: (
-                execution.0,
-                execution.1,
-                execution.2,
                 native.0,
                 native.1,
                 native.2,

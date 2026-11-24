@@ -8,8 +8,8 @@ use commonware_cryptography::Digestible as _;
 use commonware_parallel::Sequential;
 use commonware_utils::non_empty;
 use vera_domain::{
-    Block, BlockId, ConsensusContext, ConsensusDigest, ConsensusPublicKey, DbTargets,
-    EpochMaterial, LIGHT_BLOCK_NAMESPACE, LightBlock, LightConsensusScheme, StateRoot,
+    Block, BlockId, ConsensusContext, ConsensusDigest, ConsensusPublicKey, EpochMaterial,
+    LIGHT_BLOCK_NAMESPACE, LightBlock, LightConsensusScheme,
 };
 use vera_e2e::cluster::KeySet;
 
@@ -33,13 +33,11 @@ pub(super) fn fixture() -> (LightBlock, ConsensusPublicKey) {
         height: 1,
         timestamp: 1_700_000_000,
         term: 0,
-        state_root: StateRoot(B256::repeat_byte(2)),
         module_state_root: B256::repeat_byte(3),
         txs: Vec::new(),
         payload: None,
-        native_targets: None,
-        receipt_commitment: Some(B256::repeat_byte(4)),
-        db_targets: DbTargets::default(),
+        native_targets: Default::default(),
+        receipt_commitment: B256::repeat_byte(4),
     };
     let proposal = Proposal::new(round, View::new(0), block.digest());
     let votes: Vec<_> = (0..3)

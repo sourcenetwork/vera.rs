@@ -51,8 +51,8 @@ async fn physical_damage_is_rejected(damage: Damage) {
     let directory = tempfile::tempdir().unwrap();
     let genesis = block(0, BlockId(B256::ZERO));
     let mut first = block(1, genesis.id());
-    first.native_targets = Some([vera_domain::DbTarget::default(); 4]);
-    first.receipt_commitment = Some(vera_executor::receipt_commitment(100, &[]));
+    first.native_targets = [vera_domain::DbTarget::default(); 4];
+    first.receipt_commitment = vera_executor::receipt_commitment(100, &[]);
     let mut second = block(2, first.id());
     second.native_targets = first.native_targets;
     second.receipt_commitment = first.receipt_commitment;

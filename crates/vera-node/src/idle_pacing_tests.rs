@@ -42,8 +42,8 @@ fn block(height: u64, txs: Vec<Tx>) -> Digested<Block> {
 
 fn child(parent: Option<&Digested<Block>>, height: u64, txs: Vec<Tx>) -> Digested<Block> {
     let mut block = vera_app::genesis_block(
-        vera_domain::StateRoot(alloy_primitives::B256::ZERO),
-        vera_domain::DbTargets::default(),
+        alloy_primitives::B256::ZERO,
+        Default::default(),
         alloy_primitives::B256::ZERO,
     );
     if let Some(parent) = parent {

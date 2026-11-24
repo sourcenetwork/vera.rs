@@ -22,8 +22,6 @@ pub struct IndexedBlock {
     pub number: u64,
     /// Parent block hash.
     pub parent_hash: B256,
-    /// State root after executing this block.
-    pub state_root: B256,
     /// Combined root of per-module state trees (ACP, Bulletin, Vera, NativeNonce).
     pub module_state_root: B256,
     /// Block timestamp.

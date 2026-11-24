@@ -51,7 +51,6 @@ fn publish(api: &VeraApiImpl, root: B256, height: u64) {
             hash: hash.into(),
             number: height,
             parent_hash: B256::ZERO,
-            state_root: B256::ZERO,
             module_state_root: root,
             timestamp: height,
             gas_limit: 1_000_000,

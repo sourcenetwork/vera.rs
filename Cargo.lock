@@ -6982,7 +6982,6 @@ dependencies = [
  "vera-indexer",
  "vera-jsonrpc",
  "vera-modules",
- "vera-qmdb",
 ]
 
 [[package]]
@@ -7009,8 +7008,6 @@ dependencies = [
  "tracing",
  "vera-modules",
  "vera-permission",
- "vera-qmdb",
- "vera-traits",
  "vera-zanzibar",
 ]
 
@@ -7302,7 +7299,6 @@ dependencies = [
  "vera-indexer",
  "vera-modules",
  "vera-permission",
- "vera-traits",
 ]
 
 [[package]]
@@ -7394,8 +7390,6 @@ dependencies = [
  "vera-indexer",
  "vera-jsonrpc",
  "vera-modules",
- "vera-qmdb",
- "vera-traits",
  "zeroize",
 ]
 
@@ -7418,14 +7412,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vera-qmdb"
-version = "0.1.2"
-dependencies = [
- "alloy-primitives",
- "rstest",
-]
-
-[[package]]
 name = "vera-test-infra"
 version = "0.1.2"
 dependencies = [
@@ -7435,14 +7421,6 @@ dependencies = [
  "serde",
  "toml 0.8.23",
  "tracing",
-]
-
-[[package]]
-name = "vera-traits"
-version = "0.1.2"
-dependencies = [
- "alloy-primitives",
- "thiserror 2.0.18",
 ]
 
 [[package]]

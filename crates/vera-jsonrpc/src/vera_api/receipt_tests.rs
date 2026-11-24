@@ -10,7 +10,6 @@ fn refused_revision(submission: B256, refusal: &Refusal) -> Arc<BlockIndex> {
             hash,
             number: 1,
             parent_hash: B256::ZERO,
-            state_root: B256::ZERO,
             module_state_root: B256::ZERO,
             timestamp: 1,
             gas_limit: 1_000_000,

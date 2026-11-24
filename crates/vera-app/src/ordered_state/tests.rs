@@ -6,7 +6,6 @@ use commonware_consensus::types::{Epoch, Height, Round, View};
 use commonware_runtime::{Runner as _, Supervisor as _, buffer::paged::CacheRef, tokio};
 use commonware_utils::{NZU16, NZU64, NZUsize};
 use std::{sync::Arc, time::Duration};
-use vera_backend::state_set_config;
 use vera_client::{ACP_ADDRESS, BlsSigner};
 use vera_modules::acp::abi::IAcp;
 
@@ -27,17 +26,10 @@ fn config(
     executor: VeraExecutor,
 ) -> <OrderedState as DatabaseSet<Ctx>>::Config {
     let cache = CacheRef::new(NZU16!(4084), NZUsize!(128));
-    ordered_config(
-        state_set_config(prefix, cache.clone()),
-        native::state_config(prefix, cache),
-        executor,
-    )
+    ordered_config(native::state_config(prefix, cache), executor)
 }
 
 type Sources = (
-    Shared<AccountsDb>,
-    Shared<StorageDb>,
-    Shared<CodeDb>,
     Shared<NativeDb>,
     Shared<NativeDb>,
     Shared<NativeDb>,
@@ -47,16 +39,7 @@ type Sources = (
 
 fn sources(state: &OrderedState) -> Sources {
     let db = &state.databases;
-    (
-        db.0.clone(),
-        db.1.clone(),
-        db.2.clone(),
-        db.3.clone(),
-        db.4.clone(),
-        db.5.clone(),
-        db.6.clone(),
-        (),
-    )
+    (db.0.clone(), db.1.clone(), db.2.clone(), db.3.clone(), ())
 }
 
 fn block(height: u64) -> BlockContext {

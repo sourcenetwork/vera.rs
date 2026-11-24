@@ -64,10 +64,9 @@ pub(super) fn heartbeat(
     let noise =
         |salt: u8| alloy_primitives::keccak256([&height.to_be_bytes()[..], &[salt]].concat());
     let mut next = block(height, parent.id());
-    next.state_root = StateRoot(noise(0));
     next.module_state_root = noise(1);
-    next.native_targets = Some([vera_domain::DbTarget::default(); 4]);
-    next.receipt_commitment = Some(vera_executor::receipt_commitment(100, &[]));
+    next.native_targets = [vera_domain::DbTarget::default(); 4];
+    next.receipt_commitment = vera_executor::receipt_commitment(100, &[]);
     if (height + 1).is_multiple_of(epoch_length) {
         let mut info = info.clone();
         info.epoch = Epoch::new((height + 1) / epoch_length);

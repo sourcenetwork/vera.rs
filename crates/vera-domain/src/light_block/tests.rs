@@ -9,7 +9,7 @@ use commonware_cryptography::{
 use commonware_utils::{N3f1, TestRng, non_empty};
 
 use super::*;
-use crate::{BlockId, ConsensusContext, DbTargets, StateRoot};
+use crate::{BlockId, ConsensusContext};
 
 fn fixture(
     seed: u64,
@@ -77,13 +77,11 @@ fn artifacts(seed: u64, configure: impl FnOnce(&mut Block)) -> (Block, Vec<u8>, 
         height: 100,
         timestamp: 1_700_000_000,
         term: 0,
-        state_root: StateRoot(B256::repeat_byte(0x01)),
         module_state_root: B256::repeat_byte(0x02),
         txs: vec![crate::Tx::new(Bytes::from_static(b"light-block"))],
         payload: None,
-        native_targets: None,
-        receipt_commitment: Some(B256::repeat_byte(9)),
-        db_targets: DbTargets::default(),
+        native_targets: Default::default(),
+        receipt_commitment: B256::repeat_byte(9),
     };
     configure(&mut block);
     let proposal = Proposal::new(round, View::new(16), block.digest());
@@ -122,7 +120,7 @@ fn valid_light_block_verifies() {
     let light = light_fixture(42);
     assert_eq!(
         verify_light_block(&light, &trusted_key()).unwrap(),
-        (B256::repeat_byte(0x01), B256::repeat_byte(0x02))
+        B256::repeat_byte(0x02)
     );
 }
 
@@ -240,7 +238,6 @@ fn indirect_fixture(count: usize) -> LightBlock {
         child.parent = parent.id();
         child.height += 1;
         child.timestamp += 1;
-        child.state_root = StateRoot(B256::repeat_byte(0x30));
         child.module_state_root = B256::repeat_byte(0x40);
         child.context.parent = (parent.context.round.view(), parent.digest());
         child.context.round = Round::new(Epoch::new(4), View::new(index as u64 + 1));
@@ -283,7 +280,7 @@ fn descendant_certificate_authenticates_the_requested_roots_across_epochs() {
     );
     assert_eq!(
         verify_light_block(&light, &trusted_key()).unwrap(),
-        (B256::repeat_byte(1), B256::repeat_byte(2))
+        B256::repeat_byte(2)
     );
     let decoded: LightBlock =
         serde_json::from_str(&serde_json::to_string(&light).unwrap()).unwrap();
@@ -394,7 +391,7 @@ fn receipt_evidence_binds_results_to_finality_and_submission() {
         block
             .txs
             .push(crate::Tx::new(Bytes::from_static(b"second")));
-        block.receipt_commitment = Some(receipt_commitment(100, &receipts));
+        block.receipt_commitment = receipt_commitment(100, &receipts);
     });
     let response = ReceiptResponse {
         revision,
@@ -448,23 +445,13 @@ fn receipt_evidence_binds_results_to_finality_and_submission() {
             "mutation {mutation}"
         );
     }
-    let legacy = ReceiptResponse {
-        revision: light_fixture_with(42, |block| {
-            block
-                .txs
-                .push(crate::Tx::new(Bytes::from_static(b"second")));
-            block.receipt_commitment = None;
-        }),
-        ..response.clone()
-    };
-    assert!(legacy.verify(first, &trusted_key()).is_err());
     let mut duplicate = response;
     duplicate.receipts[1].tx_hash = first;
     duplicate.revision = light_fixture_with(42, |block| {
         block
             .txs
             .push(crate::Tx::new(Bytes::from_static(b"second")));
-        block.receipt_commitment = Some(receipt_commitment(100, &duplicate.receipts));
+        block.receipt_commitment = receipt_commitment(100, &duplicate.receipts);
     });
     assert!(duplicate.verify(first, &trusted_key()).is_err());
 }
@@ -584,7 +571,7 @@ fn receipt_evidence_commits_the_refusal_kind_but_not_its_message() {
     ];
     let response = ReceiptResponse {
         revision: light_fixture_with(42, |block| {
-            block.receipt_commitment = Some(receipt_commitment(100, &receipts));
+            block.receipt_commitment = receipt_commitment(100, &receipts);
         }),
         gas_limit: 100,
         receipts,
@@ -613,7 +600,7 @@ fn receipt_evidence_commits_the_refusal_kind_but_not_its_message() {
     ];
     let contradictory = ReceiptResponse {
         revision: light_fixture_with(42, |block| {
-            block.receipt_commitment = Some(receipt_commitment(100, &succeeded));
+            block.receipt_commitment = receipt_commitment(100, &succeeded);
         }),
         gas_limit: 100,
         receipts: succeeded,

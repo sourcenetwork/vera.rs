@@ -1,5 +1,5 @@
 use bytes::BufMut;
-use commonware_codec::{Codec, EncodeSize, Error, RangeCfg, Read, Write};
+use commonware_codec::{Codec, EncodeSize, Error, Read, Write};
 use commonware_cryptography::sha256::Digest;
 use commonware_glue::stateful::db::{AttachableResolver, Shared, p2p};
 use commonware_storage::{
@@ -12,7 +12,7 @@ use commonware_storage::{
 use commonware_utils::NZU64;
 use std::num::NonZeroU64;
 
-use crate::{AccountsDb, CodeDb, StorageDb, native::NativeDb};
+use crate::native::NativeDb;
 
 /// A persisted partition with a bounded operation codec for peer messages.
 pub trait Partition:
@@ -54,53 +54,6 @@ impl Partition for NativeDb {
             Operation::CommitFloor(metadata, _) => {
                 metadata.as_ref().is_none_or(|v| v.len() <= MAX_VALUE_BYTES)
             }
-        }
-    }
-}
-
-impl Partition for AccountsDb {
-    fn bounds(&self) -> std::ops::Range<commonware_storage::merkle::Location<mmr::Family>> {
-        self.bounds()
-    }
-    fn operation_config() -> <Self::Op as Read>::Cfg {
-        ((), ())
-    }
-    fn accepts(_: &Self::Op) -> bool {
-        true
-    }
-}
-
-impl Partition for StorageDb {
-    fn bounds(&self) -> std::ops::Range<commonware_storage::merkle::Location<mmr::Family>> {
-        self.bounds()
-    }
-    fn operation_config() -> <Self::Op as Read>::Cfg {
-        ((), ())
-    }
-    fn accepts(_: &Self::Op) -> bool {
-        true
-    }
-}
-
-/// Maximum bytecode or code-partition commit metadata accepted over peer transport.
-/// Existing local journals retain their original decoding configuration.
-pub const MAX_CODE_BYTES: usize = 1 << 20;
-
-impl Partition for CodeDb {
-    fn bounds(&self) -> std::ops::Range<commonware_storage::merkle::Location<mmr::Family>> {
-        self.bounds()
-    }
-    fn operation_config() -> <Self::Op as Read>::Cfg {
-        ((), (RangeCfg::new(0..=MAX_CODE_BYTES), ()))
-    }
-    fn accepts(operation: &Self::Op) -> bool {
-        use commonware_storage::qmdb::any::operation::Operation;
-        match operation {
-            Operation::Update(record) => record.1.len() <= MAX_CODE_BYTES,
-            Operation::CommitFloor(metadata, _) => {
-                metadata.as_ref().is_none_or(|v| v.len() <= MAX_CODE_BYTES)
-            }
-            Operation::Delete(_) => true,
         }
     }
 }

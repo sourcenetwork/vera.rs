@@ -242,7 +242,6 @@ mod tests {
             hash,
             number,
             parent_hash: B256::ZERO,
-            state_root: B256::ZERO,
             module_state_root: B256::ZERO,
             timestamp: 1000 + number,
             gas_limit: 30_000_000,

@@ -48,10 +48,8 @@ use vera_app::{
     ordered_state::{OrderedState, ordered_config},
 };
 use vera_backend::{
-    AccountsDb, CodeDb, StorageDb,
     native::{self, NativeDb},
     p2p::{MAX_FETCH_OPS, Resolver as StateResolver, WireDatabase},
-    state_set_config,
 };
 use vera_consensus::components::InMemoryMempool;
 use vera_domain::EpochMaterial;
@@ -60,11 +58,11 @@ use vera_indexer::{BlockIndex, LightBlockIndex, StoredEpochMaterial};
 use vera_jsonrpc::{IndexedStateProvider, NodeState, RpcServer, TxSubmitCallback};
 
 use crate::{
-    BACKFILL_CHANNEL, BROADCAST_CHANNEL, CERTIFICATE_CHANNEL, CommittedState, DKG_CHANNEL,
-    DKG_PROBE_CHANNEL, DynamicProvider, FileSecretStore, IO_BUFFER_SIZE, MAILBOX_SIZE,
-    MAX_BLOCK_TXS, MAX_PARTICIPANTS, MAX_SUPPORTED_MODE, MAX_TX_BYTES, MEMPOOL_CHANNEL, NAMESPACE,
-    NodeOptions, NodeSettings, PAGE_SIZE, RESOLVER_CHANNEL, REVEAL, Registrar,
-    RegistryParticipants, RpcMode, SHARING_MODE, TxGossip, VOTE_CHANNEL,
+    BACKFILL_CHANNEL, BROADCAST_CHANNEL, CERTIFICATE_CHANNEL, DKG_CHANNEL, DKG_PROBE_CHANNEL,
+    DynamicProvider, FileSecretStore, IO_BUFFER_SIZE, MAILBOX_SIZE, MAX_BLOCK_TXS,
+    MAX_PARTICIPANTS, MAX_SUPPORTED_MODE, MAX_TX_BYTES, MEMPOOL_CHANNEL, NAMESPACE, NodeOptions,
+    NodeSettings, PAGE_SIZE, RESOLVER_CHANNEL, REVEAL, Registrar, RegistryParticipants, RpcMode,
+    SHARING_MODE, TxGossip, VOTE_CHANNEL,
     peer_capacity::PeerCapacity,
     rejoin,
     secret_store::{HeldSecretStore, NodeSecretStore, ObserverSecretStore},
@@ -327,13 +325,10 @@ pub async fn run_node_with_options(
         }};
     }
     let state_resolvers = (
-        state_channel!(0, AccountsDb),
-        state_channel!(1, StorageDb),
-        state_channel!(2, CodeDb),
+        state_channel!(0, NativeDb),
+        state_channel!(1, NativeDb),
+        state_channel!(2, NativeDb),
         state_channel!(3, NativeDb),
-        state_channel!(4, NativeDb),
-        state_channel!(5, NativeDb),
-        state_channel!(6, NativeDb),
         (),
     );
     let p2p_handle = p2p.start();
@@ -839,7 +834,6 @@ pub async fn run_node_with_options(
             application,
             strategy: verification_strategy.clone(),
             db_config: ordered_config(
-                state_set_config(PARTITION_PREFIX, page_cache.clone()),
                 native::state_config(PARTITION_PREFIX, page_cache.clone()),
                 executor.clone(),
             )
@@ -1205,8 +1199,6 @@ pub async fn run_node_with_options(
         }
     };
     let native_databases = databases.native_databases();
-    let state_set = databases.execution_databases();
-    let committed_state = CommittedState::new(state_set.clone());
     {
         // Hold the module read lock through publication so finalization cannot
         // advance nonces between loading them and enabling admission.
@@ -1289,7 +1281,6 @@ pub async fn run_node_with_options(
     });
     let state_provider = IndexedStateProvider::new(
         block_index.clone(),
-        committed_state,
         execution_config,
         gas_limit,
         modules.clone(),

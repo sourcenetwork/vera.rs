@@ -76,7 +76,7 @@ fn sync_modules_before_suffix_execution(follow_tip: bool) {
             let sealed_target = first.sync_targets();
             assert!(OrderedState::matches_sync_targets(&first, &sealed_target));
             let mut wrong_target = sealed_target.clone();
-            wrong_target.3.root = Digest::from([0; 32]);
+            wrong_target.0.root = Digest::from([0; 32]);
             assert!(!OrderedState::matches_sync_targets(&first, &wrong_target));
             let second_tx = policy(&signer, "second");
             let (second, second_outcome) = source
@@ -104,20 +104,11 @@ fn sync_modules_before_suffix_execution(follow_tip: bool) {
 
             let db = &source.databases;
             let paused = Arc::new(PausedSource {
-                db: db.6.clone(),
+                db: db.3.clone(),
                 gate: ::tokio::sync::Semaphore::new(0),
                 requested: ::tokio::sync::Notify::new(),
             });
-            let sources = (
-                db.0.clone(),
-                db.1.clone(),
-                db.2.clone(),
-                db.3.clone(),
-                db.4.clone(),
-                db.5.clone(),
-                paused.clone(),
-                (),
-            );
+            let sources = (db.0.clone(), db.1.clone(), db.2.clone(), paused.clone(), ());
             let (mut tip_tx, tip_rx) = ring::channel(NZUsize!(4));
             let handoff_entered = Arc::new(::tokio::sync::Notify::new());
             let handoff_release = Arc::new(::tokio::sync::Notify::new());
@@ -226,10 +217,10 @@ fn sync_modules_before_suffix_execution(follow_tip: bool) {
             let readers = destination.readers();
             assert_eq!(
                 vera_modules::module_state::combine_module_roots(&[
+                    readers.0.read().await.root().0,
+                    readers.1.read().await.root().0,
+                    readers.2.read().await.root().0,
                     readers.3.read().await.root().0,
-                    readers.4.read().await.root().0,
-                    readers.5.read().await.root().0,
-                    readers.6.read().await.root().0,
                 ]),
                 module_root
             );
@@ -300,10 +291,10 @@ fn sync_modules_before_suffix_execution(follow_tip: bool) {
                     .serialize_stores(),
                 expected
             );
-            let old_acp_root = readers.3.read().await.root();
-            let held = readers.6.read().await;
+            let old_acp_root = readers.0.read().await.root();
+            let held = readers.3.read().await;
             let observe = async {
-                while readers.3.read().await.root() == old_acp_root {
+                while readers.0.read().await.root() == old_acp_root {
                     ::tokio::task::yield_now().await;
                 }
                 assert_eq!(

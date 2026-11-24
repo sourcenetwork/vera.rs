@@ -20,7 +20,7 @@ use super::wire::Message;
 
 /// Every channel a validator sends on. A message on a channel the receiver
 /// never registered ends the connection.
-const CHANNELS: [u64; 17] = [
+const CHANNELS: [u64; 14] = [
     crate::VOTE_CHANNEL,
     crate::CERTIFICATE_CHANNEL,
     crate::RESOLVER_CHANNEL,
@@ -33,9 +33,6 @@ const CHANNELS: [u64; 17] = [
     crate::QMDB_CHANNELS[1],
     crate::QMDB_CHANNELS[2],
     crate::QMDB_CHANNELS[3],
-    crate::QMDB_CHANNELS[4],
-    crate::QMDB_CHANNELS[5],
-    crate::QMDB_CHANNELS[6],
     crate::HISTORY_CHANNEL,
     crate::TERM_CHANNEL,
 ];

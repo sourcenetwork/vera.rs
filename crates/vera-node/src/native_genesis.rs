@@ -5,11 +5,7 @@ use anyhow::ensure;
 use commonware_codec::{Decode as _, Encode as _};
 use commonware_glue::stateful::db::DatabaseSet as _;
 use commonware_runtime::{Supervisor as _, buffer::paged::CacheRef, tokio};
-use vera_backend::{
-    VeraStateSet,
-    native::{self, NativeStateSet},
-    state_set_config,
-};
+use vera_backend::native::{self, NativeStateSet};
 use vera_domain::Block;
 use vera_genesis::VeraGenesis;
 use vera_modules::ModuleState;
@@ -20,7 +16,7 @@ pub(super) fn fingerprint(genesis: &VeraGenesis) -> anyhow::Result<alloy_primiti
     Ok(keccak256(bytes))
 }
 
-/// Initialize all seven journals once, with a durable intent for interrupted first boots.
+/// Initialize the four journals once, with a durable intent for interrupted first boots.
 pub(super) async fn load_or_create(
     context: &tokio::Context,
     data_dir: &Path,
@@ -41,15 +37,11 @@ pub(super) async fn load_or_create(
             &crate::node::block_cfg(),
         )?;
         ensure!(
-            block.native_targets.is_some(),
-            "native genesis commitments missing"
-        );
-        ensure!(
             block.timestamp == genesis.timestamp,
             "native genesis timestamp does not match configuration"
         );
         ensure!(
-            block.receipt_commitment == Some(vera_executor::receipt_commitment(0, &[])),
+            block.receipt_commitment == vera_executor::receipt_commitment(0, &[]),
             "native genesis receipt commitment is invalid"
         );
         return Ok(block);
@@ -67,12 +59,6 @@ pub(super) async fn load_or_create(
             "interrupted genesis has different configuration"
         );
     }
-    let execution = VeraStateSet::init(
-        context.child("genesis_execution"),
-        state_set_config(super::node::PARTITION_PREFIX, cache.clone()),
-        interrupted.then(VeraStateSet::initial_sync_targets),
-    )
-    .await;
     let native = NativeStateSet::init(
         context.child("genesis_modules"),
         native::state_config(super::node::PARTITION_PREFIX, cache.clone()),
@@ -81,13 +67,11 @@ pub(super) async fn load_or_create(
     .await;
     if !interrupted {
         ensure!(
-            execution.committed_targets().await == VeraStateSet::initial_sync_targets()
-                && native.committed_targets().await == NativeStateSet::initial_sync_targets(),
+            native.committed_targets().await == NativeStateSet::initial_sync_targets(),
             "existing journals have no native genesis or initialization intent"
         );
         vera_cli::write_durable(&intent, fingerprint.as_slice())?;
     }
-    let (root, targets) = vera_app::apply_genesis(&execution, &genesis.to_genesis_state()?).await?;
     let mut modules = ModuleState::default();
     if let Some(policy) = &genesis.operators {
         modules.vera.initialize_administration(policy.clone())?;
@@ -130,25 +114,26 @@ pub(super) async fn load_or_create(
     let native_targets = native.committed_targets().await;
     #[cfg(feature = "fault-injection")]
     crate::crash::point(data_dir, "native-genesis");
-    let mut block = vera_app::genesis_block(root, targets, module_root);
+    let native_targets = [
+        &native_targets.0,
+        &native_targets.1,
+        &native_targets.2,
+        &native_targets.3,
+    ]
+    .map(|target| vera_domain::DbTarget {
+        root: target.root,
+        floor: *target.range.start(),
+        tip: *target.range.end(),
+    });
+    let mut block = vera_app::genesis_block(
+        module_root,
+        native_targets,
+        vera_executor::receipt_commitment(0, &[]),
+    );
     block.timestamp = genesis.timestamp;
     // The genesis block has no parent: its parent field binds the native schema
     // and consensus parameters into the deployment identity.
     block.parent = vera_domain::BlockId(fingerprint);
-    block.receipt_commitment = Some(vera_executor::receipt_commitment(0, &[]));
-    block.native_targets = Some(
-        [
-            &native_targets.0,
-            &native_targets.1,
-            &native_targets.2,
-            &native_targets.3,
-        ]
-        .map(|target| vera_domain::DbTarget {
-            root: target.root,
-            floor: *target.range.start(),
-            tip: *target.range.end(),
-        }),
-    );
     let mut record = fingerprint.to_vec();
     record.extend_from_slice(&block.encode());
     vera_cli::write_durable(&path, &record)?;

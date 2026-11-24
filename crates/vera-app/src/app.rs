@@ -138,20 +138,15 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
             .with_verification()
             .with_expected_module_state_root(block.module_state_root);
         let executed = Box::pin(D::execute(&self.executor, batches, &context, &block.txs)).await?;
-        if executed.state_root != block.state_root {
-            return Err(AppError::RootMismatch("state root"));
-        }
         if executed.outcome.module_state_root != block.module_state_root {
             return Err(AppError::RootMismatch("module state root"));
         }
-        if executed.db_targets != block.db_targets
-            || executed.native_targets != block.native_targets
-        {
+        if executed.native_targets != block.native_targets {
             return Err(AppError::RootMismatch("db targets"));
         }
-        if block.receipt_commitment.is_some_and(|expected| {
-            receipt_commitment(self.gas_limit, &executed.outcome.receipts) != expected
-        }) {
+        if receipt_commitment(self.gas_limit, &executed.outcome.receipts)
+            != block.receipt_commitment
+        {
             return Err(AppError::RootMismatch("execution receipts"));
         }
         Ok(D::with_receipts(
@@ -292,16 +287,11 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             height,
             timestamp,
             term,
-            state_root: executed.state_root,
             module_state_root: executed.outcome.module_state_root,
             txs,
             payload: input.upstream.payload,
             native_targets: executed.native_targets,
-            receipt_commitment: Some(receipt_commitment(
-                self.gas_limit,
-                &executed.outcome.receipts,
-            )),
-            db_targets: executed.db_targets,
+            receipt_commitment: receipt_commitment(self.gas_limit, &executed.outcome.receipts),
         };
         if !block.fits_wire_limits() {
             return None;
@@ -440,7 +430,7 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         let receipts = D::receipts(batches);
         assert_eq!(
             block.receipt_commitment,
-            Some(receipt_commitment(self.gas_limit, receipts)),
+            receipt_commitment(self.gas_limit, receipts),
             "sealed execution receipts must match the selected block"
         );
         receipts.to_vec()
@@ -542,8 +532,8 @@ mod processing_failure_tests {
     fn candidate_processing_fails_stopped_on_a_storage_error() {
         tokio::Runner::new(tokio::Config::default()).start(|context| async move {
             let genesis = crate::genesis_block(
-                vera_domain::StateRoot(alloy_primitives::B256::ZERO),
-                vera_domain::DbTargets::default(),
+                alloy_primitives::B256::ZERO,
+                Default::default(),
                 alloy_primitives::B256::ZERO,
             );
             let mut candidate = genesis.clone();
@@ -557,8 +547,8 @@ mod processing_failure_tests {
             let mut app = StatefulVeraApp::<NoopSink, FailingState>::new(
                 VeraExecutor::new(9001),
                 crate::genesis_block(
-                    vera_domain::StateRoot(alloy_primitives::B256::ZERO),
-                    vera_domain::DbTargets::default(),
+                    alloy_primitives::B256::ZERO,
+                    Default::default(),
                     alloy_primitives::B256::ZERO,
                 ),
                 InMemoryMempool::new(),
@@ -585,8 +575,8 @@ mod processing_failure_tests {
     fn candidate_with_a_non_native_transaction_is_rejected_before_execution() {
         tokio::Runner::new(tokio::Config::default()).start(|context| async move {
             let genesis = crate::genesis_block(
-                vera_domain::StateRoot(alloy_primitives::B256::ZERO),
-                vera_domain::DbTargets::default(),
+                alloy_primitives::B256::ZERO,
+                Default::default(),
                 alloy_primitives::B256::ZERO,
             );
             for (bytes, reject) in [
@@ -636,8 +626,8 @@ mod processing_failure_tests {
         tokio::Runner::new(tokio::Config::default()).start(|context| async move {
             let now = super::now_secs();
             let mut genesis = crate::genesis_block(
-                vera_domain::StateRoot(alloy_primitives::B256::ZERO),
-                vera_domain::DbTargets::default(),
+                alloy_primitives::B256::ZERO,
+                Default::default(),
                 alloy_primitives::B256::ZERO,
             );
             genesis.timestamp = now + 14;
@@ -686,8 +676,8 @@ mod processing_failure_tests {
     fn admitted(parent_term: u64, term: u64, held: Option<(u64, u64)>) -> bool {
         tokio::Runner::new(tokio::Config::default()).start(|context| async move {
             let mut genesis = crate::genesis_block(
-                vera_domain::StateRoot(alloy_primitives::B256::ZERO),
-                vera_domain::DbTargets::default(),
+                alloy_primitives::B256::ZERO,
+                Default::default(),
                 alloy_primitives::B256::ZERO,
             );
             genesis.timestamp = super::now_secs();
@@ -745,8 +735,8 @@ mod processing_failure_tests {
     fn candidate_timestamp_rejects_excessive_parent_step() {
         tokio::Runner::new(tokio::Config::default()).start(|context| async move {
             let mut genesis = crate::genesis_block(
-                vera_domain::StateRoot(alloy_primitives::B256::ZERO),
-                vera_domain::DbTargets::default(),
+                alloy_primitives::B256::ZERO,
+                Default::default(),
                 alloy_primitives::B256::ZERO,
             );
             genesis.timestamp = super::now_secs();

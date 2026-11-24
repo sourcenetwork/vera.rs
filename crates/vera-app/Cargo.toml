@@ -20,7 +20,6 @@ vera-domain.workspace = true
 vera-executor.workspace = true
 vera-genesis.workspace = true
 vera-modules.workspace = true
-vera-qmdb.workspace = true
 
 commonware-codec.workspace = true
 commonware-consensus.workspace = true

@@ -69,8 +69,7 @@ async fn a_pruned_store_holds_one_run_from_the_floors_parent_and_recovers_from_i
     let mut other = chain.block(96).clone();
     other.timestamp += 1;
     other.txs.clear();
-    other.native_targets = None;
-    other.receipt_commitment = None;
+    other.receipt_commitment = vera_executor::receipt_commitment(100, &[]);
     let record = Record {
         block: other.encode().to_vec(),
         gas_limit: 100,

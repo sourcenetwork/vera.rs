@@ -12,10 +12,6 @@ pub struct BlockId(pub B256);
 /// Transaction identifier (32 bytes).
 pub struct TxId(pub B256);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-/// State commitment (32 bytes) computed from merkleized, non-durable QMDB partition roots.
-pub struct StateRoot(pub B256);
-
 /// Identifier encoding helpers.
 #[derive(Debug)]
 pub struct Idents;
@@ -45,10 +41,6 @@ impl FixedSize for TxId {
     const SIZE: usize = 32;
 }
 
-impl FixedSize for StateRoot {
-    const SIZE: usize = 32;
-}
-
 impl Write for BlockId {
     fn write(&self, buf: &mut impl BufMut) {
         Idents::write_b256(&self.0, buf);
@@ -70,20 +62,6 @@ impl Write for TxId {
 }
 
 impl Read for TxId {
-    type Cfg = ();
-
-    fn read_cfg(buf: &mut impl commonware_codec::Buf, _: &Self::Cfg) -> Result<Self, CodecError> {
-        Ok(Self(Idents::read_b256(buf)?))
-    }
-}
-
-impl Write for StateRoot {
-    fn write(&self, buf: &mut impl BufMut) {
-        Idents::write_b256(&self.0, buf);
-    }
-}
-
-impl Read for StateRoot {
     type Cfg = ();
 
     fn read_cfg(buf: &mut impl commonware_codec::Buf, _: &Self::Cfg) -> Result<Self, CodecError> {
@@ -135,13 +113,11 @@ mod tests {
             height: 7,
             timestamp: 1_700_000_000,
             term: 0,
-            state_root: StateRoot(B256::from([0xBBu8; 32])),
             module_state_root: B256::ZERO,
             txs,
             payload: None,
-            native_targets: None,
-            receipt_commitment: None,
-            db_targets: crate::DbTargets::default(),
+            native_targets: Default::default(),
+            receipt_commitment: alloy_primitives::B256::ZERO,
         };
         let encoded = block.encode();
         let decoded = Block::decode_cfg(encoded.clone(), &cfg()).expect("decode block");
@@ -178,11 +154,6 @@ mod tests {
     #[test]
     fn test_tx_id_fixed_size() {
         assert_eq!(TxId::SIZE, 32);
-    }
-
-    #[test]
-    fn test_state_root_fixed_size() {
-        assert_eq!(StateRoot::SIZE, 32);
     }
 
     #[test]
@@ -227,16 +198,6 @@ mod tests {
 
         let decoded = TxId::decode(encoded).expect("decode tx id");
         assert_eq!(decoded, tx_id);
-    }
-
-    #[test]
-    fn test_state_root_encode_decode_roundtrip() {
-        let root = StateRoot(B256::from([0xEFu8; 32]));
-        let encoded = root.encode();
-        assert_eq!(encoded.len(), 32);
-
-        let decoded = StateRoot::decode(encoded).expect("decode state root");
-        assert_eq!(decoded, root);
     }
 
     #[test]

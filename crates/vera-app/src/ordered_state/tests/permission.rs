@@ -50,7 +50,6 @@ pub(super) fn index_block(index: &BlockIndex, block: &vera_domain::Block) {
             hash: block.id().0,
             number: block.height,
             parent_hash: block.parent.0,
-            state_root: block.state_root.0,
             module_state_root: block.module_state_root,
             timestamp: block.timestamp,
             gas_limit: 30_000_000,
@@ -130,7 +129,7 @@ fn synchronized_permission_rpc_verifies_native_evidence_and_subsequent_denial() 
                     let block = checkpoint::block(&source, 2).await;
                     let db = &source.databases;
                     let proof = native::SyncProof::capture(
-                        &(db.3.clone(), db.4.clone(), db.5.clone(), db.6.clone()),
+                        &(db.0.clone(), db.1.clone(), db.2.clone(), db.3.clone()),
                         block.module_state_root,
                     )
                     .await
@@ -167,7 +166,7 @@ fn synchronized_permission_rpc_verifies_native_evidence_and_subsequent_denial() 
                     )
                     .with_vera_index_and_modules(index.clone(), replica.executor.modules().clone())
                     .with_vera_native_modules(
-                        (db.3.clone(), db.4.clone(), db.5.clone(), db.6.clone()),
+                        (db.0.clone(), db.1.clone(), db.2.clone(), db.3.clone()),
                         replica.executor.modules().clone(),
                     )
                     .with_vera_light_block_lookup(Arc::new(move |height| {

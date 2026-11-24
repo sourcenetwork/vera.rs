@@ -75,10 +75,6 @@ impl FinalizedHistory {
     /// and recover() completes. The destination may already have a committed prefix.
     pub fn begin_import(&self, revision: &LightBlock, trusted: &ConsensusPublicKey) -> Result<()> {
         let anchor = verify_finalized_block(revision, trusted)?;
-        ensure!(
-            anchor.native_targets.is_some() && anchor.receipt_commitment.is_some(),
-            "native import commitments missing"
-        );
         let head = self.head.lock();
         let base = if let Some(bytes) = self.db.get(IMPORT)? {
             let import: Import = borsh::from_slice(&bytes)?;
@@ -312,10 +308,6 @@ fn decode_record(mut input: &[u8], limits: HistoryLimits) -> Result<Block> {
         commonware_codec::Copying(vector(&mut input)?),
         &crate::node::block_cfg(),
     )?;
-    ensure!(
-        block.native_targets.is_some() && block.receipt_commitment.is_some(),
-        "native import commitments missing"
-    );
     let gas_limit = u64::deserialize(&mut input)?;
     let count = u32::deserialize(&mut input)? as usize;
     ensure!(count == block.txs.len(), "history receipt count mismatch");

@@ -11,9 +11,6 @@ pub use bootstrap::{
     BootstrapSettings, GenesisEpochInfo, epoch_info_hex, run_bootstrap, trusted_setup,
 };
 
-mod committed_state;
-pub use committed_state::CommittedState;
-
 mod config;
 mod connectivity;
 mod consensus_timeouts;

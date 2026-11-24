@@ -15,9 +15,8 @@ use commonware_parallel::Sequential;
 use commonware_utils::{N3f1, TestRng, non_empty, ordered::Set};
 
 use crate::{
-    Block, BlockId, ConsensusContext, ConsensusDigest, ConsensusPublicKey, DbTargets,
-    EpochMaterial, FinalizedArtifacts, LIGHT_BLOCK_NAMESPACE, LightBlock, LightConsensusScheme,
-    StateRoot,
+    Block, BlockId, ConsensusContext, ConsensusDigest, ConsensusPublicKey, EpochMaterial,
+    FinalizedArtifacts, LIGHT_BLOCK_NAMESPACE, LightBlock, LightConsensusScheme,
 };
 
 /// Four validators holding shares of one dealt consensus key.
@@ -93,13 +92,11 @@ impl TestDeployment {
             height,
             timestamp: 1_700_000_000 + height,
             term,
-            state_root: StateRoot(B256::repeat_byte(0x01)),
             module_state_root,
             txs: vec![crate::Tx::new(Bytes::from_static(b"test"))],
             payload: None,
-            native_targets: None,
-            receipt_commitment: Some(B256::repeat_byte(9)),
-            db_targets: DbTargets::default(),
+            native_targets: Default::default(),
+            receipt_commitment: B256::repeat_byte(9),
         }
     }
 

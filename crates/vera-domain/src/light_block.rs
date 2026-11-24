@@ -111,16 +111,14 @@ impl Read for EpochMaterial {
 /// Binary fields use `0x`-prefixed hex so the type remains directly usable over JSON-RPC.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LightBlock {
-    /// EVM block ID: keccak256 of the canonical Vera block encoding.
+    /// Block ID: keccak256 of the canonical Vera block encoding.
     pub block_hash: String,
-    /// Parent EVM block ID.
+    /// Parent block ID.
     pub parent_hash: String,
     /// Block height.
     pub height: u64,
     /// Unix timestamp in seconds.
     pub timestamp: u64,
-    /// EVM/QMDB state root.
-    pub state_root: String,
     /// Combined native-module state root.
     pub module_state_root: String,
     /// Consensus epoch.
@@ -212,7 +210,6 @@ impl LightBlock {
             parent_hash: encode_hex(block.parent.0.as_slice()),
             height: block.height,
             timestamp: block.timestamp,
-            state_root: encode_hex(block.state_root.0.as_slice()),
             module_state_root: encode_hex(block.module_state_root.as_slice()),
             epoch: block.context.round.epoch().get(),
             view: block.context.round.view().get(),
@@ -346,13 +343,12 @@ fn decode_block(bytes: &[u8]) -> Result<Block, LightBlockError> {
 /// Obtain `trusted_key` from the deployment's authenticated bootstrap configuration,
 /// never from the response being verified. The identity remains constant across
 /// resharing epochs. Epoch material in the response cannot establish trust.
-/// Returns the authenticated `(state_root, module_state_root)` on success.
+/// Returns the authenticated module state root on success.
 pub fn verify_light_block(
     light: &LightBlock,
     trusted_key: &ConsensusPublicKey,
-) -> Result<(B256, B256), LightBlockError> {
-    let block = verify_finalized_block(light, trusted_key)?;
-    Ok((block.state_root.0, block.module_state_root))
+) -> Result<B256, LightBlockError> {
+    Ok(verify_finalized_block(light, trusted_key)?.module_state_root)
 }
 
 /// Return the requested canonical revision after validating direct or descendant finality.
@@ -390,10 +386,6 @@ pub fn verify_finalized_block_unless(
         ),
         (block.height == light.height, "height"),
         (block.timestamp == light.timestamp, "timestamp"),
-        (
-            block.state_root.0 == decode_b256("state_root", &light.state_root)?,
-            "state_root",
-        ),
         (
             block.module_state_root == decode_b256("module_state_root", &light.module_state_root)?,
             "module_state_root",

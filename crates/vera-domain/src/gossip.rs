@@ -29,8 +29,6 @@ pub struct GossipHeader {
     pub timestamp: u64,
     /// Term of the device that proposed the block.
     pub term: u64,
-    /// EVM state root (QMDB).
-    pub state_root: B256,
     /// Combined current-QMDB root for ACP, bulletin, Vera and native sequences.
     pub module_state_root: B256,
     /// Number of transactions in the block.
@@ -61,7 +59,6 @@ impl GossipHeader {
             parent_hash: block.parent.0,
             timestamp: block.timestamp,
             term: block.term,
-            state_root: block.state_root.0,
             module_state_root: block.module_state_root,
             tx_count: block.txs.len() as u32,
             publisher_index,
@@ -80,7 +77,7 @@ mod tests {
     use alloy_primitives::Bytes;
 
     use super::*;
-    use crate::{BlockId, StateRoot, Tx};
+    use crate::{BlockId, Tx};
 
     fn sample_block() -> Block {
         Block {
@@ -89,13 +86,11 @@ mod tests {
             height: 42,
             timestamp: 1_700_000_000,
             term: 3,
-            state_root: StateRoot(B256::repeat_byte(0xcd)),
             module_state_root: B256::repeat_byte(0xef),
             txs: vec![Tx::new(Bytes::from_static(&[0xde, 0xad]))],
             payload: None,
-            native_targets: None,
-            receipt_commitment: None,
-            db_targets: crate::DbTargets::default(),
+            native_targets: Default::default(),
+            receipt_commitment: alloy_primitives::B256::ZERO,
         }
     }
 
@@ -110,7 +105,6 @@ mod tests {
         assert_eq!(header.parent_hash, B256::repeat_byte(0x01));
         assert_eq!(header.timestamp, 1_700_000_000);
         assert_eq!(header.term, 3);
-        assert_eq!(header.state_root, B256::repeat_byte(0xcd));
         assert_eq!(header.module_state_root, B256::repeat_byte(0xef));
         assert_eq!(header.tx_count, 1);
         assert_eq!(header.publisher_index, 2);

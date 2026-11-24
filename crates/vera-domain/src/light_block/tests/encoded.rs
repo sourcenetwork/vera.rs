@@ -1,7 +1,7 @@
 use super::*;
 
 fn native(block: &mut Block) {
-    block.native_targets = Some(Default::default());
+    block.native_targets = Default::default();
     block.txs = (0..3u8)
         .map(|index| crate::Tx::new(Bytes::from(vec![index; 40])))
         .collect();
@@ -19,7 +19,6 @@ fn encoded_native_block_matches_construction_from_the_decoded_block() {
         parent_hash: encode_hex(block.parent.0.as_slice()),
         height: block.height,
         timestamp: block.timestamp,
-        state_root: encode_hex(block.state_root.0.as_slice()),
         module_state_root: encode_hex(block.module_state_root.as_slice()),
         epoch: block.context.round.epoch().get(),
         view: block.context.round.view().get(),

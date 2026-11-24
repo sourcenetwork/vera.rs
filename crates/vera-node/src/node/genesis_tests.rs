@@ -89,15 +89,6 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
                 )
                 .unwrap();
                 let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
-                let execution = VeraStateSet::init(
-                    context.child("partial_execution"),
-                    state_set_config(crate::node::PARTITION_PREFIX, cache.clone()),
-                    None,
-                )
-                .await;
-                vera_app::apply_genesis(&execution, &genesis.to_genesis_state().unwrap())
-                    .await
-                    .unwrap();
                 if stage == 2 {
                     let modules = NativeStateSet::init(
                         context.child("partial_modules"),
@@ -127,7 +118,6 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
             let block = load_or_create(&context, directory, genesis, &cache)
                 .await
                 .unwrap();
-            assert!(block.native_targets.is_some());
             assert_eq!(block.parent.0, fingerprint(genesis).unwrap());
             assert!(!directory.join("native-genesis.intent").exists());
             let modules = NativeStateSet::init(
@@ -191,7 +181,7 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
                 legacy
             );
             let mut old = block;
-            old.receipt_commitment = None;
+            old.receipt_commitment.0[0] ^= 1;
             let mut record = crate::native_genesis::fingerprint(genesis)
                 .unwrap()
                 .to_vec();

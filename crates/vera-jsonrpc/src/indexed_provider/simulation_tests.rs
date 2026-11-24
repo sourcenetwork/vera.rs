@@ -1,12 +1,11 @@
 use std::sync::{Arc, RwLock};
 
-use alloy_primitives::{Address, B256, Bytes, KECCAK256_EMPTY, U64, U256, keccak256};
+use alloy_primitives::{Address, B256, Bytes, U64, U256, keccak256};
 use vera_domain::NativeCallSimulation;
 use vera_executor::{ExecutionConfig, ModuleState, SharedModuleState};
 use vera_indexer::{BlockIndex, IndexedBlock};
 use vera_modules::acp::types::PolicyRecord;
 use vera_modules::types::{BlockExecCtx, Timestamp, TxExecCtx};
-use vera_traits::{StateDbError, StateDbRead};
 
 use super::IndexedStateProvider;
 use crate::simulation_slots::{SIMULATION_SLOTS, SIMULATION_WAITERS};
@@ -19,34 +18,12 @@ pub(super) const HEAD_TIME: u64 = 1_800_000_123;
 pub(super) const OWNER: &str = "did:key:owner";
 pub(super) const POLICY: &str = "name: files\nresources:\n  - name: file\n";
 
-#[derive(Clone)]
-pub(super) struct EmptyState;
-
-impl StateDbRead for EmptyState {
-    async fn nonce(&self, _address: &Address) -> Result<u64, StateDbError> {
-        Ok(0)
-    }
-    async fn balance(&self, _address: &Address) -> Result<U256, StateDbError> {
-        Ok(U256::ZERO)
-    }
-    async fn code_hash(&self, _address: &Address) -> Result<B256, StateDbError> {
-        Ok(KECCAK256_EMPTY)
-    }
-    async fn code(&self, _code_hash: &B256) -> Result<Bytes, StateDbError> {
-        Ok(Bytes::new())
-    }
-    async fn storage(&self, _address: &Address, _slot: &U256) -> Result<U256, StateDbError> {
-        Ok(U256::ZERO)
-    }
-}
-
 pub(super) fn insert_head(index: &BlockIndex, number: u64, timestamp: u64) {
     index.insert_block(
         IndexedBlock {
             hash: B256::from(U256::from(number)),
             number,
             parent_hash: B256::ZERO,
-            state_root: B256::ZERO,
             module_state_root: B256::ZERO,
             timestamp,
             gas_limit: 30_000_000,
@@ -58,19 +35,13 @@ pub(super) fn insert_head(index: &BlockIndex, number: u64, timestamp: u64) {
     );
 }
 
-pub(super) fn provider(modules: SharedModuleState) -> IndexedStateProvider<EmptyState> {
+pub(super) fn provider(modules: SharedModuleState) -> IndexedStateProvider {
     let index = Arc::new(BlockIndex::new());
     insert_head(&index, HEAD_NUMBER, HEAD_TIME);
-    IndexedStateProvider::new(
-        index,
-        EmptyState,
-        ExecutionConfig::new(CHAIN),
-        30_000_000,
-        modules,
-    )
+    IndexedStateProvider::new(index, ExecutionConfig::new(CHAIN), 30_000_000, modules)
 }
 
-pub(super) fn local(provider: IndexedStateProvider<EmptyState>) -> LocalRpc {
+pub(super) fn local(provider: IndexedStateProvider) -> LocalRpc {
     RpcServer::with_state_provider(
         NodeState::new(CHAIN, 0, 1),
         "127.0.0.1:0".parse().unwrap(),

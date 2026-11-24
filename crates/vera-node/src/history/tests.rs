@@ -4,7 +4,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
-use vera_domain::{DbTargets, StateRoot, Tx};
+use vera_domain::Tx;
 
 #[path = "physical_tests.rs"]
 mod physical_tests;
@@ -34,13 +34,11 @@ pub(super) fn block(height: u64, parent: BlockId) -> Block {
         height,
         timestamp: height,
         term: 0,
-        state_root: StateRoot(B256::ZERO),
         module_state_root: B256::ZERO,
         txs: Vec::new(),
         payload: None,
-        native_targets: None,
-        receipt_commitment: None,
-        db_targets: DbTargets::default(),
+        native_targets: Default::default(),
+        receipt_commitment: alloy_primitives::B256::ZERO,
     }
 }
 
@@ -268,11 +266,9 @@ fn execution_record_preserves_receipt_fields_and_rejects_corruption() {
         vec![log.clone()],
         Some(Address::repeat_byte(5)),
     );
-    first.native_targets = Some([vera_domain::DbTarget::default(); 4]);
-    first.receipt_commitment = Some(vera_executor::receipt_commitment(
-        31,
-        std::slice::from_ref(&receipt),
-    ));
+    first.native_targets = [vera_domain::DbTarget::default(); 4];
+    first.receipt_commitment =
+        vera_executor::receipt_commitment(31, std::slice::from_ref(&receipt));
     let history = FinalizedHistory::open(dir.path(), &genesis).unwrap();
     assert!(
         history
@@ -307,7 +303,7 @@ fn execution_record_preserves_receipt_fields_and_rejects_corruption() {
             7 => altered.receipts.clear(),
             8 => {
                 let mut missing = first.clone();
-                missing.receipt_commitment = None;
+                missing.receipt_commitment.0[0] ^= 1;
                 altered.block = missing.encode().to_vec();
             }
             _ => unreachable!(),
@@ -327,8 +323,8 @@ async fn receipt_corruption_is_rejected_before_recovery_publishes_the_record() {
     let dir = tempfile::tempdir().unwrap();
     let genesis = block(0, BlockId(B256::ZERO));
     let mut first = block(1, genesis.id());
-    first.native_targets = Some([vera_domain::DbTarget::default(); 4]);
-    first.receipt_commitment = Some(vera_executor::receipt_commitment(100, &[]));
+    first.native_targets = [vera_domain::DbTarget::default(); 4];
+    first.receipt_commitment = vera_executor::receipt_commitment(100, &[]);
     let history = FinalizedHistory::open(dir.path(), &genesis).unwrap();
     history.append(&first, &[], 100).unwrap();
     let bytes = history.db.get(key(RECORD, 1)).unwrap().unwrap();
@@ -411,10 +407,8 @@ async fn indirect_proof_survives_reopen_and_uses_the_rpc_history_lookup() {
     first.payload = Some(Payload::EpochInfo(info));
     first.txs.push(Tx::new(vec![1].into()));
     let receipt = ExecutionReceipt::new(B256::repeat_byte(42), false, 3, 3, vec![], None);
-    first.receipt_commitment = Some(vera_executor::receipt_commitment(
-        100,
-        std::slice::from_ref(&receipt),
-    ));
+    first.receipt_commitment =
+        vera_executor::receipt_commitment(100, std::slice::from_ref(&receipt));
 
     let mut second = block(2, first.id());
     second.context.round = commonware_consensus::types::Round::new(

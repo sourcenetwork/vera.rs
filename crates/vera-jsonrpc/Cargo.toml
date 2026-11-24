@@ -53,7 +53,6 @@ vera-permission.workspace = true
 vera-executor.workspace = true
 vera-indexer.workspace = true
 vera-modules.workspace = true
-vera-traits.workspace = true
 
 [dev-dependencies]
 commonware-glue.workspace = true

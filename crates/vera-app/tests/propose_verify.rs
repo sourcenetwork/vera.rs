@@ -12,7 +12,6 @@ use vera_client::{ACP_ADDRESS, BlsSigner};
 use vera_consensus::{Mempool as _, components::InMemoryMempool};
 use vera_domain::{Block, DbTarget, NativeTx, Tx};
 use vera_executor::VeraExecutor;
-use vera_genesis::GenesisState;
 use vera_modules::acp::abi::IAcp;
 mod support;
 use support::block_ancestry;
@@ -52,7 +51,7 @@ fn competing_proposals_preserve_receipts() {
         )
         .await;
 
-        let genesis = support::genesis(&set, &GenesisState::default()).await;
+        let genesis = support::genesis(&set).await;
         drop(set);
         let set = OrderedState::init(
             context.child("anchored_genesis"),
@@ -145,7 +144,7 @@ fn competing_proposals_preserve_receipts() {
                 30_000_000,
             );
             let mut wrong = candidate.clone();
-            wrong.receipt_commitment = Some(alloy_primitives::B256::ZERO);
+            wrong.receipt_commitment = alloy_primitives::B256::ZERO;
             assert!(
                 std::panic::AssertUnwindSafe(capturer.capture(
                     (context.child("wrong_receipts"), wrong.context.clone()),
@@ -180,13 +179,13 @@ fn competing_proposals_preserve_receipts() {
         set.apply(verified).await;
         assert!(set.finalize().await.durable().await);
         let committed = set.committed_targets().await;
-        let native = [committed.3, committed.4, committed.5, committed.6];
+        let native = [committed.0, committed.1, committed.2, committed.3];
         assert_eq!(
-            Some(native.each_ref().map(|target| DbTarget {
+            native.each_ref().map(|target| DbTarget {
                 root: target.root,
                 floor: *target.range.start(),
                 tip: *target.range.end(),
-            })),
+            }),
             block.native_targets
         );
     });

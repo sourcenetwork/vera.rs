@@ -566,16 +566,10 @@ fn check_receipts(block: &Block, receipts: &[ExecutionReceipt], gas_limit: u64) 
         !receipts.iter().any(|r| r.success() && r.refusal.is_some()),
         "refusal on a successful receipt"
     );
-    match block.receipt_commitment {
-        Some(expected) => ensure!(
-            vera_executor::receipt_commitment(gas_limit, receipts) == expected,
-            "execution receipt commitment mismatch"
-        ),
-        None => ensure!(
-            block.native_targets.is_none(),
-            "native receipt commitment missing"
-        ),
-    }
+    ensure!(
+        vera_executor::receipt_commitment(gas_limit, receipts) == block.receipt_commitment,
+        "execution receipt commitment mismatch"
+    );
     Ok(())
 }
 

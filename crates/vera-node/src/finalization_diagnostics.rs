@@ -43,7 +43,7 @@ mod tests {
     use commonware_utils::{Acknowledgement as _, acknowledgement::Exact};
     use futures::FutureExt as _;
     use std::sync::{Arc, Mutex};
-    use vera_domain::{BlockId, DbTargets, StateRoot};
+    use vera_domain::BlockId;
 
     #[derive(Clone)]
     struct Recording {
@@ -73,13 +73,11 @@ mod tests {
                 height: 7,
                 timestamp: 7,
                 term: 0,
-                state_root: StateRoot(B256::ZERO),
                 module_state_root: B256::ZERO,
                 txs: Vec::new(),
                 payload: None,
-                native_targets: None,
-                receipt_commitment: None,
-                db_targets: DbTargets::default(),
+                native_targets: Default::default(),
+                receipt_commitment: alloy_primitives::B256::ZERO,
             });
             assert_eq!(
                 reporter.report(Update::Tip(

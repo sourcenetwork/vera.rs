@@ -31,7 +31,7 @@ pub(super) async fn check_permissions(
             .unwrap()
     );
     let revision = &response.revision;
-    let (_, root) = verify_light_block(revision, trusted).unwrap();
+    let root = verify_light_block(revision, trusted).unwrap();
     let proof = response.proof;
     for index in 0..proof.reads.len() {
         let mut missing = proof.clone();
@@ -113,7 +113,7 @@ pub(super) async fn check_permissions(
             .unwrap()
     );
     let denied_revision = response.revision;
-    let (_, denied_root) = verify_light_block(&denied_revision, trusted).unwrap();
+    let denied_root = verify_light_block(&denied_revision, trusted).unwrap();
     let mut denied = response.proof;
     let mut owner_request = request.clone();
     owner_request.actor = Actor(signer.did().parse().unwrap());

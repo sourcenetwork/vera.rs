@@ -16,7 +16,7 @@ mod aliases;
 pub use aliases::{ConsensusContext, ConsensusDigest, PublicKey};
 
 mod db_targets;
-pub use db_targets::{DbTarget, DbTargets};
+pub use db_targets::DbTarget;
 
 mod block;
 pub use block::{
@@ -31,7 +31,7 @@ mod term_certificate;
 pub use term_certificate::{TermApproval, TermCertificate, TermChange, TermCut, TermError};
 
 mod idents;
-pub use idents::{BlockId, Idents, StateRoot, TxId};
+pub use idents::{BlockId, Idents, TxId};
 
 mod native_tx;
 pub use native_tx::{NATIVE_TX_TYPE, NativeTx, NativeTxPayload};

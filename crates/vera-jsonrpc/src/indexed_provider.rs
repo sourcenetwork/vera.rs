@@ -8,7 +8,6 @@ use std::sync::Arc;
 use alloy_primitives::{Address, Bytes};
 use async_trait::async_trait;
 use vera_indexer::BlockIndex;
-use vera_traits::StateDbRead;
 
 use vera_domain::{NativeCallRequest, NativeCallSimulation, ViewCallResult};
 use vera_executor::{ExecutionConfig, SharedModuleState};
@@ -19,34 +18,30 @@ use crate::{error::RpcError, simulation_slots::SimulationSlots, state_provider::
 
 /// State provider that runs module executions against live committed state.
 ///
-/// Uses [`BlockIndex`] for the head revision's height and time, the shared
-/// module values for the call, and a generic state database for registry
-/// storage.
+/// Uses [`BlockIndex`] for the head revision's height and time and the shared
+/// module values for the call.
 #[derive(Debug)]
-pub struct IndexedStateProvider<S> {
+pub struct IndexedStateProvider {
     index: Arc<BlockIndex>,
-    state: S,
     config: ExecutionConfig,
     block_gas_limit: u64,
     modules: SharedModuleState,
     simulations: SimulationSlots,
 }
 
-impl<S> IndexedStateProvider<S> {
+impl IndexedStateProvider {
     /// Creates a provider that executes under the deployment's execution
     /// configuration, which binds the genesis record and the membership limit
     /// module calls observe. A view call may use `block_gas_limit` gas.
     #[must_use]
     pub fn new(
         index: Arc<BlockIndex>,
-        state: S,
         config: ExecutionConfig,
         block_gas_limit: u64,
         modules: SharedModuleState,
     ) -> Self {
         Self {
             index,
-            state,
             config,
             block_gas_limit,
             modules,
@@ -55,11 +50,10 @@ impl<S> IndexedStateProvider<S> {
     }
 }
 
-impl<S: Clone> Clone for IndexedStateProvider<S> {
+impl Clone for IndexedStateProvider {
     fn clone(&self) -> Self {
         Self {
             index: Arc::clone(&self.index),
-            state: self.state.clone(),
             config: self.config.clone(),
             block_gas_limit: self.block_gas_limit,
             modules: Arc::clone(&self.modules),
@@ -69,7 +63,7 @@ impl<S: Clone> Clone for IndexedStateProvider<S> {
 }
 
 #[async_trait]
-impl<S: StateDbRead + Send + Sync + 'static> StateProvider for IndexedStateProvider<S> {
+impl StateProvider for IndexedStateProvider {
     async fn simulate_native_call(
         &self,
         request: NativeCallRequest,
@@ -98,41 +92,13 @@ mod view_tests;
 mod tests {
     use std::sync::RwLock;
 
-    use alloy_primitives::{B256, KECCAK256_EMPTY, U256};
     use vera_executor::{ModuleState, VALIDATOR_REGISTRY_ADDRESS};
-    use vera_traits::StateDbError;
 
     use super::*;
     use crate::simulation_slots::{SIMULATION_SLOTS, SIMULATION_WAITERS};
 
     fn default_modules() -> SharedModuleState {
         Arc::new(RwLock::new(ModuleState::default()))
-    }
-
-    /// Account state no simulation reads.
-    #[derive(Clone)]
-    struct GatedState;
-
-    impl StateDbRead for GatedState {
-        async fn nonce(&self, _address: &Address) -> Result<u64, StateDbError> {
-            Ok(0)
-        }
-
-        async fn balance(&self, _address: &Address) -> Result<U256, StateDbError> {
-            Ok(U256::MAX)
-        }
-
-        async fn code_hash(&self, _address: &Address) -> Result<B256, StateDbError> {
-            Ok(KECCAK256_EMPTY)
-        }
-
-        async fn code(&self, _code_hash: &B256) -> Result<Bytes, StateDbError> {
-            Ok(Bytes::new())
-        }
-
-        async fn storage(&self, _address: &Address, _slot: &U256) -> Result<U256, StateDbError> {
-            Ok(U256::ZERO)
-        }
     }
 
     #[tokio::test]
@@ -142,7 +108,6 @@ mod tests {
         let modules = default_modules();
         let provider = IndexedStateProvider::new(
             Arc::new(BlockIndex::new()),
-            GatedState,
             ExecutionConfig::new(1),
             30_000_000,
             modules.clone(),
@@ -156,7 +121,7 @@ mod tests {
         let running = provider.clone();
         let call = tokio::spawn(async move {
             running
-                .simulate(move |_, _, _| {
+                .simulate(move |_, _| {
                     entered.send(()).unwrap();
                     gate.recv().unwrap();
                     Ok(())

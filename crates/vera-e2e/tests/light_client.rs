@@ -178,7 +178,7 @@ async fn light_client_proof_verification() {
         "RPC must return the requested revision"
     );
     assert_ne!(light_block.block_hash.parse::<B256>().unwrap(), B256::ZERO);
-    let (_state_root, module_state_root) =
+    let module_state_root =
         verify_light_block(&light_block, &trusted_key).expect("light block should verify");
 
     let lb_msr_hex = format!("0x{}", hex::encode(module_state_root.as_slice()));
@@ -242,8 +242,7 @@ async fn light_client_proof_verification() {
                 .rpc_call_typed("vera_getLightBlock", serde_json::json!([height]))
                 .await
                 .expect("vera_getLightBlock should succeed");
-            let (_, msr) =
-                verify_light_block(&lb, &trusted_key).expect("light block should verify");
+            let msr = verify_light_block(&lb, &trusted_key).expect("light block should verify");
 
             if proof_1
                 .verify(msr, ModuleId::Acp, acp_key.as_bytes(), RECORD_PROOF_BYTES)

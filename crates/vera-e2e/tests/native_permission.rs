@@ -93,7 +93,6 @@ async fn current_evidence(
         .await
         .unwrap();
     let block = verify_finalized_block(&response.revision, trusted).unwrap();
-    assert!(block.native_targets.is_some());
     assert!(block.height >= minimum);
     (response.revision, response.proof)
 }

@@ -1,6 +1,6 @@
 use alloy_primitives::{B256, Bytes, Log, keccak256};
 use vera_client::{ACP_ADDRESS, BlsSigner};
-use vera_domain::{Block, BlockId, DbTargets, NativeTx, StateRoot, Tx};
+use vera_domain::{Block, BlockId, NativeTx, Tx};
 use vera_executor::ExecutionReceipt;
 use vera_indexer::BlockIndex;
 
@@ -45,7 +45,6 @@ fn fixture() -> Fixture {
         height: 1,
         timestamp: 1_800_000_000,
         term: 0,
-        state_root: StateRoot(B256::ZERO),
         module_state_root: B256::ZERO,
         txs: wires
             .into_iter()
@@ -53,9 +52,8 @@ fn fixture() -> Fixture {
             .map(|bytes| Tx::new(bytes.into()))
             .collect(),
         payload: None,
-        native_targets: None,
-        receipt_commitment: None,
-        db_targets: DbTargets::default(),
+        native_targets: Default::default(),
+        receipt_commitment: alloy_primitives::B256::ZERO,
     };
     // Receipts follow execution order, which need not be block order.
     let receipts = vec![

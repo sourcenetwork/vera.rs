@@ -3,11 +3,8 @@ use super::*;
 use std::{io::Write as _, panic::AssertUnwindSafe, path::Path, process::Command};
 
 use commonware_codec::{DecodeExt as _, Encode as _};
-use commonware_glue::stateful::db::Unmerkleized as _;
 use futures::FutureExt as _;
-use vera_backend::{AccountKey, AccountValue, CodeKey, StorageKey, StorageValue};
 use vera_modules::{ModuleState, kv_store::InMemoryKvStore};
-use vera_qmdb::AccountEncoding;
 
 fn modules(version: u8) -> ModuleState {
     ModuleState::from_stores(std::array::from_fn(|module| {
@@ -19,29 +16,7 @@ fn modules(version: u8) -> ModuleState {
 }
 
 pub(super) async fn revision(set: &OrderedState, version: u8) -> OrderedSealed {
-    let (accounts, storage, code, acp, bulletin, vera, nonces, _) =
-        set.databases.new_batches().await;
-    let accounts = accounts
-        .write(
-            AccountKey::new([1; 20]),
-            Some(AccountValue([version; AccountEncoding::SIZE])),
-        )
-        .merkleize()
-        .await
-        .unwrap();
-    let storage = storage
-        .write(
-            StorageKey::new([2; 60]),
-            Some(StorageValue(alloy_primitives::U256::from(version))),
-        )
-        .merkleize()
-        .await
-        .unwrap();
-    let code = code
-        .write(CodeKey::new([3; 32]), Some(vec![version; 128]))
-        .merkleize()
-        .await
-        .unwrap();
+    let (acp, bulletin, vera, nonces, _) = set.databases.new_batches().await;
     let modules = modules(version);
     let native = native::prepare(
         (acp, bulletin, vera, nonces),
@@ -54,9 +29,6 @@ pub(super) async fn revision(set: &OrderedState, version: u8) -> OrderedSealed {
     let module_root = native::state_root(&native);
     OrderedSealed {
         databases: (
-            accounts,
-            storage,
-            code,
             native.0,
             native.1,
             native.2,
@@ -70,42 +42,6 @@ pub(super) async fn revision(set: &OrderedState, version: u8) -> OrderedSealed {
 }
 
 pub(super) async fn assert_records(set: &OrderedState, version: u8) {
-    let readers = set.readers();
-    assert_eq!(
-        readers
-            .0
-            .read()
-            .await
-            .get(&AccountKey::new([1; 20]))
-            .await
-            .unwrap()
-            .unwrap()
-            .0,
-        [version; AccountEncoding::SIZE]
-    );
-    assert_eq!(
-        readers
-            .1
-            .read()
-            .await
-            .get(&StorageKey::new([2; 60]))
-            .await
-            .unwrap()
-            .unwrap()
-            .0,
-        alloy_primitives::U256::from(version)
-    );
-    assert_eq!(
-        readers
-            .2
-            .read()
-            .await
-            .get(&CodeKey::new([3; 32]))
-            .await
-            .unwrap()
-            .unwrap(),
-        vec![version; 128]
-    );
     assert_eq!(
         set.executor.modules().read().unwrap().serialize_stores(),
         modules(version).serialize_stores()
@@ -151,9 +87,6 @@ fn startup_recovers_each_partial_apply_before_publication() {
                 advance!(1);
                 advance!(2);
                 advance!(3);
-                advance!(4);
-                advance!(5);
-                advance!(6);
                 assert_eq!(
                     state.executor.modules().read().unwrap().serialize_stores(),
                     modules(1).serialize_stores()
@@ -165,7 +98,7 @@ fn startup_recovers_each_partial_apply_before_publication() {
     }
 
     // Concurrent finalization can leave any subset durable, not only a prefix.
-    for durable_mask in 0..=0x7f_u8 {
+    for durable_mask in 0..=0x0f_u8 {
         let directory = tempfile::tempdir().unwrap();
         let output = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "ordered_state::tests::recovery::startup_recovers_each_partial_apply_before_publication", "--nocapture"])
@@ -175,7 +108,7 @@ fn startup_recovers_each_partial_apply_before_publication() {
         assert_eq!(
             output.status.code(),
             Some(77),
-            "durable subset {durable_mask:#09b}: {}\n{}",
+            "durable subset {durable_mask:#06b}: {}\n{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
@@ -199,17 +132,12 @@ fn startup_recovers_each_partial_apply_before_publication() {
                 ))
                 .await;
                 let actual = raw.committed_targets().await;
-                let actual = [
-                    actual.0, actual.1, actual.2, actual.3, actual.4, actual.5, actual.6,
-                ];
+                let actual = [actual.0, actual.1, actual.2, actual.3];
                 let first = [
                     anchor.0.clone(),
                     anchor.1.clone(),
                     anchor.2.clone(),
                     anchor.3.clone(),
-                    anchor.4.clone(),
-                    anchor.5.clone(),
-                    anchor.6.clone(),
                 ];
                 for (index, (actual, expected)) in actual.iter().zip(&first).enumerate() {
                     assert_eq!(
@@ -231,7 +159,7 @@ fn startup_recovers_each_partial_apply_before_publication() {
                 );
                 if durable_mask == 0x0f {
                     let mut wrong = anchor.clone();
-                    wrong.3.root = Digest::from([0; 32]);
+                    wrong.0.root = Digest::from([0; 32]);
                     let failed = AssertUnwindSafe(OrderedState::open(
                         context.child("wrong"),
                         config(&context, "recover", executor.clone()).recover_to(wrong),
