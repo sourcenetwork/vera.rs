@@ -12,11 +12,14 @@ use commonware_utils::{NZU32, sequence::Unit};
 use std::fmt;
 use std::num::NonZeroU32;
 
-use crate::{BlockId, ConsensusContext, DbTarget, Idents, Tx, TxCfg, UnsupportedVersion};
+use crate::{
+    Ancestry, AncestryProof, BlockId, ConsensusContext, DbTarget, Idents, Tx, TxCfg,
+    UnsupportedVersion,
+};
 
 /// Version of the block encoding, written as a block's first byte and covered
 /// by its identifier. A block carrying any other version is refused on decode.
-pub const BLOCK_FORMAT_VERSION: u8 = 1;
+pub const BLOCK_FORMAT_VERSION: u8 = 2;
 
 /// BLS variant used by the DKG reshare payload.
 pub type DkgVariant = MinSig;
@@ -63,6 +66,8 @@ pub struct Block {
     pub parent: BlockId,
     /// Block height (number of committed ancestors).
     pub height: u64,
+    /// Commitment to the identifiers of every ancestor, the genesis block first.
+    pub ancestry: Ancestry,
     /// Wall-clock timestamp (unix seconds), set by proposer.
     pub timestamp: u64,
     /// Term of the device that proposed the block. It never decreases along
@@ -92,6 +97,23 @@ impl Block {
                 .all(|tx| tx.bytes.len() <= crate::MAX_TX_BYTES)
             && self.txs.encode_size() <= crate::MAX_BLOCK_TX_BYTES
             && self.encode_size() <= crate::MAX_BLOCK_BYTES
+    }
+
+    /// Whether `proof` shows that the block with identifier `id` at height
+    /// `height` is an ancestor of this block.
+    #[must_use]
+    pub fn has_ancestor(&self, height: u64, id: &BlockId, proof: &AncestryProof) -> bool {
+        self.ancestry.includes(self.height, height, id, proof)
+    }
+
+    /// Whether this block's ancestry is that of a child of `parent`.
+    #[must_use]
+    pub fn extends_ancestry(&self, parent: &Self) -> bool {
+        self.height == parent.height.wrapping_add(1)
+            && parent
+                .ancestry
+                .extended(parent.height, &parent.id())
+                .is_ok_and(|ancestry| ancestry == self.ancestry)
     }
 
     /// Compute the block identifier from its encoded contents.
@@ -166,6 +188,7 @@ impl Write for Block {
         self.context.write(buf);
         self.parent.write(buf);
         self.height.write(buf);
+        self.ancestry.write(buf);
         self.timestamp.write(buf);
         self.term.write(buf);
         Idents::write_b256(&self.module_state_root, buf);
@@ -182,6 +205,7 @@ impl EncodeSize for Block {
             + self.context.encode_size()
             + self.parent.encode_size()
             + self.height.encode_size()
+            + self.ancestry.encode_size()
             + self.timestamp.encode_size()
             + self.term.encode_size()
             + 32
@@ -202,6 +226,13 @@ impl Read for Block {
         let context = ConsensusContext::read(buf)?;
         let parent = BlockId::read(buf)?;
         let height = u64::read(buf)?;
+        let ancestry = Ancestry::read(buf)?;
+        if !ancestry.fits(height) {
+            return Err(CodecError::Invalid(
+                "Block",
+                "ancestry does not fit the height",
+            ));
+        }
         let timestamp = u64::read(buf)?;
         let term = u64::read(buf)?;
         let module_state_root = Idents::read_b256(buf)?;
@@ -219,6 +250,7 @@ impl Read for Block {
             context,
             parent,
             height,
+            ancestry,
             timestamp,
             term,
             module_state_root,
@@ -246,6 +278,7 @@ impl fmt::Debug for Block {
             .field("context", &self.context)
             .field("parent", &self.parent)
             .field("height", &self.height)
+            .field("ancestry", &self.ancestry.peaks().len())
             .field("timestamp", &self.timestamp)
             .field("term", &self.term)
             .field("module_state_root", &self.module_state_root)
@@ -316,6 +349,7 @@ mod tests {
             context: Block::genesis_context(),
             parent: BlockId(B256::repeat_byte(0x01)),
             height: 42,
+            ancestry: crate::testing::ancestry(42),
             timestamp: 1_700_000_000,
             term: 0,
             module_state_root: B256::ZERO,
@@ -484,11 +518,45 @@ mod tests {
     }
 
     #[test]
+    fn a_block_commits_to_its_ancestry_and_refuses_one_that_does_not_fit() {
+        let genesis = Block {
+            height: 0,
+            ancestry: Ancestry::genesis(),
+            ..sample_block()
+        };
+        let mut child = sample_block();
+        child.height = 1;
+        child.parent = genesis.id();
+        child.ancestry = genesis.ancestry.extended(0, &genesis.id()).unwrap();
+        assert!(child.extends_ancestry(&genesis));
+        let decoded = Block::decode_cfg(child.encode(), &default_block_cfg()).unwrap();
+        assert_eq!(decoded, child);
+        assert_eq!(child.encode_size(), child.encode().len());
+
+        let mut other = child.clone();
+        other.ancestry = crate::testing::ancestry(1);
+        assert_ne!(other.id(), child.id());
+        assert!(!other.extends_ancestry(&genesis));
+        let mut skipped = child.clone();
+        skipped.height = 2;
+        assert!(!skipped.extends_ancestry(&genesis));
+        // One peak cannot be the ancestry of a block at height 2 or 3.
+        assert!(Block::decode_cfg(skipped.encode(), &default_block_cfg()).is_ok());
+        skipped.height = 3;
+        assert!(Block::decode_cfg(skipped.encode(), &default_block_cfg()).is_err());
+
+        let proof = genesis.ancestry.prove(0, &[genesis.id()], 0).unwrap();
+        assert!(child.has_ancestor(0, &genesis.id(), &proof));
+        assert!(!child.has_ancestor(0, &child.id(), &proof));
+    }
+
+    #[test]
     fn empty_block_roundtrip() {
         let block = Block {
             context: Block::genesis_context(),
             parent: BlockId(B256::ZERO),
             height: 0,
+            ancestry: Ancestry::genesis(),
             timestamp: 0,
             term: 0,
             module_state_root: B256::ZERO,

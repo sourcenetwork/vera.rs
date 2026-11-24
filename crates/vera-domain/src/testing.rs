@@ -15,9 +15,17 @@ use commonware_parallel::Sequential;
 use commonware_utils::{N3f1, TestRng, non_empty, ordered::Set};
 
 use crate::{
-    Block, BlockId, ConsensusContext, ConsensusDigest, ConsensusPublicKey, EpochMaterial,
+    Ancestry, Block, BlockId, ConsensusContext, ConsensusDigest, ConsensusPublicKey, EpochMaterial,
     FinalizedArtifacts, LIGHT_BLOCK_NAMESPACE, LightBlock, LightConsensusScheme,
 };
+
+/// An ancestry that fits a block at `height` and commits to no real chain,
+/// for tests that build a block at an arbitrary height.
+#[must_use]
+pub fn ancestry(height: u64) -> Ancestry {
+    let peak = ConsensusDigest::from([0x5a; 32]);
+    Ancestry::from_peaks(vec![peak; height.count_ones() as usize])
+}
 
 /// Four validators holding shares of one dealt consensus key.
 #[allow(missing_debug_implementations)]
@@ -90,6 +98,7 @@ impl TestDeployment {
             },
             parent: BlockId(parent),
             height,
+            ancestry: ancestry(height),
             timestamp: 1_700_000_000 + height,
             term,
             module_state_root,

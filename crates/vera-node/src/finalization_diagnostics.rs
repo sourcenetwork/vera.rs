@@ -71,6 +71,7 @@ mod tests {
                 context: Block::genesis_context(),
                 parent: BlockId(B256::ZERO),
                 height: 7,
+                ancestry: vera_domain::testing::ancestry(7),
                 timestamp: 7,
                 term: 0,
                 module_state_root: B256::ZERO,

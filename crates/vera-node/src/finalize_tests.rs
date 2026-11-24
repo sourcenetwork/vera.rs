@@ -43,6 +43,7 @@ fn fixture() -> Fixture {
         context: Block::genesis_context(),
         parent: BlockId(B256::ZERO),
         height: 1,
+        ancestry: vera_domain::testing::ancestry(1),
         timestamp: 1_800_000_000,
         term: 0,
         module_state_root: B256::ZERO,

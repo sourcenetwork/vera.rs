@@ -13,6 +13,7 @@ pub fn genesis_block(
         context: Block::genesis_context(),
         parent: BlockId(B256::ZERO),
         height: 0,
+        ancestry: vera_domain::Ancestry::genesis(),
         timestamp: 0,
         term: 0,
         module_state_root,

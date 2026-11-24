@@ -111,6 +111,7 @@ mod tests {
             context: Block::genesis_context(),
             parent: BlockId(B256::from([0xAAu8; 32])),
             height: 7,
+            ancestry: crate::testing::ancestry(7),
             timestamp: 1_700_000_000,
             term: 0,
             module_state_root: B256::ZERO,

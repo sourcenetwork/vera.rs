@@ -32,6 +32,7 @@ pub(super) fn block(height: u64, parent: BlockId) -> Block {
         context: Block::genesis_context(),
         parent,
         height,
+        ancestry: vera_domain::testing::ancestry(height),
         timestamp: height,
         term: 0,
         module_state_root: B256::ZERO,

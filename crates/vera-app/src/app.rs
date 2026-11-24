@@ -254,6 +254,13 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             );
             return None;
         }
+        let ancestry = match parent.ancestry.extended(parent.height, &parent.id()) {
+            Ok(ancestry) => ancestry,
+            Err(error) => {
+                warn!(height, %error, "propose: the parent's ancestry cannot be extended");
+                return None;
+            }
+        };
         let timestamp = now_secs()
             .max(parent.timestamp)
             .min(parent.timestamp.saturating_add(self.timestamp_step));
@@ -285,6 +292,7 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             context: consensus_context,
             parent: parent.id(),
             height,
+            ancestry,
             timestamp,
             term,
             module_state_root: executed.outcome.module_state_root,
@@ -360,6 +368,14 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         }
         if block.context != context.1 {
             warn!(?digest, "block consensus context mismatch");
+            return None;
+        }
+        if !block.extends_ancestry(&parent) {
+            warn!(
+                ?digest,
+                height = block.height,
+                "block ancestry does not extend its parent's"
+            );
             return None;
         }
         if !self.admits_term(&block, &parent) {
@@ -539,6 +555,7 @@ mod processing_failure_tests {
             let mut candidate = genesis.clone();
             candidate.height = 1;
             candidate.parent = genesis.id();
+            candidate.ancestry = genesis.ancestry.extended(0, &genesis.id()).unwrap();
             let block_context = candidate.context.clone();
             let ancestry = ancestry::from_iter([candidate, genesis].map(|block| {
                 let digest = block.digest();
@@ -587,6 +604,7 @@ mod processing_failure_tests {
                 let mut candidate = genesis.clone();
                 candidate.height = 1;
                 candidate.parent = genesis.id();
+                candidate.ancestry = genesis.ancestry.extended(0, &genesis.id()).unwrap();
                 candidate.txs.push(Tx::new(bytes.into()));
                 let block_context = candidate.context.clone();
                 let ancestry = ancestry::from_iter([candidate, genesis.clone()].map(|block| {
@@ -634,6 +652,7 @@ mod processing_failure_tests {
             let mut candidate = genesis.clone();
             candidate.height = 1;
             candidate.parent = genesis.id();
+            candidate.ancestry = genesis.ancestry.extended(0, &genesis.id()).unwrap();
             candidate.timestamp = now + 18;
             let block_context = candidate.context.clone();
             let ancestry = ancestry::from_iter([candidate, genesis.clone()].map(|block| {
@@ -674,6 +693,16 @@ mod processing_failure_tests {
     /// Processes a candidate of `term` at height 1 on a parent of `parent_term`.
     /// A refused block returns `None`; an admitted one reaches the injected failure.
     fn admitted(parent_term: u64, term: u64, held: Option<(u64, u64)>) -> bool {
+        processed(parent_term, term, held, |_| {})
+    }
+
+    /// As [`admitted`], with `alter` applied to the candidate first.
+    fn processed(
+        parent_term: u64,
+        term: u64,
+        held: Option<(u64, u64)>,
+        alter: impl FnOnce(&mut Block) + Send + 'static,
+    ) -> bool {
         tokio::Runner::new(tokio::Config::default()).start(|context| async move {
             let mut genesis = crate::genesis_block(
                 alloy_primitives::B256::ZERO,
@@ -685,7 +714,9 @@ mod processing_failure_tests {
             let mut candidate = genesis.clone();
             candidate.height = 1;
             candidate.parent = genesis.id();
+            candidate.ancestry = genesis.ancestry.extended(0, &genesis.id()).unwrap();
             candidate.term = term;
+            alter(&mut candidate);
             let block_context = candidate.context.clone();
             let ancestry = ancestry::from_iter([candidate, genesis.clone()].map(|block| {
                 let digest = block.digest();
@@ -718,6 +749,14 @@ mod processing_failure_tests {
     }
 
     #[test]
+    fn a_candidate_whose_ancestry_does_not_extend_its_parents_is_refused() {
+        assert!(processed(0, 0, None, |_| {}));
+        assert!(!processed(0, 0, None, |candidate| {
+            candidate.ancestry = vera_domain::testing::ancestry(1);
+        }));
+    }
+
+    #[test]
     fn a_candidate_of_a_lower_term_than_its_parent_is_refused() {
         assert!(admitted(2, 2, None));
         assert!(admitted(2, 3, None));
@@ -743,6 +782,7 @@ mod processing_failure_tests {
             let mut candidate = genesis.clone();
             candidate.height = 1;
             candidate.parent = genesis.id();
+            candidate.ancestry = genesis.ancestry.extended(0, &genesis.id()).unwrap();
             candidate.timestamp = genesis.timestamp + super::MAX_TIMESTAMP_STEP_SECS + 1;
             let block_context = candidate.context.clone();
             let ancestry = ancestry::from_iter([candidate, genesis.clone()].map(|block| {

@@ -6116,6 +6116,7 @@ dependencies = [
  "commonware-cryptography",
  "commonware-glue",
  "commonware-parallel",
+ "commonware-storage",
  "commonware-utils",
  "hex",
  "serde",

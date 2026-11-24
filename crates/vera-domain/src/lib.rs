@@ -21,6 +21,9 @@ pub use db_targets::DbTarget;
 mod unsupported_version;
 pub use unsupported_version::UnsupportedVersion;
 
+mod ancestry;
+pub use ancestry::{Ancestry, AncestryError, AncestryProof, MAX_ANCESTRY_PROOF_BYTES};
+
 mod block;
 pub use block::{
     BLOCK_FORMAT_VERSION, Block, BlockCfg, DKG_PAYLOAD_CFG, DkgDirectory, DkgPayload,
