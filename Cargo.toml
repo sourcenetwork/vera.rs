@@ -90,7 +90,7 @@ commonware-stream = { version = "=2026.10.0" }
 orbis-reporting = "=0.0.3"
 
 # Policy semantics and evaluation (acp-rs)
-acp = { path = "../acp-rs/crates/acp", version = "=0.0.1" }
+acp = { git = "https://github.com/sourcenetwork/acp", rev = "8b5bee58f60d51ff897d40d4de2e3b73a609aeea", version = "=0.0.1" }
 
 # Shared Defra types and policy evaluation
 vera-identity = { path = "crates/vera-identity", version = "=0.2.0" }

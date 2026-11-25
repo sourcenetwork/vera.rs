@@ -5,7 +5,9 @@ allow = [
     "Zlib", "BSL-1.0", "Unlicense", "CC0-1.0", "OpenSSL", "CDLA-Permissive-2.0",
 ]
 exceptions = [
+    { name = "acp", version = "=0.0.1", allow = ["BUSL-1.1"] },
     { name = "orbis-reporting", version = "=0.0.3", allow = ["BUSL-1.1"] },
+    { name = "zanzi", version = "=0.0.1", allow = ["BUSL-1.1"] },
 ]
 
 [advisories]

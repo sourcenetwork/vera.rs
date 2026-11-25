@@ -5,6 +5,7 @@ version = 4
 [[package]]
 name = "acp"
 version = "0.0.1"
+source = "git+https://github.com/sourcenetwork/acp?rev=8b5bee58f60d51ff897d40d4de2e3b73a609aeea#8b5bee58f60d51ff897d40d4de2e3b73a609aeea"
 dependencies = [
  "serde",
  "serde-saphyr",
@@ -121,7 +122,7 @@ dependencies = [
  "keccak-asm",
  "paste",
  "proptest",
- "rand 0.9.2",
+ "rand 0.9.5",
  "rapidhash",
  "ruint",
  "rustc-hash",
@@ -2118,7 +2119,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2451,7 +2452,7 @@ dependencies = [
  "parking_lot",
  "portable-atomic",
  "quanta",
- "rand 0.9.2",
+ "rand 0.9.5",
  "smallvec",
  "spinning_top",
  "web-time",
@@ -3131,7 +3132,7 @@ dependencies = [
  "jsonrpsee-types",
  "parking_lot",
  "pin-project",
- "rand 0.9.2",
+ "rand 0.9.5",
  "rustc-hash",
  "serde",
  "serde_json",
@@ -3329,9 +3330,9 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "linux-raw-sys"
-version = "0.11.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df1d3c3b53da64cf5760482273a98e575c651a67eec7f77df96b5b642de8f039"
+checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "litemap"
@@ -3727,7 +3728,7 @@ dependencies = [
  "opentelemetry",
  "percent-encoding",
  "portable-atomic",
- "rand 0.9.2",
+ "rand 0.9.5",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
@@ -4108,7 +4109,7 @@ checksum = "37566cb3fdacef14c0737f9546df7cfeadbfbc9fef10991038bf5015d0c80532"
 dependencies = [
  "bitflags",
  "num-traits",
- "rand 0.9.2",
+ "rand 0.9.5",
  "rand_chacha 0.9.0",
  "rand_xorshift",
  "regex-syntax",
@@ -4193,9 +4194,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.9.2"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6db2770f06117d490610c7488547d543617b21bfa07796d7a12f6f1bd53850d1"
+checksum = "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41"
 dependencies = [
  "rand_chacha 0.9.0",
  "rand_core 0.9.5",
@@ -4599,7 +4600,7 @@ dependencies = [
  "primitive-types",
  "proptest",
  "rand 0.8.8",
- "rand 0.9.2",
+ "rand 0.9.5",
  "rlp",
  "ruint-macro",
  "serde_core",
@@ -4645,15 +4646,15 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.1.3"
+version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "146c9e247ccc180c1f61615433868c99f3de3ae256a30a43b49f67c2d9171f34"
+checksum = "e5e76742e5294153d4dde1207dbec5bdd81eef6fabdc0d2118babadabfd858aa"
 dependencies = [
  "bitflags",
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4840,7 +4841,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c3c81b43dc2d8877c216a3fccf76677ee1ebccd429566d3e67447290d0c42b2"
 dependencies = [
  "bitcoin_hashes",
- "rand 0.9.2",
+ "rand 0.9.5",
  "secp256k1-sys",
 ]
 
@@ -5357,7 +5358,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6571,7 +6572,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6943,6 +6944,7 @@ dependencies = [
 [[package]]
 name = "zanzi"
 version = "0.0.1"
+source = "git+https://github.com/sourcenetwork/acp?rev=8b5bee58f60d51ff897d40d4de2e3b73a609aeea#8b5bee58f60d51ff897d40d4de2e3b73a609aeea"
 dependencies = [
  "smol_str",
  "thiserror 2.0.18",
