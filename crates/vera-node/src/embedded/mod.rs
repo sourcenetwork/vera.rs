@@ -145,9 +145,7 @@ impl EmbeddedNode {
             config.leader_timeout,
             config.certification_timeout,
             config.timeout_retry,
-            genesis
-                .simplex
-                .map(|parameters| std::time::Duration::from_millis(parameters.stall_timeout_ms)),
+            std::time::Duration::from_millis(genesis.simplex.stall_timeout_ms),
         )
         .map_err(|error| EmbedError::Config(error.reason()))?;
         if let (Some(retained), Some(epoch_length)) = (

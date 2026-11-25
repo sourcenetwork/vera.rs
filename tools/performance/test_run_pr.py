@@ -15,7 +15,8 @@ from protocol import BLOCK, DISCOVERY, KEYS, RECEIPTS, TYPES, source_schema, una
 
 
 RECEIPTS_V2 = 'hash.update(b"vera/receipts/v2");\n'
-BLOCK_WITH_TERM = 'pub struct Block {\n    pub timestamp: u64,\n    pub term: u64,\n}\n'
+BLOCK_WITH_TERM = ('pub const BLOCK_FORMAT_VERSION: u8 = 1;\n'
+                   'pub struct Block {\n    pub timestamp: u64,\n    pub term: u64,\n}\n')
 
 
 class RunPrTests(unittest.TestCase):
@@ -149,7 +150,7 @@ print({help_text!r} if sys.argv[1:] == ['validator', '--help'] else {side!r})
                 row = json.loads((destination / 'workload.jsonl').read_text())
                 self.assertEqual(row, dict(driver='head', node=side, checkout=side,
                                            arguments=['3', '7', '128', '1', 'normal', '100',
-                                                      '192', '0', str(objects), '256', '1', '1', '1']))
+                                                      '192', '0', str(objects), '256', '1', '1']))
                 self.assertEqual(manifest['format_version'], 2)
                 for field in ('source', 'runner_source', 'node_sha256', 'runner_sha256'):
                     self.assertEqual(manifest[field], identity[side][field])
@@ -282,7 +283,7 @@ print({help_text!r} if sys.argv[1:] == ['validator', '--help'] else {side!r})
         self.measure(workloads=4)
         identity = json.loads((self.output / 'comparison.json').read_text())
         self.assertEqual(identity['base']['block_encoding'], 1)
-        self.assertEqual(identity['head']['block_encoding'], 2)
+        self.assertEqual(identity['head']['block_encoding'], 'v1')
         for tag in ('base1', 'base2'):
             for objects in (0, 32):
                 directory = self.output / tag / f'objects-{objects}'

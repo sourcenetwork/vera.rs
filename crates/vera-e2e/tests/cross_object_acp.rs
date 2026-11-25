@@ -10,19 +10,20 @@
 //!
 //! Requires `cargo build -p verad` (and `VERAD_BINARY`) before running.
 
+#[path = "support/broadcast.rs"]
+mod broadcast;
+#[path = "support/native_receipt.rs"]
+mod native_receipt;
+
 use std::time::Duration;
 
-use alloy_primitives::{Address, Bytes, FixedBytes};
+use alloy_primitives::FixedBytes;
 use alloy_sol_types::SolCall;
 
-use vera_client::{ACP_ADDRESS, EvmSigner, TransactionReceipt, VeraClient};
+use vera_client::{ACP_ADDRESS, BlsSigner, VeraClient};
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, TestCluster};
 use vera_e2e::observe::ClusterAssertions;
-use vera_e2e::{RECEIPT_POLL_ATTEMPTS, RECEIPT_POLL_INTERVAL};
 use vera_modules::acp::abi::IAcp;
-
-/// Hardhat account 0 — funded; creates the policy and signs all txs.
-const HARDHAT_KEY_0: &str = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 /// Policy with a `document` whose `read` inherits from `reader` on its parent
 /// `collection` (`parent->reader`), so a `document#parent` edge can point at a
@@ -62,54 +63,17 @@ fn parse_policy_id(hex_str: &str) -> FixedBytes<32> {
     FixedBytes::from(bytes)
 }
 
-/// Sign an EVM tx and broadcast to every node so the current leader has it.
-async fn broadcast_evm_tx(
-    cluster: &TestCluster,
-    client: &VeraClient,
-    signer: &EvmSigner,
-    target: Address,
-    calldata: Vec<u8>,
-) -> TransactionReceipt {
-    let nonce = client
-        .get_nonce(signer.address())
-        .await
-        .expect("get_nonce should work");
-    let raw = signer
-        .sign_tx(target, Bytes::from(calldata), nonce)
-        .expect("EVM sign should succeed");
-
-    let futs: Vec<_> = (0..cluster.node_count())
-        .map(|i| {
-            let r = raw.clone();
-            let url = cluster.node(i).rpc_url();
-            tokio::spawn(async move { VeraClient::new(url).send_raw_transaction(&r).await })
-        })
-        .collect();
-    let mut tx_hash = None;
-    for fut in futs {
-        if let Ok(Ok(hash)) = fut.await {
-            tx_hash = Some(hash);
-        }
-    }
-    let tx_hash = tx_hash.expect("at least one node should accept the EVM tx");
-
-    client
-        .wait_for_receipt(tx_hash, RECEIPT_POLL_INTERVAL, RECEIPT_POLL_ATTEMPTS)
-        .await
-        .expect("EVM receipt should appear")
-}
-
 #[tokio::test]
 async fn cross_object_grant_replicates_across_nodes() {
     let chain_id = 9001;
-    let genesis = GenesisBuilder::devnet().funded_accounts(1, "1000000000000000000000000");
+    let genesis = GenesisBuilder::devnet();
 
     let cluster = TestCluster::builder()
         .binary(vera_e2e::resolve_binary().expect("resolve verad binary"))
         .nodes(4)
         .chain_id(chain_id)
         .genesis(genesis)
-        .preset(ConsensusPreset::Fast)
+        .preset(ConsensusPreset::Normal)
         .build()
         .await
         .expect("cluster should start");
@@ -126,19 +90,19 @@ async fn cross_object_grant_replicates_across_nodes() {
         .expect("should reach height 3");
 
     let client = VeraClient::new(cluster.node(0).rpc_url());
-    let signer = EvmSigner::from_hex(HARDHAT_KEY_0, chain_id).expect("valid signer");
+    let signer = BlsSigner::random(chain_id).expect("random BLS signer");
 
     let alice = "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH";
 
-    // ── 1. Create the policy on node 0 (account0 becomes its owner) ──────
+    // ── 1. Create the policy on node 0 (the signer becomes its owner) ──────
     let create = IAcp::createPolicyCall {
         policy: TEST_POLICY_YAML.as_bytes().to_vec().into(),
         marshalType: 1,
         nonce: vera_client::random_policy_nonce().0.into(),
     }
     .abi_encode();
-    let create_receipt = broadcast_evm_tx(&cluster, &client, &signer, ACP_ADDRESS, create).await;
-    assert_eq!(create_receipt.status, 1, "createPolicy should succeed");
+    let create_receipt = broadcast::native(&cluster, &client, &signer, ACP_ADDRESS, create).await;
+    assert!(create_receipt.success, "createPolicy should succeed");
 
     let policy_ids = client
         .get_policy_ids()
@@ -154,8 +118,8 @@ async fn cross_object_grant_replicates_across_nodes() {
             objectId: object_id.into(),
         }
         .abi_encode();
-        let receipt = broadcast_evm_tx(&cluster, &client, &signer, ACP_ADDRESS, register).await;
-        assert_eq!(receipt.status, 1, "register {resource}/{object_id}");
+        let receipt = broadcast::native(&cluster, &client, &signer, ACP_ADDRESS, register).await;
+        assert!(receipt.success, "register {resource}/{object_id}");
     }
 
     // ── 2. Seed the parent edge via setRelationshipSubject ───────────────
@@ -174,9 +138,9 @@ async fn cross_object_grant_replicates_across_nodes() {
     }
     .abi_encode();
     let parent_receipt =
-        broadcast_evm_tx(&cluster, &client, &signer, ACP_ADDRESS, parent_calldata).await;
-    assert_eq!(
-        parent_receipt.status, 1,
+        broadcast::native(&cluster, &client, &signer, ACP_ADDRESS, parent_calldata).await;
+    assert!(
+        parent_receipt.success,
         "setting the userset parent edge should succeed"
     );
 
@@ -189,8 +153,8 @@ async fn cross_object_grant_replicates_across_nodes() {
         actor: alice.into(),
     }
     .abi_encode();
-    let grant_receipt = broadcast_evm_tx(&cluster, &client, &signer, ACP_ADDRESS, grant).await;
-    assert_eq!(grant_receipt.status, 1, "child grant should succeed");
+    let grant_receipt = broadcast::native(&cluster, &client, &signer, ACP_ADDRESS, grant).await;
+    assert!(grant_receipt.success, "child grant should succeed");
 
     // ── 4. Converge, then verify replication on BOTH nodes ───────────────
     let max_block = create_receipt
@@ -231,7 +195,7 @@ async fn cross_object_grant_replicates_across_nodes() {
         // document#read = owner + reader + parent->reader, so the chain inherits
         // her read of doc1 from her reader grant on doc1's parent collection
         // col1 — resolved on-chain through the zanzibar PermissionEngine
-        // (TupleToUserset) via eth_call.
+        // (TupleToUserset) via a module query.
         let can_read = node
             .verify_access_request(
                 policy_id,
@@ -279,9 +243,9 @@ async fn cross_object_grant_replicates_across_nodes() {
     }
     .abi_encode();
     let revoke_receipt =
-        broadcast_evm_tx(&cluster, &client, &signer, ACP_ADDRESS, revoke_calldata).await;
-    assert_eq!(
-        revoke_receipt.status, 1,
+        broadcast::native(&cluster, &client, &signer, ACP_ADDRESS, revoke_calldata).await;
+    assert!(
+        revoke_receipt.success,
         "revoking the parent edge should succeed"
     );
 

@@ -13,18 +13,17 @@ use commonware_parallel::Sequential;
 use commonware_utils::{N3f1, TestRng, non_empty, ordered::Set};
 use vera_domain::{
     Block, BlockId, ConsensusPublicKey, EpochMaterial, LIGHT_BLOCK_NAMESPACE, LightBlock,
-    LightConsensusScheme, StateRoot,
+    LightConsensusScheme,
 };
 
 pub(super) async fn block(source: &OrderedState, height: u64) -> Block {
     let target = source.committed_targets().await;
-    let db_targets = crate::db_targets_from_sync(&(target.0, target.1, target.2));
     let db = &source.databases;
     let module_state_root = vera_modules::module_state::combine_module_roots(&[
+        db.0.read().await.root().0,
+        db.1.read().await.root().0,
+        db.2.read().await.root().0,
         db.3.read().await.root().0,
-        db.4.read().await.root().0,
-        db.5.read().await.root().0,
-        db.6.read().await.root().0,
     ]);
     let mut context = Block::genesis_context();
     context.round = Round::new(Epoch::zero(), View::new(height));
@@ -32,25 +31,16 @@ pub(super) async fn block(source: &OrderedState, height: u64) -> Block {
         context,
         parent: BlockId(B256::ZERO),
         height,
+        ancestry: vera_domain::testing::ancestry(height),
         timestamp: 1000 + height,
         term: 0,
-        prevrandao: B256::ZERO,
-        randomness: None,
-        state_root: StateRoot(vera_qmdb::StateRoot::compute(
-            B256::from(db_targets.accounts.root.0),
-            B256::from(db_targets.storage.root.0),
-            B256::from(db_targets.code.root.0),
-        )),
         module_state_root,
         txs: Vec::new(),
         payload: None,
-        receipt_commitment: Some(vera_executor::receipt_commitment(30_000_000, &[])),
-        native_targets: Some(
-            [target.3, target.4, target.5, target.6]
-                .each_ref()
-                .map(crate::targets::target_from_sync),
-        ),
-        db_targets,
+        receipt_commitment: vera_executor::receipt_commitment(30_000_000, &[]),
+        native_targets: [target.0, target.1, target.2, target.3]
+            .each_ref()
+            .map(crate::targets::target_from_sync),
     }
 }
 
@@ -105,7 +95,7 @@ fn checkpoint_rejects_bad_evidence_and_checks_rebuilt_state_before_publication()
                 let block = block(&source, 1).await;
                 let db = &source.databases;
                 let proof = native::SyncProof::capture(
-                    &(db.3.clone(), db.4.clone(), db.5.clone(), db.6.clone()),
+                    &(db.0.clone(), db.1.clone(), db.2.clone(), db.3.clone()),
                     block.module_state_root,
                 )
                 .await
@@ -120,24 +110,18 @@ fn checkpoint_rejects_bad_evidence_and_checks_rebuilt_state_before_publication()
                 altered.height += 1;
                 assert!(OrderedCheckpoint::verify(&altered, &key, &proof).is_err());
                 let mut bad_range = block.clone();
-                bad_range.db_targets.accounts.floor = bad_range.db_targets.accounts.tip;
+                bad_range.native_targets[0].floor = bad_range.native_targets[0].tip;
                 assert!(
                     OrderedCheckpoint::verify(&certify(&bad_range, 42).0, &key, &proof).is_err()
                 );
                 let mut bad_root = block.clone();
-                bad_root.state_root.0[0] ^= 1;
+                bad_root.native_targets[1].root.0[0] ^= 1;
                 assert!(
                     OrderedCheckpoint::verify(&certify(&bad_root, 42).0, &key, &proof).is_err()
                 );
-                let mut missing_receipts = block.clone();
-                missing_receipts.receipt_commitment = None;
-                assert!(
-                    OrderedCheckpoint::verify(&certify(&missing_receipts, 42).0, &key, &proof)
-                        .is_err()
-                );
 
                 // A certificate can bind internally inconsistent state; verify the rebuilt bitmap too.
-                let mut witness = db.3.read().await.ops_root_witness().await.unwrap();
+                let mut witness = db.0.read().await.ops_root_witness().await.unwrap();
                 witness.grafted_root.0[0] ^= 1;
                 let mut encoded = proof.encode().to_vec();
                 encoded[Digest::SIZE] ^= 1;
@@ -146,10 +130,10 @@ fn checkpoint_rejects_bad_evidence_and_checks_rebuilt_state_before_publication()
                         .unwrap();
                 let mut block = block;
                 block.module_state_root = vera_modules::module_state::combine_module_roots(&[
-                    witness.root::<Sha256>(&db.3.read().await.ops_root()).0,
-                    db.4.read().await.root().0,
-                    db.5.read().await.root().0,
-                    db.6.read().await.root().0,
+                    witness.root::<Sha256>(&db.0.read().await.ops_root()).0,
+                    db.1.read().await.root().0,
+                    db.2.read().await.root().0,
+                    db.3.read().await.root().0,
                 ]);
                 let (light, _) = certify(&block, 42);
                 let checkpoint = OrderedCheckpoint::verify(&light, &key, &inconsistent).unwrap();

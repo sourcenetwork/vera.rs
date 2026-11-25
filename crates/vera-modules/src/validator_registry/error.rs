@@ -38,4 +38,8 @@ pub enum ValidatorRegistryError {
 
     #[error("state error: {0}")]
     State(String),
+
+    /// Stored registry state that does not read back: the node's own fault.
+    #[error("registry state is unreadable: {0}")]
+    Corrupt(String),
 }

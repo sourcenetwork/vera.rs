@@ -14,7 +14,7 @@ use commonware_utils::{ordered::Set, sequence::Unit};
 use vera_domain::PublicKey;
 use vera_executor::SharedModuleState;
 
-/// Derive a stable validator EVM address from its ed25519 consensus key.
+/// Derive a validator's registry address from its ed25519 consensus key.
 #[must_use]
 pub fn validator_address(public_key: &PublicKey) -> Address {
     let encoded = commonware_codec::Encode::encode(public_key);
@@ -139,7 +139,7 @@ mod tests {
     fn history() -> (tempfile::TempDir, Arc<crate::FinalizedHistory>) {
         let directory = tempfile::tempdir().unwrap();
         let genesis = vera_app::genesis_block(
-            vera_domain::StateRoot(alloy_primitives::B256::ZERO),
+            alloy_primitives::B256::ZERO,
             Default::default(),
             alloy_primitives::B256::ZERO,
         );

@@ -1,4 +1,4 @@
-use vera_domain::ConsensusPublicKey;
+use vera_domain::FinalityTrust;
 use vera_modules::acp::{
     keys,
     types::{RelationPair, RelationshipRecord},
@@ -37,7 +37,7 @@ impl PolicyPrefixResponse {
         policy: &str,
         object: &Object,
         minimum_height: u64,
-        trusted: &ConsensusPublicKey,
+        trusted: &impl FinalityTrust,
     ) -> Result<Option<Actor>, PermissionError> {
         let prefix = object_owner_prefix(policy, object)?;
         let Some(evidence) =

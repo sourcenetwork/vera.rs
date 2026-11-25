@@ -9,7 +9,7 @@ use commonware_storage::qmdb::sync::Target;
 use commonware_utils::channel::ring;
 use commonware_utils::non_empty_range;
 use vera_backend::{
-    AccountsDb, CodeDb, Ctx, StorageDb, VeraConfig,
+    Ctx,
     native::{self, NativeConfig, NativeDb, NativeStateSet},
 };
 use vera_domain::Tx;
@@ -17,17 +17,14 @@ use vera_executor::{
     BlockContext, ExecutionOutcome, ExecutionReceipt, ModuleSnapshot, VeraExecutor,
 };
 
-use crate::{AppError, execute_block};
+use crate::AppError;
 
 type SyncHandoff = Box<
     dyn FnOnce(Anchor<Digest>) -> futures::future::BoxFuture<'static, Result<(), String>> + Send,
 >;
 
-/// Execution and ordered native partitions, coordinated by Commonware as one set.
+/// The ordered native partitions and their commitment, coordinated by Commonware as one set.
 pub type OrderedDatabases = (
-    Shared<AccountsDb>,
-    Shared<StorageDb>,
-    Shared<CodeDb>,
     Shared<NativeDb>,
     Shared<NativeDb>,
     Shared<NativeDb>,
@@ -37,7 +34,7 @@ pub type OrderedDatabases = (
 type Pending = <OrderedDatabases as DatabaseSet<Ctx>>::Unmerkleized;
 type Sealed = <OrderedDatabases as DatabaseSet<Ctx>>::Merkleized;
 type Config = <OrderedDatabases as DatabaseSet<Ctx>>::Config;
-/// Seven operation-log targets selected by one authenticated revision.
+/// Four operation-log targets and the commitment selected by one authenticated revision.
 pub type OrderedTargets = <OrderedDatabases as DatabaseSet<Ctx>>::SyncTargets;
 
 mod commitment;
@@ -150,11 +147,6 @@ impl OrderedSealed {
     /// Operation-log targets authenticated by the revision that selects these batches.
     pub fn sync_targets(&self) -> <OrderedState as DatabaseSet<Ctx>>::SyncTargets {
         let db = &self.databases;
-        let execution = crate::sync_targets(&crate::db_targets_from_merkleized(&(
-            db.0.clone(),
-            db.1.clone(),
-            db.2.clone(),
-        )));
         let native =
             |batch: &<NativeDb as commonware_glue::stateful::db::ManagedDb<Ctx>>::Merkleized| {
                 Target::new(
@@ -163,14 +155,11 @@ impl OrderedSealed {
                 )
             };
         (
-            execution.0,
-            execution.1,
-            execution.2,
+            native(&db.0),
+            native(&db.1),
+            native(&db.2),
             native(&db.3),
-            native(&db.4),
-            native(&db.5),
-            native(&db.6),
-            db.7.0,
+            db.4.0,
         )
     }
 }
@@ -178,23 +167,10 @@ impl OrderedSealed {
 #[cfg(test)]
 mod tests;
 
-/// Configure execution and authenticated native journals alongside their executor.
-pub fn ordered_config(
-    execution: VeraConfig,
-    native: NativeConfig,
-    executor: VeraExecutor,
-) -> OrderedConfig {
+/// Configure the authenticated native journals alongside their executor.
+pub fn ordered_config(native: NativeConfig, executor: VeraExecutor) -> OrderedConfig {
     OrderedConfig {
-        databases: (
-            execution.0,
-            execution.1,
-            execution.2,
-            native.0,
-            native.1,
-            native.2,
-            native.3,
-            (),
-        ),
+        databases: (native.0, native.1, native.2, native.3, ()),
         executor,
         recovery: None,
         marshal_recovery: false,
@@ -203,22 +179,13 @@ pub fn ordered_config(
 }
 
 impl OrderedState {
-    /// Shared execution partitions for admission, indexing and peer serving.
-    pub fn execution_databases(&self) -> vera_backend::VeraStateSet {
+    /// Shared ordered module partitions for verified reads and peer serving.
+    pub fn native_databases(&self) -> NativeStateSet {
         (
             self.databases.0.clone(),
             self.databases.1.clone(),
             self.databases.2.clone(),
-        )
-    }
-
-    /// Shared ordered module partitions for verified reads and peer serving.
-    pub fn native_databases(&self) -> NativeStateSet {
-        (
             self.databases.3.clone(),
-            self.databases.4.clone(),
-            self.databases.5.clone(),
-            self.databases.6.clone(),
         )
     }
 
@@ -282,7 +249,7 @@ impl OrderedState {
     }
 
     async fn check_module_root(databases: &OrderedDatabases) -> Result<(), AppError> {
-        let expected = databases.7.read().await.0;
+        let expected = databases.4.read().await.0;
         match expected {
             Some(root) if Self::module_root(databases).await.0 == root.0 => Ok(()),
             None if databases.committed_targets().await
@@ -296,17 +263,15 @@ impl OrderedState {
 
     async fn module_root(databases: &OrderedDatabases) -> alloy_primitives::B256 {
         vera_modules::module_state::combine_module_roots(&[
+            databases.0.read().await.root().0,
+            databases.1.read().await.root().0,
+            databases.2.read().await.root().0,
             databases.3.read().await.root().0,
-            databases.4.read().await.root().0,
-            databases.5.read().await.root().0,
-            databases.6.read().await.root().0,
         ])
     }
 
     async fn reload(&self) -> Result<(), AppError> {
-        let db = &self.databases;
-        let native: NativeStateSet = (db.3.clone(), db.4.clone(), db.5.clone(), db.6.clone());
-        let modules = native::load_modules(&native).await?;
+        let modules = native::load_modules(&self.native_databases()).await?;
         self.executor.set_base_modules(modules);
         Ok(())
     }
@@ -327,47 +292,37 @@ impl OrderedState {
         context: &BlockContext,
         txs: &[Tx],
     ) -> Result<(OrderedSealed, ExecutionOutcome), AppError> {
-        let (accounts, storage, code, acp, bulletin, vera, nonces, _) = parent.databases;
-        let mut executed = execute_block(
-            executor,
-            (accounts, storage, code),
-            context,
-            txs,
-            parent.modules.clone(),
-        )
-        .await?;
+        let (acp, bulletin, vera, nonces, _) = parent.databases;
+        let tx_bytes: Vec<alloy_primitives::Bytes> =
+            txs.iter().map(|tx| tx.bytes.clone()).collect();
+        let (mut outcome, modules) =
+            executor.execute_with_modules(context, &tx_bytes, parent.modules.clone())?;
         let native = native::prepare(
             (acp, bulletin, vera, nonces),
-            executed.modules.changes_from(&parent.modules),
+            modules.changes_from(&parent.modules),
         )
         .await?;
-        executed.outcome.module_state_root = native::state_root(&native);
+        outcome.module_state_root = native::state_root(&native);
         if context
             .expected_module_state_root
-            .is_some_and(|root| root != executed.outcome.module_state_root)
+            .is_some_and(|root| root != outcome.module_state_root)
         {
             return Err(AppError::RootMismatch("ordered module state"));
         }
-        let execution = executed.merkleized;
         Ok((
             OrderedSealed {
                 databases: (
-                    execution.0,
-                    execution.1,
-                    execution.2,
                     native.0,
                     native.1,
                     native.2,
                     native.3,
-                    commitment::Commitment(Some(Digest::from(
-                        executed.outcome.module_state_root.0,
-                    ))),
+                    commitment::Commitment(Some(Digest::from(outcome.module_state_root.0))),
                 ),
-                modules: executed.modules,
-                height: context.header.number,
+                modules,
+                height: context.height,
                 receipts: None,
             },
-            executed.outcome,
+            outcome,
         ))
     }
 }
@@ -556,8 +511,7 @@ where
     }
 }
 
-impl<R0, R1, R2, R3, R4, R5, R6> AttachableResolverSet<OrderedState>
-    for (R0, R1, R2, R3, R4, R5, R6, ())
+impl<R0, R1, R2, R3> AttachableResolverSet<OrderedState> for (R0, R1, R2, R3, ())
 where
     Self: AttachableResolverSet<OrderedDatabases>,
 {

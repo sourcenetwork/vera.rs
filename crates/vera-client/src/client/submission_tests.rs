@@ -17,7 +17,7 @@ fn target() -> Address {
 fn receipt(tx_hash: B256) -> serde_json::Value {
     serde_json::to_value(TransactionReceipt {
         transaction_hash: tx_hash,
-        status: 1,
+        success: true,
         ..TransactionReceipt::default()
     })
     .unwrap()
@@ -259,7 +259,7 @@ async fn receipt_polling_stops_once_an_outage_outlasts_its_budget() {
 }
 
 #[tokio::test]
-async fn a_refused_native_request_names_its_refusal_and_an_evm_revert_does_not() {
+async fn a_refused_native_request_names_its_refusal_with_its_receipt() {
     let refusal = vera_domain::Refusal::new(
         vera_domain::RefusingModule::Acp,
         vera_domain::RefusalKind::InvalidPolicy,
@@ -268,7 +268,7 @@ async fn a_refused_native_request_names_its_refusal_and_an_evm_revert_does_not()
     let failed = |refusal: Option<vera_domain::Refusal>| {
         serde_json::to_value(TransactionReceipt {
             transaction_hash: B256::repeat_byte(3),
-            status: 0,
+            success: false,
             gas_used: 5_000,
             refusal,
             ..TransactionReceipt::default()
@@ -286,12 +286,69 @@ async fn a_refused_native_request_names_its_refusal_and_an_evm_revert_does_not()
             receipt,
         }) => {
             assert_eq!(reported, refusal);
-            assert_eq!(receipt.gas_used, 5_000);
+            assert_eq!(receipt.unwrap().gas_used, 5_000);
         }
         other => panic!("expected a refusal, got {other:?}"),
     }
+    // A failed receipt always names its refusal; one that does not is malformed.
     assert!(matches!(
         client.executed(B256::repeat_byte(3)).await,
-        Err(ClientError::TxReverted { status: 0, .. })
+        Err(ClientError::InvalidResponse(_))
     ));
+    let requests = stub.requests();
+    assert!(
+        requests
+            .iter()
+            .all(|request| request["method"] == "vera_getTransactionReceipt")
+    );
+}
+
+#[tokio::test]
+async fn a_typed_query_reads_through_vera_call_and_reports_a_refusal_without_a_receipt() {
+    use alloy_sol_types::SolCall as _;
+    use vera_modules::acp::abi::IAcp;
+
+    let refusal = vera_domain::Refusal::new(
+        vera_domain::RefusingModule::Acp,
+        vera_domain::RefusalKind::Unauthenticated,
+        "module call requires an authenticated caller",
+    );
+    let output = Bytes::from(IAcp::getPolicyIdsCall::abi_encode_returns(&vec![
+        "policy".to_owned(),
+    ]));
+    let stub = Stub::serve(vec![
+        Reply::Result(json!({
+            "output": output, "blockNumber": "0x7", "timestamp": "0x64",
+        })),
+        Reply::Result(json!({
+            "output": "0x", "refusal": refusal, "blockNumber": "0x7", "timestamp": "0x64",
+        })),
+        Reply::Result(
+            json!({"chainId": 9001, "validatorIndex": 0, "uptimeSecs": 1,
+            "finalizedCount": 0, "proposedCount": 0}),
+        ),
+    ]);
+    let client = VeraClient::new(stub.url.clone());
+
+    assert_eq!(client.get_policy_ids().await.unwrap(), ["policy"]);
+    match client.get_policy_ids().await {
+        Err(ClientError::Refused {
+            refusal: reported,
+            receipt: None,
+        }) => assert_eq!(reported, refusal),
+        other => panic!("expected a refusal without a receipt, got {other:?}"),
+    }
+    assert_eq!(client.chain_id().await.unwrap(), 9001);
+
+    let requests = stub.requests();
+    assert_eq!(requests[0]["method"], "vera_call");
+    assert_eq!(
+        requests[0]["params"],
+        json!([
+            crate::ACP_ADDRESS,
+            Bytes::from(IAcp::getPolicyIdsCall {}.abi_encode())
+        ])
+    );
+    assert_eq!(requests[1]["method"], "vera_call");
+    assert_eq!(requests[2]["method"], "vera_nodeStatus");
 }

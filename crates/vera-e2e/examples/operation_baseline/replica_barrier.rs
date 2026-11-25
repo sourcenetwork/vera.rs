@@ -15,7 +15,7 @@ pub(super) struct Anchor {
     pub(super) transaction_hash: B256,
     pub(super) block_hash: B256,
     pub(super) height: u64,
-    pub(super) status: u64,
+    pub(super) success: bool,
 }
 
 pub(super) async fn synchronize(
@@ -38,7 +38,7 @@ pub(super) async fn synchronize(
         "transaction_hash": anchor.transaction_hash,
         "block_hash": anchor.block_hash,
         "height": anchor.height,
-        "status": anchor.status,
+        "success": anchor.success,
         "replicas": clients.len(),
         "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,
     })))
@@ -65,7 +65,7 @@ async fn wait_for_replica(
         transaction_hash: receipt.transaction_hash,
         block_hash: receipt.block_hash,
         height: receipt.block_number,
-        status: receipt.status,
+        success: receipt.success,
     };
     if actual != anchor {
         return Err(format!(

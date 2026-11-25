@@ -41,7 +41,7 @@ per-node RPC connection limit (default 100), independently of outstanding
 workflows. Operators configure the same limit with `rpc.max_connections` in
 node TOML; it must be a positive u32. A higher connection limit increases server
 resource exposure and is not a throughput guarantee. The seventh argument sets
-revisions per epoch (default 20); values too short for four participants are
+revisions per epoch (default 192); values too short for four participants are
 rejected before node startup. The output records this value and the protocol's
 operation-count and encoded-byte limits. An eighth argument optionally sets a
 minimum revision for post-workload historical checks (default 0 disables them).
@@ -52,12 +52,12 @@ captured values and verifies the early receipt against the trusted consensus key
 It repeats these checks on the hard-restarted replica. This waiting and checking
 is outside timing and does not extend the timed resource samples.
 
-An optional twelfth argument controls inherited RPC listeners (`1` by default on
+An optional eleventh argument controls inherited RPC listeners (`1` by default on
 Unix, `0` elsewhere). Set `0` when driving a daemon that predates
 `--rpc-listener-fd`; the harness then uses address-based binding. The configuration
 record includes `inherit_rpc_listener`.
 
-An optional thirteenth argument controls the `[network.discovery]` section of
+An optional twelfth argument controls the `[network.discovery]` section of
 the generated node configuration (`1` by default). Set `0` when driving a daemon
 that predates the setting: it rejects the section as an unknown key and always
 runs the local discovery values the section states, so both settings give the

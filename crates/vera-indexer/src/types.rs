@@ -1,6 +1,6 @@
-//! Indexed types for blocks, transactions, receipts, and logs.
+//! Indexed types for revisions, requests, receipts, and logs.
 
-use alloy_primitives::{Address, B256, Bytes, U256};
+use alloy_primitives::{Address, B256, Bytes};
 
 /// A point lookup into retained execution history.
 #[derive(Debug, Clone, Copy)]
@@ -13,7 +13,7 @@ pub enum IndexQuery {
     Submission(B256),
 }
 
-/// An indexed block containing header information and transaction hashes.
+/// An indexed revision header with the identifiers of its requests.
 #[derive(Debug, Clone)]
 pub struct IndexedBlock {
     /// Block hash.
@@ -22,88 +22,72 @@ pub struct IndexedBlock {
     pub number: u64,
     /// Parent block hash.
     pub parent_hash: B256,
-    /// State root after executing this block.
-    pub state_root: B256,
     /// Combined root of per-module state trees (ACP, Bulletin, Vera, NativeNonce).
     pub module_state_root: B256,
     /// Block timestamp.
     pub timestamp: u64,
-    /// Gas limit for this block.
+    /// Execution gas limit of this block.
     pub gas_limit: u64,
-    /// Gas used by all transactions in this block.
+    /// Gas used by all requests in this block.
     pub gas_used: u64,
-    /// Base fee per gas (EIP-1559).
-    pub base_fee_per_gas: Option<u64>,
-    /// Randomness beacon value (prevrandao / mix_hash).
-    pub prevrandao: B256,
-    /// Hashes of transactions included in this block.
+    /// Identifiers of the requests included in this block.
     pub transaction_hashes: Vec<B256>,
 }
 
-/// An indexed transaction with full details.
+/// An indexed native request.
 #[derive(Debug, Clone)]
 pub struct IndexedTransaction {
-    /// Transaction hash.
+    /// Request identifier.
     pub hash: B256,
-    /// Hash of the block containing this transaction.
+    /// Hash of the block containing this request.
     pub block_hash: B256,
-    /// Number of the block containing this transaction.
+    /// Number of the block containing this request.
     pub block_number: u64,
-    /// Index of the transaction within the block.
+    /// Index of the request within the block.
     pub transaction_index: u64,
-    /// Sender address.
-    pub from: Address,
-    /// Recipient address (None for contract creation).
-    pub to: Option<Address>,
-    /// Value transferred.
-    pub value: U256,
-    /// Gas limit for this transaction.
-    pub gas_limit: u64,
-    /// Gas price.
-    pub gas_price: u128,
-    /// Input data.
+    /// Module address the request calls.
+    pub target: Address,
+    /// ABI-encoded module call.
     pub input: Bytes,
-    /// Sender nonce.
+    /// The signer's sequence.
     pub nonce: u64,
-    /// DID of the BLS signer (`None` for EVM transactions).
-    pub signer_did: Option<String>,
+    /// DID of the BLS signer.
+    pub signer_did: String,
 }
 
-/// An indexed transaction receipt.
+/// An indexed execution result of a native request.
 #[derive(Debug, Clone)]
 pub struct IndexedReceipt {
-    /// Transaction hash.
+    /// Request identifier.
     pub transaction_hash: B256,
-    /// Hash of the block containing this transaction.
+    /// Hash of the block containing this request.
     pub block_hash: B256,
-    /// Number of the block containing this transaction.
+    /// Number of the block containing this request.
     pub block_number: u64,
-    /// Index of the transaction within the block.
+    /// Index of the request within the block.
     pub transaction_index: u64,
-    /// Sender address.
-    pub from: Address,
-    /// Recipient address (None for contract creation).
-    pub to: Option<Address>,
-    /// Cumulative gas used in the block up to and including this transaction.
+    /// Module address the request called.
+    pub target: Address,
+    /// DID of the BLS signer.
+    pub signer_did: String,
+    /// The signer's sequence.
+    pub nonce: u64,
+    /// Cumulative gas used in the block up to and including this request.
     pub cumulative_gas_used: u64,
-    /// Gas used by this transaction.
+    /// Gas used by this request.
     pub gas_used: u64,
-    /// Contract address created (if contract creation transaction).
-    pub contract_address: Option<Address>,
-    /// Logs emitted by this transaction.
+    /// Logs emitted by this request.
     pub logs: Vec<IndexedLog>,
-    /// Transaction status (true = success, false = revert).
+    /// Whether the module call ran to completion.
     pub status: bool,
-    /// DID of the BLS signer (`None` for EVM transactions).
-    pub signer_did: Option<String>,
-    /// Why a module refused a native request (`None` on success and for EVM transactions).
+    /// Why a module refused the request; `None` on success.
     pub refusal: Option<vera_domain::Refusal>,
 }
 
 /// An indexed log entry.
 #[derive(Debug, Clone)]
 pub struct IndexedLog {
-    /// Address of the contract that emitted the log.
+    /// Address of the module that emitted the log.
     pub address: Address,
     /// Indexed topics.
     pub topics: Vec<B256>,

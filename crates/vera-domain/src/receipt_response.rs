@@ -77,14 +77,6 @@ impl ReceiptResponse {
         if self.receipts.len() != block.txs.len() {
             return Err(ReceiptResponseError::Invalid("receipt count"));
         }
-        // The commitment encodes a boolean result, not legacy state-root statuses.
-        if self
-            .receipts
-            .iter()
-            .any(|r| !matches!(r.receipt.status, alloy_consensus::Eip658Value::Eip658(_)))
-        {
-            return Err(ReceiptResponseError::Invalid("receipt status"));
-        }
         if self
             .receipts
             .iter()
@@ -94,9 +86,7 @@ impl ReceiptResponse {
                 "refusal on a successful receipt",
             ));
         }
-        if block.receipt_commitment
-            != Some(crate::receipt_commitment(self.gas_limit, &self.receipts))
-        {
+        if block.receipt_commitment != crate::receipt_commitment(self.gas_limit, &self.receipts) {
             return Err(ReceiptResponseError::Invalid("receipt commitment"));
         }
         let mut matches = self.receipts.iter().filter(|r| r.tx_hash == submission);

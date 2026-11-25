@@ -6,10 +6,7 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
-use crate::{ApplicationState, VrfSeedCache, ordered_state::OrderedState};
-use alloy_consensus::Header;
-use alloy_primitives::{Address, B256};
-use commonware_consensus::types::{Round, View};
+use crate::{ApplicationState, ordered_state::OrderedState};
 use commonware_consensus::{Handoff, marshal::ancestry::Ancestry};
 use commonware_cryptography::Digestible as _;
 use commonware_glue::stateful::{Application, Finality, Input, Proposed};
@@ -19,7 +16,7 @@ use std::marker::PhantomData;
 use tracing::{info, warn};
 use vera_backend::Ctx;
 use vera_consensus::{Mempool as _, TxId, components::InMemoryMempool};
-use vera_domain::{Block, ConsensusContext, PublicKey, Tx};
+use vera_domain::{Block, ConsensusContext, Tx};
 use vera_executor::{BlockContext, ExecutionReceipt, VeraExecutor, receipt_commitment};
 
 use crate::{AppError, ConsensusScheme, FinalizedSink, ReshareInput};
@@ -39,10 +36,6 @@ pub struct StatefulVeraApp<S: FinalizedSink, D: ApplicationState = OrderedState>
     sink: S,
     max_txs: usize,
     gas_limit: u64,
-    participant_addresses: Arc<Vec<(PublicKey, Address)>>,
-    vrf_seeds: VrfSeedCache,
-    vrf_verifier: Option<ConsensusScheme>,
-    native_pipeline: bool,
     proposal_batch_wait: std::time::Duration,
     settled_batch_wait: Option<std::time::Duration>,
     timestamp_step: u64,
@@ -80,10 +73,6 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
             sink,
             max_txs,
             gas_limit,
-            participant_addresses: Arc::new(Vec::new()),
-            vrf_seeds: VrfSeedCache::default(),
-            vrf_verifier: None,
-            native_pipeline: false,
             proposal_batch_wait: std::time::Duration::ZERO,
             settled_batch_wait: None,
             timestamp_step: MAX_TIMESTAMP_STEP_SECS,
@@ -104,21 +93,9 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
             && self.term.admits(block.height, block.term)
     }
 
-    /// Map consensus leaders to the EVM address credited as block beneficiary.
+    /// Wait up to `batch_wait` for requests before building a proposal.
     #[must_use]
-    pub fn with_participant_addresses(mut self, addrs: Vec<(PublicKey, Address)>) -> Self {
-        self.participant_addresses = Arc::new(addrs);
-        self
-    }
-
-    /// Enable native-only execution without certificate-dependent EVM randomness.
-    #[must_use]
-    pub const fn with_native_pipeline(
-        mut self,
-        enabled: bool,
-        batch_wait: std::time::Duration,
-    ) -> Self {
-        self.native_pipeline = enabled;
+    pub const fn with_proposal_batch_wait(mut self, batch_wait: std::time::Duration) -> Self {
         self.proposal_batch_wait = batch_wait;
         self
     }
@@ -144,45 +121,8 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
         self
     }
 
-    /// Shared cache populated by the node's VRF-aware consensus elector.
-    #[must_use]
-    pub fn vrf_seed_cache(&self) -> VrfSeedCache {
-        self.vrf_seeds.clone()
-    }
-
-    /// Authenticate rotating-mode randomness against the deployment consensus key.
-    #[must_use]
-    pub fn with_consensus_key(mut self, key: vera_domain::ConsensusPublicKey) -> Self {
-        self.vrf_verifier = Some(ConsensusScheme::certificate_verifier(
-            vera_domain::LIGHT_BLOCK_NAMESPACE,
-            key,
-        ));
-        self
-    }
-
-    fn beneficiary_for(&self, leader: &PublicKey) -> Address {
-        self.participant_addresses
-            .iter()
-            .find(|(pk, _)| pk == leader)
-            .map_or(Address::ZERO, |(_, addr)| *addr)
-    }
-
-    fn block_context(
-        &self,
-        height: u64,
-        timestamp: u64,
-        prevrandao: B256,
-        leader: &PublicKey,
-    ) -> BlockContext {
-        let header = Header {
-            number: height,
-            timestamp,
-            gas_limit: self.gas_limit,
-            beneficiary: self.beneficiary_for(leader),
-            base_fee_per_gas: Some(0),
-            ..Default::default()
-        };
-        BlockContext::new(header, B256::ZERO, prevrandao)
+    const fn block_context(&self, height: u64, timestamp: u64) -> BlockContext {
+        BlockContext::new(height, timestamp, self.gas_limit)
     }
 
     async fn re_execute(
@@ -194,29 +134,19 @@ impl<S: FinalizedSink, D: ApplicationState> StatefulVeraApp<S, D> {
             return Err(AppError::RootMismatch("storage layout"));
         }
         let context = self
-            .block_context(
-                block.height,
-                block.timestamp,
-                block.prevrandao,
-                &block.context.leader,
-            )
+            .block_context(block.height, block.timestamp)
             .with_verification()
             .with_expected_module_state_root(block.module_state_root);
         let executed = Box::pin(D::execute(&self.executor, batches, &context, &block.txs)).await?;
-        if executed.state_root != block.state_root {
-            return Err(AppError::RootMismatch("state root"));
-        }
         if executed.outcome.module_state_root != block.module_state_root {
             return Err(AppError::RootMismatch("module state root"));
         }
-        if executed.db_targets != block.db_targets
-            || executed.native_targets != block.native_targets
-        {
+        if executed.native_targets != block.native_targets {
             return Err(AppError::RootMismatch("db targets"));
         }
-        if block.receipt_commitment.is_some_and(|expected| {
-            receipt_commitment(self.gas_limit, &executed.outcome.receipts) != expected
-        }) {
+        if receipt_commitment(self.gas_limit, &executed.outcome.receipts)
+            != block.receipt_commitment
+        {
             return Err(AppError::RootMismatch("execution receipts"));
         }
         Ok(D::with_receipts(
@@ -271,9 +201,6 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         batches: D::Unmerkleized,
         input: Input<Self::Input, Self::Provider>,
     ) -> Handoff<Proposed<Self, Ctx>> {
-        if !self.native_pipeline {
-            return Handoff::Wait;
-        }
         self.propose(context, ancestry, batches, input)
             .await
             .map_or(Handoff::Wait, Handoff::Stage)
@@ -307,21 +234,14 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         let excluded = Self::pending_tx_ids(&pending);
         // The actor processes finalization only between builds, so a proposer
         // that idles waits before its request reaches the actor, not here.
-        let mut txs = if self.native_pipeline {
-            let batch_wait = match self.settled_batch_wait {
-                Some(wait) if parent.height <= finalized_height => wait,
-                _ => self.proposal_batch_wait,
-            };
-            input
-                .provider
-                .build_block_wait(self.max_txs, &excluded, batch_wait)
-                .await
-        } else {
-            input.provider.build_block(self.max_txs, &excluded)
+        let batch_wait = match self.settled_batch_wait {
+            Some(wait) if parent.height <= finalized_height => wait,
+            _ => self.proposal_batch_wait,
         };
-        if self.native_pipeline {
-            txs.retain(Tx::is_native);
-        }
+        let txs = input
+            .provider
+            .build_block_wait(self.max_txs, &excluded, batch_wait)
+            .await;
 
         let height = parent.height + 1;
         let term = self.term.term();
@@ -334,25 +254,19 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             );
             return None;
         }
+        // Hashing a block encodes it whole, so the parent is hashed once.
+        let parent_id = parent.id();
+        let ancestry = match parent.ancestry.extended(parent.height, &parent_id) {
+            Ok(ancestry) => ancestry,
+            Err(error) => {
+                warn!(height, %error, "propose: the parent's ancestry cannot be extended");
+                return None;
+            }
+        };
         let timestamp = now_secs()
             .max(parent.timestamp)
             .min(parent.timestamp.saturating_add(self.timestamp_step));
-        let randomness = if self.native_pipeline || consensus_context.round.view().get() <= 1 {
-            None
-        } else {
-            match self.vrf_seeds.witness(consensus_context.round) {
-                Some(seed) => Some(seed),
-                None => {
-                    warn!(round = ?consensus_context.round, "missing parent VRF seed");
-                    return None;
-                }
-            }
-        };
-        let prevrandao = randomness
-            .as_ref()
-            .map_or(B256::ZERO, crate::vrf_cache::seed_digest);
-        let block_context =
-            self.block_context(height, timestamp, prevrandao, &consensus_context.leader);
+        let block_context = self.block_context(height, timestamp);
         let exec_start = Instant::now();
         let executed =
             match Box::pin(D::execute(&self.executor, batches, &block_context, &txs)).await {
@@ -371,7 +285,6 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             .collect();
         if !rejected.is_empty() {
             self.mempool.prune(&rejected);
-            self.sink.rejected().await;
         }
         let txs = match &executed.outcome.executed_tx_indices {
             Some(indices) => indices.iter().map(|&i| txs[i].clone()).collect(),
@@ -379,22 +292,16 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         };
         let block = Block {
             context: consensus_context,
-            parent: parent.id(),
+            parent: parent_id,
             height,
+            ancestry,
             timestamp,
             term,
-            prevrandao,
-            randomness,
-            state_root: executed.state_root,
             module_state_root: executed.outcome.module_state_root,
             txs,
             payload: input.upstream.payload,
             native_targets: executed.native_targets,
-            receipt_commitment: Some(receipt_commitment(
-                self.gas_limit,
-                &executed.outcome.receipts,
-            )),
-            db_targets: executed.db_targets,
+            receipt_commitment: receipt_commitment(self.gas_limit, &executed.outcome.receipts),
         };
         if !block.fits_wire_limits() {
             return None;
@@ -425,8 +332,11 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         let block = ancestry.next().await?;
         let digest = block.digest();
         let block = block.inner_shared();
-        if self.native_pipeline && !block.txs.iter().all(Tx::is_native) {
-            warn!(?digest, "legacy transaction in native-only block");
+        if !block.txs.iter().all(Tx::is_native) {
+            warn!(
+                ?digest,
+                "block carries a transaction that is not a native request"
+            );
             return None;
         }
         if finality == Finality::Finalized {
@@ -462,27 +372,13 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
             warn!(?digest, "block consensus context mismatch");
             return None;
         }
-        let round = context.1.round;
-        if self.native_pipeline || round.view().get() <= 1 {
-            if block.randomness.is_some() || block.prevrandao != B256::ZERO {
-                return None;
-            }
-        } else {
-            let Some(seed) = &block.randomness else {
-                return None;
-            };
-            let previous = Round::new(round.epoch(), View::new(round.view().get() - 1));
-            let verifier = self
-                .vrf_verifier
-                .as_ref()
-                .expect("consensus randomness verifier not configured");
-            if seed.round != previous
-                || !seed.verify(verifier)
-                || block.prevrandao != crate::vrf_cache::seed_digest(seed)
-            {
-                warn!(?digest, "invalid authenticated consensus randomness");
-                return None;
-            }
+        if !block.extends_ancestry(&parent) {
+            warn!(
+                ?digest,
+                height = block.height,
+                "block ancestry does not extend its parent's"
+            );
+            return None;
         }
         if !self.admits_term(&block, &parent) {
             warn!(
@@ -552,7 +448,7 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         let receipts = D::receipts(batches);
         assert_eq!(
             block.receipt_commitment,
-            Some(receipt_commitment(self.gas_limit, receipts)),
+            receipt_commitment(self.gas_limit, receipts),
             "sealed execution receipts must match the selected block"
         );
         receipts.to_vec()
@@ -569,7 +465,6 @@ impl<S: FinalizedSink, D: ApplicationState> Application<Ctx> for StatefulVeraApp
         self.mempool.prune(&ids);
         self.term.observe(block.height, block.term);
         self.sink.finalized(block, captured).await;
-        self.vrf_seeds.finalized(block.context.round);
     }
 }
 
@@ -655,13 +550,14 @@ mod processing_failure_tests {
     fn candidate_processing_fails_stopped_on_a_storage_error() {
         tokio::Runner::new(tokio::Config::default()).start(|context| async move {
             let genesis = crate::genesis_block(
-                vera_domain::StateRoot(alloy_primitives::B256::ZERO),
-                vera_domain::DbTargets::default(),
+                alloy_primitives::B256::ZERO,
+                Default::default(),
                 alloy_primitives::B256::ZERO,
             );
             let mut candidate = genesis.clone();
             candidate.height = 1;
             candidate.parent = genesis.id();
+            candidate.ancestry = genesis.ancestry.extended(0, &genesis.id()).unwrap();
             let block_context = candidate.context.clone();
             let ancestry = ancestry::from_iter([candidate, genesis].map(|block| {
                 let digest = block.digest();
@@ -670,8 +566,8 @@ mod processing_failure_tests {
             let mut app = StatefulVeraApp::<NoopSink, FailingState>::new(
                 VeraExecutor::new(9001),
                 crate::genesis_block(
-                    vera_domain::StateRoot(alloy_primitives::B256::ZERO),
-                    vera_domain::DbTargets::default(),
+                    alloy_primitives::B256::ZERO,
+                    Default::default(),
                     alloy_primitives::B256::ZERO,
                 ),
                 InMemoryMempool::new(),
@@ -695,22 +591,22 @@ mod processing_failure_tests {
     }
 
     #[test]
-    fn pipelined_candidate_rejects_legacy_transaction_before_execution() {
+    fn candidate_with_a_non_native_transaction_is_rejected_before_execution() {
         tokio::Runner::new(tokio::Config::default()).start(|context| async move {
             let genesis = crate::genesis_block(
-                vera_domain::StateRoot(alloy_primitives::B256::ZERO),
-                vera_domain::DbTargets::default(),
+                alloy_primitives::B256::ZERO,
+                Default::default(),
                 alloy_primitives::B256::ZERO,
             );
-            for (bytes, native_pipeline, reject) in [
-                (vec![0x02], true, true),
-                (vec![], true, true),
-                (vec![vera_domain::NATIVE_TX_TYPE], true, false),
-                (vec![0x02], false, false),
+            for (bytes, reject) in [
+                (vec![0x02], true),
+                (vec![], true),
+                (vec![vera_domain::NATIVE_TX_TYPE], false),
             ] {
                 let mut candidate = genesis.clone();
                 candidate.height = 1;
                 candidate.parent = genesis.id();
+                candidate.ancestry = genesis.ancestry.extended(0, &genesis.id()).unwrap();
                 candidate.txs.push(Tx::new(bytes.into()));
                 let block_context = candidate.context.clone();
                 let ancestry = ancestry::from_iter([candidate, genesis.clone()].map(|block| {
@@ -724,8 +620,7 @@ mod processing_failure_tests {
                     NoopSink,
                     64,
                     30_000_000,
-                )
-                .with_native_pipeline(native_pipeline, std::time::Duration::ZERO);
+                );
                 let result = std::panic::AssertUnwindSafe(app.process(
                     (context.child("block_validation"), block_context),
                     ancestry,
@@ -751,14 +646,15 @@ mod processing_failure_tests {
         tokio::Runner::new(tokio::Config::default()).start(|context| async move {
             let now = super::now_secs();
             let mut genesis = crate::genesis_block(
-                vera_domain::StateRoot(alloy_primitives::B256::ZERO),
-                vera_domain::DbTargets::default(),
+                alloy_primitives::B256::ZERO,
+                Default::default(),
                 alloy_primitives::B256::ZERO,
             );
             genesis.timestamp = now + 14;
             let mut candidate = genesis.clone();
             candidate.height = 1;
             candidate.parent = genesis.id();
+            candidate.ancestry = genesis.ancestry.extended(0, &genesis.id()).unwrap();
             candidate.timestamp = now + 18;
             let block_context = candidate.context.clone();
             let ancestry = ancestry::from_iter([candidate, genesis.clone()].map(|block| {
@@ -799,10 +695,20 @@ mod processing_failure_tests {
     /// Processes a candidate of `term` at height 1 on a parent of `parent_term`.
     /// A refused block returns `None`; an admitted one reaches the injected failure.
     fn admitted(parent_term: u64, term: u64, held: Option<(u64, u64)>) -> bool {
+        processed(parent_term, term, held, |_| {})
+    }
+
+    /// As [`admitted`], with `alter` applied to the candidate first.
+    fn processed(
+        parent_term: u64,
+        term: u64,
+        held: Option<(u64, u64)>,
+        alter: impl FnOnce(&mut Block) + Send + 'static,
+    ) -> bool {
         tokio::Runner::new(tokio::Config::default()).start(|context| async move {
             let mut genesis = crate::genesis_block(
-                vera_domain::StateRoot(alloy_primitives::B256::ZERO),
-                vera_domain::DbTargets::default(),
+                alloy_primitives::B256::ZERO,
+                Default::default(),
                 alloy_primitives::B256::ZERO,
             );
             genesis.timestamp = super::now_secs();
@@ -810,7 +716,9 @@ mod processing_failure_tests {
             let mut candidate = genesis.clone();
             candidate.height = 1;
             candidate.parent = genesis.id();
+            candidate.ancestry = genesis.ancestry.extended(0, &genesis.id()).unwrap();
             candidate.term = term;
+            alter(&mut candidate);
             let block_context = candidate.context.clone();
             let ancestry = ancestry::from_iter([candidate, genesis.clone()].map(|block| {
                 let digest = block.digest();
@@ -843,6 +751,14 @@ mod processing_failure_tests {
     }
 
     #[test]
+    fn a_candidate_whose_ancestry_does_not_extend_its_parents_is_refused() {
+        assert!(processed(0, 0, None, |_| {}));
+        assert!(!processed(0, 0, None, |candidate| {
+            candidate.ancestry = vera_domain::testing::ancestry(1);
+        }));
+    }
+
+    #[test]
     fn a_candidate_of_a_lower_term_than_its_parent_is_refused() {
         assert!(admitted(2, 2, None));
         assert!(admitted(2, 3, None));
@@ -860,14 +776,15 @@ mod processing_failure_tests {
     fn candidate_timestamp_rejects_excessive_parent_step() {
         tokio::Runner::new(tokio::Config::default()).start(|context| async move {
             let mut genesis = crate::genesis_block(
-                vera_domain::StateRoot(alloy_primitives::B256::ZERO),
-                vera_domain::DbTargets::default(),
+                alloy_primitives::B256::ZERO,
+                Default::default(),
                 alloy_primitives::B256::ZERO,
             );
             genesis.timestamp = super::now_secs();
             let mut candidate = genesis.clone();
             candidate.height = 1;
             candidate.parent = genesis.id();
+            candidate.ancestry = genesis.ancestry.extended(0, &genesis.id()).unwrap();
             candidate.timestamp = genesis.timestamp + super::MAX_TIMESTAMP_STEP_SECS + 1;
             let block_context = candidate.context.clone();
             let ancestry = ancestry::from_iter([candidate, genesis.clone()].map(|block| {
@@ -891,156 +808,6 @@ mod processing_failure_tests {
             .catch_unwind()
             .await;
             assert!(matches!(result, Ok(None)));
-        });
-    }
-    #[test]
-    fn rotating_candidate_authenticates_seed_without_election_cache() {
-        use commonware_codec::{Decode as _, Encode as _, EncodeSize as _};
-        use commonware_consensus::{
-            simplex::{scheme::bls12381_threshold::vrf::Seed, types::Subject},
-            types::{Epoch, Round, View},
-        };
-        use commonware_cryptography::{
-            Signer as _,
-            bls12381::{
-                dkg::feldman_desmedt,
-                primitives::{sharing::Mode, variant::MinSig},
-            },
-            certificate::Scheme as _,
-            ed25519,
-        };
-        use commonware_parallel::Sequential;
-        use commonware_runtime::Supervisor as _;
-        use commonware_utils::{N3f1, TestRng, non_empty, ordered::Set};
-
-        let players = Set::from_iter_dedup([ed25519::PrivateKey::from_seed(17).public_key()]);
-        let (output, shares) = feldman_desmedt::deal::<MinSig, _, N3f1>(
-            TestRng::new(17),
-            Mode::NonZeroCounter,
-            players.clone(),
-        )
-        .unwrap();
-        let key = *output.public().public();
-        let share = shares
-            .get_value(players.iter().next().unwrap())
-            .unwrap()
-            .clone();
-        let scheme = super::ConsensusScheme::signer(
-            vera_domain::LIGHT_BLOCK_NAMESPACE,
-            players.clone(),
-            output.public().clone(),
-            share,
-        )
-        .unwrap();
-        let previous = Round::new(Epoch::zero(), View::new(1));
-        let vote = scheme
-            .sign::<vera_domain::ConsensusDigest>(Subject::Nullify { round: previous })
-            .unwrap();
-        let certificate = scheme.assemble(non_empty![vote], &Sequential).unwrap();
-        let seed = Seed::new(previous, certificate.get().unwrap().seed_signature);
-        let proposal_round = Round::new(Epoch::zero(), View::new(2));
-        let cache = crate::VrfSeedCache::default();
-        cache.insert_seed(proposal_round, seed.clone());
-        assert_eq!(cache.witness(proposal_round), Some(seed.clone()));
-        cache.finalized(proposal_round);
-        assert_eq!(cache.witness(proposal_round), Some(seed.clone()));
-        cache.finalized(Round::new(Epoch::zero(), View::new(3)));
-        assert!(cache.witness(proposal_round).is_none());
-        let forged = Seed::new(Round::new(Epoch::zero(), View::new(2)), seed.signature);
-        let (wrong_output, wrong_shares) = feldman_desmedt::deal::<MinSig, _, N3f1>(
-            TestRng::new(99),
-            Mode::NonZeroCounter,
-            players.clone(),
-        )
-        .unwrap();
-        let wrong_share = wrong_shares
-            .get_value(players.iter().next().unwrap())
-            .unwrap()
-            .clone();
-        let wrong_scheme = super::ConsensusScheme::signer(
-            vera_domain::LIGHT_BLOCK_NAMESPACE,
-            players,
-            wrong_output.public().clone(),
-            wrong_share,
-        )
-        .unwrap();
-        let wrong_vote = wrong_scheme
-            .sign::<vera_domain::ConsensusDigest>(Subject::Nullify { round: previous })
-            .unwrap();
-        let wrong_cert = wrong_scheme
-            .assemble(non_empty![wrong_vote], &Sequential)
-            .unwrap();
-        let wrong_seed = Seed::new(previous, wrong_cert.get().unwrap().seed_signature);
-
-        tokio::Runner::new(tokio::Config::default()).start(|context| async move {
-            let genesis = crate::genesis_block(
-                vera_domain::StateRoot(alloy_primitives::B256::ZERO),
-                vera_domain::DbTargets::default(),
-                alloy_primitives::B256::ZERO,
-            );
-            let mut candidate = genesis.clone();
-            candidate.height = 1;
-            candidate.parent = genesis.id();
-            candidate.context.round = Round::new(Epoch::zero(), View::new(2));
-            candidate.prevrandao = crate::vrf_cache::seed_digest(&seed);
-            candidate.randomness = Some(seed.clone());
-            assert_eq!(candidate.encode_size(), candidate.encode().len());
-            candidate = Block::decode_cfg(
-                candidate.encode(),
-                &vera_domain::BlockCfg {
-                    max_txs: 64,
-                    tx: vera_domain::TxCfg {
-                        max_tx_bytes: vera_domain::MAX_TX_BYTES,
-                    },
-                },
-            )
-            .unwrap();
-            let mut app = StatefulVeraApp::<NoopSink, FailingState>::new(
-                VeraExecutor::new(9001),
-                genesis.clone(),
-                InMemoryMempool::new(),
-                NoopSink,
-                64,
-                30_000_000,
-            )
-            .with_consensus_key(key);
-            for kind in 0..5 {
-                let mut block = candidate.clone();
-                match kind {
-                    1 => block.randomness = None,
-                    2 => block.randomness = Some(forged.clone()),
-                    3 => block.prevrandao = alloy_primitives::B256::ZERO,
-                    4 => {
-                        block.prevrandao = crate::vrf_cache::seed_digest(&wrong_seed);
-                        block.randomness = Some(wrong_seed.clone());
-                    }
-                    _ => {}
-                }
-                let block_context = block.context.clone();
-                let ancestry = ancestry::from_iter([block, genesis.clone()].map(|block| {
-                    let digest = block.digest();
-                    Digested::precomputed(block, digest)
-                }));
-                let result = std::panic::AssertUnwindSafe(app.process(
-                    (context.child("seed_test"), block_context),
-                    ancestry,
-                    (),
-                    Finality::Candidate,
-                ))
-                .catch_unwind()
-                .await;
-                if kind == 0 {
-                    assert!(
-                        result.is_err(),
-                        "valid witness should reach execution without a cached seed"
-                    );
-                } else {
-                    assert!(
-                        matches!(result, Ok(None)),
-                        "invalid witness must be rejected"
-                    );
-                }
-            }
         });
     }
 }

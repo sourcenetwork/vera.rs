@@ -1,11 +1,7 @@
 //! Node-side handling of proposals and finalized blocks: indexing,
 //! subscriptions, gossip headers, node status, and mempool recheck.
 
-use std::{
-    future::Future,
-    pin::Pin,
-    sync::{Arc, OnceLock},
-};
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use commonware_codec::Encode as _;
 use tokio::sync::broadcast;
@@ -15,15 +11,13 @@ use vera_consensus::components::InMemoryMempool;
 use vera_domain::{Block, GossipHeader};
 use vera_executor::{ExecutionReceipt, VeraExecutor};
 use vera_indexer::{BlockIndex, LightBlockIndex, StoredFinalization};
-use vera_jsonrpc::{NodeState, RpcBlock, RpcLog};
-
-use vera_backend::VeraStateSet;
+use vera_jsonrpc::NodeState;
 
 use crate::{
-    CommittedState, FinalizedHistory,
-    finalize::{index_finalized_block, subscription_data},
+    FinalizedHistory,
+    finalize::index_finalized_block,
     history::{HistoryRetention, restore_epoch},
-    tx_gossip::{SharedValidator, recheck, release},
+    tx_gossip::{SharedValidator, recheck},
 };
 
 /// Encoded finalization artifacts fetched from marshal after a block commits.
@@ -50,8 +44,6 @@ pub struct NodeSink {
     history: Arc<FinalizedHistory>,
     index: Arc<BlockIndex>,
     light_index: Arc<LightBlockIndex>,
-    heads: broadcast::Sender<RpcBlock>,
-    logs: broadcast::Sender<Vec<RpcLog>>,
     headers: broadcast::Sender<GossipHeader>,
     node_state: NodeState,
     finalization_lookup: FinalizationLookup,
@@ -61,7 +53,6 @@ pub struct NodeSink {
     executor: VeraExecutor,
     mempool: InMemoryMempool,
     validator: SharedValidator,
-    state: Arc<OnceLock<VeraStateSet>>,
     metrics: Option<Arc<crate::finalization_metrics::FinalizationMetrics>>,
     retention: Option<HistoryRetention>,
     #[cfg(feature = "fault-injection")]
@@ -82,11 +73,7 @@ pub struct SinkParts {
     pub index: Arc<BlockIndex>,
     /// Public consensus artifacts served to light clients.
     pub light_index: Arc<LightBlockIndex>,
-    /// `newHeads` subscribers.
-    pub heads: broadcast::Sender<RpcBlock>,
-    /// `logs` subscribers.
-    pub logs: broadcast::Sender<Vec<RpcLog>>,
-    /// `headers` subscribers.
+    /// `vera_subscribeHeaders` subscribers.
     pub headers: broadcast::Sender<GossipHeader>,
     /// Node status counters.
     pub node_state: NodeState,
@@ -144,8 +131,6 @@ impl NodeSink {
             history: parts.history,
             index: parts.index,
             light_index: parts.light_index,
-            heads: parts.heads,
-            logs: parts.logs,
             headers: parts.headers,
             node_state: parts.node_state,
             finalization_lookup: parts.finalization_lookup,
@@ -155,17 +140,11 @@ impl NodeSink {
             executor: parts.executor,
             mempool: parts.mempool,
             validator: parts.validator,
-            state: Arc::new(OnceLock::new()),
             metrics: None,
             retention: None,
             #[cfg(feature = "fault-injection")]
             crash_directory: None,
         }
-    }
-
-    /// Attach the committed database set once the stateful actor has opened it.
-    pub fn attach_state(&self, set: VeraStateSet) {
-        let _ = self.state.set(set);
     }
 }
 
@@ -176,10 +155,6 @@ impl FinalizedSink for NodeSink {
 
     fn proposed(&self, _block: &Block) {
         self.node_state.inc_proposed();
-    }
-
-    async fn rejected(&self) {
-        release(&self.mempool, &self.validator).await;
     }
 
     async fn finalized(&self, block: &Block, receipts: Vec<ExecutionReceipt>) {
@@ -244,7 +219,7 @@ impl FinalizedSink for NodeSink {
         let gas_used = receipts.iter().map(|r| r.gas_used).sum();
         // One identifier serves indexing, subscriptions, the header and the light index.
         let id = block.id();
-        let tx_hashes = index_finalized_block(
+        index_finalized_block(
             &self.index,
             block,
             id.0,
@@ -270,16 +245,6 @@ impl FinalizedSink for NodeSink {
                 transactions = block.txs.len(), lookup_us = lookup.as_micros(),
                 history_us = (persisted - lookup).as_micros(), index_us,
                 "finalized revision publication");
-        }
-        if self.heads.receiver_count() > 0 || self.logs.receiver_count() > 0 {
-            let (rpc_block, rpc_logs) =
-                subscription_data(block, id.0, self.gas_limit, &receipts, gas_used, &tx_hashes);
-            if self.heads.send(rpc_block).is_err() {
-                trace!(height = block.height, "no newHeads subscribers");
-            }
-            if !rpc_logs.is_empty() && self.logs.send(rpc_logs).is_err() {
-                trace!(height = block.height, "no logs subscribers");
-            }
         }
         restore_epoch(&self.light_index, block);
         let height = block.height;
@@ -315,23 +280,13 @@ impl FinalizedSink for NodeSink {
                 .expect("prune finalized history below the retained window");
         }
 
-        let Some(set) = self.state.get() else {
-            completed();
-            return;
-        };
         let nonces = self
             .executor
             .modules()
             .read()
             .map(|m| m.nonces.clone())
             .unwrap_or_default();
-        recheck(
-            &self.mempool,
-            &self.validator,
-            CommittedState::new(set.clone()),
-            nonces,
-        )
-        .await;
+        recheck(&self.mempool, &self.validator, nonces).await;
         completed();
     }
 }

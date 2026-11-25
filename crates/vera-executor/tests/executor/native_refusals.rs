@@ -5,9 +5,8 @@ use ark_ec::{AffineRepr as _, CurveGroup as _};
 use ark_serialize::CanonicalSerialize as _;
 use vera_domain::{ExecutionReceipt, RefusalKind, RefusingModule, receipt_commitment};
 use vera_executor::{
-    SimulateRequest, SimulationContext, VeraExecutor,
-    precompiles::{ACP_ADDRESS, BULLETIN_ADDRESS, VALIDATOR_REGISTRY_ADDRESS, VERA_ADDRESS},
-    simulate_call,
+    VeraExecutor,
+    dispatch::{ACP_ADDRESS, BULLETIN_ADDRESS, VALIDATOR_REGISTRY_ADDRESS, VERA_ADDRESS},
 };
 use vera_modules::acp::abi::IAcp;
 use vera_modules::bulletin::abi::IBulletin;
@@ -37,23 +36,9 @@ fn native(target: Address, calldata: Vec<u8>) -> Bytes {
 
 fn execute(target: Address, calldata: Vec<u8>) -> ExecutionReceipt {
     let executor = VeraExecutor::new(9001);
-    let context = BlockContext::new(
-        Header {
-            number: 1,
-            timestamp: 100,
-            gas_limit: NATIVE_LIMIT,
-            ..Default::default()
-        },
-        B256::ZERO,
-        B256::ZERO,
-    );
+    let context = BlockContext::new(1, 100, NATIVE_LIMIT);
     let (mut outcome, _) = executor
-        .execute_with_modules(
-            &MockStateDb::new(),
-            &context,
-            &[native(target, calldata)],
-            executor.snapshot(),
-        )
+        .execute_with_modules(&context, &[native(target, calldata)], executor.snapshot())
         .unwrap();
     assert_eq!(outcome.executed_tx_indices, Some(vec![0]));
     outcome.receipts.pop().unwrap()
@@ -158,8 +143,8 @@ fn each_module_names_its_refusal() {
     assert_refused(
         &execute(
             VALIDATOR_REGISTRY_ADDRESS,
-            IValidatorRegistry::setPolicyCall {
-                policyId: B256::repeat_byte(1),
+            IValidatorRegistry::removeValidatorCall {
+                validator: Address::repeat_byte(1),
             }
             .abi_encode(),
         ),
@@ -213,47 +198,5 @@ fn an_exhausted_allowance_keeps_its_own_kind_and_the_full_charge() {
     assert_ne!(
         receipt_commitment(NATIVE_LIMIT, std::slice::from_ref(&exhausted)),
         receipt_commitment(NATIVE_LIMIT, &[exhausted.with_refusal(refused.refusal)]),
-    );
-}
-
-#[test]
-fn a_contract_caller_still_receives_the_refusal_message_as_revert_data() {
-    let context = SimulationContext::at_block(
-        &vera_executor::ExecutionConfig::new(9001),
-        30_000_000,
-        1,
-        100,
-    );
-    let modules = vera_executor::ModuleState::default();
-    let call = |data: Vec<u8>| {
-        simulate_call(
-            &MockStateDb::new(),
-            &context,
-            &SimulateRequest {
-                from: Address::repeat_byte(0x44),
-                to: Some(ACP_ADDRESS),
-                value: U256::ZERO,
-                data: data.into(),
-                gas: Some(NATIVE_LIMIT),
-            },
-            Some(&modules),
-        )
-        .unwrap()
-    };
-
-    let commitment = IAcp::getRegistrationsCommitmentCall { commitmentId: 42 }.abi_encode();
-    let reverted = call(commitment.clone());
-    assert!(!reverted.success);
-    let native = execute(ACP_ADDRESS, commitment);
-    let refusal = native.refusal.unwrap();
-    assert_eq!(refusal.kind, RefusalKind::NotFound);
-    assert_eq!(reverted.output.as_ref(), refusal.message().as_bytes());
-
-    // A refusal raised as an error reaches the contract without its kind tag.
-    let unsigned = call(policy(r#"{"name":"x"}"#));
-    assert!(!unsigned.success);
-    assert_eq!(
-        unsigned.output.as_ref(),
-        b"fatal: module call requires an authenticated caller"
     );
 }

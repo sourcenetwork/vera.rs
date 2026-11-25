@@ -79,25 +79,20 @@ impl RpcPoller {
         loop {
             ticker.tick().await;
 
-            // Poll vera_nodeStatus.
             let status = Self::call_node_status(&client, &rpc_url).await;
-            let block_height = Self::call_latest_block(&client, &rpc_url).await;
 
             let mut snaps = snapshots.write();
             let snap = &mut snaps[node_index];
-            let prev_height = snap.latest_block_height;
+            let prev_height = snap.finalized_height;
 
             if let Some(status) = status {
                 Self::observe_status(snap, &status, &tx);
             } else {
                 snap.is_healthy = false;
             }
-            if let Some(height) = block_height {
-                snap.latest_block_height = height;
-            }
 
-            if let Some(height) = block_height
-                && height != prev_height
+            if let Some(height) = snap.finalized_height
+                && Some(height) != prev_height
             {
                 let _ = tx.send(RpcEvent::NewBlock {
                     node: node_index,
@@ -167,21 +162,6 @@ impl RpcPoller {
         let json: serde_json::Value = resp.json().await.ok()?;
         let result = json.get("result")?;
         serde_json::from_value(result.clone()).ok()
-    }
-
-    async fn call_latest_block(client: &reqwest::Client, url: &str) -> Option<u64> {
-        let body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_getBlockByNumber",
-            "params": ["latest", false],
-            "id": 2
-        });
-
-        let resp = client.post(url).json(&body).send().await.ok()?;
-        let json: serde_json::Value = resp.json().await.ok()?;
-        let result = json.get("result")?;
-        let number_hex = result.get("number")?.as_str()?;
-        u64::from_str_radix(number_hex.trim_start_matches("0x"), 16).ok()
     }
 }
 

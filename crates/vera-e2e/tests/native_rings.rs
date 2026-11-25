@@ -7,13 +7,13 @@ use vera_client::threshold_objects::{
     EncryptedDocument, KeyDerivation, ObjectKind, ThresholdObject, encode_threshold_object,
 };
 use vera_client::{
-    ACP_ADDRESS, BlsSigner, DelegationScope, NativeReceipt, Secp256k1SigningKey as SigningKey,
+    ACP_ADDRESS, BlsSigner, DelegationScope, Secp256k1SigningKey as SigningKey, TransactionReceipt,
     VERA_ADDRESS, VeraClient, create_scoped_bearer_token,
     nodes::{NodeCommand, NodeInfo, NodeRequest, encode_node_request, sign_node_request},
     rings::*,
 };
 use vera_domain::{ConsensusPublicKey, NativeTx};
-use vera_e2e::cluster::{ConsensusParams, KeySet, TestCluster};
+use vera_e2e::cluster::{ConsensusParams, GenesisBuilder, KeySet, TestCluster};
 use vera_modules::acp::{
     abi::IAcp,
     types::{Object, PolicyCmd},
@@ -32,7 +32,7 @@ async fn execute(
     target: Address,
     call: Bytes,
     success: bool,
-) -> NativeReceipt {
+) -> TransactionReceipt {
     let call_bytes = call.len();
     let receipt_deadline = if call_bytes > 8 << 20 {
         vera_e2e::readiness_deadline().max(Duration::from_secs(120))
@@ -51,7 +51,7 @@ async fn execute(
             .unwrap();
             if let (Some(local), Some(_)) = (local, remote) {
                 assert_eq!(local.verify(id, trusted).unwrap().success(), success);
-                return writer.get_native_receipt(id).await.unwrap().unwrap();
+                return writer.get_transaction_receipt(id).await.unwrap().unwrap();
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
@@ -81,6 +81,13 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
         .nodes(4)
         .seed(deployment)
         .chain_id(deployment)
+        // The stall timeout must exceed the notarization timeout below.
+        .genesis(
+            GenesisBuilder::devnet().simplex(vera_domain::SimplexParameters {
+                stall_timeout_ms: 30_000,
+                ..vera_domain::SimplexParameters::default()
+            }),
+        )
         // The report larger than 8 MiB must fit inside one consensus round
         // even when validators share a busy runner.
         .consensus_params(ConsensusParams {
@@ -102,11 +109,11 @@ async fn native_ring_lifecycle_preserves_actor_authority_and_terminal_state() {
         .unwrap();
     let writer = VeraClient::new(cluster.node(0).rpc_url());
     let reader = VeraClient::new(cluster.node(3).rpc_url());
-    let first: serde_json::Value = writer
-        .rpc_call_typed("eth_getBlockByNumber", serde_json::json!(["0x1", false]))
+    let first: vera_domain::LightBlock = writer
+        .rpc_call_typed("vera_getLightBlock", serde_json::json!([1]))
         .await
         .unwrap();
-    let root: B256 = first["parentHash"].as_str().unwrap().parse().unwrap();
+    let root: B256 = first.parent_hash.parse().unwrap();
     let worker = BlsSigner::new(7u64.into(), deployment).unwrap();
     let issuer = SigningKey::from_slice(&[30; 32]).unwrap();
     let actor = vera_crypto::secp256k1::did_from_secp256k1_pubkey(

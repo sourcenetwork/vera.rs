@@ -17,7 +17,10 @@ pub(super) async fn publication(cluster: &TestCluster, minimum: u64) {
         loop {
             let mut ready = true;
             for (index, client) in clients.iter().enumerate() {
-                let height = client.block_number().await;
+                let height = client
+                    .node_status()
+                    .await
+                    .map(|status| status.finalized_height.unwrap_or(0));
                 ready &= matches!(&height, Ok(height) if *height >= minimum);
                 observed[index] = format!("node {index}: {height:?}");
             }
@@ -53,7 +56,7 @@ pub(super) async fn submit(
         )
         .await
         .unwrap();
-    assert_eq!(receipt.status, 1, "transaction {id} reverted");
+    assert!(receipt.success, "transaction {id} reverted");
     publication(cluster, receipt.block_number + 2).await;
     // Poll only publication. Evidence is requested and verified once on each member.
     for index in 0..cluster.node_count() {

@@ -109,13 +109,10 @@ fn all_partitions_sync_over_authenticated_peers_and_reopen() {
                         }};
                     }
                     resolvers.push((
-                        channel!(0, AccountsDb),
-                        channel!(1, StorageDb),
-                        channel!(2, CodeDb),
+                        channel!(0, NativeDb),
+                        channel!(1, NativeDb),
+                        channel!(2, NativeDb),
                         channel!(3, NativeDb),
-                        channel!(4, NativeDb),
-                        channel!(5, NativeDb),
-                        channel!(6, NativeDb),
                         (),
                     ));
                     drop(listener);
@@ -149,10 +146,10 @@ fn all_partitions_sync_over_authenticated_peers_and_reopen() {
                     let native = &source.databases;
                     let proof = native::SyncProof::capture(
                         &(
+                            native.0.clone(),
+                            native.1.clone(),
+                            native.2.clone(),
                             native.3.clone(),
-                            native.4.clone(),
-                            native.5.clone(),
-                            native.6.clone(),
                         ),
                         block.module_state_root,
                     )
@@ -217,10 +214,10 @@ fn all_partitions_sync_over_authenticated_peers_and_reopen() {
                     assert_eq!(replica.committed_targets().await, final_target);
                     recovery::assert_records(&replica, version).await;
                     for (source, destination) in [
+                        (&source.databases.0, &replica.databases.0),
+                        (&source.databases.1, &replica.databases.1),
+                        (&source.databases.2, &replica.databases.2),
                         (&source.databases.3, &replica.databases.3),
-                        (&source.databases.4, &replica.databases.4),
-                        (&source.databases.5, &replica.databases.5),
-                        (&source.databases.6, &replica.databases.6),
                     ] {
                         assert_eq!(source.read().await.root(), destination.read().await.root());
                     }

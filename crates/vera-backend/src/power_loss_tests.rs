@@ -1,79 +1,36 @@
 use bytes::Bytes;
-use commonware_cryptography::Sha256;
-use commonware_glue::stateful::db::{DatabaseSet, Shared, Unmerkleized as _};
-use commonware_parallel::Sequential;
+use commonware_glue::stateful::db::{DatabaseSet, Unmerkleized as _};
 use commonware_runtime::{
     Metrics as _, Runner as _, Supervisor as _,
     buffer::paged::CacheRef,
     deterministic::{self, FaultConfig, PartialWriteMode, WriteConfig},
 };
-use commonware_storage::{merkle::mmr, qmdb::any::unordered::variable, translator::EightCap};
 use commonware_utils::{NZU16, NZUsize, probability};
-use vera_qmdb::AccountEncoding;
 
-use crate::{AccountKey, AccountValue, CodeKey, StorageKey, StorageValue, native};
+use crate::native;
 
-type Accounts<E> =
-    variable::Db<mmr::Family, E, AccountKey, AccountValue, Sha256, EightCap, Sequential>;
-type Storage<E> =
-    variable::Db<mmr::Family, E, StorageKey, StorageValue, Sha256, EightCap, Sequential>;
-type Code<E> = variable::Db<mmr::Family, E, CodeKey, Vec<u8>, Sha256, EightCap, Sequential>;
-type Journals<E> = (
-    Shared<Accounts<E>>,
-    Shared<Storage<E>>,
-    Shared<Code<E>>,
-    Shared<native::NativeDbFor<E>>,
-    Shared<native::NativeDbFor<E>>,
-    Shared<native::NativeDbFor<E>>,
-    Shared<native::NativeDbFor<E>>,
-);
+type Journals<E> = native::NativeSetFor<E>;
 type Context = deterministic::Context;
 type Databases = Journals<Context>;
 type Sealed = <Databases as DatabaseSet<Context>>::Merkleized;
 
 fn config(_context: &Context) -> <Databases as DatabaseSet<Context>>::Config {
     let cache = CacheRef::new(NZU16!(4084), NZUsize!(4096));
-    let execution = crate::state_set_config("power-loss", cache.clone());
-    let native = native::state_config("power-loss", cache);
-    let mut config = (
-        execution.0,
-        execution.1,
-        execution.2,
-        native.0,
-        native.1,
-        native.2,
-        native.3,
-    );
+    let mut config = native::state_config("power-loss", cache);
     // The paged writer requires two pages; fill them without sealing a section.
     macro_rules! small_buffers {
         ($($index:tt),+) => {
             $(config.$index.journal_config.write_buffer = NZUsize!(2 * 4084);)+
         };
     }
-    small_buffers!(0, 1, 2, 3, 4, 5, 6);
+    small_buffers!(0, 1, 2, 3);
     config
 }
 
 async fn revision(databases: &Databases, version: u8, count: usize) -> Sealed {
-    let (mut accounts, mut storage, mut code, mut acp, mut bulletin, mut vera, mut nonces) =
-        databases.new_batches().await;
+    let (mut acp, mut bulletin, mut vera, mut nonces) = databases.new_batches().await;
     for index in 0..count {
         let key = u64::try_from(index).unwrap().to_be_bytes();
-        let mut address = [0; 20];
-        address[..8].copy_from_slice(&key);
-        accounts = accounts.write(
-            AccountKey::new(address),
-            Some(AccountValue([version; AccountEncoding::SIZE])),
-        );
-        let mut slot = [0; 60];
-        slot[..8].copy_from_slice(&key);
-        storage = storage.write(
-            StorageKey::new(slot),
-            Some(StorageValue(alloy_primitives::U256::from(version))),
-        );
-        let mut code_key = [0; 32];
-        code_key[..8].copy_from_slice(&key);
-        code = code.write(CodeKey::new(code_key), Some(vec![version; 128]));
         let value = Some(Bytes::from(vec![version; 128]));
         acp = acp.write(key.to_vec(), value.clone());
         bulletin = bulletin.write(key.to_vec(), value.clone());
@@ -81,9 +38,6 @@ async fn revision(databases: &Databases, version: u8, count: usize) -> Sealed {
         nonces = nonces.write(key.to_vec(), value);
     }
     (
-        accounts.merkleize().await.unwrap(),
-        storage.merkleize().await.unwrap(),
-        code.merkleize().await.unwrap(),
         acp.merkleize().await.unwrap(),
         bulletin.merkleize().await.unwrap(),
         vera.merkleize().await.unwrap(),
@@ -105,79 +59,7 @@ fn written_bytes(context: &Context) -> u64 {
 
 async fn assert_restored_records(databases: &Databases, version: u8) {
     let readers = databases.readers();
-    assert_eq!(
-        readers
-            .0
-            .read()
-            .await
-            .get(&AccountKey::new([0; 20]))
-            .await
-            .unwrap()
-            .unwrap()
-            .0,
-        [version; AccountEncoding::SIZE]
-    );
-    assert_eq!(
-        readers
-            .1
-            .read()
-            .await
-            .get(&StorageKey::new([0; 60]))
-            .await
-            .unwrap()
-            .unwrap()
-            .0,
-        alloy_primitives::U256::from(version)
-    );
-    assert_eq!(
-        readers
-            .2
-            .read()
-            .await
-            .get(&CodeKey::new([0; 32]))
-            .await
-            .unwrap()
-            .unwrap(),
-        vec![version; 128]
-    );
-    let key = 99u64.to_be_bytes();
-    let mut address = [0; 20];
-    address[..8].copy_from_slice(&key);
-    assert!(
-        readers
-            .0
-            .read()
-            .await
-            .get(&AccountKey::new(address))
-            .await
-            .unwrap()
-            .is_none()
-    );
-    let mut slot = [0; 60];
-    slot[..8].copy_from_slice(&key);
-    assert!(
-        readers
-            .1
-            .read()
-            .await
-            .get(&StorageKey::new(slot))
-            .await
-            .unwrap()
-            .is_none()
-    );
-    let mut code_key = [0; 32];
-    code_key[..8].copy_from_slice(&key);
-    assert!(
-        readers
-            .2
-            .read()
-            .await
-            .get(&CodeKey::new(code_key))
-            .await
-            .unwrap()
-            .is_none()
-    );
-    for reader in [readers.3, readers.4, readers.5, readers.6] {
+    for reader in [readers.0, readers.1, readers.2, readers.3] {
         let database = reader.read().await;
         assert_eq!(
             database.get(&vec![0; 8]).await.unwrap().unwrap().as_ref(),
@@ -194,22 +76,13 @@ async fn assert_restored_records(databases: &Databases, version: u8) {
 }
 
 #[test]
-fn seven_journals_recover_the_anchor_after_unsynced_write_loss() {
-    type Production = (
-        Shared<crate::AccountsDb>,
-        Shared<crate::StorageDb>,
-        Shared<crate::CodeDb>,
-        Shared<native::NativeDb>,
-        Shared<native::NativeDb>,
-        Shared<native::NativeDb>,
-        Shared<native::NativeDb>,
-    );
-    let _: fn(Production) -> Journals<crate::Ctx> = std::convert::identity;
+fn four_journals_recover_the_anchor_after_unsynced_write_loss() {
+    let _: fn(native::NativeStateSet) -> Journals<crate::Ctx> = std::convert::identity;
 
     for (durable_mask, retention, mode) in [
         (0x00u8, probability!(0.0), PartialWriteMode::Prefix),
-        (0x55, probability!(0.0), PartialWriteMode::Prefix),
-        (0x7f, probability!(0.0), PartialWriteMode::Prefix),
+        (0x05, probability!(0.0), PartialWriteMode::Prefix),
+        (0x0e, probability!(0.0), PartialWriteMode::Prefix),
         (0x00, probability!(0.5), PartialWriteMode::Prefix),
         (0x00, probability!(0.5), PartialWriteMode::Subset),
     ] {
@@ -247,9 +120,6 @@ fn seven_journals_recover_the_anchor_after_unsynced_write_loss() {
                 apply!(1);
                 apply!(2);
                 apply!(3);
-                apply!(4);
-                apply!(5);
-                apply!(6);
                 (anchor, context.storage_audit())
             });
         let (next_anchor, checkpoint) =

@@ -5,7 +5,7 @@ use vera_crypto::bls;
 use vera_domain::NativeTx;
 
 use crate::ExecutionError;
-use crate::precompiles::{
+use crate::dispatch::{
     ACP_ADDRESS, ANCHOR_ADDRESS, BULLETIN_ADDRESS, VALIDATOR_REGISTRY_ADDRESS, VERA_ADDRESS,
 };
 

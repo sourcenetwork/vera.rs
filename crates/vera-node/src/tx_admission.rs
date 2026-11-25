@@ -8,8 +8,6 @@ use vera_domain::Tx;
 use vera_executor::{ExecutionError, MempoolValidator, PreValidatedNativeTx};
 use vera_modules::native_account::NativeNonceStore;
 
-use crate::CommittedState;
-
 /// The mempool validator with the signer and nonce of each pending native request.
 ///
 /// A request's bytes never change, so the signer derived at admission stays
@@ -17,30 +15,23 @@ use crate::CommittedState;
 /// its nonce reservation.
 #[derive(Debug)]
 pub struct Admission {
-    validator: MempoolValidator<CommittedState>,
+    validator: MempoolValidator,
     native: HashMap<TxId, PreValidatedNativeTx>,
 }
 
 impl Admission {
     /// Wrap a validator that has no pending requests.
     #[must_use]
-    pub fn new(validator: MempoolValidator<CommittedState>) -> Self {
+    pub fn new(validator: MempoolValidator) -> Self {
         Self {
             validator,
             native: HashMap::new(),
         }
     }
 
-    /// Reserve the sender's next nonce for a request about to enter the pool.
-    pub(crate) async fn reserve(
-        &mut self,
-        pre: Option<&PreValidatedNativeTx>,
-        bytes: &[u8],
-    ) -> Result<(), ExecutionError> {
-        match pre {
-            Some(pre) => self.validator.admit_native(pre).map(drop),
-            None => self.validator.validate_tx(bytes).await.map(drop),
-        }
+    /// Reserve the signer's next nonce for a request about to enter the pool.
+    pub(crate) fn reserve(&mut self, pre: &PreValidatedNativeTx) -> Result<(), ExecutionError> {
+        self.validator.admit_native(pre).map(drop)
     }
 
     /// Keep a native request's admission result while it is pending.
@@ -51,13 +42,12 @@ impl Admission {
     /// Reset to committed state and replay `pending` in its admission order.
     ///
     /// Returns the requests that no longer validate.
-    pub(crate) async fn recheck(
+    pub(crate) fn recheck(
         &mut self,
-        state: CommittedState,
         nonces: NativeNonceStore,
         pending: &[(TxId, Tx)],
     ) -> Vec<TxId> {
-        self.validator.reset(state, nonces);
+        self.validator.reset(nonces);
         let mut remembered = std::mem::take(&mut self.native);
         let mut stale = Vec::new();
         for (id, tx) in pending {
@@ -65,28 +55,9 @@ impl Admission {
                 Some(pre) => self.validator.admit_native(&pre).map(|_| {
                     self.native.insert(*id, pre);
                 }),
-                None => self.validator.recheck_pending_tx(&tx.bytes).await,
+                None => self.validator.recheck_pending_tx(&tx.bytes),
             };
             if let Err(error) = result {
-                trace!(tx_id = ?id, %error, "evicting stale tx");
-                stale.push(*id);
-            }
-        }
-        stale
-    }
-
-    /// Rebuild EVM reservations from `pending` after requests left the pool
-    /// without a finalized block. Native reservations are kept.
-    ///
-    /// Returns the requests that no longer validate.
-    pub(crate) async fn release_evm(&mut self, pending: &[(TxId, Tx)]) -> Vec<TxId> {
-        self.validator.release_evm_reservations();
-        let mut stale = Vec::new();
-        for (id, tx) in pending {
-            if tx.is_native() {
-                continue;
-            }
-            if let Err(error) = self.validator.recheck_pending_tx(&tx.bytes).await {
                 trace!(tx_id = ?id, %error, "evicting stale tx");
                 stale.push(*id);
             }

@@ -1,35 +1,26 @@
 # Execution limits
 
-`VeraExecutor` enforces one cumulative execution budget for each revision, using
-`Header::gas_limit`. Native requests execute first, followed by optional EVM
-requests. Both paths share the same remaining budget. Pipelined deployments
-accept only native requests.
+`VeraExecutor` enforces one cumulative execution budget for each revision, the
+block's gas limit. A block carries native requests only, executed in order
+against the remaining budget.
 
 ## Admission and accounting
 
 Before dispatch, a native request must fit its full 1,000,000-unit execution
-allowance. An EVM request must fit its signed gas limit. Successful native
-requests charge the module-reported cost; EVM requests charge the execution
-result. Unused allowance remains available to subsequent requests.
+allowance. A successful request charges the module-reported cost. Unused
+allowance remains available to subsequent requests.
 
 During proposal construction, a request whose allowance does not fit is omitted
-before changing its sequence, module state or account state. Its index is absent
+before changing its sequence or module state. Its index is absent
 from `ExecutionOutcome::executed_tx_indices`, so it is absent from the proposed
 revision and does not become finalized through that proposal. Normal mempool
 admission, revalidation and eviction rules still apply. Proposal verification
 rejects a revision containing a request that cannot fit.
 
-Admission rejects an EVM request whose signed gas limit exceeds the configured
-revision limit, or whose gas cost plus value overflows, since no revision can
-hold it. Blob (type 3) requests are refused at admission and execution. Revalidation after finalization replays each sender's retained EVM
-requests in admission order, so a queued follow-up keeps its nonce and balance
-reservation. Construction also lists in `ExecutionOutcome::rejected_tx_indices`
-the EVM requests that do not decode or that fail transaction validation for a
-reason other than a nonce ahead of the account, and the proposer removes them
-from its pending pool. It then rebuilds the EVM reservations from the requests
-that remain, so the sender of a removed request can resubmit at the same nonce
-without waiting for the next finalized revision. A request omitted for the budget, or for a nonce that is
-still ahead, stays pending.
+Bytes that are not a native request are refused at admission. Construction
+lists any it still holds in `ExecutionOutcome::rejected_tx_indices`, and the
+proposer removes them from its pending pool; a block that carries one does not
+verify. A request omitted for the budget stays pending.
 
 A native request a module refuses is charged the gas the call reported, and at
 least 5,000 units, the base charge of a module write. This covers a
@@ -40,7 +31,7 @@ no less than the cheapest successful write and no more than the work it did. A
 call that exhausts its allowance, and a module panic, are charged the full
 1,000,000 units. The receipt names the refusal's kind, which tells an exhausted
 allowance (`out_of_gas`) from a refusal of what the caller sent; see
-[receipt commitments](receipt-commitments.md#refusals). Module and journal
+[receipt commitments](receipt-commitments.md#refusals). Module
 changes roll back, while the accepted request consumes its signing sequence.
 Invalid native authentication or sequence does not produce a failure receipt:
 construction omits that request, and verification rejects it. Fatal execution
@@ -60,8 +51,7 @@ encoding is described in [receipt commitments](receipt-commitments.md).
 
 For example, with a 1,000,000-unit revision limit, a successful or refused
 native request charged 5,000 leaves 995,000. Another native request cannot fit its full
-allowance. In a deployment permitting EVM execution, a request declaring at
-most 995,000 can still execute.
+allowance and waits for the next revision.
 
 ## ACP string-array decoding
 
@@ -75,8 +65,8 @@ Strings in these three calls share the existing decoded-byte budget with all
 nested batch payloads. Every occurrence counts separately, including aliased arrays or tails,
 the actor string, and UTF-8 replacement bytes produced by the permissive decoder.
 Validation borrows the input and rejects invalid heads, offsets and lengths
-before owned arrays or strings are allocated. Failures use the existing native
-and EVM error and rollback paths.
+before owned arrays or strings are allocated. Failures are refusals of the
+request and roll its effects back.
 
 ## Native record bounds
 
@@ -87,12 +77,10 @@ relationship keys contain hexadecimal encodings of object identifiers.
 
 Before accepting a successful native dispatch, execution checks changed records
 against its pre-dispatch snapshot. Oversized records produce an ordinary failed
-receipt naming `storage_bounds`: module and account-journal effects and logs
+receipt naming `storage_bounds`: module effects and logs
 are discarded, the native sequence is consumed, and the request is charged what
 the call reported using, since it ran to completion.
-Subsequent requests can execute with the remaining revision budget. Optional EVM
-module calls perform the same check before returning success; an oversized write
-fails that call and follows its existing call-frame rollback semantics.
+Subsequent requests can execute with the remaining revision budget.
 
 Validation borrows the persistent maps' changed entries, including changes across
 nested batch snapshots. It does not copy record payloads or scan unchanged state.

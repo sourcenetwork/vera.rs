@@ -143,7 +143,7 @@ impl FinalizedHistory {
             .context("missing indexed execution record")?;
         *remaining_bytes = remaining_bytes
             .checked_sub(bytes.len())
-            .ok_or(vera_indexer::IndexerError::LogQueryLimit)?;
+            .ok_or(vera_indexer::IndexerError::ReadLimit)?;
         let record: Record = borsh::from_slice(&bytes)?;
         let (block, receipts) = record.decode()?;
         ensure!(block.height == height, "indexed execution height mismatch");
@@ -173,12 +173,10 @@ mod tests {
         let genesis = block(0, BlockId(B256::ZERO));
         let mut first = block(1, genesis.id());
         first.txs.push(vera_domain::Tx::new(vec![1].into()));
-        let receipt = ExecutionReceipt::new(B256::repeat_byte(7), true, 3, 3, vec![], None);
-        first.native_targets = Some([vera_domain::DbTarget::default(); 4]);
-        first.receipt_commitment = Some(vera_executor::receipt_commitment(
-            100,
-            std::slice::from_ref(&receipt),
-        ));
+        let receipt = ExecutionReceipt::new(B256::repeat_byte(7), true, 3, 3, vec![]);
+        first.native_targets = [vera_domain::DbTarget::default(); 4];
+        first.receipt_commitment =
+            vera_executor::receipt_commitment(100, std::slice::from_ref(&receipt));
         let history = FinalizedHistory::open(dir.path(), &genesis).unwrap();
         history
             .append_finalized(&first, std::slice::from_ref(&receipt), 100, None)
@@ -211,18 +209,15 @@ mod tests {
         let genesis = block(0, BlockId(B256::ZERO));
         let mut first = block(1, genesis.id());
         first.txs.push(vera_domain::Tx::new(vec![1].into()));
-        let receipt =
-            ExecutionReceipt::new(B256::repeat_byte(7), false, 5_000, 5_000, vec![], None)
-                .with_refusal(Some(vera_domain::Refusal::new(
-                    vera_domain::RefusingModule::Vera,
-                    vera_domain::RefusalKind::NotFound,
-                    "JWS token not found: missing",
-                )));
-        first.native_targets = Some([vera_domain::DbTarget::default(); 4]);
-        first.receipt_commitment = Some(vera_executor::receipt_commitment(
-            100,
-            std::slice::from_ref(&receipt),
-        ));
+        let receipt = ExecutionReceipt::new(B256::repeat_byte(7), false, 5_000, 5_000, vec![])
+            .with_refusal(Some(vera_domain::Refusal::new(
+                vera_domain::RefusingModule::Vera,
+                vera_domain::RefusalKind::NotFound,
+                "JWS token not found: missing",
+            )));
+        first.native_targets = [vera_domain::DbTarget::default(); 4];
+        first.receipt_commitment =
+            vera_executor::receipt_commitment(100, std::slice::from_ref(&receipt));
         let second = block(2, first.id());
         {
             let history = FinalizedHistory::open(dir.path(), &genesis).unwrap();

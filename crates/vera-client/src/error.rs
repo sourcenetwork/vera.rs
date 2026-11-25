@@ -28,27 +28,24 @@ pub enum ClientError {
     #[error("RPC service busy: {0}")]
     ResourceBusy(String),
 
+    /// The requested revision has no finalization certificate yet: the node has
+    /// applied it, and a descendant that finalizes it is still to come. Retryable.
+    #[error("finality pending: {0}")]
+    FinalityPending(String),
+
     /// ABI decoding failed on a precompile response.
     #[error("ABI decode error: {0}")]
     AbiDecode(String),
 
-    /// A module refused a native request. The request was executed and its
-    /// sequence consumed; the receipt says why it had no effect.
+    /// A module refused a call. A refused native request was executed and its
+    /// sequence consumed; its receipt says why it had no effect. A refused
+    /// typed query was only evaluated and has no receipt.
     #[error("{refusal}")]
     Refused {
-        /// The committed module and kind, with the module's message.
+        /// The module and kind, with the module's message.
         refusal: vera_domain::Refusal,
-        /// Full receipt for inspection.
-        receipt: Box<TransactionReceipt>,
-    },
-
-    /// An EVM transaction was included but reverted.
-    #[error("transaction reverted: status={status}")]
-    TxReverted {
-        /// EVM status code (0 = revert).
-        status: u64,
-        /// Full receipt for inspection.
-        receipt: Box<TransactionReceipt>,
+        /// Receipt of a refused native request; `None` for a typed query.
+        receipt: Option<Box<TransactionReceipt>>,
     },
 
     /// Receipt polling exhausted without finding the receipt.
@@ -158,11 +155,12 @@ impl ClientError {
             .and_then(serde_json::Value::as_str)
             .unwrap_or("unknown")
             .to_owned();
-        if code == -32002
-            && error.get("data").and_then(|data| data.get("retryable"))
-                == Some(&serde_json::Value::Bool(true))
-        {
+        let retryable = error.get("data").and_then(|data| data.get("retryable"))
+            == Some(&serde_json::Value::Bool(true));
+        if code == -32002 && retryable {
             Self::ResourceBusy(message)
+        } else if code == -32006 && retryable {
+            Self::FinalityPending(message)
         } else {
             Self::Rpc { code, message }
         }
@@ -172,6 +170,21 @@ impl ClientError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_finality_is_its_own_retryable_error() {
+        let error = ClientError::from_rpc(&serde_json::json!({
+            "code": -32006,
+            "message": "finalization certificate not found for height 7 within retained proof limits",
+            "data": {"retryable": true, "height": 7}
+        }));
+        assert!(matches!(error, ClientError::FinalityPending(_)));
+        assert!(!error.is_throttled());
+        let error = ClientError::from_rpc(&serde_json::json!({
+            "code": -32006, "message": "pending",
+        }));
+        assert!(matches!(error, ClientError::Rpc { code: -32006, .. }));
+    }
 
     #[test]
     fn remote_throttle_cannot_impersonate_local_capacity() {

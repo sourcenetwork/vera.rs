@@ -1,8 +1,7 @@
 # Simulated calls
 
-A node answers three methods by executing a call against its committed state
-and discarding every effect: `eth_call`, `eth_estimateGas` and
-`vera_simulateNativeCall`. None of them writes state, takes a sequence or
+A node answers two methods by executing a module call against its committed
+state and discarding every effect: `vera_call` and `vera_simulateNativeCall`. None of them writes state, takes a sequence or
 enters a revision, and none of their answers is evidence. A caller that needs
 an authenticated answer reads a certified record, prefix or permission proof
 instead ([permission-proofs.md](permission-proofs.md)).
@@ -20,8 +19,7 @@ A simulated call observes the deployment and the node's head revision:
 | Module state | A snapshot of the committed module values taken when the call starts |
 
 Time-dependent module paths, such as token validity and expiry, are evaluated
-at the head revision's time. `NUMBER` and `TIMESTAMP` read the same height and
-time in contract code. A request executed later runs in a later revision, so a
+at the head revision's time. A request executed later runs in a later revision, so a
 simulated success does not guarantee that a submission succeeds.
 
 The height, time and module snapshot are read together when the call starts
@@ -39,21 +37,64 @@ executes them, no request executes in genesis, and the modules reject a zero
 height rather than store a record that names it. Dry runs of those calls
 succeed once the first revision is indexed. Queries are not affected.
 
-Account reads and simulations answer for current state only: an explicit block
-number or `earliest` fails with -32004.
+## `vera_call`
 
-## `eth_call` and `eth_estimateGas`
+Evaluates one module call without a signer and returns what the module
+answered.
 
-These carry an address, not a key, so no signer DID can be derived for them.
-Module methods that require an authenticated caller revert with
-`module call requires an authenticated caller`; module queries and ordinary
-contracts run normally. To learn what an actor's module write would do, use
-`vera_simulateNativeCall`.
+```json
+{
+  "method": "vera_call",
+  "params": ["0x0000000000000000000000000000000000000810", "0x..."]
+}
+```
 
-An estimate is a limit the call succeeded with. The search stops within 1/64 of
-its upper bound and starts from the gas used at the cap, so a call that uses
-less gas under a lower limit can be estimated above its smallest sufficient
-limit.
+| Result field | Meaning |
+| --- | --- |
+| `output` | Return data of a call that ran to completion; empty when refused |
+| `refusal` | Why the module refused the call: `module`, `kind` and `message`; absent when it ran to completion |
+| `blockNumber`, `timestamp` | The head revision the call was evaluated at |
+
+The call carries no signer, so module queries answer and every method that
+needs an authenticated caller is refused as `unauthenticated` with
+`module call requires an authenticated caller`. To learn what an actor's module
+write would do, use `vera_simulateNativeCall`. The target must be a module
+address and the calldata at most what a native request may carry; a request
+outside these bounds fails with -32602 before it takes a slot.
+
+The Rust client's typed queries (`get_policy`, `has_relationship`,
+`verify_access_request`, `get_post`, `get_jws_token` and the rest of
+`vera_client`'s query helpers) are this method. Their documentation names the
+verified reader that answers the same question with evidence.
+
+## When an unauthenticated read is acceptable
+
+**`vera_call` and `vera_simulateNativeCall` are unauthenticated.** The answer is
+the word of the node that served it about its own head revision. It carries no
+finalization certificate and no state proof, the node checks nothing about the
+caller, and a node that is behind, on a discarded fork or dishonest answers
+just as readily.
+
+Acceptable:
+
+- a host reading the embedded node it runs itself, in-process through
+  `LocalRpc`, where the node is the host's own state;
+- convenience and display queries, where a wrong answer misleads a view and
+  grants nothing;
+- tests and tooling.
+
+Not acceptable:
+
+- anything that grants or denies access, including answering another party's
+  access question;
+- anything recorded as a decision or acted on for another party;
+- any check a later write relies on.
+
+Those read certified evidence against a consensus key the caller trusts:
+`VeraClient::verify_current_access` for a permission, `read_current_record`,
+`read_current_prefix` and their typed forms for state
+([permission-proofs.md](permission-proofs.md)). Nothing in Vera's own services
+decides access or records a decision from either method.
 
 ## `vera_simulateNativeCall`
 
@@ -109,7 +150,7 @@ The Rust client exposes the method as `VeraClient::simulate_native_call`.
 
 ## Admission
 
-The three methods share one set of slots per node. Executions run on the
+The two methods share one set of slots per node. Executions run on the
 blocking pool against the module snapshot, so they hold neither an async
 worker nor the lock finalization publishes under. Four run at a time and up to
 64 more wait at most two seconds for a slot. A caller beyond the 64, or one

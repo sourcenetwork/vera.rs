@@ -1,6 +1,6 @@
-use super::{broadcast_evm_tx, parse_policy_id};
+use super::{broadcast_native_tx, parse_policy_id};
 use alloy_sol_types::SolCall;
-use vera_client::{ACP_ADDRESS, EvmSigner, ModuleId, RECORD_PROOF_BYTES, VeraClient};
+use vera_client::{ACP_ADDRESS, BlsSigner, ModuleId, RECORD_PROOF_BYTES, VeraClient};
 use vera_domain::ConsensusPublicKey;
 use vera_e2e::cluster::TestCluster;
 use vera_modules::{
@@ -15,7 +15,7 @@ use vera_modules::{
 pub(super) async fn check_decisions(
     cluster: &TestCluster,
     client: &VeraClient,
-    signer: &EvmSigner,
+    signer: &BlsSigner,
     policy: &str,
     trusted: &ConsensusPublicKey,
 ) {
@@ -24,8 +24,8 @@ pub(super) async fn check_decisions(
         let expected = DecisionRequest {
             deployment_id: signer.chain_id(),
             policy_id: policy.into(),
-            creator: signer.did(),
-            creator_sequence: client.get_nonce(signer.address()).await.unwrap(),
+            creator: signer.did().to_owned(),
+            creator_sequence: signer.nonce(),
             request: AccessRequest {
                 actor: Actor(signer.did().parse().unwrap()),
                 operations: vec![Operation {
@@ -37,7 +37,7 @@ pub(super) async fn check_decisions(
                 }],
             },
         };
-        let receipt = broadcast_evm_tx(
+        let receipt = broadcast_native_tx(
             cluster,
             client,
             signer,
@@ -47,12 +47,12 @@ pub(super) async fn check_decisions(
                 resources: vec!["document".into()],
                 objectIds: vec!["doc1".into()],
                 permissions: vec!["read".into()],
-                actor: signer.did(),
+                actor: signer.did().into(),
             }
             .abi_encode(),
         )
         .await;
-        assert_eq!(receipt.status, 1);
+        assert!(receipt.success);
         let id = expected.id().unwrap();
         let key = vera_modules::acp::keys::access_decision_key(&id);
         let response = client

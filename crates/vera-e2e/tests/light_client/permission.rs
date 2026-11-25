@@ -1,8 +1,8 @@
-use super::{broadcast_evm_tx, parse_policy_id};
+use super::{broadcast_native_tx, parse_policy_id};
 use alloy_sol_types::SolCall;
 use commonware_codec::{Decode as _, Encode as _};
 use vera_client::{
-    ACP_ADDRESS, AccessRequest, Actor, EvmSigner, Object, Operation, PERMISSION_LIMITS,
+    ACP_ADDRESS, AccessRequest, Actor, BlsSigner, Object, Operation, PERMISSION_LIMITS,
     PermissionProof, PermissionRead, PermissionResponse, VeraClient, verify_permission_proof,
 };
 use vera_domain::{ConsensusPublicKey, verify_light_block};
@@ -18,7 +18,7 @@ pub(super) const READER_DID: &str = "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8
 pub(super) async fn check_permissions(
     cluster: &TestCluster,
     client: &VeraClient,
-    signer: &EvmSigner,
+    signer: &BlsSigner,
     policy: &str,
     minimum_height: u64,
     trusted: &ConsensusPublicKey,
@@ -31,7 +31,7 @@ pub(super) async fn check_permissions(
             .unwrap()
     );
     let revision = &response.revision;
-    let (_, root) = verify_light_block(revision, trusted).unwrap();
+    let root = verify_light_block(revision, trusted).unwrap();
     let proof = response.proof;
     for index in 0..proof.reads.len() {
         let mut missing = proof.clone();
@@ -68,11 +68,10 @@ pub(super) async fn check_permissions(
         objectId: "suspensions".into(),
     }
     .abi_encode();
-    assert_eq!(
-        broadcast_evm_tx(cluster, client, signer, ACP_ADDRESS, register)
+    assert!(
+        broadcast_native_tx(cluster, client, signer, ACP_ADDRESS, register)
             .await
-            .status,
-        1
+            .success
     );
 
     let edge = IAcp::setRelationshipSubjectCall {
@@ -86,11 +85,10 @@ pub(super) async fn check_permissions(
         subjectRelation: "blocked".into(),
     }
     .abi_encode();
-    assert_eq!(
-        broadcast_evm_tx(cluster, client, signer, ACP_ADDRESS, edge)
+    assert!(
+        broadcast_native_tx(cluster, client, signer, ACP_ADDRESS, edge)
             .await
-            .status,
-        1
+            .success
     );
     let block = IAcp::setRelationshipCall {
         policyId: parse_policy_id(policy),
@@ -100,8 +98,8 @@ pub(super) async fn check_permissions(
         actor: READER_DID.into(),
     }
     .abi_encode();
-    let receipt = broadcast_evm_tx(cluster, client, signer, ACP_ADDRESS, block).await;
-    assert_eq!(receipt.status, 1);
+    let receipt = broadcast_native_tx(cluster, client, signer, ACP_ADDRESS, block).await;
+    assert!(receipt.success);
     let response = evidence(client, policy, &request, receipt.block_number).await;
     assert!(
         !response
@@ -115,7 +113,7 @@ pub(super) async fn check_permissions(
             .unwrap()
     );
     let denied_revision = response.revision;
-    let (_, denied_root) = verify_light_block(&denied_revision, trusted).unwrap();
+    let denied_root = verify_light_block(&denied_revision, trusted).unwrap();
     let mut denied = response.proof;
     let mut owner_request = request.clone();
     owner_request.actor = Actor(signer.did().parse().unwrap());

@@ -57,19 +57,12 @@ fn valid_response(body: &[u8]) -> bool {
     response["jsonrpc"] == "2.0"
         && response["id"] == 1
         && response["error"].is_null()
-        && response["result"]
-            .as_str()
-            .and_then(|id| id.strip_prefix("0x"))
-            .is_some_and(|id| {
-                !id.is_empty()
-                    && id.bytes().all(|byte| byte.is_ascii_hexdigit())
-                    && u64::from_str_radix(id, 16).is_ok()
-            })
+        && response["result"]["chainId"].is_u64()
 }
 
 async fn check_node_health(client: &reqwest::Client, url: &str) -> bool {
     let request = serde_json::json!({
-        "jsonrpc": "2.0", "method": "eth_chainId", "params": [], "id": 1
+        "jsonrpc": "2.0", "method": "vera_nodeStatus", "params": [], "id": 1
     });
     let Ok(mut response) = client.post(url).json(&request).send().await else {
         return false;

@@ -12,7 +12,7 @@ use crate::{run_args::RunArgs, testnet};
 
 #[derive(Parser, Debug)]
 #[command(name = "verad")]
-#[command(about = "SourceHub validator node (commonware + REVM)")]
+#[command(about = "Vera validator node")]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -232,7 +232,7 @@ fn configure_devnet_membership(
     let consensus_pubkey = hex::encode(commonware_codec::Encode::encode(local));
     if genesis.validators.is_empty() {
         genesis.validators.push(ValidatorConfig {
-            evm_address: format!("{:?}", vera_node::validator_address(local)),
+            address: format!("{:?}", vera_node::validator_address(local)),
             consensus_pubkey,
             p2p_address: listen_addr.into(),
         });
@@ -309,8 +309,8 @@ mod tests {
         let mut genesis = VeraGenesis::devnet();
         configure_devnet_membership(&mut genesis, &key, "127.0.0.1:3000").unwrap();
         assert_eq!(
-            genesis.to_genesis_state().unwrap().participant_addresses,
-            vec![vera_node::validator_address(&key)]
+            genesis.registry_members().unwrap()[0].0,
+            vera_node::validator_address(&key)
         );
         configure_devnet_membership(&mut genesis, &key, "127.0.0.1:3000").unwrap();
         assert_eq!(genesis.validators.len(), 1);

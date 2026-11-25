@@ -1,19 +1,13 @@
 //! Vera genesis configuration.
 
-use std::{path::Path, str::FromStr};
+use std::path::Path;
 
-use crate::{
-    VeraGenesisError,
-    state::GenesisState,
-    validators::{PRECOMPILE_SENTINEL_BYTECODE, validator_storage_entries},
-};
-use alloy_evm::revm::primitives::{Address, U256};
+use crate::{VeraGenesisError, validators::registry_members};
+use alloy_primitives::Address;
 use serde::{Deserialize, Serialize};
-use vera_modules::validator_registry::layout::ADDRESS as VALIDATOR_REGISTRY_ADDRESS;
 
-/// Vera genesis configuration: the EVM allocations and code together with
-/// the deployment's operators, seeded policies, validators and consensus
-/// parameters.
+/// Vera genesis configuration: the deployment's operators, seeded policies,
+/// validators and consensus parameters.
 ///
 /// A key this struct does not define is an error, so a misspelled optional
 /// section cannot fall back to its default unnoticed.
@@ -47,27 +41,19 @@ pub struct VeraGenesis {
     /// Genesis timestamp.
     #[serde(default = "default_timestamp")]
     pub timestamp: u64,
-    /// Initial account allocations.
-    pub allocations: Vec<GenesisAllocation>,
-    /// Genesis validators for the ValidatorRegistry precompile.
+    /// Genesis members of the validator registry.
     #[serde(default)]
     pub validators: Vec<ValidatorConfig>,
-    /// Arbitrary contract bytecode to deploy at genesis.
-    #[serde(default)]
-    pub contracts: Vec<GenesisContract>,
-    /// Pre-set storage slot values at genesis.
-    #[serde(default)]
-    pub extra_storage: Vec<GenesisStorage>,
     /// Hex-encoded `EpochInfo<MinSig, ed25519::PublicKey, Unit>` for epoch 0
     /// (commonware codec `Encode`d bytes), produced by the bootstrap DKG.
     #[serde(default)]
     pub epoch_info: Option<String>,
-    /// Number of blocks in each DKG epoch.
+    /// Number of blocks in each DKG epoch; omission selects 192.
     #[serde(default = "default_blocks_per_epoch")]
     pub blocks_per_epoch: u64,
-    /// Pipelined consensus parameters. Omission preserves rotating leaders.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub simplex: Option<vera_domain::SimplexParameters>,
+    /// Pipelined consensus parameters; omission selects the defaults.
+    #[serde(default)]
+    pub simplex: vera_domain::SimplexParameters,
     /// Limit, in seconds, on how far a block's timestamp may advance past its
     /// parent's; omission keeps the application default. A deployment that
     /// finalizes less often than the limit, or pauses, falls behind the clock.
@@ -76,55 +62,23 @@ pub struct VeraGenesis {
 }
 
 const fn default_blocks_per_epoch() -> u64 {
-    20
+    192
 }
 
 const fn default_timestamp() -> u64 {
     0
 }
 
-/// A single genesis allocation entry.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct GenesisAllocation {
-    /// Account address (hex with 0x prefix).
-    pub address: String,
-    /// Account balance (decimal string).
-    pub balance: String,
-}
-
-/// A genesis validator entry for the ValidatorRegistry precompile.
+/// A genesis member of the validator registry.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ValidatorConfig {
-    /// EVM address (hex with 0x prefix).
-    pub evm_address: String,
+    /// Registry address identifying the validator (hex with 0x prefix).
+    pub address: String,
     /// Ed25519 consensus public key (hex string, 64 chars).
     pub consensus_pubkey: String,
     /// P2P network address (e.g., "127.0.0.1:30300").
     pub p2p_address: String,
-}
-
-/// Arbitrary contract bytecode to deploy at genesis.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct GenesisContract {
-    /// Contract address (hex with 0x prefix).
-    pub address: String,
-    /// Contract bytecode (hex with 0x prefix).
-    pub bytecode: String,
-}
-
-/// Pre-set storage slot at genesis.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct GenesisStorage {
-    /// Account address (hex with 0x prefix).
-    pub address: String,
-    /// Storage slot (hex with 0x prefix).
-    pub slot: String,
-    /// Storage value (hex with 0x prefix).
-    pub value: String,
 }
 
 impl VeraGenesis {
@@ -175,80 +129,23 @@ impl VeraGenesis {
         Ok(Some(info))
     }
 
-    /// Build the EVM genesis state: balances, registry storage, and code.
-    pub fn to_genesis_state(&self) -> Result<GenesisState, VeraGenesisError> {
+    /// The validator registry's genesis members: address, consensus key and
+    /// network address, validated.
+    pub fn registry_members(&self) -> Result<Vec<(Address, [u8; 32], String)>, VeraGenesisError> {
+        registry_members(&self.validators)
+    }
+
+    /// Check the operator policy and the validator registry's genesis members.
+    pub fn validate(&self) -> Result<(), VeraGenesisError> {
         if let Some(policy) = &self.operators {
             policy
                 .validate()
                 .map_err(|error| VeraGenesisError::Parse(error.to_string()))?;
         }
-        let mut genesis_alloc = Vec::with_capacity(self.allocations.len());
-        for alloc in &self.allocations {
-            let address = Address::from_str(&alloc.address)
-                .map_err(|e| VeraGenesisError::Parse(format!("invalid address: {}", e)))?;
-            let balance = U256::from_str(&alloc.balance)
-                .map_err(|e| VeraGenesisError::Parse(format!("invalid balance: {}", e)))?;
-            genesis_alloc.push((address, balance));
-        }
-
-        let (mut genesis_storage, mut genesis_code) = if self.validators.is_empty() {
-            (Vec::new(), Vec::new())
-        } else {
-            let entries = validator_storage_entries(&self.validators)?;
-            let storage = vec![(VALIDATOR_REGISTRY_ADDRESS, entries)];
-            let code = vec![(
-                VALIDATOR_REGISTRY_ADDRESS,
-                PRECOMPILE_SENTINEL_BYTECODE.to_vec(),
-            )];
-            (storage, code)
-        };
-
-        for contract in &self.contracts {
-            let address = Address::from_str(&contract.address)
-                .map_err(|e| VeraGenesisError::Parse(format!("invalid contract address: {}", e)))?;
-            let bytecode_hex = contract
-                .bytecode
-                .strip_prefix("0x")
-                .unwrap_or(&contract.bytecode);
-            let bytecode = hex::decode(bytecode_hex).map_err(|e| {
-                VeraGenesisError::Parse(format!("invalid contract bytecode: {}", e))
-            })?;
-            genesis_code.push((address, bytecode));
-        }
-
-        for entry in &self.extra_storage {
-            let address = Address::from_str(&entry.address)
-                .map_err(|e| VeraGenesisError::Parse(format!("invalid storage address: {}", e)))?;
-            let slot = U256::from_str(&entry.slot)
-                .map_err(|e| VeraGenesisError::Parse(format!("invalid storage slot: {}", e)))?;
-            let value = U256::from_str(&entry.value)
-                .map_err(|e| VeraGenesisError::Parse(format!("invalid storage value: {}", e)))?;
-
-            if let Some(existing) = genesis_storage.iter_mut().find(|(a, _)| *a == address) {
-                existing.1.push((slot, value));
-            } else {
-                genesis_storage.push((address, vec![(slot, value)]));
-            }
-        }
-
-        let participant_addresses: Vec<Address> = self
-            .validators
-            .iter()
-            .map(|v| {
-                Address::from_str(&v.evm_address)
-                    .expect("validator address already validated above")
-            })
-            .collect();
-
-        Ok(GenesisState {
-            genesis_alloc,
-            genesis_storage,
-            genesis_code,
-            participant_addresses,
-        })
+        self.registry_members().map(drop)
     }
 
-    /// Create a default devnet genesis (chain_id=9001, test allocations).
+    /// Create a default devnet genesis (chain_id=9001).
     #[must_use]
     pub fn devnet() -> Self {
         Self {
@@ -258,22 +155,10 @@ impl VeraGenesis {
             node_demerits: Vec::new(),
             chain_id: 9001,
             timestamp: 0,
-            allocations: vec![
-                GenesisAllocation {
-                    address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
-                    balance: "1000000000000000000000".to_string(), // 1000 ETH
-                },
-                GenesisAllocation {
-                    address: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8".to_string(),
-                    balance: "1000000000000000000000".to_string(),
-                },
-            ],
             validators: Vec::new(),
-            contracts: Vec::new(),
-            extra_storage: Vec::new(),
             epoch_info: None,
-            blocks_per_epoch: 20,
-            simplex: None,
+            blocks_per_epoch: default_blocks_per_epoch(),
+            simplex: vera_domain::SimplexParameters::default(),
             timestamp_step_secs: None,
         }
     }
@@ -284,13 +169,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pipeline_parameters_round_trip_without_changing_legacy_encoding() {
+    fn omitted_pipeline_parameters_select_the_defaults() {
         let mut genesis = VeraGenesis::devnet();
-        let legacy = serde_json::to_value(&genesis).unwrap();
-        assert!(legacy.get("simplex").is_none());
-        let decoded: VeraGenesis = serde_json::from_value(legacy).unwrap();
-        assert!(decoded.simplex.is_none());
-        genesis.simplex = Some(vera_domain::SimplexParameters::default());
+        let mut encoded = serde_json::to_value(&genesis).unwrap();
+        encoded.as_object_mut().unwrap().remove("simplex");
+        let decoded: VeraGenesis = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded.simplex, vera_domain::SimplexParameters::default());
+        genesis.simplex.term_length = 8;
         let decoded: VeraGenesis =
             serde_json::from_str(&serde_json::to_string(&genesis).unwrap()).unwrap();
         assert_eq!(decoded.simplex, genesis.simplex);
@@ -302,15 +187,6 @@ mod tests {
         let json = serde_json::to_string_pretty(&genesis).unwrap();
         let parsed: VeraGenesis = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.chain_id, 9001);
-        assert_eq!(parsed.allocations.len(), 2);
-    }
-
-    #[test]
-    fn devnet_to_genesis_state() {
-        let genesis = VeraGenesis::devnet();
-        let state = genesis.to_genesis_state().unwrap();
-        assert_eq!(state.genesis_alloc.len(), 2);
-        assert!(state.participant_addresses.is_empty());
     }
 
     #[test]
@@ -324,32 +200,18 @@ mod tests {
 
         let loaded = VeraGenesis::load(&path).unwrap();
         assert_eq!(loaded.chain_id, genesis.chain_id);
-        assert_eq!(loaded.allocations.len(), genesis.allocations.len());
     }
 
     #[test]
-    fn genesis_parse_error_on_invalid_address() {
-        let genesis = VeraGenesis {
-            operators: None,
-            policies: Vec::new(),
-            placed_policies: Vec::new(),
-            node_demerits: Vec::new(),
-            chain_id: 1,
-            timestamp: 0,
-            allocations: vec![GenesisAllocation {
-                address: "not-an-address".to_string(),
-                balance: "100".to_string(),
-            }],
-            validators: Vec::new(),
-            contracts: Vec::new(),
-            extra_storage: Vec::new(),
-            epoch_info: None,
-            blocks_per_epoch: 20,
-            simplex: None,
-            timestamp_step_secs: None,
-        };
-        let err = genesis.to_genesis_state().unwrap_err();
-        assert!(err.to_string().contains("invalid address"));
+    fn genesis_rejects_an_invalid_validator_address() {
+        let genesis = genesis_with_validators(vec![ValidatorConfig {
+            address: "not-an-address".to_string(),
+            consensus_pubkey: "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+                .to_string(),
+            p2p_address: "127.0.0.1:30300".to_string(),
+        }]);
+        let err = genesis.validate().unwrap_err();
+        assert!(err.to_string().contains("invalid validator address"));
     }
 
     fn genesis_with_validators(validators: Vec<ValidatorConfig>) -> VeraGenesis {
@@ -360,13 +222,10 @@ mod tests {
             node_demerits: Vec::new(),
             chain_id: 1,
             timestamp: 0,
-            allocations: Vec::new(),
             validators,
-            contracts: Vec::new(),
-            extra_storage: Vec::new(),
             epoch_info: None,
             blocks_per_epoch: 20,
-            simplex: None,
+            simplex: vera_domain::SimplexParameters::default(),
             timestamp_step_secs: None,
         }
     }
@@ -375,17 +234,17 @@ mod tests {
     fn genesis_rejects_duplicate_validators() {
         let genesis = genesis_with_validators(vec![
             ValidatorConfig {
-                evm_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
+                address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
                 consensus_pubkey: "aa".repeat(32),
                 p2p_address: "127.0.0.1:30300".to_string(),
             },
             ValidatorConfig {
-                evm_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
+                address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
                 consensus_pubkey: "bb".repeat(32),
                 p2p_address: "127.0.0.1:30301".to_string(),
             },
         ]);
-        let err = genesis.to_genesis_state().unwrap_err();
+        let err = genesis.validate().unwrap_err();
         assert!(err.to_string().contains("duplicate validator address"));
     }
 
@@ -401,30 +260,33 @@ mod tests {
         );
         let genesis = genesis_with_validators(vec![
             ValidatorConfig {
-                evm_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
+                address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
                 consensus_pubkey: key.clone(),
                 p2p_address: "127.0.0.1:30300".to_string(),
             },
             ValidatorConfig {
-                evm_address: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8".to_string(),
+                address: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8".to_string(),
                 consensus_pubkey: key,
                 p2p_address: "127.0.0.1:30301".to_string(),
             },
         ]);
-        let err = genesis.to_genesis_state().unwrap_err();
+        let err = genesis.validate().unwrap_err();
         assert!(err.to_string().contains("duplicate consensus pubkey"));
     }
 
     #[test]
-    fn unknown_keys_are_rejected_at_the_top_level_and_in_allocations() {
+    fn unknown_keys_are_rejected_at_the_top_level_and_account_sections_are_unknown() {
         let mut value = serde_json::to_value(VeraGenesis::devnet()).unwrap();
         value["operator"] = serde_json::Value::Null;
         let error = serde_json::from_value::<VeraGenesis>(value).unwrap_err();
         assert!(error.to_string().contains("unknown field `operator`"));
 
-        let mut value = serde_json::to_value(VeraGenesis::devnet()).unwrap();
-        value["allocations"][0]["nonce"] = 1.into();
-        assert!(serde_json::from_value::<VeraGenesis>(value).is_err());
+        for section in ["allocations", "contracts", "extra_storage"] {
+            let mut value = serde_json::to_value(VeraGenesis::devnet()).unwrap();
+            value[section] = serde_json::json!([]);
+            let error = serde_json::from_value::<VeraGenesis>(value).unwrap_err();
+            assert!(error.to_string().contains("unknown field"), "{section}");
+        }
     }
 
     #[test]
@@ -473,32 +335,32 @@ mod tests {
     #[test]
     fn genesis_rejects_invalid_p2p_address() {
         let genesis = genesis_with_validators(vec![ValidatorConfig {
-            evm_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
+            address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
             consensus_pubkey: "aa".repeat(32),
             p2p_address: "not-a-socket-addr".to_string(),
         }]);
-        let err = genesis.to_genesis_state().unwrap_err();
+        let err = genesis.validate().unwrap_err();
         assert!(err.to_string().contains("invalid validator p2p address"));
     }
 
     #[test]
     fn genesis_rejects_malformed_consensus_key() {
         let genesis = genesis_with_validators(vec![ValidatorConfig {
-            evm_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".into(),
+            address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".into(),
             consensus_pubkey: "dd".repeat(32),
             p2p_address: "127.0.0.1:30300".into(),
         }]);
-        assert!(genesis.to_genesis_state().is_err());
+        assert!(genesis.validate().is_err());
     }
 
     #[test]
     fn genesis_rejects_zero_consensus_key() {
         let genesis = genesis_with_validators(vec![ValidatorConfig {
-            evm_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
+            address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
             consensus_pubkey: "00".repeat(32),
             p2p_address: "127.0.0.1:30300".to_string(),
         }]);
-        let err = genesis.to_genesis_state().unwrap_err();
+        let err = genesis.validate().unwrap_err();
         assert!(
             err.to_string()
                 .contains("consensus pubkey cannot be all zeros")
@@ -506,16 +368,17 @@ mod tests {
     }
 
     #[test]
-    fn genesis_sets_precompile_bytecode() {
+    fn genesis_validators_become_registry_members() {
+        let key = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
         let genesis = genesis_with_validators(vec![ValidatorConfig {
-            evm_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
-            consensus_pubkey: "aa".repeat(32),
-            p2p_address: "127.0.0.1:30300".to_string(),
+            address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
+            consensus_pubkey: key.to_string(),
+            p2p_address: "[2001:db8::1]:30300".to_string(),
         }]);
-        let bootstrap = genesis.to_genesis_state().unwrap();
-        assert_eq!(bootstrap.genesis_code.len(), 1);
-        assert_eq!(bootstrap.genesis_code[0].0, VALIDATOR_REGISTRY_ADDRESS);
-        assert_eq!(bootstrap.genesis_code[0].1, PRECOMPILE_SENTINEL_BYTECODE);
+        let members = genesis.registry_members().unwrap();
+        assert_eq!(members.len(), 1);
+        assert_eq!(hex::encode(members[0].1), key);
+        assert_eq!(members[0].2, "[2001:db8::1]:30300");
     }
 
     #[test]
@@ -524,7 +387,7 @@ mod tests {
         use commonware_cryptography::Signer as _;
 
         let genesis = VeraGenesis::devnet();
-        assert_eq!(genesis.blocks_per_epoch, 20);
+        assert_eq!(genesis.blocks_per_epoch, 192);
         assert!(genesis.decode_epoch_info().unwrap().is_none());
 
         let players = commonware_utils::ordered::Set::from_iter_dedup((0..4).map(|seed| {

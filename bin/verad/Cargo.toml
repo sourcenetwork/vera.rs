@@ -24,6 +24,7 @@ vera-config.workspace = true
 vera-node.workspace = true
 
 alloy-primitives.workspace = true
+vera-crypto.workspace = true
 ark-bls12-381.workspace = true
 ark-ff.workspace = true
 
@@ -47,7 +48,6 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
-vera-crypto.workspace = true
 
 [lints]
 workspace = true

@@ -1,6 +1,6 @@
 use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};
-use vera_domain::{ConsensusPublicKey, LIGHT_BLOCK_RESPONSE_BYTES, LightBlock, verify_light_block};
+use vera_domain::{FinalityTrust, LIGHT_BLOCK_RESPONSE_BYTES, LightBlock};
 
 use crate::{
     ModuleId, PERMISSION_LIMITS, PermissionError, PrefixProof, RECORD_PROOF_BYTES, ReadLimits,
@@ -123,11 +123,11 @@ impl PolicyPrefixResponse {
         resource: &str,
         relation: &str,
         minimum_height: u64,
-        trusted: &ConsensusPublicKey,
+        trusted: &impl FinalityTrust,
         maximum_bytes: usize,
     ) -> Result<PrefixEvidence, PermissionError> {
         encoded_size(&self.revision, LIGHT_BLOCK_RESPONSE_BYTES)?;
-        let (_, root) = verify_light_block(&self.revision, trusted)?;
+        let root = trusted.finalized_block(&self.revision)?.module_state_root;
         if self.revision.height < minimum_height {
             return Err(PermissionError::Invalid(
                 "revision precedes required minimum",
@@ -143,12 +143,12 @@ impl PolicyPrefixResponse {
         policy: &str,
         prefix: &[u8],
         minimum_height: u64,
-        trusted: &ConsensusPublicKey,
+        trusted: &impl FinalityTrust,
         maximum_bytes: usize,
     ) -> Result<Option<PrefixEvidence>, PermissionError> {
         validate_policy_prefix(policy, prefix)?;
         encoded_size(&self.revision, LIGHT_BLOCK_RESPONSE_BYTES)?;
-        let (_, root) = verify_light_block(&self.revision, trusted)?;
+        let root = trusted.finalized_block(&self.revision)?.module_state_root;
         if self.revision.height < minimum_height {
             return Err(PermissionError::Invalid(
                 "revision precedes required minimum",

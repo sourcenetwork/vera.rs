@@ -156,7 +156,7 @@ pub(crate) fn run(
             .iter()
             .zip(&p2p_ports)
             .map(|(public_key, port)| ValidatorConfig {
-                evm_address: format!("{:?}", vera_node::validator_address(public_key)),
+                address: format!("{:?}", vera_node::validator_address(public_key)),
                 consensus_pubkey: hex::encode(Encode::encode(public_key)),
                 p2p_address: format!("127.0.0.1:{port}"),
             })
@@ -359,7 +359,7 @@ fn print_config_summary(
 fn check_rpc_health(url: &str) -> bool {
     let body = serde_json::json!({
         "jsonrpc": "2.0",
-        "method": "eth_chainId",
+        "method": "vera_nodeStatus",
         "params": [],
         "id": 1
     });

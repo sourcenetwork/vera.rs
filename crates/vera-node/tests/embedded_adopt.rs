@@ -94,8 +94,8 @@ fn a_second_directory_opens_the_exported_deployment_from_its_genesis() {
         genesis.validators[0].consensus_pubkey
     );
     assert_eq!(
-        adopted.genesis().validators[0].evm_address,
-        genesis.validators[0].evm_address
+        adopted.genesis().validators[0].address,
+        genesis.validators[0].address
     );
     assert_eq!(adopted.genesis().epoch_info, genesis.epoch_info);
     // No state travels with the export: the first device's write is unknown here.

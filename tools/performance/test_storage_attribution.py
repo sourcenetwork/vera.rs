@@ -12,11 +12,11 @@ from storage_attribution import closed_blob_span, closed_span, span_summary, sys
 
 APPLY = '2026-10-06T00:00:00Z DEBUG vera_publication_diagnostics: finalized state apply height=12 database_apply_us=12000 publication_us=10\n'
 START = '2026-10-06T00:00:01Z DEBUG vera_publication_diagnostics: finalized state synchronization started height=Some(12) sync_start_us=100000\n'
-FINALIZE = 'stateful.db.finalize{index=3}: commonware_glue::stateful::db: close time.busy=2ms time.idle=10ms\n'
-ANY = ('stateful.db.finalize{index=3}:qmdb.current.db.start_sync:'
+FINALIZE = 'stateful.db.finalize{index=0}: commonware_glue::stateful::db: close time.busy=2ms time.idle=10ms\n'
+ANY = ('stateful.db.finalize{index=0}:qmdb.current.db.start_sync:'
        'qmdb.any.db.start_sync{db_size=3}: commonware_storage::qmdb::any::db: close '
        'time.busy=100ns time.idle=12µs\n')
-WRITE = 'utils.rwlock.write{lock="stateful.db.3"}: commonware_utils::sync: close time.busy=3us time.idle=1s\n'
+WRITE = 'utils.rwlock.write{lock="stateful.db.0"}: commonware_utils::sync: close time.busy=3us time.idle=1s\n'
 
 BLOB_WRITE = ('runtime.storage.blob.write_at{partition=/private/secret bytes=32 options=DONT_CACHE}: '
               'commonware_runtime::storage::metered: close time.busy=5µs time.idle=3ms\n')
@@ -53,24 +53,24 @@ class StorageAttributionTests(unittest.TestCase):
         self.assertEqual(groups['write']['partition'], 'acp')
 
     def test_retained_completion_children_expose_missing_finalize_window_coverage(self):
-        persistent = ''.join(FINALIZE.replace('index=3', f'index={index}') for index in range(7))
+        persistent = ''.join(FINALIZE.replace('index=0', f'index={index}') for index in range(4))
         first = APPLY + persistent + START
         complete = span_summary(io.StringIO(first))
         self.assertTrue(complete['persistent_finalize_window_coverage_complete'])
-        self.assertEqual(complete['persistent_finalize_window_samples'], 7)
+        self.assertEqual(complete['persistent_finalize_window_samples'], 4)
         self.assertEqual(complete['incomplete_persistent_finalize_windows'], 0)
         # Persistent parents close after the window when returned completion children retain them.
-        second = APPLY + FINALIZE.replace('index=3', 'index=7') + START + BLOB_COMPLETE + persistent
+        second = APPLY + FINALIZE.replace('index=0', 'index=4') + START + BLOB_COMPLETE + persistent
         retained = span_summary(io.StringIO(first + second))
         self.assertEqual(retained['completed_finalization_windows'], 2)
         self.assertFalse(retained['persistent_finalize_window_coverage_complete'])
         self.assertEqual(retained['incomplete_persistent_finalize_windows'], 1)
-        self.assertEqual(retained['persistent_finalize_window_samples'], 7)
-        self.assertEqual(retained['spans_outside_windows'], 7)
+        self.assertEqual(retained['persistent_finalize_window_samples'], 4)
+        self.assertEqual(retained['spans_outside_windows'], 4)
         self.assertEqual(retained['blob_groups'][0]['operation'], 'sync')
 
     def test_child_close_is_not_double_counted_and_bad_units_fail(self):
-        current = ('stateful.db.finalize{index=3}:qmdb.current.db.start_sync: '
+        current = ('stateful.db.finalize{index=0}:qmdb.current.db.start_sync: '
                    'commonware_storage::qmdb::current::db: close time.busy=1ms time.idle=2ms\n')
         self.assertIsNone(closed_span(current))
         self.assertEqual(closed_span(ANY)[0], 'start_sync')

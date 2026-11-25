@@ -38,6 +38,14 @@ pub enum AnchoringError {
         /// Sequence of the newer anchor.
         latest: u64,
     },
+    /// A term the deployment's operators certified voided the snapshot's anchor.
+    #[error("snapshot anchor {held} is above the cut of term {term}")]
+    Superseded {
+        /// Sequence of the snapshot's anchor.
+        held: u64,
+        /// The term that voided it.
+        term: u64,
+    },
     /// Two anchor records with one sequence name different revisions.
     #[error("anchor records with sequence {0} disagree")]
     Conflict(u64),

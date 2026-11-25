@@ -1,4 +1,4 @@
-//! verad — SourceHub validator node.
+//! verad — Vera validator node.
 
 #![recursion_limit = "256"]
 

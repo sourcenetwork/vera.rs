@@ -31,7 +31,13 @@ impl VeraClient {
                 vera_domain::LIGHT_BLOCK_RESPONSE_BYTES + maximum_bytes + 1024,
             )
             .await?;
-        response.verify(module, key, minimum_height, trusted, maximum_bytes)?;
+        response.verify(
+            module,
+            key,
+            minimum_height,
+            &self.established(trusted),
+            maximum_bytes,
+        )?;
         Ok(response)
     }
 }
@@ -62,7 +68,13 @@ impl VeraClient {
                 vera_domain::LIGHT_BLOCK_RESPONSE_BYTES + maximum_bytes + 1024,
             )
             .await?;
-        response.verify(module, prefix, minimum_height, trusted, maximum_bytes)?;
+        response.verify(
+            module,
+            prefix,
+            minimum_height,
+            &self.established(trusted),
+            maximum_bytes,
+        )?;
         Ok(response)
     }
 }
@@ -105,7 +117,12 @@ impl VeraClient {
                 vera_domain::LIGHT_BLOCK_RESPONSE_BYTES + maximum_bytes + 1024,
             )
             .await?;
-        let page = response.verify(request, minimum_height, trusted, maximum_bytes)?;
+        let page = response.verify(
+            request,
+            minimum_height,
+            &self.established(trusted),
+            maximum_bytes,
+        )?;
         Ok((response, page))
     }
 }

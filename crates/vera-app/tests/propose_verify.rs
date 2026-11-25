@@ -2,26 +2,40 @@
 
 #![recursion_limit = "256"]
 
-use alloy_primitives::{Address, U256, keccak256};
+use alloy_sol_types::SolCall;
 use commonware_glue::stateful::{Application, Input, db::DatabaseSet as _};
 use commonware_runtime::{Runner as _, Supervisor as _, tokio};
 use futures::FutureExt as _;
-use k256::ecdsa::SigningKey;
 use vera_app::ordered_state::OrderedState;
 use vera_app::{NoopSink, ReshareInput, StatefulVeraApp};
+use vera_client::{ACP_ADDRESS, BlsSigner};
 use vera_consensus::{Mempool as _, components::InMemoryMempool};
-use vera_domain::{Block, evm::Evm};
+use vera_domain::{Block, DbTarget, NativeTx, Tx};
 use vera_executor::VeraExecutor;
-use vera_genesis::GenesisState;
+use vera_modules::acp::abi::IAcp;
 mod support;
 use support::block_ancestry;
 
 const CHAIN_ID: u64 = 9001;
 
-fn signer() -> (SigningKey, Address) {
-    let key = SigningKey::from_bytes(&[7u8; 32].into()).expect("key");
-    let address = Evm::address_from_key(&key);
-    (key, address)
+fn create_policy(signer: &BlsSigner, name: &str) -> Tx {
+    Tx::new(
+        signer
+            .sign_native_tx(
+                ACP_ADDRESS,
+                IAcp::createPolicyCall {
+                    policy: format!("name: {name}\nresources:\n  - name: file\n")
+                        .into_bytes()
+                        .into(),
+                    marshalType: 1,
+                    nonce: Default::default(),
+                }
+                .abi_encode()
+                .into(),
+            )
+            .unwrap()
+            .into(),
+    )
 }
 
 #[test]
@@ -37,12 +51,7 @@ fn competing_proposals_preserve_receipts() {
         )
         .await;
 
-        let (key, from) = signer();
-        let genesis_state = GenesisState {
-            genesis_alloc: vec![(from, U256::from(1_000_000_000_000_000_000u128))],
-            ..Default::default()
-        };
-        let genesis = support::genesis(&set, &genesis_state).await;
+        let genesis = support::genesis(&set).await;
         drop(set);
         let set = OrderedState::init(
             context.child("anchored_genesis"),
@@ -52,9 +61,9 @@ fn competing_proposals_preserve_receipts() {
         .await;
 
         let mempool = InMemoryMempool::new();
-        let to = Address::repeat_byte(0x42);
-        let tx = Evm::sign_eip1559_transfer(&key, CHAIN_ID, to, U256::from(1000u64), 0, 21_000);
-        assert!(mempool.insert(tx));
+        let first = BlsSigner::new(7u64.into(), CHAIN_ID).unwrap();
+        let second = BlsSigner::new(8u64.into(), CHAIN_ID).unwrap();
+        assert!(mempool.insert(create_policy(&first, "first")));
 
         let mut app = StatefulVeraApp::<NoopSink>::new(
             executor,
@@ -84,8 +93,8 @@ fn competing_proposals_preserve_receipts() {
         let block = proposed.block;
         assert_eq!(block.height, 1);
         assert_eq!(block.txs.len(), 1);
-        assert_ne!(block.state_root, genesis.state_root);
-        assert_ne!(block.db_targets, genesis.db_targets);
+        assert_ne!(block.module_state_root, genesis.module_state_root);
+        assert_ne!(block.native_targets, genesis.native_targets);
 
         let verified = app
             .process(
@@ -101,37 +110,8 @@ fn competing_proposals_preserve_receipts() {
             &StatefulVeraApp::<NoopSink>::sync_targets(&block)
         ));
 
-        let mut pipeline = app
-            .clone()
-            .with_native_pipeline(true, std::time::Duration::ZERO);
-        for finality in [
-            commonware_glue::stateful::Finality::Candidate,
-            commonware_glue::stateful::Finality::Finalized,
-        ] {
-            assert!(
-                pipeline
-                    .process(
-                        (context.child("reject_legacy"), block.context.clone()),
-                        block_ancestry([block.clone(), genesis.clone()]),
-                        set.new_batches().await,
-                        finality,
-                    )
-                    .await
-                    .is_none(),
-                "pipelined execution must reject the valid legacy proposal"
-            );
-        }
-
         mempool.prune(&[block.txs[0].id()]);
-        let competing_tx = Evm::sign_eip1559_transfer(
-            &key,
-            CHAIN_ID,
-            Address::repeat_byte(0x43),
-            U256::from(2000u64),
-            0,
-            21_000,
-        );
-        assert!(mempool.insert(competing_tx));
+        assert!(mempool.insert(create_policy(&second, "second")));
         let mut verifier = app.clone();
         let competing = verifier
             .propose(
@@ -164,7 +144,7 @@ fn competing_proposals_preserve_receipts() {
                 30_000_000,
             );
             let mut wrong = candidate.clone();
-            wrong.receipt_commitment = Some(alloy_primitives::B256::ZERO);
+            wrong.receipt_commitment = alloy_primitives::B256::ZERO;
             assert!(
                 std::panic::AssertUnwindSafe(capturer.capture(
                     (context.child("wrong_receipts"), wrong.context.clone()),
@@ -185,17 +165,28 @@ fn competing_proposals_preserve_receipts() {
                 )
                 .await;
             assert_eq!(receipts.len(), 1);
-            assert_eq!(receipts[0].tx_hash, keccak256(&candidate.txs[0].bytes));
+            assert_eq!(
+                receipts[0].tx_hash,
+                NativeTx::decode_wire(&candidate.txs[0].bytes)
+                    .unwrap()
+                    .tx_id()
+                    .0
+            );
             assert!(receipts[0].success());
-            assert_eq!(receipts[0].gas_used, 21_000);
+            assert!(receipts[0].gas_used > 0);
         }
 
         set.apply(verified).await;
         assert!(set.finalize().await.durable().await);
         let committed = set.committed_targets().await;
+        let native = [committed.0, committed.1, committed.2, committed.3];
         assert_eq!(
-            vera_app::db_targets_from_sync(&(committed.0, committed.1, committed.2)),
-            block.db_targets
+            native.each_ref().map(|target| DbTarget {
+                root: target.root,
+                floor: *target.range.start(),
+                tip: *target.range.end(),
+            }),
+            block.native_targets
         );
     });
 }

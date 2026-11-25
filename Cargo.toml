@@ -60,9 +60,7 @@ vera-consensus = { path = "crates/vera-consensus", version = "=0.2.0" }
 vera-crypto = { path = "crates/vera-crypto", version = "=0.2.0" }
 vera-domain = { path = "crates/vera-domain", version = "=0.2.0" }
 vera-indexer = { path = "crates/vera-indexer", version = "=0.2.0" }
-vera-qmdb = { path = "crates/vera-qmdb", version = "=0.2.0" }
 vera-jsonrpc = { path = "crates/vera-jsonrpc", version = "=0.2.0" }
-vera-traits = { path = "crates/vera-traits", version = "=0.2.0" }
 
 vera-app = { path = "crates/vera-app", version = "=0.2.0" }
 vera-node = { path = "crates/vera-node", version = "=0.2.0" }
@@ -98,16 +96,8 @@ vera-zanzibar = { path = "crates/vera-zanzibar", version = "=0.2.0" }
 
 # Alloy
 alloy-primitives = "1.7"
-alloy-consensus = { version = "2.4", features = ["k256"] }
-alloy-eips = "2.4"
 alloy-rlp = { version = "0.3.16", features = ["derive"] }
-alloy-evm = { version = "0.39.0", default-features = false }
-alloy-signer = "2.4"
-alloy-signer-local = { version = "2.4", default-features = false }
 alloy-sol-types = "1.7"
-
-# Execution
-revm = { version = "43.0.0", default-features = false, features = ["optional_balance_check"] }
 
 # Async
 tokio = { version = "1.50", features = ["full"] }

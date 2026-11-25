@@ -138,7 +138,7 @@ A successful Linux job does not replace the other release gates.
 | `validator.key` | Ed25519 consensus identity (32 bytes, owner-only) |
 | `secrets.json` | BLS shares and DKG state (owner-only, atomic writes) |
 | `history/` | Durable execution and finalization records |
-| `native-genesis.bin` | Published after all seven partitions first seal |
+| `native-genesis.bin` | Published after all four partitions first seal |
 
 `config.toml` and `genesis.json` reject keys they do not define, so a misspelled
 section fails at startup instead of selecting its default. `genesis.json` must
@@ -432,8 +432,8 @@ It restores only its own queue, checks all replica records and requires the
 affected member for a subsequent quorum. This is local transport-fault coverage;
 real WAN latency and capacity measurements still require separate hosts.
 
-The ordered-state recovery unit test separately exercises all 128 durable
-subsets of the seven journals after an interrupted generation. It checks the
+The ordered-state recovery unit test separately exercises all 16 durable
+subsets of the four journals after an interrupted generation. It checks the
 actual persisted targets, rejects unanchored state, recovers the selected anchor
 before publishing query state, and verifies subsequent writes and reopening.
 This models completed partition writes around a process exit; it does not
@@ -455,6 +455,8 @@ failure coverage alongside the completed-partition recovery matrix.
   durable history. They are null until observed. `snapshotRevision` separately
   records the recovered snapshot floor. Use height changes for progress alarms;
   `finalizedCount` counts callbacks in this process and is not a height.
+  `headHeight` is the newest revision in the execution index that receipt,
+  revision and proof reads are served from; `VeraClient::block_number` returns it.
 - `peerCount` is the number of peers the node holds an authenticated connection
   to, sampled every ten seconds from the network's connection metric. It is null
   before the first sample and on a deployment with one validator. It counts
@@ -464,13 +466,7 @@ failure coverage alongside the completed-partition recovery matrix.
   Null does not mean no nullifications or a known non-leader.
   `validatorIndex` and `validatorCount` describe startup configuration, not the
   active membership after operator changes. Rust clients represent unavailable
-  fields as `Option`; JSON consumers must accept null. The compatibility
-  `net_peerCount` method returns resource-unavailable (`-32002`) until an actual
-  count is observed; it does not substitute zero for unknown connectivity.
-- While backfilling, the compatibility `eth_syncing` response uses the published
-  finalized height for `currentBlock`. Its `highestBlock` is only the maximum of
-  that height and the recovered snapshot floor, not an estimate of the network
-  tip. Consensus views and process counters are never used as heights.
+  fields as `Option`; JSON consumers must accept null.
 - `RUST_LOG=warn,vera_resource_diagnostics=debug` emits a resource snapshot every 30
   seconds (runtime metrics, resident execution index, cache occupancy,
   history-backend memory counters). Collection runs off the async executor and
@@ -538,8 +534,9 @@ workloads and measurement boundaries.
 - Certificate and proof endpoints apply fixed budgets; a client exceeding
   them receives retryable `-32002` errors and must back off, not reconnect
   harder.
-- `eth_call` and `eth_estimateGas`, which carry the Rust client's typed
-  queries, share four slots per node with `vera_simulateNativeCall`. Up to 64
+- `vera_call`, which carries the Rust client's typed queries, shares four
+  slots per node with `vera_simulateNativeCall`. Both are unauthenticated
+  ([simulation.md](simulation.md#when-an-unauthenticated-read-is-acceptable)). Up to 64
   more callers wait at most two seconds for a slot; a caller beyond those, or
   one whose wait expires, receives the same retryable `-32002`. The client
   does not retry it.

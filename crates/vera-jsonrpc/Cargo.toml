@@ -34,9 +34,6 @@ tokio-util = { version = "0.7", features = ["compat"], optional = true }
 serde.workspace = true
 serde_json.workspace = true
 
-# Encoding
-hex.workspace = true
-
 # Error handling
 thiserror.workspace = true
 
@@ -56,7 +53,6 @@ vera-permission.workspace = true
 vera-executor.workspace = true
 vera-indexer.workspace = true
 vera-modules.workspace = true
-vera-traits.workspace = true
 
 [dev-dependencies]
 commonware-glue.workspace = true

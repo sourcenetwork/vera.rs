@@ -20,7 +20,6 @@ vera-domain.workspace = true
 vera-executor.workspace = true
 vera-genesis.workspace = true
 vera-modules.workspace = true
-vera-qmdb.workspace = true
 
 commonware-codec.workspace = true
 commonware-consensus.workspace = true
@@ -31,7 +30,6 @@ commonware-runtime.workspace = true
 commonware-storage.workspace = true
 commonware-utils.workspace = true
 
-alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 futures.workspace = true
 parking_lot.workspace = true
@@ -47,7 +45,7 @@ commonware-p2p.workspace = true
 commonware-codec.workspace = true
 vera-client.workspace = true
 alloy-sol-types.workspace = true
-vera-domain = { workspace = true, features = ["evm"] }
+vera-domain = { workspace = true, features = ["testing"] }
 alloy-primitives.workspace = true
 k256.workspace = true
 tempfile.workspace = true

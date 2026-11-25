@@ -20,13 +20,70 @@ pub enum AnchorError {
         /// Height of the submitted revision.
         height: u64,
     },
-    /// The revision's term is lower than the latest anchor's.
-    #[error("revision term {term} is below the latest anchor's term {latest}")]
+    /// The revision's term is below the certified one, which voids it.
+    #[error("revision term {term} is below the certified term {latest}")]
     LowerTerm {
-        /// Term of the latest anchor.
+        /// The term certified last.
         latest: u64,
         /// Term of the submitted revision.
         term: u64,
+    },
+    /// The revision is not shown to descend from the deployment's latest anchor.
+    #[error("revision {height} is not shown to descend from the latest anchor at {latest}")]
+    NotDescendant {
+        /// Height of the latest anchor.
+        latest: u64,
+        /// Height of the submitted revision.
+        height: u64,
+    },
+    /// The deployment has no anchor a fork could conflict with.
+    #[error("the deployment has no anchor")]
+    NoAnchor,
+    /// The reported block does not conflict with the deployment's latest anchor.
+    #[error("revision {height} is not shown to conflict with the latest anchor at {latest}")]
+    NotAFork {
+        /// Height of the latest anchor.
+        latest: u64,
+        /// Height of the reported revision.
+        height: u64,
+    },
+    /// The fork is already recorded.
+    #[error("the fork is already recorded")]
+    ForkRecorded,
+    /// The revision's term is above the one the deployment's operators certified.
+    #[error("revision term {term} is above the certified term {certified}")]
+    TermNotCertified {
+        /// The term certified last.
+        certified: u64,
+        /// Term of the submitted revision.
+        term: u64,
+    },
+    /// The certificate's term is not above the one recorded last.
+    #[error("term {term} is not above the certified term {certified}")]
+    TermNotNewer {
+        /// The term certified last.
+        certified: u64,
+        /// The certificate's term.
+        term: u64,
+    },
+    /// The deployment is not registered for anchoring.
+    #[error("the deployment is not registered")]
+    NotRegistered,
+    /// A registration names no genesis block, an invalid operator policy, or
+    /// another genesis block than the deployment is registered with.
+    #[error("the registration is invalid or names another genesis block")]
+    InvalidRegistration,
+    /// A grant names an invalid signer or a quota of zero.
+    #[error("the submitter grant is invalid")]
+    InvalidGrant,
+    /// The signer has no grant to submit for the deployment.
+    #[error("the signer has no grant to submit for the deployment")]
+    NotGranted,
+    /// The signer used its quota of submissions for the day.
+    #[error("the signer used its {quota} submissions for the day")]
+    QuotaExceeded {
+        /// Submissions the grant allows in one day.
+        quota: u32,
     },
     /// A stored anchor record does not decode or names another deployment.
     #[error("anchor record is malformed")]

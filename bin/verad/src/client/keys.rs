@@ -2,19 +2,19 @@
 
 use clap::Subcommand;
 use rand::RngCore;
-use vera_client::{BlsSigner, EvmSigner, Secp256k1SigningKey, create_bearer_token};
+use vera_client::{BlsSigner, Secp256k1SigningKey, create_bearer_token};
 use zeroize::Zeroizing;
 
 use super::{context::ClientContext, parse};
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum KeysCommand {
-    /// Generate a random secp256k1 keypair.
-    GenerateEvm,
+    /// Generate a random secp256k1 actor keypair.
+    GenerateActor,
     /// Generate a random BLS12-381 keypair.
     GenerateBls,
-    /// Show address and DID for a secp256k1 private key.
-    ShowEvm {
+    /// Show the DID of a secp256k1 actor private key.
+    ShowActor {
         /// Hex-encoded private key.
         key: String,
     },
@@ -33,7 +33,7 @@ pub(crate) enum KeysCommand {
     },
 }
 
-fn generate_evm_key() -> Result<Secp256k1SigningKey, rand::Error> {
+fn generate_actor_key() -> Result<Secp256k1SigningKey, rand::Error> {
     let mut secret = Zeroizing::new([0u8; 32]);
     loop {
         rand::rngs::OsRng.try_fill_bytes(&mut *secret)?;
@@ -43,17 +43,20 @@ fn generate_evm_key() -> Result<Secp256k1SigningKey, rand::Error> {
     }
 }
 
+/// The canonical `did:key` of a secp256k1 actor key.
+pub(super) fn actor_did(key: &Secp256k1SigningKey) -> eyre::Result<String> {
+    vera_crypto::secp256k1::did_from_secp256k1_pubkey(&key.verifying_key().to_sec1_bytes())
+        .map_err(|error| eyre::eyre!("actor DID: {error}"))
+}
+
 impl KeysCommand {
     pub(super) async fn run(self, ctx: &ClientContext) -> eyre::Result<()> {
         match self {
-            Self::GenerateEvm => {
-                let key = generate_evm_key()?;
-                let hex_key = hex::encode(key.to_bytes());
-                let signer = EvmSigner::from_native_key(key, 0);
+            Self::GenerateActor => {
+                let key = generate_actor_key()?;
                 ctx.print_json(&serde_json::json!({
-                    "private_key": hex_key,
-                    "address": format!("{:?}", signer.address()),
-                    "did": signer.did(),
+                    "private_key": hex::encode(key.to_bytes()),
+                    "did": actor_did(&key)?,
                 }))?;
             }
             Self::GenerateBls => {
@@ -65,14 +68,10 @@ impl KeysCommand {
                     "private_key": format!("0x{}", hex::encode(signer.secret_key_bytes()?)),
                 }))?;
             }
-            Self::ShowEvm { key } => {
-                let key_hex = key.strip_prefix("0x").unwrap_or(&key);
-                let signer =
-                    EvmSigner::from_hex(key_hex, 0).map_err(|e| eyre::eyre!("invalid key: {e}"))?;
-                ctx.print_json(&serde_json::json!({
-                    "address": format!("{:?}", signer.address()),
-                    "did": signer.did(),
-                }))?;
+            Self::ShowActor { key } => {
+                let key = Secp256k1SigningKey::from_slice(&parse::decode_hex(&key)?)
+                    .map_err(|_| eyre::eyre!("invalid secp256k1 key"))?;
+                ctx.print_json(&serde_json::json!({ "did": actor_did(&key)? }))?;
             }
             Self::ShowBls { key } => {
                 let signer = BlsSigner::new(parse::bls_scalar(&key)?, 0)
@@ -107,11 +106,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn generated_evm_key_round_trips() {
-        let key = generate_evm_key().unwrap();
-        let expected = EvmSigner::from_native_key(key.clone(), 1);
-        let actual = EvmSigner::from_hex(&hex::encode(key.to_bytes()), 1).unwrap();
-        assert_eq!(actual.address(), expected.address());
-        assert_eq!(actual.did(), expected.did());
+    fn a_generated_actor_key_round_trips_to_the_same_did() {
+        let key = generate_actor_key().unwrap();
+        let restored = Secp256k1SigningKey::from_slice(&key.to_bytes()).unwrap();
+        let did = actor_did(&key).unwrap();
+        assert_eq!(actor_did(&restored).unwrap(), did);
+        assert_eq!(vera_crypto::actor::canonical_did(&did), did);
     }
 }

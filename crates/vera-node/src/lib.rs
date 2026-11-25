@@ -6,14 +6,10 @@
 #![recursion_limit = "256"]
 
 mod allocator_memory;
-mod beneficiaries;
 mod bootstrap;
 pub use bootstrap::{
     BootstrapSettings, GenesisEpochInfo, epoch_info_hex, run_bootstrap, trusted_setup,
 };
-
-mod committed_state;
-pub use committed_state::CommittedState;
 
 mod config;
 mod connectivity;
@@ -37,13 +33,14 @@ mod term;
 pub use term::{Contest, Device, Switching, TermRefusal, TermSeat};
 
 mod finalize;
-pub use finalize::{index_finalized_block, subscription_data};
+pub use finalize::index_finalized_block;
 
 mod history;
 pub use history::{
     DiscardedSubmission, FinalizedHistory, HISTORY_CHUNK_BYTES, HISTORY_MAINTENANCE_INTERVAL,
     HistoricalExecution, HistoryChunk, HistoryLimits, HistoryMemory, HistoryPeer, HistoryPruned,
-    RetentionTooShort, check_history_retention, minimum_history_retention, start_history_peer,
+    RetentionTooShort, UnsupportedHistoryFormat, check_history_retention,
+    minimum_history_retention, start_history_peer,
 };
 
 #[cfg(feature = "fault-injection")]
@@ -96,5 +93,4 @@ mod tx_reannouncement;
 pub use tx_admission::Admission;
 pub use tx_gossip::{SharedValidator, TxGossip, spawn_tx_receiver};
 
-mod vrf_elector;
-use vrf_elector::VrfElectorConfig;
+mod term_elector;

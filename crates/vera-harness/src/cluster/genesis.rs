@@ -29,70 +29,27 @@ pub struct VeraGenesis {
     pub node_demerits: Vec<NodeDemeritSeed>,
     /// Genesis timestamp (unix seconds).
     pub timestamp: u64,
-    /// Pre-funded accounts.
-    pub allocations: Vec<GenesisAllocation>,
     /// Initial validator set.
     #[serde(default)]
     pub validators: Vec<ValidatorConfig>,
-    /// Contract bytecode deployed at genesis.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub contracts: Vec<GenesisContract>,
-    /// Storage slots pre-set at genesis.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub extra_storage: Vec<GenesisStorage>,
     /// Hex-encoded epoch-0 DKG `EpochInfo` (optional).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub epoch_info: Option<String>,
     /// Number of blocks in each DKG epoch.
-    #[serde(default, skip_serializing_if = "is_default_blocks_per_epoch")]
     pub blocks_per_epoch: u64,
-    /// Pipelined consensus parameters. Omission preserves rotating leaders.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub simplex: Option<vera_domain::SimplexParameters>,
-}
-
-const fn is_default_blocks_per_epoch(value: &u64) -> bool {
-    *value == 20
-}
-
-/// A pre-funded account allocation.
-#[derive(Clone, Debug, Serialize)]
-pub struct GenesisAllocation {
-    /// EVM address of the account.
-    pub address: String,
-    /// Initial balance in wei.
-    pub balance: String,
+    /// Pipelined consensus parameters.
+    pub simplex: vera_domain::SimplexParameters,
 }
 
 /// An initial validator entry.
 #[derive(Clone, Debug, Serialize)]
 pub struct ValidatorConfig {
-    /// Validator's EVM address.
-    pub evm_address: String,
+    /// Validator's registry address.
+    pub address: String,
     /// Validator's consensus public key.
     pub consensus_pubkey: String,
     /// Validator's P2P listen address.
     pub p2p_address: String,
-}
-
-/// Arbitrary contract bytecode injected at genesis.
-#[derive(Clone, Debug, Serialize)]
-pub struct GenesisContract {
-    /// Contract address.
-    pub address: String,
-    /// Hex-encoded init bytecode.
-    pub bytecode: String,
-}
-
-/// Pre-set storage slot at genesis.
-#[derive(Clone, Debug, Serialize)]
-pub struct GenesisStorage {
-    /// Contract address.
-    pub address: String,
-    /// Storage slot key.
-    pub slot: String,
-    /// Storage slot value.
-    pub value: String,
 }
 
 /// Builder for test genesis configurations.
@@ -102,13 +59,10 @@ pub struct GenesisBuilder {
     operators: Option<OperatorPolicy>,
     policies: Vec<PolicySeed>,
     node_demerits: Vec<NodeDemeritSeed>,
-    allocations: Vec<GenesisAllocation>,
     validators: Vec<ValidatorConfig>,
-    contracts: Vec<GenesisContract>,
-    extra_storage: Vec<GenesisStorage>,
     epoch_info: Option<String>,
     blocks_per_epoch: Option<u64>,
-    simplex: Option<vera_domain::SimplexParameters>,
+    simplex: vera_domain::SimplexParameters,
 }
 
 impl Default for GenesisBuilder {
@@ -118,13 +72,10 @@ impl Default for GenesisBuilder {
             operators: None,
             policies: Vec::new(),
             node_demerits: Vec::new(),
-            allocations: Vec::new(),
             validators: Vec::new(),
-            contracts: Vec::new(),
-            extra_storage: Vec::new(),
             epoch_info: None,
             blocks_per_epoch: None,
-            simplex: None,
+            simplex: vera_domain::SimplexParameters::default(),
         }
     }
 }
@@ -135,30 +86,9 @@ impl GenesisBuilder {
         Self::default()
     }
 
-    /// Pre-configured for devnet (matches `VeraGenesis::devnet()`).
+    /// Pre-configured for devnet: chain ID 9001 and pipelined consensus.
     pub fn devnet() -> Self {
-        Self {
-            chain_id: 9001,
-            operators: None,
-            policies: Vec::new(),
-            node_demerits: Vec::new(),
-            allocations: vec![
-                GenesisAllocation {
-                    address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
-                    balance: "1000000000000000000000".to_string(),
-                },
-                GenesisAllocation {
-                    address: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8".to_string(),
-                    balance: "1000000000000000000000".to_string(),
-                },
-            ],
-            validators: Vec::new(),
-            contracts: Vec::new(),
-            extra_storage: Vec::new(),
-            epoch_info: None,
-            blocks_per_epoch: None,
-            simplex: None,
-        }
+        Self::default()
     }
 
     /// Set the initial operator approval policy.
@@ -212,41 +142,6 @@ impl GenesisBuilder {
         self
     }
 
-    /// Add a pre-funded account allocation.
-    #[must_use]
-    pub fn allocation(mut self, address: &str, balance: &str) -> Self {
-        self.allocations.push(GenesisAllocation {
-            address: address.to_string(),
-            balance: balance.to_string(),
-        });
-        self
-    }
-
-    /// Add pre-funded test accounts (up to 10).
-    #[must_use]
-    pub fn funded_accounts(mut self, count: usize, balance: &str) -> Self {
-        const TEST_ADDRESSES: [&str; 10] = [
-            "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-            "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
-            "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
-            "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
-            "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65",
-            "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc",
-            "0x976EA74026E726554dB657fA54763abd0C3a0aa9",
-            "0x14dC79964da2C08daa4968306Dba23d250591E0A",
-            "0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f",
-            "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720",
-        ];
-
-        for addr in TEST_ADDRESSES.iter().take(count) {
-            self.allocations.push(GenesisAllocation {
-                address: (*addr).to_string(),
-                balance: balance.to_string(),
-            });
-        }
-        self
-    }
-
     /// Set the initial validator set.
     #[must_use]
     pub fn validators(mut self, configs: Vec<ValidatorConfig>) -> Self {
@@ -258,27 +153,6 @@ impl GenesisBuilder {
         if self.validators.is_empty() {
             self.validators = configs;
         }
-        self
-    }
-
-    /// Add arbitrary contract bytecode at genesis.
-    #[must_use]
-    pub fn contract(mut self, address: &str, bytecode: &str) -> Self {
-        self.contracts.push(GenesisContract {
-            address: address.to_string(),
-            bytecode: bytecode.to_string(),
-        });
-        self
-    }
-
-    /// Pre-set a storage slot at genesis.
-    #[must_use]
-    pub fn storage(mut self, address: &str, slot: &str, value: &str) -> Self {
-        self.extra_storage.push(GenesisStorage {
-            address: address.to_string(),
-            slot: slot.to_string(),
-            value: value.to_string(),
-        });
         self
     }
 
@@ -296,16 +170,16 @@ impl GenesisBuilder {
         self
     }
 
-    /// Configure bounded stable-leader consensus for this deployment.
-    /// Unless explicitly set, the epoch length becomes 192 blocks.
+    /// Set the pipelined consensus parameters.
+    #[must_use]
     pub const fn simplex(mut self, parameters: vera_domain::SimplexParameters) -> Self {
-        self.simplex = Some(parameters);
+        self.simplex = parameters;
         self
     }
 
+    /// The epoch length: 192 blocks unless explicitly set.
     fn epoch_length(&self) -> u64 {
-        self.blocks_per_epoch
-            .unwrap_or(if self.simplex.is_some() { 192 } else { 20 })
+        self.blocks_per_epoch.unwrap_or(192)
     }
 
     /// Build the genesis configuration.
@@ -320,10 +194,7 @@ impl GenesisBuilder {
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("system clock before unix epoch")
                 .as_secs(),
-            allocations: self.allocations,
             validators: self.validators,
-            contracts: self.contracts,
-            extra_storage: self.extra_storage,
             epoch_info: self.epoch_info,
             blocks_per_epoch,
             simplex: self.simplex,
@@ -341,10 +212,7 @@ impl GenesisBuilder {
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("system clock before unix epoch")
                 .as_secs(),
-            allocations: self.allocations.clone(),
             validators: self.validators.clone(),
-            contracts: self.contracts.clone(),
-            extra_storage: self.extra_storage.clone(),
             epoch_info: self.epoch_info.clone(),
             blocks_per_epoch: self.epoch_length(),
             simplex: self.simplex,
@@ -364,51 +232,20 @@ mod tests {
     fn devnet_genesis() {
         let genesis = GenesisBuilder::devnet().build();
         assert_eq!(genesis.chain_id, 9001);
-        assert_eq!(genesis.allocations.len(), 2);
+        assert_eq!(genesis.simplex, vera_domain::SimplexParameters::default());
     }
 
     #[test]
     fn custom_genesis() {
-        let genesis = GenesisBuilder::new()
-            .chain_id(1337)
-            .allocation(
-                "0xdead000000000000000000000000000000000000",
-                "1000000000000000000000",
-            )
-            .build();
-
+        let genesis = GenesisBuilder::new().chain_id(1337).build();
         assert_eq!(genesis.chain_id, 1337);
-        assert_eq!(genesis.allocations.len(), 1);
+        assert!(genesis.validators.is_empty());
     }
 
     #[test]
-    fn funded_accounts_genesis() {
-        let genesis = GenesisBuilder::new()
-            .funded_accounts(3, "1000000000000000000000")
-            .build();
-
-        assert_eq!(genesis.allocations.len(), 3);
-        assert!(genesis.allocations[0].address.starts_with("0xf39F"));
-    }
-
-    #[test]
-    fn genesis_with_contracts_and_storage() {
-        let genesis = GenesisBuilder::new()
-            .contract(
-                "0x1234000000000000000000000000000000000000",
-                "0x600160005260206000f3",
-            )
-            .storage("0x1234000000000000000000000000000000000000", "0x0", "0x2a")
-            .build();
-
-        assert_eq!(genesis.contracts.len(), 1);
-        assert_eq!(genesis.extra_storage.len(), 1);
-    }
-
-    #[test]
-    fn pipelined_epoch_default_preserves_explicit_lengths() {
+    fn epoch_default_preserves_explicit_lengths() {
         let parameters = vera_domain::SimplexParameters::default();
-        assert_eq!(GenesisBuilder::devnet().build().blocks_per_epoch, 20);
+        assert_eq!(GenesisBuilder::devnet().build().blocks_per_epoch, 192);
         assert_eq!(
             GenesisBuilder::devnet()
                 .simplex(parameters)

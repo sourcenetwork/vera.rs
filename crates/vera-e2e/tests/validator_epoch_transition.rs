@@ -7,30 +7,38 @@
 
 #[path = "support/administration.rs"]
 mod administration;
+#[path = "support/broadcast.rs"]
+mod broadcast;
+#[path = "support/native_receipt.rs"]
+mod native_receipt;
 
 use vera_client::BlsSigner;
 use vera_client::administration::AdministrativeCommand;
 
 use std::time::Duration;
 
-use alloy_primitives::{Address, B256, Bytes, FixedBytes};
+use alloy_primitives::{Address, B256, FixedBytes};
 use alloy_sol_types::{SolCall, SolEvent};
 use commonware_codec::Encode;
 use commonware_cryptography::{Signer as _, ed25519};
 
-use vera_client::{
-    ACP_ADDRESS, EvmSigner, TransactionReceipt, VALIDATOR_REGISTRY_ADDRESS, VeraClient,
-};
+use vera_client::{ACP_ADDRESS, TransactionReceipt, VALIDATOR_REGISTRY_ADDRESS, VeraClient};
 use vera_domain::{EpochMaterial, LightBlock, verify_light_block};
+use vera_e2e::RECEIPT_POLL_INTERVAL;
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, TestCluster};
-use vera_e2e::{RECEIPT_POLL_ATTEMPTS, RECEIPT_POLL_INTERVAL};
 use vera_modules::acp::abi::IAcp;
 use vera_modules::validator_registry::abi::IValidatorRegistry;
 use vera_modules::validator_registry::types::ValidatorInfo;
 
 const BLOCKS_PER_EPOCH: u64 = 20;
 
-const HARDHAT_KEY_0: &str = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+/// Two-view leader terms give each of the five registry members a leader
+/// opportunity within a 20-block epoch.
+const SIMPLEX: vera_domain::SimplexParameters = vera_domain::SimplexParameters {
+    term_length: 2,
+    optimistic_views: 1,
+    stall_timeout_ms: 5_000,
+};
 
 const REGISTRY_POLICY_YAML: &str = "\
 name: validator-registry-policy
@@ -58,56 +66,39 @@ fn parse_policy_id(hex_str: &str) -> FixedBytes<32> {
     FixedBytes::from(bytes)
 }
 
-async fn broadcast_evm_tx(
+async fn broadcast_native_tx(
     cluster: &TestCluster,
     client: &VeraClient,
-    signer: &EvmSigner,
+    signer: &BlsSigner,
     target: Address,
     calldata: Vec<u8>,
 ) -> TransactionReceipt {
-    let nonce = client.get_nonce(signer.address()).await.expect("get_nonce");
-    let raw = signer
-        .sign_tx(target, Bytes::from(calldata), nonce)
-        .expect("sign_tx");
-
-    let futs: Vec<_> = (0..cluster.node_count())
-        .map(|i| {
-            let r = raw.clone();
-            let url = cluster.node(i).rpc_url();
-            tokio::spawn(async move { VeraClient::new(url).send_raw_transaction(&r).await })
-        })
-        .collect();
-    let mut tx_hash = None;
-    for fut in futs {
-        if let Ok(Ok(hash)) = fut.await {
-            tx_hash = Some(hash);
-        }
-    }
-    let tx_hash = tx_hash.expect("at least one node should accept the tx");
-
-    client
-        .wait_for_receipt(tx_hash, RECEIPT_POLL_INTERVAL, RECEIPT_POLL_ATTEMPTS)
-        .await
-        .expect("receipt should appear")
+    broadcast::native(cluster, client, signer, target, calldata).await
 }
 
-async fn eth_call_raw(client: &VeraClient, target: Address, calldata: Vec<u8>) -> Vec<u8> {
-    client
-        .eth_call(target, Bytes::from(calldata))
+/// Read a registry view through an unsigned native dry run.
+async fn registry_view(client: &VeraClient, reader: &BlsSigner, calldata: Vec<u8>) -> Vec<u8> {
+    let simulation = client
+        .simulate_native_call(reader.did(), VALIDATOR_REGISTRY_ADDRESS, &calldata)
         .await
-        .expect("eth_call should succeed")
-        .to_vec()
+        .expect("registry view should be served");
+    assert!(
+        simulation.success,
+        "registry view should succeed: {:?}",
+        simulation.refusal
+    );
+    simulation.output.to_vec()
 }
 
-async fn setup_acp_policy(cluster: &TestCluster, client: &VeraClient, admin: &EvmSigner) {
+async fn setup_acp_policy(cluster: &TestCluster, client: &VeraClient, admin: &BlsSigner) {
     let calldata = IAcp::createPolicyCall {
         policy: REGISTRY_POLICY_YAML.as_bytes().to_vec().into(),
         marshalType: 1,
         nonce: vera_client::random_policy_nonce().0.into(),
     }
     .abi_encode();
-    let receipt = broadcast_evm_tx(cluster, client, admin, ACP_ADDRESS, calldata).await;
-    assert_eq!(receipt.status, 1, "createPolicy should succeed");
+    let receipt = broadcast_native_tx(cluster, client, admin, ACP_ADDRESS, calldata).await;
+    assert!(receipt.success, "createPolicy should succeed");
 
     let policy_ids = client
         .get_policy_ids()
@@ -121,19 +112,19 @@ async fn setup_acp_policy(cluster: &TestCluster, client: &VeraClient, admin: &Ev
         resource: "registry".to_string(),
     }
     .abi_encode();
-    let receipt = broadcast_evm_tx(cluster, client, admin, ACP_ADDRESS, calldata).await;
-    assert_eq!(receipt.status, 1, "registerObject should succeed");
+    let receipt = broadcast_native_tx(cluster, client, admin, ACP_ADDRESS, calldata).await;
+    assert!(receipt.success, "registerObject should succeed");
 
     let calldata = IAcp::setRelationshipCall {
         policyId: policy_id,
         resource: "registry".to_string(),
         objectId: "registry".to_string(),
         relation: "admin".to_string(),
-        actor: admin.did(),
+        actor: admin.did().to_owned(),
     }
     .abi_encode();
-    let receipt = broadcast_evm_tx(cluster, client, admin, ACP_ADDRESS, calldata).await;
-    assert_eq!(receipt.status, 1, "setRelationship should succeed");
+    let receipt = broadcast_native_tx(cluster, client, admin, ACP_ADDRESS, calldata).await;
+    assert!(receipt.success, "setRelationship should succeed");
 
     let signed = administration::approve(
         client,
@@ -148,7 +139,7 @@ async fn setup_acp_policy(cluster: &TestCluster, client: &VeraClient, admin: &Ev
         )
         .await
         .expect("initialize membership policy");
-    assert_eq!(receipt.status, 1);
+    assert!(receipt.success);
 }
 
 #[tokio::test]
@@ -163,8 +154,8 @@ async fn validator_epoch_transition() {
     let trusted_key = *bootstrap.epoch_info().output.public().public();
     let genesis = GenesisBuilder::devnet()
         .blocks_per_epoch(BLOCKS_PER_EPOCH)
-        .operators(administration::operators())
-        .funded_accounts(3, "1000000000000000000000000");
+        .simplex(SIMPLEX)
+        .operators(administration::operators());
 
     let cluster = TestCluster::builder()
         .binary(vera_e2e::resolve_binary().expect("resolve verad binary"))
@@ -172,7 +163,7 @@ async fn validator_epoch_transition() {
         .seed(chain_id)
         .chain_id(chain_id)
         .genesis(genesis)
-        .preset(ConsensusPreset::Fast)
+        .preset(ConsensusPreset::Normal)
         .build()
         .await
         .expect("cluster should start");
@@ -189,12 +180,12 @@ async fn validator_epoch_transition() {
         .expect("should reach height 3");
 
     let client = VeraClient::new(cluster.node(0).rpc_url());
-    let admin_signer = EvmSigner::from_hex(HARDHAT_KEY_0, chain_id).expect("valid signer");
+    let admin_signer = BlsSigner::random(chain_id).expect("random BLS signer");
 
     // ── A: Verify genesis validators ──────────────────────────────
 
     let calldata = IValidatorRegistry::getValidatorsCall {}.abi_encode();
-    let result = eth_call_raw(&client, VALIDATOR_REGISTRY_ADDRESS, calldata).await;
+    let result = registry_view(&client, &admin_signer, calldata).await;
     let decoded = IValidatorRegistry::getValidatorsCall::abi_decode_returns(&result)
         .expect("abi decode getValidators");
     let all_validators: Vec<ValidatorInfo> =
@@ -214,12 +205,12 @@ async fn validator_epoch_transition() {
     let new_consensus_key = B256::from_slice(Encode::encode(&new_public_key).as_ref());
 
     let calldata = IValidatorRegistry::addValidatorCall {
-        evmAddr: new_validator_addr,
+        validator: new_validator_addr,
         consensusPubkey: new_consensus_key,
         p2pAddr: "127.0.0.1:30302".to_string(),
     }
     .abi_encode();
-    let receipt = broadcast_evm_tx(
+    let receipt = broadcast_native_tx(
         &cluster,
         &client,
         &admin_signer,
@@ -227,7 +218,7 @@ async fn validator_epoch_transition() {
         calldata,
     )
     .await;
-    assert_eq!(receipt.status, 1, "addValidator should succeed");
+    assert!(receipt.success, "addValidator should succeed");
     assert_eq!(
         receipt.logs[0].topics[0],
         IValidatorRegistry::ValidatorAdded::SIGNATURE_HASH,
@@ -236,7 +227,7 @@ async fn validator_epoch_transition() {
 
     // Verify the validator was added
     let calldata = IValidatorRegistry::getValidatorsCall {}.abi_encode();
-    let result = eth_call_raw(&client, VALIDATOR_REGISTRY_ADDRESS, calldata).await;
+    let result = registry_view(&client, &admin_signer, calldata).await;
     let decoded = IValidatorRegistry::getValidatorsCall::abi_decode_returns(&result)
         .expect("abi decode getValidators");
     let all_validators: Vec<ValidatorInfo> =
@@ -273,7 +264,12 @@ async fn validator_epoch_transition() {
     let mut last_status = String::from("no eligible light block observed");
     let result = tokio::time::timeout(vera_e2e::readiness_deadline(), async {
         loop {
-            let height = client.block_number().await.expect("latest height");
+            let height = client
+                .node_status()
+                .await
+                .expect("node status")
+                .finalized_height
+                .unwrap_or(0);
             if height >= first_height {
                 let light = match client
                     .rpc_call_typed::<LightBlock>("vera_getLightBlock", serde_json::json!([height]))
@@ -319,11 +315,11 @@ async fn validator_epoch_transition() {
     // ── E: Deactivate a validator → triggers another epoch ────────
 
     let calldata = IValidatorRegistry::setValidatorStatusCall {
-        evmAddr: new_validator_addr,
+        validator: new_validator_addr,
         active: false,
     }
     .abi_encode();
-    let receipt = broadcast_evm_tx(
+    let receipt = broadcast_native_tx(
         &cluster,
         &client,
         &admin_signer,
@@ -331,7 +327,7 @@ async fn validator_epoch_transition() {
         calldata,
     )
     .await;
-    assert_eq!(receipt.status, 1, "setValidatorStatus should succeed");
+    assert!(receipt.success, "setValidatorStatus should succeed");
     assert_eq!(
         receipt.logs[0].topics[0],
         IValidatorRegistry::ValidatorStatusChanged::SIGNATURE_HASH,
@@ -341,10 +337,10 @@ async fn validator_epoch_transition() {
     // ── F: Remove the validator → triggers another epoch ──────────
 
     let calldata = IValidatorRegistry::removeValidatorCall {
-        evmAddr: new_validator_addr,
+        validator: new_validator_addr,
     }
     .abi_encode();
-    let receipt = broadcast_evm_tx(
+    let receipt = broadcast_native_tx(
         &cluster,
         &client,
         &admin_signer,
@@ -352,7 +348,7 @@ async fn validator_epoch_transition() {
         calldata,
     )
     .await;
-    assert_eq!(receipt.status, 1, "removeValidator should succeed");
+    assert!(receipt.success, "removeValidator should succeed");
     assert_eq!(
         receipt.logs[0].topics[0],
         IValidatorRegistry::ValidatorRemoved::SIGNATURE_HASH,
@@ -361,7 +357,7 @@ async fn validator_epoch_transition() {
 
     // Verify back to 4 validators
     let calldata = IValidatorRegistry::getValidatorsCall {}.abi_encode();
-    let result = eth_call_raw(&client, VALIDATOR_REGISTRY_ADDRESS, calldata).await;
+    let result = registry_view(&client, &admin_signer, calldata).await;
     let decoded = IValidatorRegistry::getValidatorsCall::abi_decode_returns(&result)
         .expect("abi decode getValidators");
     let final_validators: Vec<ValidatorInfo> =
@@ -376,7 +372,7 @@ async fn validator_epoch_transition() {
 
     let client2 = VeraClient::new(cluster.node(1).rpc_url());
     let calldata = IValidatorRegistry::getValidatorsCall {}.abi_encode();
-    let result = eth_call_raw(&client2, VALIDATOR_REGISTRY_ADDRESS, calldata).await;
+    let result = registry_view(&client2, &admin_signer, calldata).await;
     let decoded = IValidatorRegistry::getValidatorsCall::abi_decode_returns(&result)
         .expect("abi decode getValidators from node 1");
     let node1_validators: Vec<ValidatorInfo> =

@@ -24,7 +24,7 @@ pub(super) fn assert_policy(
     assert_eq!(record.policy.resources[0].name, "document");
     record.relations.validate(&record.policy).unwrap();
 
-    let (_, root) = verify_light_block(&response.revision, trusted).unwrap();
+    let root = verify_light_block(&response.revision, trusted).unwrap();
     response
         .record
         .verify(root, ModuleId::Acp, &key, RECORD_PROOF_BYTES)
@@ -65,14 +65,14 @@ pub(super) async fn check_peer_and_absence(
     // this exact revision to be indexed, without retrying verification failures.
     tokio::time::timeout(vera_e2e::readiness_deadline(), async {
         loop {
-            let block: Option<serde_json::Value> = peer
-                .rpc_call_typed(
-                    "eth_getBlockByNumber",
-                    serde_json::json!([format!("0x{:x}", original.revision.height), false]),
-                )
+            let status = peer
+                .node_status()
                 .await
-                .expect("peer block lookup should succeed");
-            if block.is_some() {
+                .expect("peer status lookup should succeed");
+            if status
+                .finalized_height
+                .is_some_and(|height| height >= original.revision.height)
+            {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -99,7 +99,7 @@ pub(super) async fn check_peer_and_absence(
     original
         .record
         .verify(
-            roots.1,
+            roots,
             ModuleId::Acp,
             &keys::policy_key(policy),
             RECORD_PROOF_BYTES,
@@ -147,7 +147,7 @@ pub(super) async fn check_peer_and_absence(
         absent.record.value.is_none(),
         "never-created policy must have certified absence"
     );
-    let (_, root) = verify_light_block(&absent.revision, trusted).unwrap();
+    let root = verify_light_block(&absent.revision, trusted).unwrap();
     assert!(
         absent
             .record

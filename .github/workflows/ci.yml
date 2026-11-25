@@ -99,7 +99,7 @@ jobs:
         run: cargo fmt -- --check
 
       - name: Clippy
-        run: cargo clippy --frozen --all -- -D warnings
+        run: cargo clippy --frozen --all --all-targets -- -D warnings
 
   build:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
@@ -294,7 +294,6 @@ jobs:
         run: >-
           cargo test --frozen -p vera-e2e
           --test core_chain
-          --test contract_deploy
           --test light_client
           --test gossip_headers
           --test validator_bootstrap
@@ -307,7 +306,7 @@ jobs:
         run: >-
           python3 .github/scripts/capture-tests.py --logs "$TMPDIR"
           cargo test --frozen -p vera-e2e
-          --test core_chain --test contract_deploy --test light_client
+          --test core_chain --test light_client
           --test gossip_headers --test validator_bootstrap
           --test validator_epoch_transition --test cross_object_acp
           -- --nocapture
@@ -561,6 +560,7 @@ jobs:
               --test delegation
               --test native_nodes
               --test native_refusals
+              --test parent_baby_anchoring
           - suite: snapshot-catchup
             exact: ""
             binary-features: ""

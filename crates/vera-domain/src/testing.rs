@@ -15,10 +15,17 @@ use commonware_parallel::Sequential;
 use commonware_utils::{N3f1, TestRng, non_empty, ordered::Set};
 
 use crate::{
-    Block, BlockId, ConsensusContext, ConsensusDigest, ConsensusPublicKey, DbTargets,
-    EpochMaterial, FinalizedArtifacts, LIGHT_BLOCK_NAMESPACE, LightBlock, LightConsensusScheme,
-    StateRoot,
+    Ancestry, Block, BlockId, ConsensusContext, ConsensusDigest, ConsensusPublicKey, EpochMaterial,
+    FinalizedArtifacts, LIGHT_BLOCK_NAMESPACE, LightBlock, LightConsensusScheme,
 };
+
+/// An ancestry that fits a block at `height` and commits to no real chain,
+/// for tests that build a block at an arbitrary height.
+#[must_use]
+pub fn ancestry(height: u64) -> Ancestry {
+    let peak = ConsensusDigest::from([0x5a; 32]);
+    Ancestry::from_peaks(vec![peak; height.count_ones() as usize])
+}
 
 /// Four validators holding shares of one dealt consensus key.
 #[allow(missing_debug_implementations)]
@@ -91,18 +98,39 @@ impl TestDeployment {
             },
             parent: BlockId(parent),
             height,
+            ancestry: ancestry(height),
             timestamp: 1_700_000_000 + height,
             term,
-            prevrandao: B256::ZERO,
-            randomness: None,
-            state_root: StateRoot(B256::repeat_byte(0x01)),
             module_state_root,
             txs: vec![crate::Tx::new(Bytes::from_static(b"test"))],
             payload: None,
-            native_targets: None,
-            receipt_commitment: Some(B256::repeat_byte(9)),
-            db_targets: DbTargets::default(),
+            native_targets: Default::default(),
+            receipt_commitment: B256::repeat_byte(9),
         }
+    }
+
+    /// A native block extending `parent`, in `term`, committing to its
+    /// ancestors and to `module_state_root`.
+    #[must_use]
+    pub fn child(&self, parent: &Block, term: u64, module_state_root: B256) -> Block {
+        let mut block = self.block(parent.height + 1, parent.id().0, term, module_state_root);
+        block.ancestry = parent
+            .ancestry
+            .extended(parent.height, &parent.id())
+            .expect("the parent's ancestry fits its height");
+        block
+    }
+
+    /// The blocks at heights `0..=length` of one history, told apart from
+    /// another history of this deployment by `root`.
+    #[must_use]
+    pub fn chain(&self, length: u64, root: u8) -> Vec<Block> {
+        let mut blocks = vec![self.block(0, B256::ZERO, 0, B256::ZERO)];
+        for _ in 0..length {
+            let next = self.child(&blocks[blocks.len() - 1], 0, B256::repeat_byte(root));
+            blocks.push(next);
+        }
+        blocks
     }
 
     /// Finalize `block` directly with a quorum of this deployment's shares.

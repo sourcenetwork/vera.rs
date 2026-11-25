@@ -399,7 +399,7 @@ gh workflow run performance.yml --repo sourcenetwork/vera.rs --ref <branch-or-ta
 The Regolith recorder receives these arguments:
 
 ```text
---timeout-seconds 7200 90000 50 128 1 normal 100 192 0 128 256 1
+--timeout-seconds 7200 90000 50 128 1 normal 100 192 0 128 256
 ```
 
 The recorder's two-hour process allowance includes request signing, the arrival
@@ -1037,24 +1037,21 @@ result. The reports here provide reproducible evidence for that work without
 claiming current release throughput from historical runs.
 
 
-### Pipelined consensus measurements
+### Consensus configuration
 
-`operation_baseline` accepts an optional eleventh argument, `1`, to enable the
-native-only Simplex configuration from `docs/consensus-membership.md`. Omission
-or `0` retains rotating leaders. The output records the exact `simplex` parameters;
-comparisons across different configurations must not report an isolated code
-speedup. Epoch length, history backend, arrival rate and verification gates remain
-independently configurable. Pipelining does not establish a transaction capacity
-or latency guarantee.
+`operation_baseline` runs the default Simplex parameters from
+`docs/consensus-membership.md` and records them as `simplex`; comparisons across
+different configurations must not report an isolated code speedup. Epoch length,
+history backend, arrival rate and verification gates remain independently
+configurable. Pipelining does not establish a transaction capacity or latency
+guarantee.
 
-PR comparisons and the main-branch performance jobs explicitly enable pipelining,
-with 192 revisions per epoch and 256 retained consensus revisions. This gives the
-four participants room to complete DKG with stable leader terms and retains a
-complete epoch for recovery. Both sides of a PR comparison use the same settings;
-their emitted configuration must match before a performance delta is reported.
-`run_pr.py --consensus classic` retains the rotating-leader comparison with
-20-revision epochs and 32 retained revisions. Changing these settings requires a
-new baseline; historical classic measurements are not directly comparable.
+PR comparisons and the main-branch performance jobs use 192 revisions per epoch
+and 256 retained consensus revisions. This gives the four participants room to
+complete DKG with stable leader terms and retains a complete epoch for recovery.
+Both sides of a PR comparison use the same settings; their emitted configuration
+must match before a performance delta is reported. Changing these settings
+requires a new baseline.
 
 ## Storage tracing
 
@@ -1064,7 +1061,7 @@ Add `commonware_utils::sync=info` only when lock attribution is needed; its
 higher event volume can substantially perturb the workload.
 Span-close events report busy and idle time for database apply/finalize and
 labelled lock acquisition. The database index follows `OrderedDatabases` order:
-accounts, storage, code, ACP, bulletin, identity, native sequences, commitment.
+ACP, bulletin, identity, native sequences, commitment.
 Idle time includes awaited I/O and scheduling; it is not a direct disk-latency
 measurement. Tracing is off by default and recorded in workload provenance.
 Do not treat traced runs as throughput qualification.
@@ -1159,7 +1156,7 @@ measure acquisition, not guard holding. Enabled blob completion spans retain
 parent finalize and start-sync spans beyond function return, so their close events
 may fall outside the originating window. `persistent_finalize_window_samples`
 counts captured persistent-partition finalize closes;
-`incomplete_persistent_finalize_windows` counts windows missing any of the seven
+`incomplete_persistent_finalize_windows` counts windows missing any of the four
 persistent partitions. `persistent_finalize_window_coverage_complete` is false
 when that coverage is incomplete. Missing samples are not zero-duration work or
 evidence comparable to a trace without these retained children.

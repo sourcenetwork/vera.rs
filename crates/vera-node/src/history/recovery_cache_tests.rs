@@ -40,11 +40,10 @@ fn fixture(revisions: usize, submissions_per_revision: usize) -> Fixture {
                 1,
                 position as u64 + 1,
                 vec![],
-                None,
             ));
         }
-        next.native_targets = Some([vera_domain::DbTarget::default(); 4]);
-        next.receipt_commitment = Some(vera_executor::receipt_commitment(100, &receipts));
+        next.native_targets = [vera_domain::DbTarget::default(); 4];
+        next.receipt_commitment = vera_executor::receipt_commitment(100, &receipts);
         history
             .append_finalized(&next, &receipts, 100, Some(&artifacts(height as u64)))
             .unwrap();
@@ -100,13 +99,10 @@ async fn recent_cache_recovery_matches_full_replay_and_preserves_archived_submis
                 block.hash,
                 block.number,
                 block.parent_hash,
-                block.state_root,
                 block.module_state_root,
                 block.timestamp,
                 block.gas_limit,
                 block.gas_used,
-                block.base_fee_per_gas,
-                block.prevrandao,
                 block.transaction_hashes,
             )
         })

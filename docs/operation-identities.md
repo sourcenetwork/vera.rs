@@ -1,7 +1,8 @@
 # Caller operation identities
 
 Delegated ACP creation, editing, graph commands, ordered graph-command lists and
-access-decision recording accept an optional signed `request` claim. It binds a caller operation ID, exact semantic operation digest
+access-decision recording accept an optional signed `request` claim; revocation
+of a token by its issuer requires one. It binds a caller operation ID, exact semantic operation digest
 and genesis identity. Direct key delegations and operator-authorized relay
 assertions use the same execution path. All members must support this claim
 before clients use it; older members reject unknown claims.

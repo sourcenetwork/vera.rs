@@ -58,12 +58,11 @@ fn native_record_rpc_keeps_the_captured_revision_across_finalization() {
                     let (server, _local) = RpcServer::with_state_provider(
                         NodeState::new(DEPLOYMENT, 0, 4),
                         "127.0.0.1:0".parse().unwrap(),
-                        DEPLOYMENT,
                         vera_jsonrpc::NoopStateProvider,
                     )
                     .with_vera_index_and_modules(index.clone(), set.executor.modules().clone())
                     .with_vera_native_modules(
-                        (db.3.clone(), db.4.clone(), db.5.clone(), db.6.clone()),
+                        (db.0.clone(), db.1.clone(), db.2.clone(), db.3.clone()),
                         set.executor.modules().clone(),
                     )
                     .with_vera_light_block_lookup(Arc::new(move |height| {

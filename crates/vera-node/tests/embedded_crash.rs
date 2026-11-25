@@ -107,9 +107,13 @@ fn a_node_killed_once_it_proposed_finalizes_the_request_once_or_takes_it_again()
         let node = block_on(EmbeddedNode::start(spec.in_files())).unwrap();
         run_until(&node, |reached| reached >= 2);
         let submission = submit(&node, &spec, &spec.signer(94), "submitted");
-        // The next block this node proposes may or may not carry the request.
+        // The next block this node proposes may or may not carry the request:
+        // a lone validator can propose it before the point is armed, so the
+        // child waits for a block proposed after arming.
         arm();
         await_certified_receipt(&node, submission);
+        let armed_at = height(&node);
+        run_until(&node, |reached| reached > armed_at);
         survived();
     }
     let scratch = tempfile::tempdir().unwrap();

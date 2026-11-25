@@ -8,29 +8,30 @@
 
 use std::time::Duration;
 
-use alloy_primitives::{Address, B256, Bytes, FixedBytes};
+use alloy_primitives::{Address, B256, FixedBytes};
 use alloy_sol_types::SolCall;
 
 use jsonrpsee::core::client::SubscriptionClientT;
 use jsonrpsee::rpc_params;
 use jsonrpsee::ws_client::WsClientBuilder;
 use vera_client::{
-    ACP_ADDRESS, EvmSigner, ModuleId, PERMISSION_LIMITS, RECORD_PROOF_BYTES, TransactionReceipt,
+    ACP_ADDRESS, BlsSigner, ModuleId, PERMISSION_LIMITS, RECORD_PROOF_BYTES, TransactionReceipt,
     VeraClient,
 };
 use vera_domain::{LightBlock, verify_light_block};
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, TestCluster};
-use vera_e2e::{RECEIPT_POLL_ATTEMPTS, RECEIPT_POLL_INTERVAL};
 use vera_modules::acp::abi::IAcp;
 
+#[path = "support/broadcast.rs"]
+mod broadcast;
 #[path = "light_client/decision.rs"]
 mod decision;
+#[path = "support/native_receipt.rs"]
+mod native_receipt;
 #[path = "light_client/permission.rs"]
 mod permission;
 #[path = "light_client/record.rs"]
 mod record;
-
-const HARDHAT_KEY_0: &str = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 const TEST_POLICY_YAML: &str = "\
 name: test-policy
@@ -51,43 +52,14 @@ fn parse_policy_id(hex_str: &str) -> FixedBytes<32> {
     FixedBytes::from(bytes)
 }
 
-async fn broadcast_evm_tx(
+async fn broadcast_native_tx(
     cluster: &TestCluster,
     client: &VeraClient,
-    signer: &EvmSigner,
+    signer: &BlsSigner,
     target: Address,
     calldata: Vec<u8>,
 ) -> TransactionReceipt {
-    let nonce = client
-        .get_nonce(signer.address())
-        .await
-        .expect("get_nonce should work");
-    let raw = signer
-        .sign_tx(target, Bytes::from(calldata), nonce)
-        .expect("EVM sign should succeed");
-
-    let futs: Vec<_> = (0..cluster.node_count())
-        .map(|i| {
-            let r = raw.clone();
-            let url = cluster.node(i).rpc_url();
-            tokio::spawn(async move {
-                let result = VeraClient::new(url).send_raw_transaction(&r).await;
-                (i, result)
-            })
-        })
-        .collect();
-    let mut tx_hash = None;
-    for fut in futs {
-        if let Ok((_node_idx, Ok(hash))) = fut.await {
-            tx_hash = Some(hash);
-        }
-    }
-    let tx_hash = tx_hash.expect("at least one node should accept the EVM tx");
-
-    client
-        .wait_for_receipt(tx_hash, RECEIPT_POLL_INTERVAL, RECEIPT_POLL_ATTEMPTS)
-        .await
-        .expect("EVM receipt should appear")
+    broadcast::native(cluster, client, signer, target, calldata).await
 }
 
 #[tokio::test]
@@ -101,7 +73,7 @@ async fn light_client_proof_verification() {
         .output
         .public()
         .public();
-    let genesis = GenesisBuilder::devnet().funded_accounts(1, "1000000000000000000000000");
+    let genesis = GenesisBuilder::devnet();
 
     let cluster = TestCluster::builder()
         .binary(vera_e2e::resolve_binary().expect("resolve verad binary"))
@@ -109,7 +81,7 @@ async fn light_client_proof_verification() {
         .seed(chain_id)
         .chain_id(chain_id)
         .genesis(genesis)
-        .preset(ConsensusPreset::Fast)
+        .preset(ConsensusPreset::Normal)
         .build()
         .await
         .expect("cluster should start");
@@ -126,31 +98,7 @@ async fn light_client_proof_verification() {
         .expect("should reach height 3");
 
     let client = VeraClient::new(cluster.node(0).rpc_url());
-    // The first view of each epoch has a zero seed; check a fixed later block.
-    let block = tokio::time::timeout(vera_e2e::readiness_deadline(), async {
-        loop {
-            let block: Option<serde_json::Value> = client
-                .rpc_call_typed("eth_getBlockByNumber", serde_json::json!(["0x3", false]))
-                .await
-                .expect("block 3 should be readable");
-            if let Some(block) = block {
-                return block;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    })
-    .await
-    .expect("block 3 should become indexed");
-    assert_eq!(block["number"].as_str(), Some("0x3"));
-    let mix_hash = block["mixHash"]
-        .as_str()
-        .expect("block 3 should expose prevrandao");
-    assert_ne!(
-        mix_hash,
-        format!("0x{}", "00".repeat(32)),
-        "post-genesis prevrandao must come from the threshold VRF seed"
-    );
-    let evm_signer = EvmSigner::from_hex(HARDHAT_KEY_0, chain_id).expect("valid signer");
+    let signer = BlsSigner::random(chain_id).expect("random BLS signer");
 
     let create_calldata = IAcp::createPolicyCall {
         policy: TEST_POLICY_YAML.as_bytes().to_vec().into(),
@@ -159,8 +107,8 @@ async fn light_client_proof_verification() {
     }
     .abi_encode();
     let create_receipt =
-        broadcast_evm_tx(&cluster, &client, &evm_signer, ACP_ADDRESS, create_calldata).await;
-    assert_eq!(create_receipt.status, 1, "create_policy should succeed");
+        broadcast_native_tx(&cluster, &client, &signer, ACP_ADDRESS, create_calldata).await;
+    assert!(create_receipt.success, "create_policy should succeed");
 
     let policy_ids = client
         .get_policy_ids()
@@ -175,15 +123,9 @@ async fn light_client_proof_verification() {
         resource: "document".into(),
     }
     .abi_encode();
-    let register_receipt = broadcast_evm_tx(
-        &cluster,
-        &client,
-        &evm_signer,
-        ACP_ADDRESS,
-        register_calldata,
-    )
-    .await;
-    assert_eq!(register_receipt.status, 1, "register_object should succeed");
+    let register_receipt =
+        broadcast_native_tx(&cluster, &client, &signer, ACP_ADDRESS, register_calldata).await;
+    assert!(register_receipt.success, "register_object should succeed");
     let h_register = register_receipt.block_number;
 
     let ws_client = WsClientBuilder::default()
@@ -193,9 +135,9 @@ async fn light_client_proof_verification() {
 
     let mut headers_sub = ws_client
         .subscribe::<serde_json::Value, _>(
-            "eth_subscribe",
-            rpc_params!["headers"],
-            "eth_unsubscribe",
+            "vera_subscribeHeaders",
+            rpc_params![],
+            "vera_unsubscribeHeaders",
         )
         .await
         .expect("headers subscription should succeed");
@@ -236,7 +178,7 @@ async fn light_client_proof_verification() {
         "RPC must return the requested revision"
     );
     assert_ne!(light_block.block_hash.parse::<B256>().unwrap(), B256::ZERO);
-    let (_state_root, module_state_root) =
+    let module_state_root =
         verify_light_block(&light_block, &trusted_key).expect("light block should verify");
 
     let lb_msr_hex = format!("0x{}", hex::encode(module_state_root.as_slice()));
@@ -278,15 +220,9 @@ async fn light_client_proof_verification() {
         actor: permission::READER_DID.into(),
     }
     .abi_encode();
-    let mutate_receipt = broadcast_evm_tx(
-        &cluster,
-        &client,
-        &evm_signer,
-        ACP_ADDRESS,
-        set_rel_calldata,
-    )
-    .await;
-    assert_eq!(mutate_receipt.status, 1, "set_relationship should succeed");
+    let mutate_receipt =
+        broadcast_native_tx(&cluster, &client, &signer, ACP_ADDRESS, set_rel_calldata).await;
+    assert!(mutate_receipt.success, "set_relationship should succeed");
     let h_mutate = mutate_receipt.block_number;
 
     // Native proof roots may advance on empty revisions; require the confirmed mutation.
@@ -306,8 +242,7 @@ async fn light_client_proof_verification() {
                 .rpc_call_typed("vera_getLightBlock", serde_json::json!([height]))
                 .await
                 .expect("vera_getLightBlock should succeed");
-            let (_, msr) =
-                verify_light_block(&lb, &trusted_key).expect("light block should verify");
+            let msr = verify_light_block(&lb, &trusted_key).expect("light block should verify");
 
             if proof_1
                 .verify(msr, ModuleId::Acp, acp_key.as_bytes(), RECORD_PROOF_BYTES)
@@ -426,11 +361,11 @@ async fn light_client_proof_verification() {
     permission::check_permissions(
         &cluster,
         &client,
-        &evm_signer,
+        &signer,
         policy_id_str,
         h_invalidated,
         &trusted_key,
     )
     .await;
-    decision::check_decisions(&cluster, &client, &evm_signer, policy_id_str, &trusted_key).await;
+    decision::check_decisions(&cluster, &client, &signer, policy_id_str, &trusted_key).await;
 }

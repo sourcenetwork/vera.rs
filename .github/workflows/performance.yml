@@ -144,7 +144,7 @@ jobs:
             --node target/release/verad --runner target/release/examples/operation_baseline \
             --history "$HISTORY_BACKEND" --output "$directory" --timeout-seconds 180 \
             --rust-log 'warn,vera_storage=info,vera_resource_diagnostics=debug' \
-            8 5 8 1 normal 100 192 0 0 256 1
+            8 5 8 1 normal 100 192 0 0 256
           python3 tools/performance/snapshot_metrics.py "$directory" --node-logs "$VERA_E2E_DIR"
 
       - name: Measure growing and fixed state
@@ -182,7 +182,7 @@ jobs:
               env "${node_environment[@]}" "${recorder[@]}" \
                 --node target/release/verad --runner target/release/examples/operation_baseline \
                 --history "$HISTORY_BACKEND" --output "$directory" "${arena_options[@]}" \
-                "$count" 50 128 1 normal 100 192 0 "$objects" 256 1 || case_result=1
+                "$count" 50 128 1 normal 100 192 0 "$objects" 256 || case_result=1
               if [[ "$SUSTAINED_MEMORY_ATTRIBUTION" == true ]]; then
                 python3 tools/performance/snapshot_metrics.py "$directory" \
                   --node-logs "$node_logs" --minimum-samples "$((count / 50 / 30))" || case_result=1
@@ -340,7 +340,7 @@ jobs:
           MPLCONFIGDIR: ${{ runner.temp }}/nuclei-matplotlib
         run: |
           "$RUNNER_TEMP/performance-python/bin/python" tools/performance/run_pr.py \
-            --head . --base . --binaries binaries --output nuclei-performance --consensus pipelined
+            --head . --base . --binaries binaries --output nuclei-performance
       - name: Retain comparison and source bindings
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

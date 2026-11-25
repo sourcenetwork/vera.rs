@@ -22,13 +22,13 @@ fn anchors() -> (Anchor, Anchor) {
             transaction_hash: B256::repeat_byte(1),
             block_hash: B256::repeat_byte(2),
             height: 31,
-            status: 1,
+            success: true,
         },
         Anchor {
             transaction_hash: B256::repeat_byte(3),
             block_hash: B256::repeat_byte(4),
             height: 268,
-            status: 1,
+            success: true,
         },
     )
 }
@@ -38,7 +38,7 @@ fn receipt(anchor: Anchor) -> TransactionReceipt {
         transaction_hash: anchor.transaction_hash,
         block_hash: anchor.block_hash,
         block_number: anchor.height,
-        status: anchor.status,
+        success: anchor.success,
         ..Default::default()
     }
 }
@@ -59,7 +59,7 @@ async fn replica(
     let server = ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
     let address = server.local_addr().unwrap();
     let mut rpc = jsonrpsee::RpcModule::new(state.clone());
-    rpc.register_method("eth_getTransactionReceipt", |params, state, _| {
+    rpc.register_method("vera_getTransactionReceipt", |params, state, _| {
         let (hash,): (B256,) = params.parse()?;
         let mut state = state.lock().unwrap();
         let response = if hash == state.early.transaction_hash {
@@ -76,17 +76,18 @@ async fn replica(
         Ok::<_, ErrorObjectOwned>(response)
     })
     .unwrap();
-    rpc.register_method("eth_call", |_, state, _| {
+    rpc.register_method("vera_call", |_, state, _| {
         let registered = !state.lock().unwrap().caught_up;
-        Ok::<_, ErrorObjectOwned>(format!(
-            "0x{}",
-            hex::encode(IAcp::getObjectOwnerCall::abi_encode_returns(
-                &IAcp::getObjectOwnerReturn {
-                    registered,
-                    record: Bytes::new()
-                }
-            ))
-        ))
+        Ok::<_, ErrorObjectOwned>(vera_domain::ViewCallResult {
+            output: IAcp::getObjectOwnerCall::abi_encode_returns(&IAcp::getObjectOwnerReturn {
+                registered,
+                record: Bytes::new(),
+            })
+            .into(),
+            refusal: None,
+            block_number: Default::default(),
+            timestamp: Default::default(),
+        })
     })
     .unwrap();
     let handle = server.start(rpc);
@@ -147,7 +148,7 @@ async fn final_state_barrier_rejects_each_receipt_identity_mismatch() {
             0 => invalid.transaction_hash = B256::repeat_byte(5),
             1 => invalid.block_hash = B256::repeat_byte(6),
             2 => invalid.height -= 1,
-            3 => invalid.status = 0,
+            3 => invalid.success = false,
             _ => unreachable!(),
         }
         let (client, _, handle) = replica(invalid, Some(1)).await;

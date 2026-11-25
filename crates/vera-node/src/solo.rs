@@ -155,7 +155,7 @@ fn check_identity(
     }
     let same_validator = matches!(genesis.validators.as_slice(), [only]
         if only.consensus_pubkey == consensus_pubkey(local)
-            && only.evm_address == evm_address(local));
+            && only.address == address(local));
     if !same_validator {
         return Err(SoloError::Mismatch("validator key"));
     }
@@ -222,19 +222,16 @@ fn deal(
         chain_id: identity.chain_id,
         operators: Some(identity.operators.clone()),
         timestamp: identity.timestamp,
-        allocations: Vec::new(),
         validators: vec![validator(local, listen_addr)],
-        contracts: Vec::new(),
-        extra_storage: Vec::new(),
         policies: Vec::new(),
         placed_policies: identity.policies.clone(),
         node_demerits: Vec::new(),
         epoch_info: Some(crate::epoch_info_hex(&epoch_info)),
         blocks_per_epoch: SOLO_BLOCKS_PER_EPOCH,
-        simplex: Some(vera_domain::SimplexParameters {
+        simplex: vera_domain::SimplexParameters {
             stall_timeout_ms: SOLO_STALL_TIMEOUT_MS,
             ..Default::default()
-        }),
+        },
         // A lone validator proposes every block from its own clock, and
         // an idle or paused device must not fall behind it.
         timestamp_step_secs: Some(u64::MAX),
@@ -250,13 +247,13 @@ fn encode(genesis: &VeraGenesis) -> Result<Vec<u8>, SoloError> {
 #[must_use]
 fn validator(key: &PublicKey, listen_addr: &str) -> ValidatorConfig {
     ValidatorConfig {
-        evm_address: evm_address(key),
+        address: address(key),
         consensus_pubkey: consensus_pubkey(key),
         p2p_address: listen_addr.into(),
     }
 }
 
-fn evm_address(key: &PublicKey) -> String {
+fn address(key: &PublicKey) -> String {
     format!("{:?}", crate::validator_address(key))
 }
 

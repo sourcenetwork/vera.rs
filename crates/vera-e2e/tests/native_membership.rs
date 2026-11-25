@@ -109,22 +109,32 @@ async fn pipelined_member_joins_without_bootstrap_share_and_sustains_quorum() {
     admit_member(false, false, true).await;
 }
 
-async fn admit_member(interrupt: bool, crash_share: bool, pipelined: bool) {
-    let deployment = if pipelined {
+/// Admit a fifth member. `long_epochs` runs the default 192-block epochs and
+/// leader terms under load; otherwise 20-block epochs use two-view terms so
+/// every member of the five has a leader opportunity in each epoch.
+async fn admit_member(interrupt: bool, crash_share: bool, long_epochs: bool) {
+    let deployment = if long_epochs {
         9083
     } else if interrupt {
         9080
     } else {
         9079
     };
-    let blocks_per_epoch: u64 = if pipelined { 192 } else { 20 };
-    let epoch_deadline = deadline() * if pipelined { 4 } else { 1 };
-    let mut genesis = GenesisBuilder::devnet()
+    let blocks_per_epoch: u64 = if long_epochs { 192 } else { 20 };
+    let epoch_deadline = deadline() * if long_epochs { 4 } else { 1 };
+    let simplex = if long_epochs {
+        SimplexParameters::default()
+    } else {
+        SimplexParameters {
+            term_length: 2,
+            optimistic_views: 1,
+            ..SimplexParameters::default()
+        }
+    };
+    let genesis = GenesisBuilder::devnet()
         .operators(administration::operators())
-        .blocks_per_epoch(blocks_per_epoch);
-    if pipelined {
-        genesis = genesis.simplex(SimplexParameters::default());
-    }
+        .blocks_per_epoch(blocks_per_epoch)
+        .simplex(simplex);
     let keys = KeySet::builder().seed(deployment).build().unwrap();
     let trusted = *keys.epoch_info().output.public().public();
     let mut cluster = TestCluster::builder()
@@ -180,7 +190,7 @@ async fn admit_member(interrupt: bool, crash_share: bool, pipelined: bool) {
         .await
         .unwrap();
     receipt(&origin, initialized.transaction_hash, &trusted).await;
-    let load = if pipelined {
+    let load = if long_epochs {
         Some(membership_load::Load::start(cluster.node(0).rpc_url(), deployment, trusted).await)
     } else {
         None
@@ -300,7 +310,7 @@ async fn admit_member(interrupt: bool, crash_share: bool, pipelined: bool) {
         &signer,
         &trusted,
         IValidatorRegistry::addValidatorCall {
-            evmAddr: member,
+            validator: member,
             consensusPubkey: B256::from_slice(public.encode().as_ref()),
             p2pAddr: format!("127.0.0.1:{p2p_port}"),
         }
@@ -363,7 +373,7 @@ async fn admit_member(interrupt: bool, crash_share: bool, pipelined: bool) {
         &signer,
         &trusted,
         IValidatorRegistry::setValidatorStatusCall {
-            evmAddr: member,
+            validator: member,
             active: true,
         }
         .abi_encode(),
@@ -391,7 +401,7 @@ async fn admit_member(interrupt: bool, crash_share: bool, pipelined: bool) {
         &signer,
         &trusted,
         IValidatorRegistry::setValidatorStatusCall {
-            evmAddr: removed,
+            validator: removed,
             active: false,
         }
         .abi_encode(),
@@ -408,7 +418,7 @@ async fn admit_member(interrupt: bool, crash_share: bool, pipelined: bool) {
         &joining,
         &signer,
         &trusted,
-        IValidatorRegistry::removeValidatorCall { evmAddr: removed }.abi_encode(),
+        IValidatorRegistry::removeValidatorCall { validator: removed }.abi_encode(),
     )
     .await;
     let current = membership(&origin, &trusted, reduced.height, 4, epoch_deadline).await;
@@ -424,7 +434,7 @@ async fn admit_member(interrupt: bool, crash_share: bool, pipelined: bool) {
         &signer,
         &trusted,
         IValidatorRegistry::setValidatorStatusCall {
-            evmAddr: member,
+            validator: member,
             active: true,
         }
         .abi_encode(),

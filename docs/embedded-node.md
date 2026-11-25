@@ -277,7 +277,7 @@ The channel a catching-up device fetches finalized blocks and certificates
 on keeps at least the daemon's burst on every node with a peer, whatever
 `channel_burst` says: with a burst of one, all but one of the answers to its
 parallel requests are dropped and it advances by one fetch timeout per
-block. The seven channels that transfer state and the one that transfers
+block. The four channels that transfer state and the one that transfers
 history keep a burst of at least eight on such a node, the requests a
 transfer keeps outstanding for each database, for the same reason; see
 [snapshot recovery](snapshot-recovery.md).
@@ -306,7 +306,7 @@ A submission (`vera_sendNativeTx`) fails on a backup with the
 retryable code `-32002` and the data `{"retryable": true, "role": "backup"}`;
 `LocalRpcError::is_backup_refusal` identifies the response. Nothing is
 admitted or forwarded: the host sends the request to the active device.
-`eth_call`, `eth_estimateGas` and `vera_simulateNativeCall` run on a backup as
+`vera_call` and `vera_simulateNativeCall` run on a backup as
 on any node, against its own state.
 
 ### Limits of this version

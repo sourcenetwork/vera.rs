@@ -28,25 +28,33 @@ pub(super) fn operators() -> OperatorPolicy {
     }
 }
 
-pub(super) async fn approve(
-    client: &VeraClient,
-    command: AdministrativeCommand,
-    sequence: u64,
-) -> SignedAdministrativeRequest {
-    let genesis = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+/// The deployment's genesis record identifier: the parent of its first block.
+#[allow(dead_code)]
+pub(super) async fn genesis_id(client: &VeraClient) -> alloy_primitives::B256 {
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
-            let first: serde_json::Value = client
-                .rpc_call_typed("eth_getBlockByNumber", serde_json::json!(["0x1", false]))
+            if let Ok(first) = client
+                .rpc_call_typed::<vera_domain::LightBlock>(
+                    "vera_getLightBlock",
+                    serde_json::json!([1]),
+                )
                 .await
-                .unwrap();
-            if let Some(parent) = first["parentHash"].as_str() {
-                return parent.parse::<alloy_primitives::B256>().unwrap();
+            {
+                return first.parent_hash.parse::<alloy_primitives::B256>().unwrap();
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
     })
     .await
-    .unwrap();
+    .unwrap()
+}
+
+pub(super) async fn approve(
+    client: &VeraClient,
+    command: AdministrativeCommand,
+    sequence: u64,
+) -> SignedAdministrativeRequest {
+    let genesis = genesis_id(client).await;
     let request = AdministrativeRequest {
         genesis_id: genesis.0,
         sequence,

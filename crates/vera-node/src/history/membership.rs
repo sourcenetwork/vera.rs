@@ -92,11 +92,8 @@ mod tests {
         let (mut info, _) = crate::trusted_setup(7, [key.clone()]).unwrap();
         info.epoch = Epoch::new(2);
         info.next_players = Set::from_iter_dedup([key.clone()]);
-        let mut block = vera_app::genesis_block(
-            vera_domain::StateRoot(B256::ZERO),
-            Default::default(),
-            B256::ZERO,
-        );
+        let mut block =
+            vera_app::genesis_block(B256::ZERO, Default::default(), alloy_primitives::B256::ZERO);
         block.height = 39;
         block.payload = Some(Payload::EpochInfo(info.clone()));
         assert_eq!(

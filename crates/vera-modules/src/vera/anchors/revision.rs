@@ -19,4 +19,7 @@ pub struct VerifiedRevision {
     pub timestamp: u64,
     /// Native module state root of the block.
     pub module_state_root: B256,
+    /// Height and identifier of a block that the caller verified, against the
+    /// block's commitment to its ancestors, to be an ancestor of it.
+    pub ancestor: Option<(u64, B256)>,
 }

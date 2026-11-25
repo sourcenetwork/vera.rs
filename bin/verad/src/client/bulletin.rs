@@ -80,14 +80,11 @@ impl BulletinCommand {
     pub(super) async fn run(self, ctx: &ClientContext) -> eyre::Result<()> {
         match self {
             Self::RegisterNamespace { namespace } => {
-                let receipt = if let Some(bls) = ctx.bls_signer.as_ref() {
-                    ctx.client
-                        .native_register_namespace(bls, &namespace)
-                        .await?
-                } else {
-                    let signer = ctx.require_evm_signer()?;
-                    ctx.client.register_namespace(&signer, &namespace).await?
-                };
+                let bls = ctx.require_bls_signer().await?;
+                let receipt = ctx
+                    .client
+                    .native_register_namespace(bls, &namespace)
+                    .await?;
                 ctx.print_json(&receipt)?;
             }
             Self::GetNamespace { namespace } => {
@@ -101,29 +98,19 @@ impl BulletinCommand {
                 ctx.print_json(&json)?;
             }
             Self::AddCollaborator { namespace, did } => {
-                let receipt = if let Some(bls) = ctx.bls_signer.as_ref() {
-                    ctx.client
-                        .native_add_collaborator(bls, &namespace, &did)
-                        .await?
-                } else {
-                    let signer = ctx.require_evm_signer()?;
-                    ctx.client
-                        .add_collaborator(&signer, &namespace, &did)
-                        .await?
-                };
+                let bls = ctx.require_bls_signer().await?;
+                let receipt = ctx
+                    .client
+                    .native_add_collaborator(bls, &namespace, &did)
+                    .await?;
                 ctx.print_json(&receipt)?;
             }
             Self::RemoveCollaborator { namespace, did } => {
-                let receipt = if let Some(bls) = ctx.bls_signer.as_ref() {
-                    ctx.client
-                        .native_remove_collaborator(bls, &namespace, &did)
-                        .await?
-                } else {
-                    let signer = ctx.require_evm_signer()?;
-                    ctx.client
-                        .remove_collaborator(&signer, &namespace, &did)
-                        .await?
-                };
+                let bls = ctx.require_bls_signer().await?;
+                let receipt = ctx
+                    .client
+                    .native_remove_collaborator(bls, &namespace, &did)
+                    .await?;
                 ctx.print_json(&receipt)?;
             }
             Self::ListCollaborators { namespace } => {
@@ -139,22 +126,11 @@ impl BulletinCommand {
             } => {
                 let payload_bytes = parse_optional_hex(&payload)?;
                 let proof_bytes = parse_optional_hex(&proof)?;
-                let receipt = if let Some(bls) = ctx.bls_signer.as_ref() {
-                    ctx.client
-                        .native_create_post(
-                            bls,
-                            &namespace,
-                            &payload_bytes,
-                            &proof_bytes,
-                            &artifact,
-                        )
-                        .await?
-                } else {
-                    let signer = ctx.require_evm_signer()?;
-                    ctx.client
-                        .create_post(&signer, &namespace, &payload_bytes, &proof_bytes, &artifact)
-                        .await?
-                };
+                let bls = ctx.require_bls_signer().await?;
+                let receipt = ctx
+                    .client
+                    .native_create_post(bls, &namespace, &payload_bytes, &proof_bytes, &artifact)
+                    .await?;
                 ctx.print_json(&receipt)?;
             }
             Self::GetPost { namespace, post_id } => {

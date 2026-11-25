@@ -114,7 +114,12 @@ pub(super) async fn certified_head(
 ) -> LightBlock {
     tokio::time::timeout(PHASE_DEADLINE, async {
         loop {
-            let height = client.block_number().await.unwrap();
+            let height = client
+                .node_status()
+                .await
+                .unwrap()
+                .finalized_height
+                .unwrap_or(0);
             match client.read_finalized_revision(height, trusted).await {
                 Ok(revision) => return revision,
                 Err(ClientError::ResourceBusy(_)) => tokio::time::sleep(POLL).await,

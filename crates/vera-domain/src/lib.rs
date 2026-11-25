@@ -16,12 +16,18 @@ mod aliases;
 pub use aliases::{ConsensusContext, ConsensusDigest, PublicKey};
 
 mod db_targets;
-pub use db_targets::{DbTarget, DbTargets};
+pub use db_targets::DbTarget;
+
+mod unsupported_version;
+pub use unsupported_version::UnsupportedVersion;
+
+mod ancestry;
+pub use ancestry::{Ancestry, AncestryError, AncestryProof, MAX_ANCESTRY_PROOF_BYTES};
 
 mod block;
 pub use block::{
-    Block, BlockCfg, DKG_PAYLOAD_CFG, DkgDirectory, DkgPayload, DkgPayloadCfg, DkgSigner,
-    DkgVariant, MAX_DKG_PARTICIPANTS,
+    BLOCK_FORMAT_VERSION, Block, BlockCfg, DKG_PAYLOAD_CFG, DkgDirectory, DkgPayload,
+    DkgPayloadCfg, DkgSigner, DkgVariant, MAX_DKG_PARTICIPANTS,
 };
 
 mod term;
@@ -31,20 +37,23 @@ mod term_certificate;
 pub use term_certificate::{TermApproval, TermCertificate, TermChange, TermCut, TermError};
 
 mod idents;
-pub use idents::{BlockId, Idents, StateRoot, TxId};
+pub use idents::{BlockId, Idents, TxId};
 
 mod native_tx;
-pub use native_tx::{NATIVE_TX_TYPE, NativeTx, NativeTxPayload};
+pub use native_tx::{NATIVE_TX_TYPE, NativeTx, NativeTxDecodeError, NativeTxPayload};
 
 mod native_simulation;
 pub use native_simulation::{NativeCallRequest, NativeCallSimulation, SimulatedLog};
+mod view_call;
+pub use view_call::ViewCallResult;
 
 mod light_block;
 pub use light_block::{
-    ConsensusPublicKey, EpochMaterial, FinalizedArtifacts, LIGHT_BLOCK_MAX_ARTIFACT_BYTES,
-    LIGHT_BLOCK_MAX_DESCENDANTS, LIGHT_BLOCK_MAX_PARTICIPANTS, LIGHT_BLOCK_NAMESPACE,
-    LIGHT_BLOCK_RESPONSE_BYTES, LightBlock, LightBlockError, LightConsensusScheme,
-    verify_finalized_artifacts, verify_finalized_block, verify_light_block,
+    ConsensusPublicKey, EpochMaterial, FinalityTrust, FinalizedArtifacts,
+    LIGHT_BLOCK_MAX_ARTIFACT_BYTES, LIGHT_BLOCK_MAX_DESCENDANTS, LIGHT_BLOCK_MAX_PARTICIPANTS,
+    LIGHT_BLOCK_NAMESPACE, LIGHT_BLOCK_RESPONSE_BYTES, LightBlock, LightBlockError,
+    LightConsensusScheme, verify_finalized_artifacts, verify_finalized_block,
+    verify_finalized_block_unless, verify_light_block,
 };
 
 #[cfg(any(test, feature = "testing"))]
@@ -58,9 +67,6 @@ pub use gossip::GossipHeader;
 
 mod tx;
 pub use tx::{Tx, TxCfg};
-
-#[cfg(feature = "evm")]
-pub mod evm;
 
 mod receipt;
 pub use receipt::ExecutionReceipt;

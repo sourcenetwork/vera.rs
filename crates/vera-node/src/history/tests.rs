@@ -4,7 +4,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
-use vera_domain::{DbTargets, StateRoot, Tx};
+use vera_domain::Tx;
 
 #[path = "physical_tests.rs"]
 mod physical_tests;
@@ -17,6 +17,9 @@ mod recovery_cache_tests;
 
 #[path = "start_cost_tests.rs"]
 mod start_cost_tests;
+
+#[path = "ancestry_cost_tests.rs"]
+mod ancestry_cost_tests;
 
 #[path = "retention_cost_tests.rs"]
 mod retention_cost_tests;
@@ -32,18 +35,30 @@ pub(super) fn block(height: u64, parent: BlockId) -> Block {
         context: Block::genesis_context(),
         parent,
         height,
+        ancestry: vera_domain::testing::ancestry(height),
         timestamp: height,
         term: 0,
-        prevrandao: B256::ZERO,
-        randomness: None,
-        state_root: StateRoot(B256::ZERO),
         module_state_root: B256::ZERO,
         txs: Vec::new(),
         payload: None,
-        native_targets: None,
-        receipt_commitment: None,
-        db_targets: DbTargets::default(),
+        native_targets: Default::default(),
+        receipt_commitment: vera_executor::receipt_commitment(100, &[]),
     }
+}
+
+/// A chain of `length` blocks above a genesis block, each committing to its ancestors.
+pub(super) fn chain(length: u64) -> Vec<Block> {
+    let mut blocks = vec![block(0, BlockId(B256::ZERO))];
+    for height in 1..=length {
+        let parent = &blocks[blocks.len() - 1];
+        let mut next = block(height, parent.id());
+        next.ancestry = parent
+            .ancestry
+            .extended(parent.height, &parent.id())
+            .unwrap();
+        blocks.push(next);
+    }
+    blocks
 }
 
 fn artifacts(height: u64) -> FinalizationArtifacts {
@@ -258,23 +273,14 @@ fn execution_record_preserves_receipt_fields_and_rejects_corruption() {
     let mut first = block(1, genesis.id());
     first.txs.push(Tx::new(vec![1, 2, 3].into()));
     let log = Log::new_unchecked(
-        Address::repeat_byte(7),
+        alloy_primitives::Address::repeat_byte(7),
         vec![B256::repeat_byte(8)],
         vec![9, 10].into(),
     );
-    let receipt = ExecutionReceipt::new(
-        B256::repeat_byte(4),
-        false,
-        17,
-        29,
-        vec![log.clone()],
-        Some(Address::repeat_byte(5)),
-    );
-    first.native_targets = Some([vera_domain::DbTarget::default(); 4]);
-    first.receipt_commitment = Some(vera_executor::receipt_commitment(
-        31,
-        std::slice::from_ref(&receipt),
-    ));
+    let receipt = ExecutionReceipt::new(B256::repeat_byte(4), false, 17, 29, vec![log.clone()]);
+    first.native_targets = [vera_domain::DbTarget::default(); 4];
+    first.receipt_commitment =
+        vera_executor::receipt_commitment(31, std::slice::from_ref(&receipt));
     let history = FinalizedHistory::open(dir.path(), &genesis).unwrap();
     assert!(
         history
@@ -290,26 +296,24 @@ fn execution_record_preserves_receipt_fields_and_rejects_corruption() {
     assert_eq!(restored, first);
     let actual = &receipts[0];
     assert_eq!(actual.tx_hash, receipt.tx_hash);
-    assert_eq!(actual.contract_address, receipt.contract_address);
     assert_eq!(actual.gas_used, 17);
     assert_eq!(actual.cumulative_gas_used(), 29);
     assert!(!actual.success());
     assert_eq!(actual.logs(), &[log]);
     assert_eq!(record.gas_limit, 31);
-    for mutation in 0..9 {
+    for mutation in 0..8 {
         let mut altered: Record = borsh::from_slice(&bytes).unwrap();
         match mutation {
             0 => altered.receipts[0].hash[0] ^= 1,
             1 => altered.receipts[0].success = true,
             2 => altered.receipts[0].gas_used += 1,
             3 => altered.receipts[0].cumulative_gas_used += 1,
-            4 => altered.receipts[0].contract = None,
-            5 => altered.receipts[0].logs.clear(),
-            6 => altered.gas_limit += 1,
-            7 => altered.receipts.clear(),
-            8 => {
+            4 => altered.receipts[0].logs.clear(),
+            5 => altered.gas_limit += 1,
+            6 => altered.receipts.clear(),
+            7 => {
                 let mut missing = first.clone();
-                missing.receipt_commitment = None;
+                missing.receipt_commitment.0[0] ^= 1;
                 altered.block = missing.encode().to_vec();
             }
             _ => unreachable!(),
@@ -329,8 +333,8 @@ async fn receipt_corruption_is_rejected_before_recovery_publishes_the_record() {
     let dir = tempfile::tempdir().unwrap();
     let genesis = block(0, BlockId(B256::ZERO));
     let mut first = block(1, genesis.id());
-    first.native_targets = Some([vera_domain::DbTarget::default(); 4]);
-    first.receipt_commitment = Some(vera_executor::receipt_commitment(100, &[]));
+    first.native_targets = [vera_domain::DbTarget::default(); 4];
+    first.receipt_commitment = vera_executor::receipt_commitment(100, &[]);
     let history = FinalizedHistory::open(dir.path(), &genesis).unwrap();
     history.append(&first, &[], 100).unwrap();
     let bytes = history.db.get(key(RECORD, 1)).unwrap().unwrap();
@@ -412,11 +416,9 @@ async fn indirect_proof_survives_reopen_and_uses_the_rpc_history_lookup() {
     let mut first = block(1, genesis.id());
     first.payload = Some(Payload::EpochInfo(info));
     first.txs.push(Tx::new(vec![1].into()));
-    let receipt = ExecutionReceipt::new(B256::repeat_byte(42), false, 3, 3, vec![], None);
-    first.receipt_commitment = Some(vera_executor::receipt_commitment(
-        100,
-        std::slice::from_ref(&receipt),
-    ));
+    let receipt = ExecutionReceipt::new(B256::repeat_byte(42), false, 3, 3, vec![]);
+    first.receipt_commitment =
+        vera_executor::receipt_commitment(100, std::slice::from_ref(&receipt));
 
     let mut second = block(2, first.id());
     second.context.round = commonware_consensus::types::Round::new(
@@ -779,3 +781,36 @@ async fn pruned_roster_selection_survives_history_and_module_reopen() {
 
 #[path = "metrics_tests.rs"]
 mod metrics_tests;
+
+#[test]
+fn a_store_of_another_format_is_refused_unchanged_with_a_typed_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let genesis = block(0, BlockId(B256::ZERO));
+    drop(FinalizedHistory::open(dir.path(), &genesis).unwrap());
+    for found in [vec![0], vec![2], vec![4], vec![1, 0], Vec::new()] {
+        {
+            let db = DB::open_default(dir.path(), None).unwrap();
+            let mut batch = WriteBatch::default();
+            batch.put(FORMAT, &found);
+            write(&db, batch).unwrap();
+        }
+        let error = FinalizedHistory::open(dir.path(), &genesis).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<UnsupportedHistoryFormat>(),
+            Some(&UnsupportedHistoryFormat {
+                found: found.clone()
+            })
+        );
+        let db = DB::open_default(dir.path(), None).unwrap();
+        assert_eq!(db.get(FORMAT).unwrap().unwrap(), found);
+    }
+    for supported in [FORMAT_APPENDED, FORMAT_IMPORTED] {
+        {
+            let db = DB::open_default(dir.path(), None).unwrap();
+            let mut batch = WriteBatch::default();
+            batch.put(FORMAT, supported);
+            write(&db, batch).unwrap();
+        }
+        drop(FinalizedHistory::open(dir.path(), &genesis).unwrap());
+    }
+}

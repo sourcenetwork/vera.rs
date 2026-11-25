@@ -75,10 +75,6 @@ impl FinalizedHistory {
     /// and recover() completes. The destination may already have a committed prefix.
     pub fn begin_import(&self, revision: &LightBlock, trusted: &ConsensusPublicKey) -> Result<()> {
         let anchor = verify_finalized_block(revision, trusted)?;
-        ensure!(
-            anchor.native_targets.is_some() && anchor.receipt_commitment.is_some(),
-            "native import commitments missing"
-        );
         let head = self.head.lock();
         let base = if let Some(bytes) = self.db.get(IMPORT)? {
             let import: Import = borsh::from_slice(&bytes)?;
@@ -156,8 +152,9 @@ impl FinalizedHistory {
             "history import already staged"
         );
         let block = decode_record(bytes, limits)?;
+        let id = block.id().0.0;
         ensure!(
-            (block.height, block.id().0.0) == import.next,
+            (block.height, id) == import.next,
             "history import ancestry mismatch"
         );
         let trusted =
@@ -177,6 +174,7 @@ impl FinalizedHistory {
         )?;
         self.stage_finality(proof, &block, anchor.height, &mut batch)?;
         batch.put(key(RECORD, block.height), bytes);
+        batch.put(key(BLOCK_ID, block.height), id);
         // Imported proofs supply finality without consulting the local marshal archive.
         batch.put(
             key(CERTIFICATE, block.height),
@@ -248,6 +246,7 @@ impl FinalizedHistory {
         let id = alloy_primitives::keccak256(&self.record(floor)?.block);
         let mut batch = WriteBatch::default();
         batch.delete_range(key(RECORD, 0), key(RECORD, floor - 1));
+        batch.delete_range(key(BLOCK_ID, 0), key(BLOCK_ID, floor - 1));
         for prefix in [CERTIFICATE, IMPORTED_FINALITY, PROOF_BLOCK] {
             batch.delete_range(key(prefix, 0), key(prefix, floor));
         }
@@ -312,10 +311,6 @@ fn decode_record(mut input: &[u8], limits: HistoryLimits) -> Result<Block> {
         commonware_codec::Copying(vector(&mut input)?),
         &crate::node::block_cfg(),
     )?;
-    ensure!(
-        block.native_targets.is_some() && block.receipt_commitment.is_some(),
-        "native import commitments missing"
-    );
     let gas_limit = u64::deserialize(&mut input)?;
     let count = u32::deserialize(&mut input)? as usize;
     ensure!(count == block.txs.len(), "history receipt count mismatch");
@@ -324,7 +319,6 @@ fn decode_record(mut input: &[u8], limits: HistoryLimits) -> Result<Block> {
     for _ in 0..count {
         let hash = <[u8; 32]>::deserialize(&mut input)?;
         let gas = u64::deserialize(&mut input)?;
-        let contract = Option::<[u8; 20]>::deserialize(&mut input)?;
         let success = bool::deserialize(&mut input)?;
         let cumulative = u64::deserialize(&mut input)?;
         let count = u32::deserialize(&mut input)? as usize;
@@ -344,15 +338,8 @@ fn decode_record(mut input: &[u8], limits: HistoryLimits) -> Result<Block> {
             .map(super::StoredRefusal::decode)
             .transpose()?;
         receipts.push(
-            ExecutionReceipt::new(
-                hash.into(),
-                success,
-                gas,
-                cumulative,
-                logs,
-                contract.map(Address::from),
-            )
-            .with_refusal(refusal),
+            ExecutionReceipt::new(hash.into(), success, gas, cumulative, logs)
+                .with_refusal(refusal),
         );
     }
     ensure!(input.is_empty(), "trailing history record bytes");

@@ -48,10 +48,8 @@ use vera_app::{
     ordered_state::{OrderedState, ordered_config},
 };
 use vera_backend::{
-    AccountsDb, CodeDb, StorageDb,
     native::{self, NativeDb},
     p2p::{MAX_FETCH_OPS, Resolver as StateResolver, WireDatabase},
-    state_set_config,
 };
 use vera_consensus::components::InMemoryMempool;
 use vera_domain::EpochMaterial;
@@ -60,11 +58,11 @@ use vera_indexer::{BlockIndex, LightBlockIndex, StoredEpochMaterial};
 use vera_jsonrpc::{IndexedStateProvider, NodeState, RpcServer, TxSubmitCallback};
 
 use crate::{
-    BACKFILL_CHANNEL, BROADCAST_CHANNEL, CERTIFICATE_CHANNEL, CommittedState, DKG_CHANNEL,
-    DKG_PROBE_CHANNEL, DynamicProvider, FileSecretStore, IO_BUFFER_SIZE, MAILBOX_SIZE,
-    MAX_BLOCK_TXS, MAX_PARTICIPANTS, MAX_SUPPORTED_MODE, MAX_TX_BYTES, MEMPOOL_CHANNEL, NAMESPACE,
-    NodeOptions, NodeSettings, PAGE_SIZE, RESOLVER_CHANNEL, REVEAL, Registrar,
-    RegistryParticipants, RpcMode, SHARING_MODE, TxGossip, VOTE_CHANNEL, VrfElectorConfig,
+    BACKFILL_CHANNEL, BROADCAST_CHANNEL, CERTIFICATE_CHANNEL, DKG_CHANNEL, DKG_PROBE_CHANNEL,
+    DynamicProvider, FileSecretStore, IO_BUFFER_SIZE, MAILBOX_SIZE, MAX_BLOCK_TXS,
+    MAX_PARTICIPANTS, MAX_SUPPORTED_MODE, MAX_TX_BYTES, MEMPOOL_CHANNEL, NAMESPACE, NodeOptions,
+    NodeSettings, PAGE_SIZE, RESOLVER_CHANNEL, REVEAL, Registrar, RegistryParticipants, RpcMode,
+    SHARING_MODE, TxGossip, VOTE_CHANNEL,
     peer_capacity::PeerCapacity,
     rejoin,
     secret_store::{HeldSecretStore, NodeSecretStore, ObserverSecretStore},
@@ -97,25 +95,11 @@ pub async fn run_node_with_options(
     options: NodeOptions,
 ) -> anyhow::Result<()> {
     settings.genesis.validate_timestamp()?;
-    if let Some(parameters) = settings.genesis.simplex {
-        parameters.validate().map_err(anyhow::Error::msg)?;
-        run_node_with_elector(context, settings, options, move |_| {
-            crate::vrf_elector::pipelined_elector(parameters)
-        })
-        .await
-    } else {
-        run_node_with_elector(context, settings, options, VrfElectorConfig::new).await
-    }
-}
-
-async fn run_node_with_elector<
-    L: commonware_consensus::simplex::elector::Config<ConsensusScheme>,
->(
-    context: tokio::Context,
-    settings: NodeSettings,
-    options: NodeOptions,
-    make_elector: impl FnOnce(vera_app::VrfSeedCache) -> L + Send,
-) -> anyhow::Result<()> {
+    settings
+        .genesis
+        .simplex
+        .validate()
+        .map_err(anyhow::Error::msg)?;
     let NodeOptions {
         rpc,
         watchdog,
@@ -152,9 +136,7 @@ async fn run_node_with_elector<
         leader_timeout,
         certification_timeout,
         timeout_retry,
-        genesis
-            .simplex
-            .map(|parameters| Duration::from_millis(parameters.stall_timeout_ms)),
+        Duration::from_millis(genesis.simplex.stall_timeout_ms),
     )
     .map_err(|error| {
         anyhow::anyhow!(
@@ -178,12 +160,8 @@ async fn run_node_with_elector<
             && snapshot.logs > 0,
         "snapshot byte limit, log limit and deadlines must be positive"
     );
-    let term_length = std::num::NonZeroU64::new(
-        genesis
-            .simplex
-            .map_or(1, |parameters| parameters.term_length),
-    )
-    .expect("validated leader term length");
+    let term_length = std::num::NonZeroU64::new(genesis.simplex.term_length)
+        .expect("validated leader term length");
     let blocks_per_epoch = std::num::NonZeroU64::new(genesis.blocks_per_epoch)
         .ok_or_else(|| anyhow::anyhow!("genesis blocks_per_epoch must be non-zero"))?;
     let peer_capacity = PeerCapacity::new(blocks_per_epoch, term_length)?;
@@ -347,13 +325,10 @@ async fn run_node_with_elector<
         }};
     }
     let state_resolvers = (
-        state_channel!(0, AccountsDb),
-        state_channel!(1, StorageDb),
-        state_channel!(2, CodeDb),
+        state_channel!(0, NativeDb),
+        state_channel!(1, NativeDb),
+        state_channel!(2, NativeDb),
         state_channel!(3, NativeDb),
-        state_channel!(4, NativeDb),
-        state_channel!(5, NativeDb),
-        state_channel!(6, NativeDb),
         (),
     );
     let p2p_handle = p2p.start();
@@ -387,7 +362,6 @@ async fn run_node_with_elector<
     let executor = VeraExecutor::new(chain_id)
         .with_membership_epochs(blocks_per_epoch, term_length)
         .with_native_verification_strategy(verification_strategy.clone());
-    let executor_spec = executor.spec_id();
     #[cfg(feature = "fault-injection")]
     let executor = executor.with_crash_marker(config.data_dir.join("module-commit-crash"));
     let modules = executor.modules().clone();
@@ -737,8 +711,6 @@ async fn run_node_with_elector<
     if let Some(height) = completed_sync_height {
         node_state.set_snapshot_revision(height.get());
     }
-    let (heads_tx, _) = ::tokio::sync::broadcast::channel(64);
-    let (logs_tx, _) = ::tokio::sync::broadcast::channel(256);
     let (headers_tx, _) = ::tokio::sync::broadcast::channel(64);
 
     let validator: SharedValidator = Arc::new(OnceLock::new());
@@ -777,8 +749,6 @@ async fn run_node_with_elector<
         history: history.clone(),
         index: block_index.clone(),
         light_index: light_block_index.clone(),
-        heads: heads_tx.clone(),
-        logs: logs_tx.clone(),
         headers: headers_tx.clone(),
         node_state: node_state.clone(),
         finalization_lookup: finalization_lookup.clone(),
@@ -797,7 +767,6 @@ async fn run_node_with_elector<
         let index = block_index.clone();
         move || index.head_block_number()
     });
-    let participant_addresses = crate::beneficiaries::from_genesis(&genesis)?;
     // A device that announced a handover and now follows refuses the blocks
     // it would itself have built above the final one.
     if let (true, Some(change)) = (is_backup, &term_record.handed_over) {
@@ -820,15 +789,10 @@ async fn run_node_with_elector<
         MAX_BLOCK_TXS,
         gas_limit,
     )
-    .with_participant_addresses(participant_addresses)
-    .with_consensus_key(*sharing.public())
-    .with_native_pipeline(
-        genesis.simplex.is_some(),
-        solo_pacing.map_or_else(
-            || (leader_timeout / 4).min(Duration::from_millis(100)),
-            |pacing| pacing.batch,
-        ),
-    )
+    .with_proposal_batch_wait(solo_pacing.map_or_else(
+        || (leader_timeout / 4).min(Duration::from_millis(100)),
+        |pacing| pacing.batch,
+    ))
     .with_settled_batch_wait(solo_pacing.map(|pacing| pacing.settled))
     .with_timestamp_step(
         genesis
@@ -836,7 +800,6 @@ async fn run_node_with_elector<
             .unwrap_or(vera_app::MAX_TIMESTAMP_STEP_SECS),
     )
     .with_term(term.clone());
-    let vrf_elector = make_elector(application.vrf_seed_cache());
 
     let snapshot_history = crate::history::SnapshotHistory {
         history: history.clone(),
@@ -871,7 +834,6 @@ async fn run_node_with_elector<
             application,
             strategy: verification_strategy.clone(),
             db_config: ordered_config(
-                state_set_config(PARTITION_PREFIX, page_cache.clone()),
                 native::state_config(PARTITION_PREFIX, page_cache.clone()),
                 executor.clone(),
             )
@@ -987,7 +949,7 @@ async fn run_node_with_elector<
             application: deferred,
             strategy: Sequential,
             simplex: orchestrator::SimplexConfig {
-                elector: vrf_elector,
+                elector: crate::term_elector::term_elector(genesis.simplex),
                 mailbox_size: NZUsize!(3),
                 replay_buffer: IO_BUFFER_SIZE,
                 write_buffer: IO_BUFFER_SIZE,
@@ -1237,18 +1199,13 @@ async fn run_node_with_elector<
         }
     };
     let native_databases = databases.native_databases();
-    let state_set = databases.execution_databases();
-    let committed_state = CommittedState::new(state_set.clone());
-    sink.attach_state(state_set.clone());
     {
         // Hold the module read lock through publication so finalization cannot
         // advance nonces between loading them and enabling admission.
         let recovered_modules = modules.read().expect("module state lock poisoned");
-        let mut admission =
-            MempoolValidator::new(committed_state.clone(), ExecutionConfig::new(chain_id), 0)
-                .with_native_only(genesis.simplex.is_some())
-                .with_block_gas_limit(gas_limit);
-        admission.reset(committed_state.clone(), recovered_modules.nonces.clone());
+        let mut admission = MempoolValidator::new(ExecutionConfig::new(chain_id))
+            .with_committed_modules(modules.clone());
+        admission.reset(recovered_modules.nonces.clone());
         let _ = validator.set(::tokio::sync::Mutex::new(Admission::new(admission)));
     }
     application_ready.send_replace(true);
@@ -1314,7 +1271,7 @@ async fn run_node_with_elector<
                 gas_used,
             );
             if let vera_indexer::IndexQuery::Submission(hash) = query
-                && (index.get_receipt(&hash).is_none() || index.get_transaction(&hash).is_none())
+                && index.get_receipt(&hash).is_none()
             {
                 return Err(vera_jsonrpc::RpcError::StateError(
                     "historical submission cannot be indexed".into(),
@@ -1325,14 +1282,10 @@ async fn run_node_with_elector<
     });
     let state_provider = IndexedStateProvider::new(
         block_index.clone(),
-        committed_state,
-        chain_id,
-        executor_spec,
+        execution_config,
         gas_limit,
         modules.clone(),
-    )
-    .with_execution_config(execution_config)
-    .with_archive(archive.clone());
+    );
     if crate::diagnostics::enabled() {
         let history = history.clone();
         let index = block_index.clone();
@@ -1401,10 +1354,9 @@ async fn run_node_with_elector<
         () = crate::replay::replayed(&block_index, stored, crate::replay::LIMIT) => {}
     }
 
-    let rpc_server = RpcServer::with_state_provider(node_state, rpc_addr, chain_id, state_provider)
+    let rpc_server = RpcServer::with_state_provider(node_state, rpc_addr, state_provider)
         .with_max_connections(config.rpc.max_connections.get())
         .with_tx_submit(tx_submit)
-        .with_subscriptions(heads_tx, logs_tx)
         .with_headers_subscription(headers_tx)
         .with_vera_index_and_modules(block_index, modules.clone())
         .with_vera_native_modules(native_databases, modules)
@@ -1416,6 +1368,14 @@ async fn run_node_with_elector<
                 history.receipt_proof(hash, &epochs).map_err(|error| {
                     crate::history::rpc_error(&error, vera_jsonrpc::RpcError::Internal)
                 })
+            })
+        })
+        .with_vera_ancestry_proof_lookup({
+            let history = history.clone();
+            Arc::new(move |ancestor, height| {
+                history
+                    .ancestry_proof(ancestor, height)
+                    .map_err(|error| crate::history::ancestry_rpc_error(&error))
             })
         })
         .with_vera_light_block_lookup({

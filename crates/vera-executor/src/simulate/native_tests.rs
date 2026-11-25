@@ -1,17 +1,16 @@
-use alloy_primitives::{B256, KECCAK256_EMPTY, U256};
+use alloy_primitives::B256;
 use alloy_sol_types::SolCall;
 use vera_modules::acp::abi::IAcp;
 use vera_modules::acp::types::{
     Object, PolicyCmd, PolicyCmdResult, PolicyCommandRequest, PolicyRecord,
 };
 use vera_modules::types::{BlockExecCtx, Timestamp};
-use vera_traits::StateDbError;
 
 use super::*;
 use crate::ExecutionConfig;
+use crate::dispatch::{ACP_ADDRESS, dispatch_to_module};
 use crate::executor::native_dispatch::NATIVE_TX_GAS_LIMIT;
 use crate::executor::native_outcome::NATIVE_REFUSAL_GAS;
-use crate::precompiles::{ACP_ADDRESS, dispatch_to_module};
 
 const POLICY: &str = "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n    permissions:\n      - name: read\n        expr: reader\n";
 const OWNER: &str = "did:key:owner";
@@ -19,27 +18,6 @@ const HEAD: Timestamp = Timestamp {
     seconds: 1_800_000_000,
     block_height: 41,
 };
-
-#[derive(Clone, Debug)]
-struct EmptyState;
-
-impl StateDbRead for EmptyState {
-    async fn nonce(&self, _address: &Address) -> Result<u64, StateDbError> {
-        Ok(0)
-    }
-    async fn balance(&self, _address: &Address) -> Result<U256, StateDbError> {
-        Ok(U256::ZERO)
-    }
-    async fn code_hash(&self, _address: &Address) -> Result<B256, StateDbError> {
-        Ok(KECCAK256_EMPTY)
-    }
-    async fn code(&self, _code_hash: &B256) -> Result<Bytes, StateDbError> {
-        Ok(Bytes::new())
-    }
-    async fn storage(&self, _address: &Address, _slot: &U256) -> Result<U256, StateDbError> {
-        Ok(U256::ZERO)
-    }
-}
 
 fn context() -> SimulationContext {
     SimulationContext::at_block(
@@ -95,12 +73,13 @@ fn committed() -> (ModuleState, B256) {
             &calldata,
             &block,
             &tx,
+            crate::ExecutionConfig::new(9001).membership_limits(),
             1_000_000,
         )
         .unwrap()
         .unwrap();
-        assert!(result.precompile.status.is_success());
-        result.precompile.bytes
+        assert!(result.output.status.is_success());
+        result.output.bytes
     };
     let created = write(
         IAcp::createPolicyCall {
@@ -124,7 +103,7 @@ fn committed() -> (ModuleState, B256) {
 
 fn simulate(modules: &ModuleState, signer: &str, calldata: Vec<u8>) -> NativeSimulateResult {
     let request = NativeSimulateRequest::new(signer, ACP_ADDRESS, calldata.into()).unwrap();
-    simulate_native_call(&EmptyState, &context(), &request, modules).unwrap()
+    simulate_native_call(&context(), &request, modules).unwrap()
 }
 
 #[test]
@@ -180,7 +159,7 @@ fn a_call_is_evaluated_at_the_height_and_time_of_its_context() {
         timestamp: 0,
         ..context()
     };
-    let at_epoch = simulate_native_call(&EmptyState, &epoch, &request, &modules).unwrap();
+    let at_epoch = simulate_native_call(&epoch, &request, &modules).unwrap();
     assert!(!at_epoch.success, "a write needs the block it would run in");
 }
 

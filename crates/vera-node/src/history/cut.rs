@@ -81,7 +81,7 @@ impl FinalizedHistory {
         Ok(borsh::from_slice(&bytes)?)
     }
 
-    fn block(&self, height: u64) -> Result<Block> {
+    pub(super) fn block(&self, height: u64) -> Result<Block> {
         Ok(Block::decode_cfg(
             commonware_codec::Copying(self.record(height)?.block.as_slice()),
             &crate::node::block_cfg(),
@@ -133,7 +133,13 @@ impl FinalizedHistory {
         };
         let mut batch = WriteBatch::default();
         let next = height + 1;
-        for prefix in [RECORD, CERTIFICATE, IMPORTED_FINALITY, PROOF_BLOCK] {
+        for prefix in [
+            RECORD,
+            CERTIFICATE,
+            IMPORTED_FINALITY,
+            PROOF_BLOCK,
+            BLOCK_ID,
+        ] {
             batch.delete_range(key(prefix, next).as_slice(), &[prefix + 1]);
         }
         batch.delete_range([BLOCK_HASH], [SUBMISSION_HASH + 1]);
@@ -159,12 +165,10 @@ mod tests {
         let mut next = block(height, parent);
         next.txs
             .push(vera_domain::Tx::new(vec![height as u8].into()));
-        let receipt = ExecutionReceipt::new(submission, height != 2, 3, 3, vec![], None);
-        next.native_targets = Some([vera_domain::DbTarget::default(); 4]);
-        next.receipt_commitment = Some(vera_executor::receipt_commitment(
-            100,
-            std::slice::from_ref(&receipt),
-        ));
+        let receipt = ExecutionReceipt::new(submission, height != 2, 3, 3, vec![]);
+        next.native_targets = [vera_domain::DbTarget::default(); 4];
+        next.receipt_commitment =
+            vera_executor::receipt_commitment(100, std::slice::from_ref(&receipt));
         (next, receipt)
     }
 

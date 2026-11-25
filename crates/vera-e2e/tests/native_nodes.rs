@@ -70,11 +70,11 @@ async fn native_service_node_authority_survives_worker_changes_and_restart() {
         .unwrap();
     let writer = VeraClient::new(cluster.node(0).rpc_url());
     let reader = VeraClient::new(cluster.node(3).rpc_url());
-    let first: serde_json::Value = writer
-        .rpc_call_typed("eth_getBlockByNumber", serde_json::json!(["0x1", false]))
+    let first: vera_domain::LightBlock = writer
+        .rpc_call_typed("vera_getLightBlock", serde_json::json!([1]))
         .await
         .unwrap();
-    let genesis: alloy_primitives::B256 = first["parentHash"].as_str().unwrap().parse().unwrap();
+    let genesis: alloy_primitives::B256 = first.parent_hash.parse().unwrap();
     let node = SigningKey::from_slice(&[31; 32]).unwrap();
     let controller = SigningKey::from_slice(&[32; 32]).unwrap();
     let next = SigningKey::from_slice(&[33; 32]).unwrap();

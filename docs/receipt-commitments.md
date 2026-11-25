@@ -2,15 +2,15 @@
 
 Native revisions include `Block::receipt_commitment`, a Keccak-256 commitment to
 the ordered execution receipts and execution gas limit. Proposal verification
-re-executes the operations and requires the same commitment. Missing commitments
-are rejected by the native application and native checkpoint verifier.
+re-executes the operations and requires the same commitment. A block does not
+decode without one.
 
 `vera_executor::receipt_commitment` computes the commitment without constructing
 an intermediate receipt buffer. Its input encoding is:
 
 | Field | Encoding |
 |---|---|
-| Domain | Literal bytes `vera/receipts/v2` |
+| Domain | Literal bytes `vera/receipts/v3` |
 | Execution gas limit | Big-endian u64 |
 | Receipt count | Big-endian u64 |
 | Each receipt | Fields below, in execution order |
@@ -25,8 +25,6 @@ Each receipt contributes:
 | Success | One byte, 0 or 1 |
 | Refusal presence | One byte, 0 or 1 |
 | Refusal | Module code (one byte) and kind code (one byte), only when present |
-| Contract address presence | One byte, 0 or 1 |
-| Contract address | 20 bytes, only when present |
 | Log count | Big-endian u64 |
 | Each log | Address (20 bytes), topic count (big-endian u64), ordered topics (32 bytes each), data length (big-endian u64), data bytes |
 
@@ -41,8 +39,7 @@ revision; existing receipt RPC responses do not perform that verification.
 
 A native request a module refuses has a failed receipt naming why: the module it
 was addressed to, a refusal kind and the module's message. A successful receipt
-and every EVM receipt carry no refusal; verification rejects a successful
-receipt that names one.
+carries no refusal; verification rejects a successful receipt that names one.
 
 The module and kind are committed. The message is not: it is the module's
 error text, which embeds parser and library wording (for example a YAML
@@ -71,7 +68,7 @@ show the message as that node's explanation.
 | `unauthenticated` | 6 | A method needing a signer called without one |
 | `unauthorized` | 7 | `Unauthorized` errors of every module and Bulletin's non-collaborator |
 | `invalid_token` | 8 | Invalid bearer tokens and JWS, or a token already invalidated |
-| `invalid_proof` | 9 | An ACP proof, or an anchored revision's finality, that does not verify |
+| `invalid_proof` | 9 | An ACP proof, an anchored revision's finality or a term certificate that does not verify, or a fork report of a block that does not conflict |
 | `not_found` | 10 | A missing policy, commitment, namespace, post, collaborator, token or validator |
 | `object_not_registered` | 11 | An ACP object that is not registered |
 | `already_exists` | 12 | An existing object, namespace, post, collaborator, validator or consensus key |
@@ -82,7 +79,8 @@ show the message as that node's explanation.
 | `out_of_gas` | 17 | A call that exhausted its allowance, including ACP work allowances carved from it |
 | `state_error` | 18 | Module state the call needed could not be used (`State` errors) |
 | `module_failed` | 19 | A module panic |
-| `not_newer` | 20 | An anchor at or below the height of the deployment's latest anchor, or in a lower term |
+| `not_newer` | 20 | An anchor at or below the tip of the deployment's anchors or in a term below the certified one, or a term certificate that is not above the term recorded last |
+| `not_descendant` | 21 | An anchor that is not shown to descend from the tip of the deployment's anchors |
 
 The kind follows from the module error's variant, so every node classifies a
 refusal the same way. Codes outside these tables do not decode. Faults of the
@@ -107,7 +105,7 @@ before accepting requests; see `snapshot-recovery.md`.
 `FinalizedHistory::record_chunk` copies at most 64 KiB from a pinned Regolith
 snapshot into a response and reports the full record length and offset. The
 caller must bound record assembly before allocating for the advertised length.
-The native node serves these chunks on authenticated peer channel 16 using
+The native node serves these chunks on authenticated peer channel 13 using
 Commonware's resolver. Each request is produced on the blocking pool, two at a
 time per node; a request arriving while both are busy is dropped, which the
 importer sees as a failed fetch and retries. The four most recent finality
@@ -171,18 +169,98 @@ need above the recovery anchor. A later authenticated selection can restart the
 descending cursor while retaining the original committed-prefix boundary.
 Record bytes remain unchanged. Any other store format is refused.
 
-## Canonical encoding and existing data
+## Canonical block encoding
 
-Commitment tag 3 encodes the optional DKG payload, optional four native storage
-targets, 32-byte receipt commitment and existing execution storage targets.
-Tags 0, 1 and 2 preserve their previous bytes and remain decodable. Tag 3 adds
-33 bytes to a revision that already has native targets. Unknown tags and
-truncated encodings are rejected.
+A block encodes, in order: the format version byte, consensus context, parent,
+height, ancestry, timestamp, term, module state root, requests, the optional
+DKG payload, the four native storage targets and the 32-byte receipt
+commitment. Every field is required, there is one encoding per format version,
+and a truncated block is rejected. The block identifier hashes the whole
+encoding, so it covers the version.
 
-Fresh native genesis uses the empty receipt list with gas limit zero because
-genesis has no executed operations. Native startup rejects a persisted genesis
-with missing or invalid receipt commitments and preserves its files. Releases
-start with fresh state; incompatible development history is unsupported.
-Legacy library execution and history can still read revisions without native
-targets or receipt commitments, but those receipts have no authenticated
-commitment.
+### Ancestry
+
+The ancestry of the block at height `h` is the list of peaks, oldest first, of
+a Commonware Merkle mountain range (SHA-256, forward-folded root) over the
+identifiers of the blocks at heights `0..h`; the genesis block's is empty. It
+has one 32-byte peak for each set bit of `h`, and a block whose peak count
+differs does not decode. A child's ancestry is its parent's with the parent's
+identifier appended (`Block::extends_ancestry`), which every voter checks
+before it votes; a finalized block is replayed on its certificate.
+
+`AncestryProof` shows that the block with a given identifier at a given height
+is an ancestor of a block, and `Block::has_ancestor` checks it against the
+block's own peaks: at most 122 digests, about `2 * log2(h)` in practice. A
+verifier needs only the later block, which a light block carries, so the
+proof serves light clients and anchors alike.
+
+A node stores no part of the range. Finalized history keeps each block's
+identifier under its height, 32 bytes written in the same batch as the record,
+removed with it by a rewind, a cut or the history floor, and rewritten by a
+recovery that rebuilds the hash mappings. A missing identifier, or one the
+block's committed ancestry does not accept, fails the request instead of
+yielding a proof.
+`vera_getAncestryProof(ancestor, height)` rebuilds the proof from the
+ancestor's block and the identifiers of the blocks after it, read from one
+snapshot of the store, and checks it against the block at `height` before
+returning it. It reads two records and at most 65,536 identifiers (2 MiB),
+whatever the size of the blocks between, and none below the history floor.
+Over a full span on a history of 16 KiB or 128 KiB revisions it takes about
+35 ms in a release build, against 0.5 s and 3.3 s when it read every record
+(`ancestry_cost_tests`).
+
+Native genesis uses the empty receipt list with gas limit zero because genesis
+has no executed operations. Startup rejects a persisted genesis whose receipt
+commitment is not that value and preserves its files. Releases start with
+fresh state.
+
+## Format versions
+
+Each format below names its version, and a reader refuses a version it does not
+implement with a typed error. No reader interprets bytes under another
+version's rules, and none falls back to a default.
+
+| Format | Marker | Current | Refusal |
+|--------|--------|---------|---------|
+| Block encoding | First byte, `vera_domain::BLOCK_FORMAT_VERSION` | 2 | `UnsupportedVersion`, the source of the codec error |
+| State layout | First byte of `native-genesis.bin` and `native-genesis.intent`, `vera_backend::native::STATE_LAYOUT_VERSION` | 1 | `UnsupportedVersion`; the marker and journals are left unchanged |
+| Native request | First byte, `vera_domain::NATIVE_TX_TYPE` | `0x45` | `NativeTxDecodeError::UnsupportedType` |
+| Receipt commitment | Hash domain | `vera/receipts/v3` | Re-execution and history reject the block's commitment |
+| Genesis fingerprint | Hash domain | `vera/native-genesis/v3` | The genesis record does not match the node's configuration |
+| Finalized history | `format` key | 1 (appended), 3 (imported) | `UnsupportedHistoryFormat` |
+| Module records | Key namespace, such as `relationship/v5/` | Per record family | A key outside the namespace is not read |
+
+Light blocks, history records, block backfill and snapshot handoffs carry
+encoded blocks and take the block's version with them. A finality certificate
+signs the block identifier, so it binds the version as well.
+
+State layout 1 is four ordered current-QMDB partitions, `acp`, `bulletin`,
+`vera` and `nonces`, sealed into each block in that order. The genesis
+fingerprint hashes the layout version between its domain and the serialized
+configuration; the genesis block names the fingerprint as its parent, so the
+layout is part of the deployment identity and of every block identifier.
+
+The request type fixes a native request's signing scheme and field layout. The
+type byte leads both the wire encoding and the signed bytes, so a signature
+under one type does not verify under another.
+
+### Adding a component
+
+A release that adds an execution path, state or block fields takes new
+versions; releases start with fresh state, so no reader of an earlier version
+is kept.
+
+- A block that gains, loses or reorders a field raises `BLOCK_FORMAT_VERSION`.
+- A partition set that changes raises `STATE_LAYOUT_VERSION` and names the new
+  set where the constant is defined. Each partition has its own journals under
+  `vera-native-<name>` and its own state-transfer channel, and its
+  operation-log target joins the block's targets, which raises the block
+  version too.
+- A second signing scheme or request layout takes its own request type byte
+  beside `0x45`.
+- Receipt fields that change take the next `vera/receipts/v<n>` domain.
+- A record whose encoding changes takes the next key namespace of its family.
+
+Modules keep their addresses and call encodings. A new execution shim decodes
+its own request form and calls the same `module.method(args)` as the native
+shim; module logic and module state do not change with the shim.

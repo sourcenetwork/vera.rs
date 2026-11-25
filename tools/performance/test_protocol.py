@@ -127,11 +127,20 @@ pub struct RelationshipRecord {
 
     def test_block_encoding_is_read_from_the_recorded_revision(self):
         block = 'pub struct Block {\n    pub height: u64,\n    pub timestamp: u64,\n%s    pub txs: Vec<Tx>,\n}\n'
-        for term, expected in (('    pub term: u64,\n', 2), ('', 1)):
-            with patch('protocol.subprocess.check_output', return_value=block % term) as git:
+        term, root = '    pub term: u64,\n', '    pub state_root: StateRoot,\n'
+        for fields, expected in ((term, 3), (term + root, 2), (root, 1), ('', 1)):
+            with patch('protocol.subprocess.check_output', return_value=block % fields) as git:
                 self.assertEqual(source_block_encoding('.', 'revision'), expected)
             self.assertEqual(git.call_args.args[0], ['git', 'show', f'revision:{BLOCK}'])
-        for invalid in ('', block % '    pub term: u32,\n', (block % '') * 2):
+        version = 'pub const BLOCK_FORMAT_VERSION: u8 = %s;\n'
+        for declared, expected in ((1, 'v1'), (2, 'v2'), (12, 'v12')):
+            with patch('protocol.subprocess.check_output', return_value=version % declared + block % term):
+                self.assertEqual(source_block_encoding('.', 'revision'), expected)
+        for invalid in ('', block % '    pub term: u32,\n', block % (root + root),
+                        (block % root) * 2, version % 1 + block % '', version % 1 + block % (term + root),
+                        version % 1 + version % 2 + block % term,
+                        version % 'CURRENT' + block % term,
+                        'const BLOCK_FORMAT_VERSION: u16 = 1;\n' + block % term):
             with patch('protocol.subprocess.check_output', return_value=invalid):
                 with self.assertRaisesRegex(ValueError, 'block'):
                     source_block_encoding('.', 'revision')
@@ -145,6 +154,9 @@ pub struct RelationshipRecord {
         self.assertIn('block encodings', incompatibility_reason(identity))
         identity['base']['block_encoding'] = 2
         self.assertFalse(baseline_incompatible(identity))
+        for head, base, incompatible in (('v1', 3, True), ('v2', 'v1', True), ('v1', 'v1', False)):
+            identity['head']['block_encoding'], identity['base']['block_encoding'] = head, base
+            self.assertEqual(baseline_incompatible(identity), incompatible)
         del identity['base']['block_encoding']
         with self.assertRaisesRegex(ValueError, 'block encoding provenance'):
             baseline_incompatible(identity)

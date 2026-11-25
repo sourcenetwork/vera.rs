@@ -1,13 +1,17 @@
 //! Signed delegation, batch rollback and revocation recovery across replicas.
 
+#[path = "support/native_receipt.rs"]
+mod native_receipt;
+
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use alloy_primitives::{Address, B256, Bytes};
 use alloy_sol_types::SolCall;
 use vera_client::Secp256k1SigningKey as SigningKey;
 use vera_client::{
-    ACP_ADDRESS, BlsSigner, EvmSigner, TransactionReceipt, VERA_ADDRESS, VeraClient,
+    ACP_ADDRESS, BlsSigner, TokenRevocation, TransactionReceipt, VERA_ADDRESS, VeraClient,
 };
+use vera_crypto::operation::OperationId;
 use vera_e2e::cluster::{ConsensusPreset, TestCluster};
 use vera_modules::{
     acp::abi::IAcp,
@@ -21,27 +25,27 @@ use vera_modules::{
 const OWNER: &str = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const POLL: Duration = Duration::from_millis(50);
 
-fn token(submitter: &str, deployment: u64, now: u64) -> String {
-    let key = SigningKey::from_slice(&hex::decode(OWNER).unwrap()).unwrap();
-    vera_client::create_bearer_token(&key, submitter, deployment, now, now + 300).unwrap()
+fn owner() -> SigningKey {
+    SigningKey::from_slice(&hex::decode(OWNER).unwrap()).unwrap()
 }
 
-async fn evm(
-    client: &VeraClient,
-    signer: &EvmSigner,
-    target: Address,
-    data: Vec<u8>,
-) -> TransactionReceipt {
-    let nonce = client.get_nonce(signer.address()).await.unwrap();
-    let raw = signer.sign_tx(target, data.into(), nonce).unwrap();
-    let hash = client.send_raw_transaction(&raw).await.unwrap();
-    client.wait_for_receipt(hash, POLL, 600).await.unwrap()
+fn token(submitter: &str, deployment: u64, now: u64) -> String {
+    vera_client::create_bearer_token(&owner(), submitter, deployment, now, now + 300).unwrap()
 }
 
 async fn native(client: &VeraClient, signer: &BlsSigner, data: Vec<u8>) -> TransactionReceipt {
-    let raw = signer.sign_native_tx(ACP_ADDRESS, data.into()).unwrap();
+    send(client, signer, ACP_ADDRESS, data).await
+}
+
+async fn send(
+    client: &VeraClient,
+    signer: &BlsSigner,
+    target: Address,
+    data: Vec<u8>,
+) -> TransactionReceipt {
+    let raw = signer.sign_native_tx(target, data.into()).unwrap();
     let hash = client.send_native_tx(&raw).await.unwrap();
-    client.wait_for_receipt(hash, POLL, 600).await.unwrap()
+    native_receipt::wait(client, hash).await
 }
 
 fn register(policy: B256, bearer: &str, object: &str) -> Vec<u8> {
@@ -71,13 +75,12 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
         .await
         .unwrap();
     let client = VeraClient::new(cluster.node(0).rpc_url());
-    let owner = EvmSigner::from_hex(OWNER, 9001).unwrap();
+    let creator = BlsSigner::new(6u64.into(), 9001).unwrap();
     let delegate = BlsSigner::new(7u64.into(), 9001).unwrap();
     let stranger = BlsSigner::new(8u64.into(), 9001).unwrap();
-    let created = evm(
+    let created = native(
         &client,
-        &owner,
-        ACP_ADDRESS,
+        &creator,
         IAcp::createPolicyCall {
             policy: Bytes::from_static(b"name: delegation\nresources:\n  - name: file\n"),
             marshalType: 1,
@@ -86,44 +89,36 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
         .abi_encode(),
     )
     .await;
-    assert_eq!(created.status, 1);
+    assert!(created.success);
     let policy: B256 = client.get_policy_ids().await.unwrap()[0].parse().unwrap();
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
     let bearer = token(delegate.did(), 9001, now);
-    assert_eq!(
-        native(
+    assert!(
+        !native(
             &client,
             &stranger,
             register(policy, &bearer, "wrong-caller")
         )
         .await
-        .status,
-        0
+        .success
     );
     let wrong_deployment = token(delegate.did(), 9002, now);
-    assert_eq!(
-        native(
+    assert!(
+        !native(
             &client,
             &delegate,
             register(policy, &wrong_deployment, "wrong-deployment")
         )
         .await
-        .status,
-        0
+        .success
     );
-    assert_eq!(
-        evm(
-            &client,
-            &owner,
-            ACP_ADDRESS,
-            register(policy, &bearer, "wrong-path")
-        )
-        .await
-        .status,
-        0
+    assert!(
+        !native(&client, &creator, register(policy, &bearer, "wrong-relay"))
+            .await
+            .success
     );
 
     let batch = IAcp::batchCallsCall {
@@ -133,7 +128,7 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
         ],
     }
     .abi_encode();
-    assert_eq!(native(&client, &delegate, batch).await.status, 0);
+    assert!(!native(&client, &delegate, batch).await.success);
     assert!(
         !client
             .get_jws_token(&hash_jws_token(&bearer))
@@ -148,11 +143,10 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
             .unwrap()
             .0
     );
-    assert_eq!(
+    assert!(
         native(&client, &delegate, register(policy, &bearer, "kept"))
             .await
-            .status,
-        1
+            .success
     );
     let (_, bytes) = client
         .get_jws_token(&hash_jws_token(&bearer))
@@ -179,24 +173,23 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
     .unwrap();
     assert!(tokens.is_empty());
 
-    let evm_bearer = token(&owner.did(), 9001, now);
-    assert_eq!(
-        evm(
+    let creator_bearer = token(creator.did(), 9001, now);
+    assert!(
+        native(
             &client,
-            &owner,
-            ACP_ADDRESS,
-            register(policy, &evm_bearer, "evm")
+            &creator,
+            register(policy, &creator_bearer, "creator")
         )
         .await
-        .status,
-        1
+        .success
     );
     let unused = token(stranger.did(), 9001, now);
     let mut revocations = Vec::new();
-    for bearer in [&bearer, &unused] {
-        let receipt = evm(
+    // Each token's authorized submitter revokes it.
+    for (submitter, bearer) in [(&delegate, &bearer), (&stranger, &unused)] {
+        let receipt = send(
             &client,
-            &owner,
+            submitter,
             VERA_ADDRESS,
             IVera::revokeDelegationCall {
                 token: bearer.clone(),
@@ -204,15 +197,44 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
             .abi_encode(),
         )
         .await;
-        assert_eq!(receipt.status, 1);
+        assert!(receipt.success);
         revocations.push(receipt.transaction_hash);
     }
+    // The secp256k1 issuer of a used token revokes it through a worker it names.
+    let first: vera_domain::LightBlock = client
+        .rpc_call_typed("vera_getLightBlock", serde_json::json!([1]))
+        .await
+        .unwrap();
+    let genesis = first.parent_hash.parse::<B256>().unwrap().0;
+    let revocation = TokenRevocation::of_token(&creator_bearer);
+    let operation = revocation
+        .sign(
+            &owner(),
+            stranger.did(),
+            9001,
+            genesis,
+            OperationId::new(now + 300, [9; 24]),
+            now,
+        )
+        .unwrap();
+    let receipt = send(
+        &client,
+        &stranger,
+        VERA_ADDRESS,
+        revocation.calldata(&operation),
+    )
+    .await;
+    assert!(receipt.success);
+    revocations.push(receipt.transaction_hash);
+    let issuer = vera_crypto::jwt::verify_bearer_token(&creator_bearer)
+        .unwrap()
+        .iss;
     // Establish the same finalized revocation on the replica before restarting it.
     let replica = VeraClient::new(cluster.node(3).rpc_url());
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             let (found, bytes) = replica
-                .get_jws_token(&hash_jws_token(&unused))
+                .get_jws_token(&hash_jws_token(&creator_bearer))
                 .await
                 .unwrap();
             if found
@@ -234,36 +256,44 @@ async fn delegation_revocation_and_failed_batch_survive_restart() {
         .await
         .unwrap();
     for hash in revocations {
-        replica.wait_for_receipt(hash, POLL, 600).await.unwrap();
+        native_receipt::wait(&replica, hash).await;
     }
-    for bearer in [&bearer, &unused] {
+    for (bearer, revoker) in [
+        (&bearer, delegate.did()),
+        (&unused, stranger.did()),
+        (&creator_bearer, issuer.as_str()),
+    ] {
         let (found, bytes) = replica
             .get_jws_token(&hash_jws_token(bearer))
             .await
             .unwrap();
         assert!(found);
-        assert_eq!(
-            serde_json::from_slice::<JWSTokenRecord>(&bytes)
-                .unwrap()
-                .status,
-            JWSTokenStatus::Invalid
-        );
+        let record = serde_json::from_slice::<JWSTokenRecord>(&bytes).unwrap();
+        assert_eq!(record.status, JWSTokenStatus::Invalid);
+        assert_eq!(record.invalidated_by, revoker);
     }
-    assert_eq!(
-        native(&replica, &delegate, register(policy, &bearer, "revoked"))
+    assert!(
+        !native(&replica, &delegate, register(policy, &bearer, "revoked"))
             .await
-            .status,
-        0
+            .success
     );
-    assert_eq!(
-        native(
+    assert!(
+        !native(
             &replica,
             &stranger,
             register(policy, &unused, "revoked-unused")
         )
         .await
-        .status,
-        0
+        .success
+    );
+    assert!(
+        !native(
+            &replica,
+            &creator,
+            register(policy, &creator_bearer, "revoked-by-issuer")
+        )
+        .await
+        .success
     );
     assert!(
         !replica

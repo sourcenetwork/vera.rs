@@ -199,7 +199,7 @@ mod tests {
         };
         let cmd = PolicyCmd::RegisterUnderParent {
             object: child,
-            parent: parent.clone(),
+            parent,
         };
         assert!(matches!(
             module.direct_policy_cmd(&owner, &policy, cmd.clone()),
@@ -244,7 +244,7 @@ mod tests {
             .unwrap();
         let cmd = PolicyCmd::RegisterUnderParent {
             object: child.clone(),
-            parent: parent.clone(),
+            parent,
         };
         let before = module.store.serialize();
         assert!(
@@ -259,7 +259,7 @@ mod tests {
         let reveal = PolicyCmd::RevealRegistration {
             registrations_commitment_id: 1,
             proof: types::RegistrationProof {
-                object: child.clone(),
+                object: child,
                 leaf_count: 1,
                 leaf_index: 0,
                 merkle_proof: vec![],

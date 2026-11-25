@@ -68,7 +68,7 @@ pub struct LightBlockStats {
 
 /// In-memory index of finalizations and their epoch verifier material.
 ///
-/// Finalizations are keyed by consensus digest (SHA-256 of the EVM block ID),
+/// Finalizations are keyed by consensus digest (SHA-256 of the block ID),
 /// while verifier material is keyed by epoch. Both artifacts are public and
 /// can be reconstructed from marshal storage and finalized epoch-boundary
 /// blocks after restart. Finalizations are a FIFO cache capped at 1,024 entries

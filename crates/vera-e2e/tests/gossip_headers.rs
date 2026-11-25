@@ -1,6 +1,6 @@
 //! Integration test for gossip header subscriptions.
 //!
-//! Verifies that `eth_subscribe("headers")` delivers signed `GossipHeader`
+//! Verifies that `vera_subscribeHeaders` delivers signed `GossipHeader`
 //! events when blocks finalize. Requires `cargo build -p verad` before running.
 
 use std::time::Duration;
@@ -13,14 +13,14 @@ use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, TestCluster};
 #[tokio::test]
 async fn gossip_headers_subscription() {
     let chain_id = 9002;
-    let genesis = GenesisBuilder::devnet().funded_accounts(1, "1000000000000000000000000");
+    let genesis = GenesisBuilder::devnet();
 
     let cluster = TestCluster::builder()
         .binary(vera_e2e::resolve_binary().expect("resolve verad binary"))
         .nodes(4)
         .chain_id(chain_id)
         .genesis(genesis)
-        .preset(ConsensusPreset::Fast)
+        .preset(ConsensusPreset::Normal)
         .build()
         .await
         .expect("cluster should start");
@@ -38,14 +38,14 @@ async fn gossip_headers_subscription() {
 
     let mut headers_sub = ws_client
         .subscribe::<serde_json::Value, _>(
-            "eth_subscribe",
-            rpc_params!["headers"],
-            "eth_unsubscribe",
+            "vera_subscribeHeaders",
+            rpc_params![],
+            "vera_unsubscribeHeaders",
         )
         .await
         .expect("headers subscription should succeed");
 
-    // Blocks finalize continuously with Fast consensus — wait for a header.
+    // Blocks finalize continuously — wait for a header.
     let header = tokio::time::timeout(Duration::from_secs(15), headers_sub.next())
         .await
         .expect("header should arrive within timeout")
@@ -65,10 +65,6 @@ async fn gossip_headers_subscription() {
     assert!(
         !header["parent_hash"].is_null(),
         "parent_hash should be present"
-    );
-    assert!(
-        !header["state_root"].is_null(),
-        "state_root should be present"
     );
     assert!(
         !header["module_state_root"].is_null(),
@@ -110,9 +106,9 @@ async fn gossip_headers_subscription() {
 
     let mut headers_sub2 = ws_client2
         .subscribe::<serde_json::Value, _>(
-            "eth_subscribe",
-            rpc_params!["headers"],
-            "eth_unsubscribe",
+            "vera_subscribeHeaders",
+            rpc_params![],
+            "vera_unsubscribeHeaders",
         )
         .await
         .expect("headers subscription on node 1 should succeed");

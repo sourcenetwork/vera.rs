@@ -1,24 +1,20 @@
 # Consensus membership
 
-Consensus membership changes accept native signed submissions. They use the
-existing registry rules and storage, including ACP authorization, through the
-shared command dispatcher. Admission and proposal rechecking accept the registry
-target. A rejected command consumes its submission sequence and leaves membership
-unchanged. A storage failure aborts proposal execution; it cannot become a
-certified rejection or leave a partial member entry.
+Consensus membership changes are native signed submissions to the validator
+registry, authorized by ACP. A rejected command consumes its submission sequence
+and leaves membership unchanged. A member record that does not read back aborts
+proposal execution; it cannot become a certified rejection or leave a partial
+member entry.
 
 The registry holds at most 64 entries, matching the current protocol's DKG
 participant bound. Inactive entries count toward that limit. A consensus public
-key can belong to only one registered entry, including inactive entries. Stored
-counts, indexes and route lengths are checked at their full encoded width;
-malformed values and inconsistent array/record links are errors.
+key can belong to only one registered entry, including inactive entries. See
+[validator records](#validator-records) for the stored form.
 
 The active committee is also bounded by the configured epoch length. Commonware
 requires its dealer quorum to fit between the dealing phase and the final epoch
-artifact. With rotating leaders, 20 revisions per epoch permit 13 active members;
-87 permit the protocol maximum of 64. With stable leaders, the inclusion window
-must offer each dealer a proposing term because a proposer supplies only its own
-log. For an epoch length `B` and term length `L`, the window has
+artifact. The inclusion window must offer each dealer a proposing term because
+a proposer supplies only its own log. For an epoch length `B` and term length `L`, the window has
 `S = B - floor(B / 2) - 1` blocks and permits at most `ceil(S / L)` members,
 capped at 64. This assumes contiguous successful views and ready dealer logs.
 Skipped terms or delayed dealing can still fail a ceremony; the previous voting
@@ -104,6 +100,45 @@ qualification.
 VERAD_BINARY=/path/to/verad cargo test -p vera-e2e --test native_membership
 ```
 
+### Validator records
+
+The registry (module address `0x0813`) keeps one record per member in the vera
+module's partition under `registry/member/<20-byte address>`: the Ed25519
+consensus key, the socket address peers dial (at most 64 bytes), whether the
+member is active, the admission that created the record, and the sequence its
+next address update must carry. Every admission, a genesis member or an
+`addValidator`, takes the next number from a count under `registry/admissions`
+that removal never lowers. Genesis seeds the records from `validators` in the
+order listed; reads return members in address order. A
+record that does not decode is a fault of the node and fails the block that
+reads it.
+
+`addValidator`, `removeValidator` and `setValidatorStatus` require the
+submitting signer to hold `manage` on the `registry/registry` object of the
+membership policy operators selected. The registry holds at most 64 members,
+keeps at least one active, admits no more active members than an epoch has
+leader terms for, and never registers one consensus key twice, including the
+key of an inactive member.
+
+A validator moves its own network address without that permission.
+`updateP2PAddress(validator, p2pAddr, sequence, signature)` carries the Ed25519
+signature of the member's consensus key over
+
+```
+keccak256("vera/registry/p2p-address/v1" || genesis id || validator address
+          || admission (u64, big endian) || sequence (u64, big endian)
+          || new address bytes)
+```
+
+Any native signer may submit it. The sequence must equal the record's and then
+advances, so a signature applies once, and the genesis record identifier keeps
+it to one deployment. Removing a member deletes its record and admitting it
+again starts the sequence at zero under a new admission, so no signature made
+before the removal applies to the new record. `vera_client::ValidatorAddressUpdate::sign` builds it from
+the 32-byte secret in the validator's key file and the record's admission and
+sequence, which `getValidator` returns. An inactive member may still
+update its address.
+
 ### Operator keys
 
 An operator policy is a threshold and a list of keys in ascending string order
@@ -144,9 +179,11 @@ also reject malformed configuration before changing state. After an approved
 parameter update, use its certified revision as the minimum for the read.
 
 
-## Pipelined native deployments
+## Pipelined consensus
 
-A new deployment can enable stable leaders and optimistic validation in genesis:
+Every deployment runs Simplex with stable leader terms and optimistic
+validation. Genesis states the parameters; omitting `simplex` selects the values
+below, and omitting `blocks_per_epoch` selects 192:
 
 ```json
 "blocks_per_epoch": 192,
@@ -157,11 +194,10 @@ A new deployment can enable stable leaders and optimistic validation in genesis:
 }
 ```
 
-This configuration permits up to six active members. Omitting `blocks_per_epoch`
-retains the rotating deployment default of 20, which is insufficient for four
-members with 16-view terms and is rejected at startup. The test harness generator
-uses 192 when pipelining is selected without an explicit epoch length; explicitly
-configured lengths are preserved and validated by the node. Longer terms or larger
+This configuration permits up to six active members. An epoch too short for the
+genesis committee, such as 20 blocks for four members with 16-view terms, is
+rejected at startup. The test harness generator also uses 192 unless a test
+states another length. Longer terms or larger
 committees require longer epochs. These settings prevent deterministic capacity
 starvation; they do not guarantee resharing under arbitrary network schedules.
 
@@ -177,15 +213,9 @@ evidence. A stalled term is abandoned through Commonware's nullification path.
 Terms must contain 2–64 views. Optimistic lookahead may be zero to disable
 optimism, or at most 16 views and strictly less than the term length. The stall
 timeout must be 1–60000 milliseconds. All parameters are included in the genesis
-fingerprint and, for all native deployments, committed in the genesis header's
-`prevrandao` field. Changing parameters requires a new deployment or an explicit
-migration; restarting against different parameters is rejected.
+fingerprint, which the genesis block names as its parent. Changing parameters
+requires a new deployment; restarting against different parameters is rejected.
 
-Pipelined deployments accept native signed requests only. EVM submissions are
-rejected at admission, and proposals containing EVM transactions are invalid.
-Subsequent headers carry zero `prevrandao`; this field is not a randomness beacon.
-Native ACP, bulletin, identity and membership operations do not depend on EVM
-randomness. Threshold signatures and DKG/resharing remain enabled.
-
-Omitting `simplex` preserves rotating leaders, EVM execution and the existing
-per-view VRF handling. This preserves the encoding of existing genesis files.
+Deployments accept native signed requests only. Other bytes are refused at
+admission, and a proposal that carries any is invalid. Blocks carry
+no consensus randomness. Threshold signatures and DKG/resharing remain enabled.

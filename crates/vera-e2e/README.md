@@ -1,9 +1,8 @@
 # vera-e2e
 
 End-to-end integration tests. Each test stands up a real multi-node `verad`
-cluster (BFT consensus needs ≥4 nodes) and drives it over JSON-RPC, exercising
-both the EVM (`eth_sendRawTransaction`) and native BLS (`vera_sendNativeTx`)
-transaction paths.
+cluster (BFT consensus needs ≥4 nodes) and drives it over JSON-RPC with native
+BLS requests (`vera_sendNativeTx`).
 
 ## Required pre-build
 
@@ -19,7 +18,7 @@ The harness's `resolve_binary()` (via `test_infra::BinaryResolver`, `VERAD`
 prefix) looks for the binary in this order:
 
 1. `VERAD_BINARY` — explicit path, no version check
-2. `HUBD_WORKSPACE` — a vera.rs checkout; builds the `verad` package there
+2. `VERAD_WORKSPACE` — a vera.rs checkout; builds the `verad` package there
 3. `verad` on `PATH`
 4. a `backbone.toml` manifest pin
 
@@ -61,15 +60,14 @@ All targets live in `crates/vera-e2e/tests/`:
 
 | Target | Test(s) | Purpose |
 |--------|---------|---------|
-| `vera_e2e_canonical` | `canonical_module_test` | **Baseline gate.** Full module lifecycle on a 4-node cluster through both tx paths: ACP (policy, object, relationship, access), Bulletin (namespace, collaborator, post), cross-path verification (BLS write + EVM query and vice versa), and cluster health. Any change that breaks this has broken the core pipeline. |
-| `contract_deploy` | `deploy_and_interact` | Deploys a minimal storage contract via CREATE, then exercises read (`eth_getStorageAt`) and write (`eth_sendRawTransaction`) paths against it. |
+| `vera_e2e_canonical` | `canonical_module_test` | **Baseline gate.** Full module lifecycle on a 4-node cluster through native requests: ACP (policy, object, relationship, access), Bulletin (namespace, collaborator, post), cross-path verification (BLS write + EVM query and vice versa), and cluster health. Any change that breaks this has broken the core pipeline. |
 | `core_chain` | `cluster_observability_canonical` | 4-node BFT cluster with observability attached; cross-validates block heights and events between `LogTracker`, `RpcPoller`, and `ClusterState`. |
 | `cross_object_acp` | `cross_object_grant_replicates_across_nodes` | Seeds a cross-object parent edge (subject is another object's userset) plus a child grant on node 0, then asserts on every other node that both replicate and that access resolves across the edge via `TupleToUserset`. |
-| `gossip_headers` | `gossip_headers_subscription` | Verifies `eth_subscribe("headers")` delivers `GossipHeader` events (chain id, height, hashes, roots) carrying the finalization certificate as blocks finalize. |
+| `gossip_headers` | `gossip_headers_subscription` | Verifies `vera_subscribeHeaders` delivers `GossipHeader` events (chain id, height, hashes, roots) carrying the finalization certificate as blocks finalize. |
 | `light_client` | `light_client_proof_verification` | Full light-client pipeline: gossip headers, `verify_light_block` on the BLS threshold certificate + epoch group key, module state proofs against `module_state_root`, and state-change detection across block boundaries. |
 | `native_permission` | `native_permission_reads_follow_finalized_grants_and_denials` | Signed native grants and denial, independently authenticated current permission evidence on all four nodes, owner access, and rejection of old grant evidence at the later root. Uses combined revision/evidence responses without client proof retries; also runs 20 permission reads alongside four object registrations. |
 | `native_object_archive` | `pipelined_object_archive_preserves_exact_counts_and_regrants_after_restart` | Four-validator native Simplex archive lifecycle with certified exact operation results, denial, unarchive without grant revival, regrant, incoming-userset preservation, physical cleanup and rolling restart. Uses fixed publication barriers and single evidence requests; cleanup/regrant overlap remains covered by module tests. |
-| `node_restart` | `node_restart_preserves_state` | Starts 4 nodes, submits EVM + BLS txs, kills node 3, verifies the 3-node cluster continues, restarts it, and verifies pre-kill state survived (QMDB persistence), catch-up, post-restart txs on both paths, and tx submission *through* the restarted node. |
+| `node_restart` | `node_restart_preserves_state` | Starts 4 nodes, submits native requests, kills node 3, verifies the 3-node cluster continues, restarts it, and verifies pre-kill state survived (QMDB persistence), catch-up, post-restart txs on both paths, and tx submission *through* the restarted node. |
 | `snapshot_catchup` | `snapshot_replica_recovers_history_and_rejoins_consensus` | An empty admitted replica uses authenticated state/history transfer after missing two epochs, restores exact receipts and verified permission reads, restarts from its recovery floor and later supplies a required quorum vote. |
 | `snapshot_interrupt` | `interrupted_snapshot_resumes_without_an_explicit_request` | Requires `fault-injection` in both test and node builds. Aborts after one imported history record is durable, removes the snapshot request from configuration, and verifies automatic resume, restart, receipts, proofs, revocation and quorum participation. |
 | `cold_replay` | `cold_replica_replays_across_epochs` | Starts a replica from bootstrap files after two epochs offline; checks recovered receipts, certified roots, native sequences and access revocation through combined revision/evidence responses, then requires its vote for continued quorum after another member stops. Uses retained peer history, not snapshot transfer or a new membership identity. |

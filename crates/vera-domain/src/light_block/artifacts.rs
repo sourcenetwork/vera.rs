@@ -27,6 +27,25 @@ impl FinalizedArtifacts {
         )
     }
 
+    /// Hash of the finality evidence: the descendants, the finalization and
+    /// the epoch material, each length-prefixed. Two artifacts with one block
+    /// and one digest carry the same certificate.
+    #[must_use]
+    pub fn finality_digest(&self) -> alloy_primitives::B256 {
+        let mut hasher = alloy_primitives::Keccak256::new();
+        hasher.update(b"vera/finality-evidence/v1");
+        hasher.update((self.descendants.len() as u64).to_be_bytes());
+        for part in self
+            .descendants
+            .iter()
+            .chain([&self.finalization, &self.epoch_material])
+        {
+            hasher.update((part.len() as u64).to_be_bytes());
+            hasher.update(part);
+        }
+        hasher.finalize()
+    }
+
     /// Reject excessive descendant count or combined size.
     pub fn check_limits(&self) -> Result<(), LightBlockError> {
         if self.descendants.len() > LIGHT_BLOCK_MAX_DESCENDANTS

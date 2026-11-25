@@ -1,6 +1,5 @@
 //! Status and chain info subcommands.
 
-use alloy_primitives::Address;
 use clap::Subcommand;
 
 use super::context::ClientContext;
@@ -9,15 +8,10 @@ use super::context::ClientContext;
 pub(crate) enum StatusCommand {
     /// Query node status (vera_nodeStatus).
     Status,
-    /// Query chain ID (eth_chainId).
+    /// Query chain ID (vera_nodeStatus).
     ChainId,
-    /// Query latest block number (eth_blockNumber).
+    /// Query the newest revision of the execution index (vera_nodeStatus).
     BlockNumber,
-    /// Query balance of an address (eth_getBalance).
-    Balance {
-        /// Ethereum address (hex, 0x-prefixed).
-        address: String,
-    },
 }
 
 impl StatusCommand {
@@ -34,16 +28,6 @@ impl StatusCommand {
             Self::BlockNumber => {
                 let num = ctx.client.block_number().await?;
                 ctx.print_json(&serde_json::json!({ "block_number": num }))?;
-            }
-            Self::Balance { address } => {
-                let addr: Address = address
-                    .parse()
-                    .map_err(|e| eyre::eyre!("invalid address: {e}"))?;
-                let balance = ctx.client.get_balance(addr).await?;
-                ctx.print_json(&serde_json::json!({
-                    "address": format!("{addr:?}"),
-                    "balance": balance.to_string(),
-                }))?;
             }
         }
         Ok(())

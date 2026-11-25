@@ -43,6 +43,9 @@ pub enum DelegationScope {
     /// Register encrypted documents and signing derivations.
     #[serde(rename = "orbis:object:store")]
     StoreThresholdObject,
+    /// Invalidate one token the actor issued, named by its hash.
+    #[serde(rename = "vera:token:revoke")]
+    RevokeToken,
 }
 
 /// Verified claims extracted from a JWT bearer token.
@@ -261,10 +264,6 @@ mod tests {
         assert_eq!(
             canonical_issuer(&base58).unwrap(),
             canonical_issuer(&base64).unwrap()
-        );
-        assert_eq!(
-            crate::secp256k1::evm_address_from_did(&base58).unwrap(),
-            crate::secp256k1::evm_address_from_did(&base64).unwrap(),
         );
         assert!(canonical_issuer("did:key:z0").is_err());
         assert!(canonical_issuer("did:key:uAA=").is_err());

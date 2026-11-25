@@ -26,11 +26,11 @@ pub(crate) struct ClientArgs {
     )]
     url: String,
 
-    /// Hex secp256k1 private key for EVM transaction signing.
+    /// Hex secp256k1 actor private key, which signs bearer tokens.
     #[arg(long, env = "VERA_KEY", global = true)]
     key: Option<String>,
 
-    /// Hex BLS12-381 private key for native transaction signing.
+    /// Hex BLS12-381 private key, which signs every write command.
     #[arg(long, env = "VERA_BLS_KEY", global = true)]
     bls_key: Option<String>,
 
@@ -54,7 +54,7 @@ enum ClientCommand {
     #[command(flatten)]
     Status(status::StatusCommand),
 
-    /// Transaction operations (receipt, send).
+    /// Request operations (receipt, send).
     #[command(subcommand)]
     Tx(tx::TxCommand),
 
@@ -128,7 +128,6 @@ mod tests {
             vec!["verad", "client", "status"],
             vec!["verad", "client", "chain-id"],
             vec!["verad", "client", "block-number"],
-            vec!["verad", "client", "balance", "0x00"],
         ] {
             assert!(matches!(
                 client(&arguments).command,

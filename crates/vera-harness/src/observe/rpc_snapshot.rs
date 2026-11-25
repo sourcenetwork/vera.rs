@@ -2,11 +2,8 @@
 
 /// Latest known state of a single node from RPC polling.
 ///
-/// Block height comes from observed finalization in `vera_nodeStatus`, or from
-/// `eth_getBlockByNumber` when no finalized observation is available. Process-local
-/// callback counts are not block heights.
-///
-/// Use `effective_height()` to get the best available height.
+/// Block height comes from the finalized height in `vera_nodeStatus`.
+/// Process-local callback counts are not block heights.
 #[derive(Clone, Debug, Default)]
 pub struct NodeSnapshot {
     /// Node index in the cluster.
@@ -41,21 +38,16 @@ pub struct NodeSnapshot {
     pub is_leader: Option<bool>,
     /// Whether this node is backfilling historical blocks.
     pub backfilling: bool,
-    /// Latest block height from eth_getBlockByNumber.
-    pub latest_block_height: u64,
     /// Whether the node is reachable.
     pub is_healthy: bool,
 }
 
 impl NodeSnapshot {
-    /// Best available block height.
-    ///
-    /// Prefers observed `finalized_height`, falling back to the indexed block
-    /// height. Returns zero before either source reports progress.
+    /// Finalized block height, or zero before the node reports one.
     pub const fn effective_height(&self) -> u64 {
         match self.finalized_height {
             Some(height) => height,
-            None => self.latest_block_height,
+            None => 0,
         }
     }
 }
@@ -71,8 +63,6 @@ mod tests {
             ..NodeSnapshot::default()
         };
         assert_eq!(snapshot.effective_height(), 0);
-        snapshot.latest_block_height = 7;
-        assert_eq!(snapshot.effective_height(), 7);
         snapshot.finalized_height = Some(6);
         assert_eq!(snapshot.effective_height(), 6);
     }

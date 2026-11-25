@@ -54,7 +54,7 @@ fn native_genesis_rejects_a_persisted_timestamp_mismatch() {
     block.timestamp = 0;
     let record_path = path.join("native-genesis.bin");
     let record = std::fs::read(&record_path).unwrap();
-    let mut corrupted = record[..32].to_vec();
+    let mut corrupted = record[..33].to_vec();
     corrupted.extend_from_slice(&block.encode());
     std::fs::write(record_path, corrupted).unwrap();
     let error = tokio::Runner::new(runtime).start(|context| async move {
@@ -83,21 +83,10 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
             tokio::Runner::new(runtime.clone()).start(|context| async move {
                 vera_cli::write_durable(
                     directory.join("native-genesis.intent"),
-                    crate::native_genesis::fingerprint(genesis)
-                        .unwrap()
-                        .as_slice(),
+                    &layout_identity(&fingerprint(genesis).unwrap()),
                 )
                 .unwrap();
                 let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
-                let execution = VeraStateSet::init(
-                    context.child("partial_execution"),
-                    state_set_config(crate::node::PARTITION_PREFIX, cache.clone()),
-                    None,
-                )
-                .await;
-                vera_app::apply_genesis(&execution, &genesis.to_genesis_state().unwrap())
-                    .await
-                    .unwrap();
                 if stage == 2 {
                     let modules = NativeStateSet::init(
                         context.child("partial_modules"),
@@ -127,8 +116,7 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
             let block = load_or_create(&context, directory, genesis, &cache)
                 .await
                 .unwrap();
-            assert!(block.native_targets.is_some());
-            assert_eq!(block.prevrandao, fingerprint(genesis).unwrap());
+            assert_eq!(block.parent.0, fingerprint(genesis).unwrap());
             assert!(!directory.join("native-genesis.intent").exists());
             let modules = NativeStateSet::init(
                 context.child("check_modules"),
@@ -170,13 +158,13 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
                     .is_err()
             );
             changed = (*genesis).clone();
-            changed.allocations[0].balance = "1".into();
+            changed.blocks_per_epoch += 1;
             assert!(
                 load_or_create(&context, directory, &changed, &cache)
                     .await
                     .is_err()
             );
-            let mut legacy = keccak256(serde_json::to_vec(genesis).unwrap()).to_vec();
+            let mut legacy = layout_identity(&keccak256(serde_json::to_vec(genesis).unwrap()));
             legacy.extend_from_slice(&block.encode());
             vera_cli::write_durable(directory.join("native-genesis.bin"), &legacy).unwrap();
             assert!(
@@ -191,10 +179,8 @@ fn native_genesis_recovers_partial_initialization_and_binds_configuration() {
                 legacy
             );
             let mut old = block;
-            old.receipt_commitment = None;
-            let mut record = crate::native_genesis::fingerprint(genesis)
-                .unwrap()
-                .to_vec();
+            old.receipt_commitment.0[0] ^= 1;
+            let mut record = layout_identity(&fingerprint(genesis).unwrap());
             record.extend_from_slice(&old.encode());
             vera_cli::write_durable(directory.join("native-genesis.bin"), &record).unwrap();
             assert!(
@@ -272,9 +258,7 @@ fn missing_genesis_with_history_requires_recovery() {
         let genesis = &genesis;
         vera_cli::write_durable(
             directory.join("native-genesis.intent"),
-            crate::native_genesis::fingerprint(genesis)
-                .unwrap()
-                .as_slice(),
+            &layout_identity(&fingerprint(genesis).unwrap()),
         )
         .unwrap();
         tokio::Runner::new(
@@ -346,10 +330,10 @@ fn pipeline_parameters_bind_the_genesis_identity_and_restart() {
     for term_length in [8, 16] {
         let directory = tempfile::tempdir().unwrap();
         let mut genesis = configured_genesis();
-        genesis.simplex = Some(vera_domain::SimplexParameters {
+        genesis.simplex = vera_domain::SimplexParameters {
             term_length,
             ..Default::default()
-        });
+        };
         let runtime =
             tokio::Config::new().with_storage_directory(directory.path().join("commonware"));
         let path = directory.path();
@@ -360,9 +344,9 @@ fn pipeline_parameters_bind_the_genesis_identity_and_restart() {
                 .await
                 .unwrap()
         });
-        assert_eq!(block.prevrandao, fingerprint(&genesis).unwrap());
+        assert_eq!(block.parent.0, fingerprint(&genesis).unwrap());
         identities.push(block.id());
-        genesis.simplex.as_mut().unwrap().term_length += 1;
+        genesis.simplex.term_length += 1;
         let configured = &genesis;
         tokio::Runner::new(runtime).start(|context| async move {
             let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
@@ -386,7 +370,7 @@ fn incompatible_genesis_markers_are_rejected_unchanged() {
     for (marker, expected_error) in [
         (
             "native-genesis.bin",
-            "native genesis configuration or storage format does not match this node",
+            "native genesis configuration does not match this node",
         ),
         (
             "native-genesis.intent",
@@ -395,7 +379,8 @@ fn incompatible_genesis_markers_are_rejected_unchanged() {
     ] {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path();
-        vera_cli::write_durable(path.join(marker), incompatible_fingerprint.as_slice()).unwrap();
+        let incompatible = layout_identity(&incompatible_fingerprint);
+        vera_cli::write_durable(path.join(marker), &incompatible).unwrap();
         let runtime = tokio::Config::new().with_storage_directory(path.join("commonware"));
         let genesis = &genesis;
         tokio::Runner::new(runtime).start(|context| async move {
@@ -405,9 +390,76 @@ fn incompatible_genesis_markers_are_rejected_unchanged() {
                 .unwrap_err();
             assert_eq!(error.to_string(), expected_error);
         });
-        assert_eq!(
-            fs::read(path.join(marker)).unwrap(),
-            incompatible_fingerprint.as_slice()
-        );
+        assert_eq!(fs::read(path.join(marker)).unwrap(), incompatible);
+    }
+}
+
+#[test]
+fn the_genesis_record_leads_with_the_state_layout_and_restarts_under_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path();
+    let runtime = tokio::Config::new().with_storage_directory(path.join("commonware"));
+    let genesis = configured_genesis();
+    let genesis = &genesis;
+    let load = || {
+        tokio::Runner::new(runtime.clone()).start(|context| async move {
+            let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
+            load_or_create(&context, path, genesis, &cache)
+                .await
+                .unwrap()
+        })
+    };
+    let block = load();
+    let mut expected = vec![STATE_LAYOUT_VERSION];
+    expected.extend_from_slice(fingerprint(genesis).unwrap().as_slice());
+    expected.extend_from_slice(&block.encode());
+    assert_eq!(fs::read(path.join("native-genesis.bin")).unwrap(), expected);
+    assert_eq!(block.parent.0, fingerprint(genesis).unwrap());
+    assert_eq!(load(), block);
+}
+
+#[test]
+fn markers_of_another_state_layout_are_refused_unchanged_with_a_typed_error() {
+    let genesis = configured_genesis();
+    let genesis = &genesis;
+    let record = {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path();
+        let runtime = tokio::Config::new().with_storage_directory(path.join("commonware"));
+        tokio::Runner::new(runtime).start(|context| async move {
+            let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
+            load_or_create(&context, path, genesis, &cache)
+                .await
+                .unwrap();
+        });
+        fs::read(path.join("native-genesis.bin")).unwrap()
+    };
+    for (marker, contents) in [
+        ("native-genesis.bin", record.clone()),
+        ("native-genesis.intent", record[..33].to_vec()),
+    ] {
+        for found in [0, STATE_LAYOUT_VERSION + 1, u8::MAX] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path();
+            let mut other = contents.clone();
+            other[0] = found;
+            vera_cli::write_durable(path.join(marker), &other).unwrap();
+            let runtime = tokio::Config::new().with_storage_directory(path.join("commonware"));
+            let error = tokio::Runner::new(runtime).start(|context| async move {
+                let cache = CacheRef::new(NZU16!(4084), NZUsize!(64));
+                load_or_create(&context, path, genesis, &cache)
+                    .await
+                    .unwrap_err()
+            });
+            assert_eq!(
+                error.downcast_ref::<UnsupportedVersion>(),
+                Some(&UnsupportedVersion {
+                    format: "state layout",
+                    found,
+                    supported: STATE_LAYOUT_VERSION,
+                })
+            );
+            assert_eq!(fs::read(path.join(marker)).unwrap(), other);
+        }
     }
 }

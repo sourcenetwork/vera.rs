@@ -31,7 +31,12 @@ pub(super) async fn capture(
         let node = cluster.node(index);
         let client = VeraClient::new(node.rpc_url());
         let (height, nonce, receipt, certified) = tokio::join!(
-            probe(async { client.block_number().await.map(|height| json!(height)) }),
+            probe(async {
+                client
+                    .node_status()
+                    .await
+                    .map(|status| json!(status.finalized_height))
+            }),
             probe(async {
                 client
                     .get_native_nonce(signer)
@@ -39,13 +44,16 @@ pub(super) async fn capture(
                     .map(|nonce| json!(nonce))
             }),
             probe(async {
-                client.get_native_receipt(submission).await.map(|receipt| {
-                    json!(receipt.map(|receipt| json!({
-                        "submission": receipt.transaction_hash,
-                        "height": receipt.block_number,
-                        "status": receipt.status,
-                    })))
-                })
+                client
+                    .get_transaction_receipt(submission)
+                    .await
+                    .map(|receipt| {
+                        json!(receipt.map(|receipt| json!({
+                            "submission": receipt.transaction_hash,
+                            "height": receipt.block_number,
+                            "success": receipt.success,
+                        })))
+                    })
             }),
             probe(async {
                 client.read_receipt(submission, trusted).await.map(|proof| {
@@ -109,8 +117,13 @@ pub(super) async fn heights(clients: &[VeraClient]) -> Vec<Value> {
             .enumerate()
             .map(|(index, client)| async move {
                 let started_at = timestamp_ms();
-                let height =
-                    probe(async { client.block_number().await.map(|height| json!(height)) }).await;
+                let height = probe(async {
+                    client
+                        .node_status()
+                        .await
+                        .map(|status| json!(status.finalized_height))
+                })
+                .await;
                 json!({
                     "node": index,
                     "started_at_unix_ms": started_at,

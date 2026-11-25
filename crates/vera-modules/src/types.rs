@@ -21,8 +21,7 @@ pub struct Timestamp {
 /// Block-level execution context, set once at the start of block execution.
 ///
 /// Available to begin_block, end_block, and all tx processing within the block.
-/// Both EVM precompile and native BLS tx paths derive this from the same
-/// `BlockContext.header`, guaranteeing consistency.
+/// Derived from the executor's `BlockContext`.
 #[derive(Clone, Debug, Default)]
 pub struct BlockExecCtx {
     /// Authenticated genesis record identifier; zero disables administrative writes.
@@ -34,8 +33,8 @@ pub struct BlockExecCtx {
 
 /// Per-transaction execution context, set before each tx dispatch.
 ///
-/// Not available during begin_block/end_block. The calling shim (EVM
-/// precompile or native BLS) populates this — module methods are path-agnostic.
+/// Not available during begin_block/end_block. The dispatch that runs a
+/// native request, a dry run or a view call populates it.
 #[derive(Clone, Debug)]
 pub struct TxExecCtx {
     /// Sequence authenticated by the submitting operation.
@@ -46,8 +45,7 @@ pub struct TxExecCtx {
 
 /// A duration expressed either as wall-clock seconds or a block count.
 ///
-/// Matches Go's `sourcehub.acp.Duration` oneof: modules that use
-/// time-based expiration can express it in either unit.
+/// Modules that use time-based expiration can express it in either unit.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 pub enum Duration {
     Seconds(u64),

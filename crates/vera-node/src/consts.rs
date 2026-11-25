@@ -43,12 +43,12 @@ pub const RESOLVER_CHANNEL: u64 = 2;
 pub const BACKFILL_CHANNEL: u64 = 3;
 /// P2P channel for proposed block broadcast.
 pub const BROADCAST_CHANNEL: u64 = 4;
-/// State-transfer channels in accounts, storage, code, ACP, bulletin, vera and sequence order.
-pub const QMDB_CHANNELS: [u64; 7] = [9, 10, 11, 12, 13, 14, 15];
+/// State-transfer channels in ACP, bulletin, vera and sequence order.
+pub const QMDB_CHANNELS: [u64; 4] = [9, 10, 11, 12];
 /// P2P channel for retained execution-history chunks.
-pub const HISTORY_CHANNEL: u64 = 16;
+pub const HISTORY_CHANNEL: u64 = 13;
 /// P2P channel on which an account's devices ask each other for the term.
-pub const TERM_CHANNEL: u64 = 17;
+pub const TERM_CHANNEL: u64 = 14;
 /// P2P channel for private reshare dealings and acks.
 pub const DKG_CHANNEL: u64 = 6;
 /// P2P channel for the DKG probe.

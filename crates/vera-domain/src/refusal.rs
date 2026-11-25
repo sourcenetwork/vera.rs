@@ -91,6 +91,8 @@ pub enum RefusalKind {
     ModuleFailed = 19,
     /// The submission is not newer than the record the module holds.
     NotNewer = 20,
+    /// A revision is not shown to descend from the one it must extend.
+    NotDescendant = 21,
 }
 
 impl RefusalKind {
@@ -122,6 +124,7 @@ impl RefusalKind {
             18 => Self::StateError,
             19 => Self::ModuleFailed,
             20 => Self::NotNewer,
+            21 => Self::NotDescendant,
             _ => return None,
         })
     }
@@ -231,7 +234,7 @@ mod tests {
             if let Some(kind) = RefusalKind::from_code(code) {
                 assert_eq!(kind.code(), code);
             } else {
-                assert!(code == 0 || code > 20);
+                assert!(code == 0 || code > 21);
             }
             if let Some(module) = RefusingModule::from_code(code) {
                 assert_eq!(module.code(), code);

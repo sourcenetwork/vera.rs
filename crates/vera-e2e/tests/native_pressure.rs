@@ -243,7 +243,7 @@ async fn admission_recovers(workers: usize) {
                         );
                     }
                 }
-                assert_eq!(last.expect("admitted work recovery deadline").unwrap().status, 1);
+                assert!(last.expect("admitted work recovery deadline").unwrap().success);
                 let backlog_tail_observed_ms = recovery_started.elapsed().as_secs_f64() * 1000.0;
                 let confirmed = origin.get_native_nonce(signer.did()).await.unwrap();
                 assert_eq!(confirmed, per_worker);
@@ -273,7 +273,7 @@ async fn admission_recovers(workers: usize) {
             .await
             .expect("rejected wire retry deadline")
             .unwrap();
-    assert_eq!(recovered.status, 1);
+    assert!(recovered.success);
     cluster.restart_node(3).unwrap();
     cluster
         .wait_ready(vera_e2e::readiness_deadline())

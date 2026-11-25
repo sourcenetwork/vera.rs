@@ -1,12 +1,12 @@
 //! Client context wrapping `VeraClient` with optional signers.
 
-use vera_client::{BlsSigner, EvmSigner, Secp256k1SigningKey, VeraClient};
+use vera_client::{BlsSigner, Secp256k1SigningKey, VeraClient};
 
 use super::parse;
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum KeyError {
-    #[error("--key is required for write commands")]
+    #[error("--bls-key is required for write commands")]
     Missing,
     #[error("invalid --key hex: {0}")]
     InvalidHex(#[from] hex::FromHexError),
@@ -47,10 +47,15 @@ impl ClientContext {
         })
     }
 
-    /// Require an EVM signer, returning an error if `--key` was not provided.
-    pub(super) fn require_evm_signer(&self) -> Result<EvmSigner, KeyError> {
-        let key = self.signing_key.as_ref().ok_or(KeyError::Missing)?;
-        Ok(EvmSigner::from_native_key(key.clone(), self.chain_id))
+    /// The native signer of a write command; `--bls-key` supplies it.
+    ///
+    /// Each invocation starts a fresh signer, so it takes the signer's next
+    /// sequence from the node before signing.
+    pub(super) async fn require_bls_signer(&self) -> eyre::Result<&BlsSigner> {
+        let signer = self.bls_signer.as_ref().ok_or(KeyError::Missing)?;
+        let next = self.client.get_native_nonce(signer.did()).await?;
+        signer.set_next_sequence(next);
+        Ok(signer)
     }
 
     /// Print a serializable value as JSON to stdout.
@@ -77,8 +82,12 @@ fn parse_bls_signer(hex_key: &str, chain_id: u64) -> eyre::Result<BlsSigner> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{BufRead, Read, Write};
+
+    use serde_json::{Value, json};
+    use vera_client::create_bearer_token;
+
     use super::{ClientContext, parse_signing_key};
-    use vera_client::{EvmSigner, create_bearer_token};
 
     #[test]
     fn parses_native_keys_and_rejects_invalid_input() {
@@ -90,14 +99,59 @@ mod tests {
         }
     }
 
-    #[test]
-    fn legacy_signer_preserves_address_and_chain_id() {
+    #[tokio::test]
+    async fn a_write_requires_the_native_key() {
         let hex = hex::encode([7u8; 32]);
-        let ctx = ClientContext::new("http://localhost:8545", Some(&hex), None, 42, false).unwrap();
-        let expected = EvmSigner::from_hex(&hex, 42).unwrap();
-        let signer = ctx.require_evm_signer().unwrap();
-        assert_eq!(signer.address(), expected.address());
-        assert_eq!(signer.chain_id(), 42);
+        let actor_only =
+            ClientContext::new("http://localhost:8545", Some(&hex), None, 42, false).unwrap();
+        let missing = actor_only.require_bls_signer().await.unwrap_err();
+        assert!(matches!(
+            missing.downcast_ref::<super::KeyError>(),
+            Some(super::KeyError::Missing)
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_write_signs_at_the_sequence_the_node_reports() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let node = std::thread::spawn(move || answer_once(&listener, json!("0x5")));
+        let hex = hex::encode([7u8; 32]);
+        let ctx = ClientContext::new(&url, None, Some(&hex), 42, false).unwrap();
+        let signer = ctx.require_bls_signer().await.unwrap();
+        assert_eq!(signer.nonce(), 5);
+        let request = node.join().unwrap();
+        assert_eq!(request["method"], "vera_getNativeNonce");
+        assert_eq!(request["params"], json!([signer.did()]));
+    }
+
+    fn answer_once(listener: &std::net::TcpListener, result: Value) -> Value {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut input = std::io::BufReader::new(&mut stream);
+        let mut length = 0;
+        loop {
+            let mut line = String::new();
+            assert_ne!(input.read_line(&mut line).unwrap(), 0);
+            if line == "\r\n" {
+                break;
+            }
+            if let Some((name, value)) = line.split_once(':')
+                && name.eq_ignore_ascii_case("content-length")
+            {
+                length = value.trim().parse().unwrap();
+            }
+        }
+        let mut body = vec![0; length];
+        input.read_exact(&mut body).unwrap();
+        let request: Value = serde_json::from_slice(&body).unwrap();
+        let reply = json!({"jsonrpc": "2.0", "id": request["id"], "result": result}).to_string();
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{reply}",
+            reply.len()
+        )
+        .unwrap();
+        request
     }
 
     #[test]
@@ -113,7 +167,10 @@ mod tests {
         )
         .unwrap();
         let claims = vera_crypto::jwt::verify_bearer_token(&token).unwrap();
-        assert_eq!(claims.iss, EvmSigner::from_hex(&hex, 42).unwrap().did());
+        assert_eq!(
+            claims.iss,
+            super::super::keys::actor_did(ctx.signing_key.as_ref().unwrap()).unwrap()
+        );
         assert_eq!(claims.sub, "did:example:worker");
         assert_eq!(claims.aud, "vera:42");
         assert_eq!((claims.iat, claims.exp), (100, 200));

@@ -1,17 +1,12 @@
-//! Block execution over REVM with the vera module precompiles.
+//! Block execution of native requests against the vera modules.
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-
-mod adapter;
-pub use adapter::StateDbAdapter;
 
 mod config;
 pub use config::ExecutionConfig;
 
 mod context;
 pub use context::BlockContext;
-
-mod envelope;
 
 mod error;
 pub use error::ExecutionError;
@@ -23,18 +18,6 @@ pub use outcome::{ExecutionOutcome, ExecutionReceipt};
 
 pub use vera_domain::receipt_commitment;
 
-mod revm;
-pub use revm::{
-    SpecId, build_receipt, convert_access_list, convert_authorization_list, convert_tx_kind,
-    decode_evm_tx, extract_changes,
-};
-
-mod validation;
-pub use validation::{
-    ACCESS_LIST_ADDRESS_GAS, ACCESS_LIST_STORAGE_KEY_GAS, TX_BASE_GAS, TX_CREATE_GAS,
-    TX_DATA_NON_ZERO_GAS, TX_DATA_ZERO_GAS, TxValidator, ValidatedTx,
-};
-
 mod executor;
 #[cfg(feature = "fault-injection")]
 mod faults;
@@ -42,14 +25,13 @@ pub use executor::VeraExecutor;
 pub use vera_modules::module_state::{ModuleState, SharedModuleState};
 
 mod mempool;
-pub use mempool::{MempoolValidator, PreValidatedNativeTx, TxValidationResult};
+pub use mempool::{AnchorTarget, MempoolValidator, PreValidatedNativeTx, TxValidationResult};
 
 mod simulate;
 pub use simulate::{
     MAX_SIMULATED_SIGNER_BYTES, NativeSimulateError, NativeSimulateRequest, NativeSimulateResult,
-    SimulateRequest, SimulateResult, SimulationContext, estimate_gas, simulate_call,
-    simulate_native_call,
+    SimulationContext, ViewCall, ViewCallError, ViewCallResult, simulate_native_call, view_call,
 };
 
-pub mod precompiles;
-pub use precompiles::VALIDATOR_REGISTRY_ADDRESS;
+pub mod dispatch;
+pub use dispatch::VALIDATOR_REGISTRY_ADDRESS;

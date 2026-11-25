@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use alloy_primitives::{Address, B256, Log};
+use alloy_primitives::{B256, Log};
 use alloy_rlp::Decodable as _;
 use anyhow::{Context as _, Result, ensure};
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -31,22 +31,25 @@ const IMPORTED_FINALITY: u8 = 3;
 const PROOF_BLOCK: u8 = 4;
 const BLOCK_HASH: u8 = 5;
 const SUBMISSION_HASH: u8 = 6;
+/// Identifier of the block at each height, which ancestry proofs read
+/// without the record.
+const BLOCK_ID: u8 = 7;
 const QUERY_HEAD: &[u8] = b"query_head";
-const FORMAT: &[u8] = b"format";
-/// Layout of a store that has only appended its own execution.
-const FORMAT_APPENDED: [u8; 1] = [1];
-/// Layout of a store that has begun importing history; recovery keeps its certified suffix.
-const FORMAT_IMPORTED: [u8; 1] = [3];
 const GENESIS: &[u8] = b"genesis";
 const HEAD: &[u8] = b"head";
 
+mod ancestry;
+pub(crate) use ancestry::ancestry_rpc_error;
 mod cut;
 pub use cut::DiscardedSubmission;
 pub(crate) use cut::Standing;
 mod floor;
 pub use floor::HistoryPruned;
+mod format;
 pub(crate) use floor::rpc_error;
 use floor::{FLOOR, check_cut, check_retained};
+pub use format::UnsupportedHistoryFormat;
+use format::{FORMAT, FORMAT_APPENDED, FORMAT_IMPORTED};
 mod retention;
 mod sweep;
 pub(crate) use retention::HistoryRetention;
@@ -75,7 +78,6 @@ use validated::VALIDATED;
 struct StoredReceipt {
     hash: [u8; 32],
     gas_used: u64,
-    contract: Option<[u8; 20]>,
     success: bool,
     cumulative_gas_used: u64,
     logs: Vec<Vec<u8>>,
@@ -140,7 +142,6 @@ impl Record {
                     r.gas_used,
                     r.cumulative_gas_used,
                     logs,
-                    r.contract.map(Address::from),
                 )
                 .with_refusal(refusal))
             })
@@ -222,10 +223,7 @@ impl FinalizedHistory {
         let db = DB::open_default(path, memory)?;
         match db.get(FORMAT)? {
             Some(version) => {
-                ensure!(
-                    version.as_slice() == FORMAT_APPENDED || version.as_slice() == FORMAT_IMPORTED,
-                    "unsupported finalized history format"
-                );
+                format::check(&version)?;
                 ensure!(
                     db.get(GENESIS)?.as_deref() == Some(genesis.as_slice()),
                     "finalized history belongs to another genesis"
@@ -305,7 +303,6 @@ impl FinalizedHistory {
                 .map(|r| StoredReceipt {
                     hash: r.tx_hash.0,
                     gas_used: r.gas_used,
-                    contract: r.contract_address.map(|a| a.0.0),
                     success: r.success(),
                     cumulative_gas_used: r.cumulative_gas_used(),
                     logs: r.logs().iter().map(alloy_rlp::encode).collect(),
@@ -358,6 +355,7 @@ impl FinalizedHistory {
         let id = BlockId(alloy_primitives::keccak256(&record.block));
         query::index_execution(&mut batch, block.height, &id, &record.receipts);
         batch.put(key(RECORD, block.height), bytes);
+        batch.put(key(BLOCK_ID, block.height), id.0.0);
         batch.delete(key(PROOF_BLOCK, block.height));
         let head_bytes = borsh::to_vec(&(block.height, id.0.0))?;
         batch.put(HEAD, &head_bytes);
@@ -492,6 +490,7 @@ impl FinalizedHistory {
             }
             if rebuild_queries {
                 query::index_execution(&mut query_batch, height, &id, &record.receipts);
+                query_batch.put(key(BLOCK_ID, height), id.0.0);
                 if query_batch.size_in_bytes() >= 1 << 20 {
                     write(&self.db, std::mem::take(&mut query_batch))?;
                 }
@@ -534,7 +533,7 @@ impl FinalizedHistory {
         let mut batch = query_batch;
         batch.put(QUERY_HEAD, &anchor_bytes);
         self.retain_proof_suffix(anchor.height, head.0, &mut batch)?;
-        for prefix in [RECORD, CERTIFICATE] {
+        for prefix in [RECORD, CERTIFICATE, BLOCK_ID] {
             if let Some(next) = anchor.height.checked_add(1) {
                 batch.delete_range(key(prefix, next).as_slice(), &[prefix + 1]);
             }
@@ -566,16 +565,10 @@ fn check_receipts(block: &Block, receipts: &[ExecutionReceipt], gas_limit: u64) 
         !receipts.iter().any(|r| r.success() && r.refusal.is_some()),
         "refusal on a successful receipt"
     );
-    match block.receipt_commitment {
-        Some(expected) => ensure!(
-            vera_executor::receipt_commitment(gas_limit, receipts) == expected,
-            "execution receipt commitment mismatch"
-        ),
-        None => ensure!(
-            block.native_targets.is_none(),
-            "native receipt commitment missing"
-        ),
-    }
+    ensure!(
+        vera_executor::receipt_commitment(gas_limit, receipts) == block.receipt_commitment,
+        "execution receipt commitment mismatch"
+    );
     Ok(())
 }
 

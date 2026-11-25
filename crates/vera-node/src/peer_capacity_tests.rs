@@ -110,7 +110,7 @@ fn unsupported_epoch_has_no_network_capacity() {
                 if actual == blocks_per_epoch && term_length == NZU64!(16)
         ));
     }
-    let rotating = PeerCapacity::new(NZU64!(100), NZU64!(1)).unwrap();
-    assert_eq!(rotating.participants(), 64);
-    assert_eq!(rotating.tracked().get(), 193);
+    let short_terms = PeerCapacity::new(NZU64!(100), NZU64!(2)).unwrap();
+    assert_eq!(short_terms.participants(), 25);
+    assert_eq!(short_terms.tracked().get(), 76);
 }

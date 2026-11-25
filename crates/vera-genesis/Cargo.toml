@@ -8,7 +8,7 @@ license.workspace = true
 description = "Extended genesis configuration for vera"
 
 [dependencies]
-alloy-evm.workspace = true
+alloy-primitives.workspace = true
 hex.workspace = true
 serde.workspace = true
 serde_json.workspace = true

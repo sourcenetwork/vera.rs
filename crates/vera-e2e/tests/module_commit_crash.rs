@@ -36,7 +36,7 @@ async fn create_policy(client: &VeraClient, signer: &BlsSigner, name: &str) -> T
     tokio::time::timeout(deadline(), async {
         let hash = client.send_native_tx(&raw).await.unwrap();
         let receipt = client.wait_for_receipt(hash, POLL, 600).await.unwrap();
-        assert_eq!(receipt.status, 1);
+        assert!(receipt.success);
         receipt
     })
     .await
@@ -58,7 +58,7 @@ async fn assert_replicas(cluster: &TestCluster, signer: &BlsSigner, receipt: &Tr
                 .await
                 .unwrap();
             assert_eq!(actual.block_hash, receipt.block_hash);
-            assert_eq!(actual.status, 1);
+            assert!(actual.success);
             assert_eq!(
                 client.get_native_nonce(signer.did()).await.unwrap(),
                 signer.nonce()

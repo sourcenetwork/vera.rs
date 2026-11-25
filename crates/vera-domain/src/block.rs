@@ -1,12 +1,9 @@
 //! Block types
 
-use alloy_evm::revm::primitives::{B256, keccak256};
+use alloy_primitives::{B256, keccak256};
 use bytes::{Buf, BufMut};
 use commonware_codec::{Encode, EncodeSize, Error as CodecError, RangeCfg, Read, ReadExt, Write};
-use commonware_consensus::{
-    simplex::scheme::bls12381_threshold::vrf::Seed,
-    types::{Epoch, Round, View},
-};
+use commonware_consensus::types::{Epoch, Round, View};
 use commonware_cryptography::{
     Committable, Digestible, Hasher as _, Sha256, bls12381::primitives::variant::MinSig, ed25519,
 };
@@ -15,7 +12,14 @@ use commonware_utils::{NZU32, sequence::Unit};
 use std::fmt;
 use std::num::NonZeroU32;
 
-use crate::{BlockId, ConsensusContext, DbTarget, DbTargets, Idents, StateRoot, Tx, TxCfg};
+use crate::{
+    Ancestry, AncestryProof, BlockId, ConsensusContext, DbTarget, Idents, Tx, TxCfg,
+    UnsupportedVersion,
+};
+
+/// Version of the block encoding, written as a block's first byte and covered
+/// by its identifier. A block carrying any other version is refused on decode.
+pub const BLOCK_FORMAT_VERSION: u8 = 2;
 
 /// BLS variant used by the DKG reshare payload.
 pub type DkgVariant = MinSig;
@@ -62,31 +66,24 @@ pub struct Block {
     pub parent: BlockId,
     /// Block height (number of committed ancestors).
     pub height: u64,
+    /// Commitment to the identifiers of every ancestor, the genesis block first.
+    pub ancestry: Ancestry,
     /// Wall-clock timestamp (unix seconds), set by proposer.
     pub timestamp: u64,
     /// Term of the device that proposed the block. It never decreases along
     /// a chain; a switch of the active device raises it.
     pub term: u64,
-    /// Seed-derived randomness used for future prevrandao.
-    pub prevrandao: B256,
-    /// Authenticated prior-round seed for rotating consensus.
-    pub randomness: Option<Seed<MinSig>>,
-    /// State commitment resulting from this block (pre-commit QMDB root).
-    pub state_root: StateRoot,
     /// Module state root (combined hash of ACP, Bulletin, Vera, NativeNonce state).
     pub module_state_root: B256,
     /// Transactions included in the block.
     pub txs: Vec<Tx>,
     /// Optional DKG reshare payload (dealer log or next-epoch info).
     pub payload: Option<DkgPayload>,
-    /// Per-partition QMDB targets after this block.
-    pub db_targets: DbTargets,
-    /// Ordered module log targets in ACP, bulletin, vera and sequence order.
-    /// Presence selects the native commitment encoding; legacy blocks omit them.
-    pub native_targets: Option<[DbTarget; 4]>,
+    /// Operation-log targets of the ACP, bulletin, vera and sequence
+    /// partitions after this block, in that order.
+    pub native_targets: [DbTarget; 4],
     /// Commitment to ordered execution receipts and the execution gas limit.
-    /// Legacy encodings omit this field; native execution requires it.
-    pub receipt_commitment: Option<B256>,
+    pub receipt_commitment: B256,
 }
 
 impl Block {
@@ -100,6 +97,23 @@ impl Block {
                 .all(|tx| tx.bytes.len() <= crate::MAX_TX_BYTES)
             && self.txs.encode_size() <= crate::MAX_BLOCK_TX_BYTES
             && self.encode_size() <= crate::MAX_BLOCK_BYTES
+    }
+
+    /// Whether `proof` shows that the block with identifier `id` at height
+    /// `height` is an ancestor of this block.
+    #[must_use]
+    pub fn has_ancestor(&self, height: u64, id: &BlockId, proof: &AncestryProof) -> bool {
+        self.ancestry.includes(self.height, height, id, proof)
+    }
+
+    /// Whether this block's ancestry is that of a child of `parent`.
+    #[must_use]
+    pub fn extends_ancestry(&self, parent: &Self) -> bool {
+        self.height == parent.height.wrapping_add(1)
+            && parent
+                .ancestry
+                .extended(parent.height, &parent.id())
+                .is_ok_and(|ancestry| ancestry == self.ancestry)
     }
 
     /// Compute the block identifier from its encoded contents.
@@ -170,68 +184,35 @@ impl commonware_consensus::CertifiableBlock for Block {
 
 impl Write for Block {
     fn write(&self, buf: &mut impl BufMut) {
+        BLOCK_FORMAT_VERSION.write(buf);
         self.context.write(buf);
         self.parent.write(buf);
         self.height.write(buf);
+        self.ancestry.write(buf);
         self.timestamp.write(buf);
         self.term.write(buf);
-        Idents::write_b256(&self.prevrandao, buf);
-        self.state_root.write(buf);
         Idents::write_b256(&self.module_state_root, buf);
         self.txs.write(buf);
-        if let Some(seed) = &self.randomness {
-            4_u8.write(buf);
-            self.payload.write(buf);
-            self.native_targets.write(buf);
-            self.receipt_commitment.map(|value| value.0).write(buf);
-            seed.write(buf);
-        } else if let Some(commitment) = &self.receipt_commitment {
-            3_u8.write(buf);
-            self.payload.write(buf);
-            self.native_targets.write(buf);
-            Idents::write_b256(commitment, buf);
-        } else if let Some(targets) = &self.native_targets {
-            2_u8.write(buf);
-            self.payload.write(buf);
-            targets.write(buf);
-        } else {
-            self.payload.write(buf);
-        }
-        self.db_targets.write(buf);
+        self.payload.write(buf);
+        self.native_targets.write(buf);
+        Idents::write_b256(&self.receipt_commitment, buf);
     }
 }
 
 impl EncodeSize for Block {
     fn encode_size(&self) -> usize {
-        self.context.encode_size()
+        BLOCK_FORMAT_VERSION.encode_size()
+            + self.context.encode_size()
             + self.parent.encode_size()
             + self.height.encode_size()
+            + self.ancestry.encode_size()
             + self.timestamp.encode_size()
             + self.term.encode_size()
             + 32
-            + self.state_root.encode_size()
-            + 32
             + self.txs.encode_size()
-            + self.randomness.as_ref().map_or_else(
-                || {
-                    if self.receipt_commitment.is_some() {
-                        1 + self.payload.encode_size() + self.native_targets.encode_size() + 32
-                    } else {
-                        self.payload.encode_size()
-                            + self
-                                .native_targets
-                                .as_ref()
-                                .map_or(0, |targets| 1 + targets.encode_size())
-                    }
-                },
-                |seed| {
-                    1 + self.payload.encode_size()
-                        + self.native_targets.encode_size()
-                        + self.receipt_commitment.map(|value| value.0).encode_size()
-                        + seed.encode_size()
-                },
-            )
-            + self.db_targets.encode_size()
+            + self.payload.encode_size()
+            + self.native_targets.encode_size()
+            + 32
     }
 }
 
@@ -240,13 +221,20 @@ impl Read for Block {
 
     fn read_cfg(buf: &mut impl commonware_codec::Buf, cfg: &Self::Cfg) -> Result<Self, CodecError> {
         let buf = &mut buf.take(crate::MAX_BLOCK_BYTES);
+        UnsupportedVersion::check("block format", u8::read(buf)?, BLOCK_FORMAT_VERSION)
+            .map_err(|error| CodecError::Wrapped("Block", Box::new(error)))?;
         let context = ConsensusContext::read(buf)?;
         let parent = BlockId::read(buf)?;
         let height = u64::read(buf)?;
+        let ancestry = Ancestry::read(buf)?;
+        if !ancestry.fits(height) {
+            return Err(CodecError::Invalid(
+                "Block",
+                "ancestry does not fit the height",
+            ));
+        }
         let timestamp = u64::read(buf)?;
         let term = u64::read(buf)?;
-        let prevrandao = Idents::read_b256(buf)?;
-        let state_root = StateRoot::read(buf)?;
         let module_state_root = Idents::read_b256(buf)?;
         let txs = Vec::<Tx>::read_cfg(
             &mut (&mut *buf).take(crate::MAX_BLOCK_TX_BYTES),
@@ -255,49 +243,19 @@ impl Read for Block {
                 cfg.tx,
             ),
         )?;
-        // Tags 0 and 1 retain the original optional DKG payload encoding.
-        let (payload, native_targets, receipt_commitment, randomness) = match u8::read(buf)? {
-            0 => (None, None, None, None),
-            1 => (
-                Some(DkgPayload::read_cfg(buf, &DKG_PAYLOAD_CFG)?),
-                None,
-                None,
-                None,
-            ),
-            2 => (
-                Option::<DkgPayload>::read_cfg(buf, &DKG_PAYLOAD_CFG)?,
-                Some(<[DbTarget; 4]>::read(buf)?),
-                None,
-                None,
-            ),
-            3 => (
-                Option::<DkgPayload>::read_cfg(buf, &DKG_PAYLOAD_CFG)?,
-                Option::<[DbTarget; 4]>::read(buf)?,
-                Some(Idents::read_b256(buf)?),
-                None,
-            ),
-            4 => (
-                Option::<DkgPayload>::read_cfg(buf, &DKG_PAYLOAD_CFG)?,
-                Option::<[DbTarget; 4]>::read(buf)?,
-                Option::<[u8; 32]>::read(buf)?.map(B256::from),
-                Some(Seed::<MinSig>::read(buf)?),
-            ),
-            _ => return Err(CodecError::Invalid("Block", "unknown commitment encoding")),
-        };
-        let db_targets = DbTargets::read(buf)?;
+        let payload = Option::<DkgPayload>::read_cfg(buf, &DKG_PAYLOAD_CFG)?;
+        let native_targets = <[DbTarget; 4]>::read(buf)?;
+        let receipt_commitment = Idents::read_b256(buf)?;
         Ok(Self {
             context,
             parent,
             height,
+            ancestry,
             timestamp,
             term,
-            prevrandao,
-            randomness,
-            state_root,
             module_state_root,
             txs,
             payload,
-            db_targets,
             native_targets,
             receipt_commitment,
         })
@@ -320,15 +278,12 @@ impl fmt::Debug for Block {
             .field("context", &self.context)
             .field("parent", &self.parent)
             .field("height", &self.height)
+            .field("ancestry", &self.ancestry.peaks().len())
             .field("timestamp", &self.timestamp)
             .field("term", &self.term)
-            .field("prevrandao", &self.prevrandao)
-            .field("randomness", &self.randomness)
-            .field("state_root", &self.state_root)
             .field("module_state_root", &self.module_state_root)
             .field("txs", &self.txs.len())
             .field("payload", &self.payload.is_some())
-            .field("db_targets", &self.db_targets)
             .field("native_targets", &self.native_targets)
             .field("receipt_commitment", &self.receipt_commitment)
             .finish()
@@ -394,17 +349,14 @@ mod tests {
             context: Block::genesis_context(),
             parent: BlockId(B256::repeat_byte(0x01)),
             height: 42,
+            ancestry: crate::testing::ancestry(42),
             timestamp: 1_700_000_000,
             term: 0,
-            prevrandao: B256::repeat_byte(0xab),
-            randomness: None,
-            state_root: StateRoot(B256::repeat_byte(0xcd)),
             module_state_root: B256::ZERO,
             txs: vec![Tx::new(Bytes::from_static(&[0xde, 0xad, 0xbe, 0xef]))],
             payload: None,
-            native_targets: None,
-            receipt_commitment: None,
-            db_targets: crate::DbTargets::default(),
+            native_targets: [DbTarget::default(); 4],
+            receipt_commitment: B256::repeat_byte(7),
         }
     }
 
@@ -488,116 +440,114 @@ mod tests {
     }
 
     #[test]
+    fn the_format_version_leads_the_encoding_and_changes_the_block_id() {
+        let block = sample_block();
+        let encoded = block.encode();
+        assert_eq!(encoded[0], BLOCK_FORMAT_VERSION);
+        let mut later = encoded.to_vec();
+        later[0] = BLOCK_FORMAT_VERSION + 1;
+        assert_ne!(BlockId(keccak256(&later)), block.id());
+    }
+
+    #[test]
+    fn another_format_version_is_refused_with_a_typed_error() {
+        let encoded = sample_block().encode();
+        for found in [0, BLOCK_FORMAT_VERSION + 1, u8::MAX] {
+            let mut other = encoded.to_vec();
+            other[0] = found;
+            let error = Block::decode_cfg(
+                commonware_codec::Copying(other.as_slice()),
+                &default_block_cfg(),
+            )
+            .unwrap_err();
+            let CodecError::Wrapped("Block", source) = error else {
+                panic!("expected a version refusal, got {error:?}");
+            };
+            assert_eq!(
+                source.downcast_ref::<UnsupportedVersion>(),
+                Some(&UnsupportedVersion {
+                    format: "block format",
+                    found,
+                    supported: BLOCK_FORMAT_VERSION,
+                })
+            );
+        }
+    }
+
+    #[test]
     fn block_encode_size_matches_encoded() {
         let block = sample_block();
         assert_eq!(block.encode_size(), block.encode().len());
     }
 
     #[test]
-    fn native_commitment_encoding_is_tagged_bounded_and_streamable() {
-        for legacy in [sample_block(), sample_block_with_payload()] {
-            let original = legacy.encode();
-            let offset =
-                original.len() - legacy.db_targets.encode_size() - legacy.payload.encode_size();
-            assert_eq!(original[offset], u8::from(legacy.payload.is_some()));
-            let mut native = legacy.clone();
-            native.native_targets = Some(std::array::from_fn(|i| DbTarget {
-                root: commonware_cryptography::sha256::Digest::from([u8::try_from(i).unwrap(); 32]),
-                floor: 0,
-                tip: 1,
-            }));
-            let bytes = native.encode();
-            assert_eq!(bytes[offset], 2);
-            assert_eq!(bytes.len(), native.encode_size());
-            assert_eq!(
-                Block::decode_cfg(bytes.clone(), &default_block_cfg()).unwrap(),
-                native
-            );
-            assert_ne!(native.id(), legacy.id());
-            let mut changed = native.clone();
-            changed.native_targets.as_mut().unwrap()[3].tip += 1;
-            assert_ne!(native.id(), changed.id());
+    fn commitments_are_bound_by_the_block_id_and_every_field_is_required() {
+        for block in [sample_block(), sample_block_with_payload()] {
+            let bytes = block.encode();
+            assert_eq!(bytes.len(), block.encode_size());
+            let mut retargeted = block.clone();
+            retargeted.native_targets[3].tip += 1;
+            assert_ne!(block.id(), retargeted.id());
+            let mut recommitted = block.clone();
+            recommitted.receipt_commitment = B256::repeat_byte(8);
+            assert_ne!(block.id(), recommitted.id());
+
             let mut concatenated = bytes.to_vec();
-            concatenated.extend_from_slice(&original);
+            concatenated.extend_from_slice(&retargeted.encode());
             let mut input = commonware_codec::Copying(concatenated.as_slice());
             assert_eq!(
                 Block::read_cfg(&mut input, &default_block_cfg()).unwrap(),
-                native
+                block
             );
             assert_eq!(
                 Block::read_cfg(&mut input, &default_block_cfg()).unwrap(),
-                legacy
+                retargeted
             );
             assert!(input.0.is_empty());
-            let mut invalid = bytes.to_vec();
-            invalid[offset] = 4;
-            assert!(
-                Block::decode_cfg(
-                    commonware_codec::Copying(invalid.as_slice()),
-                    &default_block_cfg()
-                )
-                .is_err()
-            );
-            for end in offset..bytes.len() {
+            for end in 0..bytes.len() {
                 assert!(
                     Block::decode_cfg(
                         commonware_codec::Copying(&bytes[..end]),
                         &default_block_cfg()
                     )
-                    .is_err()
+                    .is_err(),
+                    "a block cut at {end} bytes must not decode"
                 );
             }
-            native.native_targets = None;
-            assert_eq!(native.encode(), original);
         }
     }
 
     #[test]
-    fn receipt_commitment_is_canonical_bound_and_streamable() {
-        for legacy in [sample_block(), sample_block_with_payload()] {
-            for targets in [None, Some([DbTarget::default(); 4])] {
-                let offset = legacy.encode_size()
-                    - legacy.db_targets.encode_size()
-                    - legacy.payload.encode_size();
-                let mut block = legacy.clone();
-                block.native_targets = targets;
-                let previous = block.encode();
-                block.receipt_commitment = Some(B256::repeat_byte(7));
-                let encoded = block.encode();
-                assert_eq!(encoded[offset], 3);
-                assert_eq!(encoded.len(), block.encode_size());
-                assert_eq!(
-                    Block::decode_cfg(encoded.clone(), &default_block_cfg()).unwrap(),
-                    block
-                );
-                let mut changed = block.clone();
-                changed.receipt_commitment = Some(B256::repeat_byte(8));
-                assert_ne!(block.id(), changed.id());
-                let mut concatenated = encoded.to_vec();
-                concatenated.extend_from_slice(&previous);
-                let mut input = commonware_codec::Copying(concatenated.as_slice());
-                assert_eq!(
-                    Block::read_cfg(&mut input, &default_block_cfg()).unwrap(),
-                    block
-                );
-                block.receipt_commitment = None;
-                assert_eq!(block.encode(), previous);
-                assert_eq!(
-                    Block::read_cfg(&mut input, &default_block_cfg()).unwrap(),
-                    block
-                );
-                assert!(input.0.is_empty());
-                for end in offset..encoded.len() {
-                    assert!(
-                        Block::decode_cfg(
-                            commonware_codec::Copying(&encoded[..end]),
-                            &default_block_cfg()
-                        )
-                        .is_err()
-                    );
-                }
-            }
-        }
+    fn a_block_commits_to_its_ancestry_and_refuses_one_that_does_not_fit() {
+        let genesis = Block {
+            height: 0,
+            ancestry: Ancestry::genesis(),
+            ..sample_block()
+        };
+        let mut child = sample_block();
+        child.height = 1;
+        child.parent = genesis.id();
+        child.ancestry = genesis.ancestry.extended(0, &genesis.id()).unwrap();
+        assert!(child.extends_ancestry(&genesis));
+        let decoded = Block::decode_cfg(child.encode(), &default_block_cfg()).unwrap();
+        assert_eq!(decoded, child);
+        assert_eq!(child.encode_size(), child.encode().len());
+
+        let mut other = child.clone();
+        other.ancestry = crate::testing::ancestry(1);
+        assert_ne!(other.id(), child.id());
+        assert!(!other.extends_ancestry(&genesis));
+        let mut skipped = child.clone();
+        skipped.height = 2;
+        assert!(!skipped.extends_ancestry(&genesis));
+        // One peak cannot be the ancestry of a block at height 2 or 3.
+        assert!(Block::decode_cfg(skipped.encode(), &default_block_cfg()).is_ok());
+        skipped.height = 3;
+        assert!(Block::decode_cfg(skipped.encode(), &default_block_cfg()).is_err());
+
+        let proof = genesis.ancestry.prove(0, &[genesis.id()], 0).unwrap();
+        assert!(child.has_ancestor(0, &genesis.id(), &proof));
+        assert!(!child.has_ancestor(0, &child.id(), &proof));
     }
 
     #[test]
@@ -606,17 +556,14 @@ mod tests {
             context: Block::genesis_context(),
             parent: BlockId(B256::ZERO),
             height: 0,
+            ancestry: Ancestry::genesis(),
             timestamp: 0,
             term: 0,
-            prevrandao: B256::ZERO,
-            randomness: None,
-            state_root: StateRoot(B256::ZERO),
             module_state_root: B256::ZERO,
             txs: vec![],
             payload: None,
-            native_targets: None,
-            receipt_commitment: None,
-            db_targets: crate::DbTargets::default(),
+            native_targets: [DbTarget::default(); 4],
+            receipt_commitment: B256::repeat_byte(7),
         };
         let encoded = block.encode();
         let decoded = Block::decode_cfg(encoded, &default_block_cfg()).expect("decode");
@@ -665,7 +612,7 @@ mod tests {
         let block = sample_block_with_payload();
         let mut encoded = block.encode().to_vec();
         let payload_start =
-            encoded.len() - block.db_targets.encode_size() - block.payload.encode_size();
+            encoded.len() - 32 - block.native_targets.encode_size() - block.payload.encode_size();
         encoded[payload_start] = 4;
         assert!(
             Block::decode_cfg(

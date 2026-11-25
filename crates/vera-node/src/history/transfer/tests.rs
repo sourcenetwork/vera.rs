@@ -45,15 +45,14 @@ pub(in crate::history) fn revision(height: u64, parent: BlockId) -> (Block, Vec<
             10,
             10,
             vec![Log::new_unchecked(
-                Address::ZERO,
+                alloy_primitives::Address::ZERO,
                 vec![B256::ZERO],
                 vec![7; HISTORY_CHUNK_BYTES + 1].into(),
             )],
-            None,
         )]
     };
-    block.native_targets = Some([DbTarget::default(); 4]);
-    block.receipt_commitment = Some(vera_executor::receipt_commitment(100, &receipts));
+    block.native_targets = [DbTarget::default(); 4];
+    block.receipt_commitment = vera_executor::receipt_commitment(100, &receipts);
     (block, receipts)
 }
 
@@ -218,7 +217,6 @@ fn record_decoder_rejects_forged_counts_and_unconnected_prefixes() {
             .map(|r| StoredReceipt {
                 hash: r.tx_hash.0,
                 gas_used: r.gas_used,
-                contract: None,
                 success: r.success(),
                 cumulative_gas_used: r.cumulative_gas_used(),
                 logs: r.logs().iter().map(alloy_rlp::encode).collect(),
@@ -427,16 +425,16 @@ fn record_decoder_keeps_a_refusal_and_its_kind_is_committed() {
     let mut block = super::super::tests::block(1, BlockId(B256::repeat_byte(9)));
     block.txs.push(Tx::new(vec![1].into()));
     let receipts = vec![
-        ExecutionReceipt::new(block.txs[0].id().0, false, 5_000, 5_000, vec![], None).with_refusal(
-            Some(Refusal::new(
+        ExecutionReceipt::new(block.txs[0].id().0, false, 5_000, 5_000, vec![]).with_refusal(Some(
+            Refusal::new(
                 RefusingModule::Bulletin,
                 RefusalKind::NotFound,
                 "namespace not found: news",
-            )),
-        ),
+            ),
+        )),
     ];
-    block.native_targets = Some([DbTarget::default(); 4]);
-    block.receipt_commitment = Some(vera_executor::receipt_commitment(100, &receipts));
+    block.native_targets = [DbTarget::default(); 4];
+    block.receipt_commitment = vera_executor::receipt_commitment(100, &receipts);
     let encode = |refusal: StoredRefusal| {
         borsh::to_vec(&Record {
             block: block.encode().to_vec(),
@@ -444,7 +442,6 @@ fn record_decoder_keeps_a_refusal_and_its_kind_is_committed() {
             receipts: vec![StoredReceipt {
                 hash: receipts[0].tx_hash.0,
                 gas_used: 5_000,
-                contract: None,
                 success: false,
                 cumulative_gas_used: 5_000,
                 logs: vec![],

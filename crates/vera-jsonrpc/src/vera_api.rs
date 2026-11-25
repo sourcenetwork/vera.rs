@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use alloy_primitives::{B256, Bytes, U64};
+use alloy_primitives::{Address, B256, Bytes, U64};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
-use vera_domain::{LightBlock, ModuleId, NativeCallRequest, NativeCallSimulation};
+use vera_domain::{LightBlock, ModuleId, NativeCallRequest, NativeCallSimulation, ViewCallResult};
 
 #[cfg(test)]
 mod admission_tests;
@@ -30,15 +30,20 @@ use vera_permission::{
 
 use crate::{
     error::RpcError,
-    eth::TxSubmitCallback,
     state::{NodeState, NodeStatus},
     state_provider::StateProvider,
-    types::{RpcLog, RpcNativeReceipt},
+    tx_submit::TxSubmitCallback,
+    types::{RpcLog, RpcTransactionReceipt},
 };
 
 /// Durable light-block lookup, executed outside the asynchronous RPC worker.
 /// `Ok(None)` means the revision has no finalization certificate yet.
 pub type LightBlockLookup = Arc<dyn Fn(u64) -> Result<Option<LightBlock>, RpcError> + Send + Sync>;
+
+/// Proof that the revision at the first height is an ancestor of the revision
+/// at the second, built from durable history on a bounded blocking worker.
+pub type AncestryProofLookup =
+    Arc<dyn Fn(u64, u64) -> Result<vera_domain::AncestryProof, RpcError> + Send + Sync>;
 
 /// Durable receipt evidence lookup, executed on a bounded blocking worker.
 pub type ReceiptProofLookup =
@@ -69,12 +74,13 @@ pub trait VeraApi {
     #[method(name = "sendNativeTx")]
     async fn send_native_tx(&self, data: Bytes) -> RpcResult<B256>;
 
-    /// Returns an extended transaction receipt with BLS signer identity info.
+    /// Returns the execution result of a native request: its place in a
+    /// revision, target module, signer, sequence, gas, logs and refusal.
     ///
-    /// For native BLS transactions, includes `signer_did` and `native_nonce`.
-    /// For EVM transactions, these fields are `None`.
+    /// Execution data only; `vera_getReceiptProof` returns finality evidence.
     #[method(name = "getTransactionReceipt")]
-    async fn get_transaction_receipt(&self, hash: B256) -> RpcResult<Option<RpcNativeReceipt>>;
+    async fn get_transaction_receipt(&self, hash: B256)
+    -> RpcResult<Option<RpcTransactionReceipt>>;
 
     /// Return the complete receipt commitment and finality evidence for a submission.
     /// A missing response does not prove that the submission was never accepted.
@@ -99,6 +105,22 @@ pub trait VeraApi {
         &self,
         request: NativeCallRequest,
     ) -> RpcResult<NativeCallSimulation>;
+
+    /// Evaluates a read-only module call that carries no signer, against the
+    /// committed module state at the head revision.
+    ///
+    /// Unauthenticated: the answer is this node's word. It carries no
+    /// finality certificate and no state proof, and must not decide access
+    /// or be recorded as a decision. The `vera_getCurrent*Proof` methods are
+    /// the authenticated path.
+    ///
+    /// `target` is a module address and `calldata` is bounded like a native
+    /// submission; anything else fails with -32602. A method that needs a
+    /// signer answers with an `unauthenticated` refusal. Nothing is written
+    /// and no gas is charged. The call runs on the simulation slots: when
+    /// they stay occupied it fails with the retryable -32002.
+    #[method(name = "call")]
+    async fn call(&self, target: Address, calldata: Bytes) -> RpcResult<ViewCallResult>;
 
     /// Return bounded evidence for evaluating this request at a finalized revision.
     #[method(name = "getPermissionProof")]
@@ -177,6 +199,18 @@ pub trait VeraApi {
     /// the deployment's authenticated bootstrap configuration.
     #[method(name = "getLightBlock")]
     async fn get_light_block(&self, height: U64) -> RpcResult<LightBlock>;
+
+    /// Returns a proof that the revision at `ancestor` is an ancestor of the
+    /// revision at `height`.
+    ///
+    /// Verify it with `vera_domain::Block::has_ancestor` against the block of
+    /// a verified light block at `height`.
+    #[method(name = "getAncestryProof")]
+    async fn get_ancestry_proof(
+        &self,
+        ancestor: U64,
+        height: U64,
+    ) -> RpcResult<vera_domain::AncestryProof>;
 }
 
 /// Implementation of the vera RPC API.
@@ -188,6 +222,7 @@ pub struct VeraApiImpl {
     native_modules: Option<vera_backend::native::NativeStateSet>,
     light_block_index: Option<Arc<LightBlockIndex>>,
     light_block_lookup: Option<LightBlockLookup>,
+    ancestry_proof_lookup: Option<AncestryProofLookup>,
     receipt_proof_lookup: Option<ReceiptProofLookup>,
     archive: Option<crate::ArchiveReader>,
     simulator: Option<Arc<dyn StateProvider>>,
@@ -219,14 +254,15 @@ impl VeraApiImpl {
             native_modules: None,
             light_block_index: None,
             light_block_lookup: None,
+            ancestry_proof_lookup: None,
             receipt_proof_lookup: None,
             archive: None,
             simulator: None,
         }
     }
 
-    /// Dry-run native calls through the provider `eth_call` executes on, so
-    /// both share its simulation slots.
+    /// Run dry runs and view calls through this provider, so both share its
+    /// simulation slots.
     #[must_use]
     pub fn with_simulator(mut self, provider: Arc<dyn StateProvider>) -> Self {
         self.simulator = Some(provider);
@@ -271,6 +307,13 @@ impl VeraApiImpl {
         self
     }
 
+    /// Serve ancestry proofs from durable history.
+    #[must_use]
+    pub fn with_ancestry_proof_lookup(mut self, lookup: AncestryProofLookup) -> Self {
+        self.ancestry_proof_lookup = Some(lookup);
+        self
+    }
+
     /// Configure durable receipt evidence for submissions absent from the memory index.
     pub fn with_receipt_proof_lookup(mut self, lookup: ReceiptProofLookup) -> Self {
         self.receipt_proof_lookup = Some(lookup);
@@ -287,7 +330,9 @@ impl VeraApiImpl {
 #[jsonrpsee::core::async_trait]
 impl VeraApiServer for VeraApiImpl {
     async fn node_status(&self) -> RpcResult<NodeStatus> {
-        Ok(self.state.status())
+        let mut status = self.state.status();
+        status.head_height = self.index.as_ref().map(|index| index.head_block_number());
+        Ok(status)
     }
 
     async fn term_certificate(&self) -> RpcResult<Option<vera_domain::TermCertificate>> {
@@ -323,30 +368,26 @@ impl VeraApiServer for VeraApiImpl {
         Ok(tx_hash)
     }
 
-    async fn get_transaction_receipt(&self, hash: B256) -> RpcResult<Option<RpcNativeReceipt>> {
+    async fn get_transaction_receipt(
+        &self,
+        hash: B256,
+    ) -> RpcResult<Option<RpcTransactionReceipt>> {
         let Some(ref index) = self.index else {
             return Err(RpcError::Internal("block index not available".into()).into());
         };
 
-        let mut execution = index.receipt_with_transaction(&hash);
-        if execution.is_none()
+        let mut receipt = index.get_receipt(&hash);
+        if receipt.is_none()
             && let Some(archive) = &self.archive
             && let Some(index) = archive
                 .read(vera_indexer::IndexQuery::Submission(hash))
                 .await?
         {
-            execution = index.receipt_with_transaction(&hash);
+            receipt = index.get_receipt(&hash);
         }
-        let Some((receipt, tx)) = execution else {
+        let Some(receipt) = receipt else {
             return Ok(None);
         };
-        let native_nonce = tx.as_ref().and_then(|t| {
-            if receipt.signer_did.is_some() {
-                Some(U64::from(t.nonce))
-            } else {
-                None
-            }
-        });
 
         let logs = receipt
             .logs
@@ -360,32 +401,22 @@ impl VeraApiServer for VeraApiImpl {
                 transaction_index: U64::from(receipt.transaction_index),
                 block_hash: receipt.block_hash,
                 log_index: U64::from(log.log_index),
-                removed: false,
             })
             .collect();
 
-        Ok(Some(RpcNativeReceipt {
+        Ok(Some(RpcTransactionReceipt {
             transaction_hash: receipt.transaction_hash,
             transaction_index: U64::from(receipt.transaction_index),
             block_hash: receipt.block_hash,
             block_number: U64::from(receipt.block_number),
-            from: receipt.from,
-            to: receipt.to,
-            cumulative_gas_used: U64::from(receipt.cumulative_gas_used),
-            gas_used: U64::from(receipt.gas_used),
-            contract_address: receipt.contract_address,
-            logs,
-            logs_bloom: Bytes::new(),
-            tx_type: U64::ZERO,
-            status: if receipt.status {
-                U64::from(1)
-            } else {
-                U64::ZERO
-            },
-            effective_gas_price: alloy_primitives::U256::ZERO,
-            refusal: receipt.refusal,
+            target: receipt.target,
             signer_did: receipt.signer_did,
-            native_nonce,
+            nonce: U64::from(receipt.nonce),
+            gas_used: U64::from(receipt.gas_used),
+            cumulative_gas_used: U64::from(receipt.cumulative_gas_used),
+            success: receipt.status,
+            logs,
+            refusal: receipt.refusal,
         }))
     }
 
@@ -419,6 +450,13 @@ impl VeraApiServer for VeraApiImpl {
             return Err(RpcError::NotImplemented.into());
         };
         Ok(simulator.simulate_native_call(request).await?)
+    }
+
+    async fn call(&self, target: Address, calldata: Bytes) -> RpcResult<ViewCallResult> {
+        let Some(simulator) = &self.simulator else {
+            return Err(RpcError::NotImplemented.into());
+        };
+        Ok(simulator.view_call(target, calldata).await?)
     }
 
     async fn get_permission_proof(
@@ -520,12 +558,30 @@ impl VeraApiServer for VeraApiImpl {
                 .ok_or_else(|| light::certificate_not_found(height)),
         }
     }
+
+    async fn get_ancestry_proof(
+        &self,
+        ancestor: U64,
+        height: U64,
+    ) -> RpcResult<vera_domain::AncestryProof> {
+        let Some(lookup) = self.ancestry_proof_lookup.clone() else {
+            return Err(RpcError::NotImplemented.into());
+        };
+        let permit = self.state.light_lookup_permit()?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            lookup(ancestor.to(), height.to())
+        })
+        .await
+        .map_err(|error| RpcError::Internal(format!("ancestry proof lookup failed: {error}")))?
+        .map_err(Into::into)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Address, FixedBytes};
+    use alloy_primitives::FixedBytes;
     use vera_domain::NativeTx;
 
     fn sample_native_tx() -> NativeTx {
@@ -593,11 +649,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_native_tx_rejects_evm_bytes() {
+    async fn send_native_tx_rejects_bytes_that_are_not_a_native_request() {
         let state = Arc::new(NodeState::new(1, 0, 1));
         let api = VeraApiImpl::new(state, None);
-        let evm_data = Bytes::from(vec![0x02, 0xAA, 0xBB]);
-        let result = VeraApiServer::send_native_tx(&api, evm_data).await;
+        let other = Bytes::from(vec![0x02, 0xAA, 0xBB]);
+        let result = VeraApiServer::send_native_tx(&api, other).await;
 
         assert!(result.is_err());
         let err = result.unwrap_err();

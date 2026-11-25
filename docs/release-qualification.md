@@ -208,14 +208,11 @@ The current runtime dependency check still reports RUSTSEC-2026-0387 for
 family. Its affected constant-time operations require a security fix; `deny.toml`
 records the same exception used by Defra and Orbis until compatible upstream
 versions are available. This exception does not remediate the vulnerability.
-Native node, operator, ring and bearer signing use
-`k256 0.14`. The legacy `EvmSigner` and EIP-1559 helper sign with the newer
-implementation, but their compatibility APIs accept `k256 0.13` keys. Other paths include
-Alloy and `revm-precompile`'s `p256 0.13`. Disabling legacy
-transactions in pipelined consensus does not remove those dependencies or
-resolve the advisory. Resolving the dependency finding requires compatible
-upstream upgrades or a separately reviewed replacement, followed by renewed
-security and compatibility checks. The
+Native node, operator, ring and bearer signing in the client use
+`k256 0.14`. `vera-crypto` verifies secp256k1 and P-256 actor keys with
+`k256 0.13` and `p256 0.13`, which is how the affected family is reached.
+Resolving the finding requires moving those verifiers to the 0.14 family,
+followed by renewed security and compatibility checks. The
 compatible zstd dependencies are updated to `zstd 0.13.4` and `zstd-safe 7.4.0`
 to address RUSTSEC-2026-0391, 0398 and 0403. The check also continues to report
 unmaintained `derivative`, `paste` and `unsafe-libyaml` dependencies.

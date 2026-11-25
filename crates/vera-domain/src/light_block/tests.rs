@@ -9,7 +9,7 @@ use commonware_cryptography::{
 use commonware_utils::{N3f1, TestRng, non_empty};
 
 use super::*;
-use crate::{BlockId, ConsensusContext, DbTargets, StateRoot};
+use crate::{BlockId, ConsensusContext};
 
 fn fixture(
     seed: u64,
@@ -75,17 +75,14 @@ fn artifacts(seed: u64, configure: impl FnOnce(&mut Block)) -> (Block, Vec<u8>, 
         },
         parent: BlockId(B256::repeat_byte(0x07)),
         height: 100,
+        ancestry: crate::testing::ancestry(100),
         timestamp: 1_700_000_000,
         term: 0,
-        prevrandao: B256::repeat_byte(0x55),
-        randomness: None,
-        state_root: StateRoot(B256::repeat_byte(0x01)),
         module_state_root: B256::repeat_byte(0x02),
         txs: vec![crate::Tx::new(Bytes::from_static(b"light-block"))],
         payload: None,
-        native_targets: None,
-        receipt_commitment: Some(B256::repeat_byte(9)),
-        db_targets: DbTargets::default(),
+        native_targets: Default::default(),
+        receipt_commitment: B256::repeat_byte(9),
     };
     configure(&mut block);
     let proposal = Proposal::new(round, View::new(16), block.digest());
@@ -124,7 +121,7 @@ fn valid_light_block_verifies() {
     let light = light_fixture(42);
     assert_eq!(
         verify_light_block(&light, &trusted_key()).unwrap(),
-        (B256::repeat_byte(0x01), B256::repeat_byte(0x02))
+        B256::repeat_byte(0x02)
     );
 }
 
@@ -241,8 +238,8 @@ fn indirect_fixture(count: usize) -> LightBlock {
         let mut child = parent.clone();
         child.parent = parent.id();
         child.height += 1;
+        child.ancestry = crate::testing::ancestry(child.height);
         child.timestamp += 1;
-        child.state_root = StateRoot(B256::repeat_byte(0x30));
         child.module_state_root = B256::repeat_byte(0x40);
         child.context.parent = (parent.context.round.view(), parent.digest());
         child.context.round = Round::new(Epoch::new(4), View::new(index as u64 + 1));
@@ -285,7 +282,7 @@ fn descendant_certificate_authenticates_the_requested_roots_across_epochs() {
     );
     assert_eq!(
         verify_light_block(&light, &trusted_key()).unwrap(),
-        (B256::repeat_byte(1), B256::repeat_byte(2))
+        B256::repeat_byte(2)
     );
     let decoded: LightBlock =
         serde_json::from_str(&serde_json::to_string(&light).unwrap()).unwrap();
@@ -348,6 +345,7 @@ fn signed_height_gaps_and_untrusted_descendant_certificates_are_rejected() {
         Err(LightBlockError::InvalidCertificate)
     );
     child.height += 1;
+    child.ancestry = crate::testing::ancestry(child.height);
     light.descendants[0] = encode_hex(&child.encode());
     light.finalization = signed_finalization(&child, 42);
     assert_eq!(
@@ -389,14 +387,14 @@ fn receipt_evidence_binds_results_to_finality_and_submission() {
     let first = B256::repeat_byte(1);
     let second = B256::repeat_byte(2);
     let receipts = vec![
-        ExecutionReceipt::new(first, true, 0, 0, vec![], None),
-        ExecutionReceipt::new(second, false, 0, 0, vec![], None),
+        ExecutionReceipt::new(first, true, 0, 0, vec![]),
+        ExecutionReceipt::new(second, false, 0, 0, vec![]),
     ];
     let revision = light_fixture_with(42, |block| {
         block
             .txs
             .push(crate::Tx::new(Bytes::from_static(b"second")));
-        block.receipt_commitment = Some(receipt_commitment(100, &receipts));
+        block.receipt_commitment = receipt_commitment(100, &receipts);
     });
     let response = ReceiptResponse {
         revision,
@@ -428,21 +426,17 @@ fn receipt_evidence_binds_results_to_finality_and_submission() {
             .to_string()
             .contains("too many execution receipts")
     );
-    for mutation in 0..7 {
+    for mutation in 0..6 {
         let mut changed = response.clone();
         match mutation {
             0 => changed.gas_limit += 1,
-            1 => changed.receipts[0].receipt.status = false.into(),
+            1 => changed.receipts[0].success = false,
             2 => changed.receipts.swap(0, 1),
             3 => {
                 changed.receipts.pop();
             }
             4 => changed.receipts[0].tx_hash = B256::ZERO,
             5 => changed.revision.height += 1,
-            6 => {
-                changed.receipts[0].receipt.status =
-                    alloy_consensus::Eip658Value::PostState(B256::ZERO)
-            }
             _ => unreachable!(),
         }
         assert!(
@@ -450,23 +444,13 @@ fn receipt_evidence_binds_results_to_finality_and_submission() {
             "mutation {mutation}"
         );
     }
-    let legacy = ReceiptResponse {
-        revision: light_fixture_with(42, |block| {
-            block
-                .txs
-                .push(crate::Tx::new(Bytes::from_static(b"second")));
-            block.receipt_commitment = None;
-        }),
-        ..response.clone()
-    };
-    assert!(legacy.verify(first, &trusted_key()).is_err());
     let mut duplicate = response;
     duplicate.receipts[1].tx_hash = first;
     duplicate.revision = light_fixture_with(42, |block| {
         block
             .txs
             .push(crate::Tx::new(Bytes::from_static(b"second")));
-        block.receipt_commitment = Some(receipt_commitment(100, &duplicate.receipts));
+        block.receipt_commitment = receipt_commitment(100, &duplicate.receipts);
     });
     assert!(duplicate.verify(first, &trusted_key()).is_err());
 }
@@ -581,12 +565,12 @@ fn receipt_evidence_commits_the_refusal_kind_but_not_its_message() {
     let submission = B256::repeat_byte(1);
     let refusal = |kind, message: &str| Refusal::new(RefusingModule::Acp, kind, message);
     let receipts = vec![
-        ExecutionReceipt::new(submission, false, 5_000, 5_000, vec![], None)
+        ExecutionReceipt::new(submission, false, 5_000, 5_000, vec![])
             .with_refusal(Some(refusal(RefusalKind::InvalidPolicy, "invalid policy"))),
     ];
     let response = ReceiptResponse {
         revision: light_fixture_with(42, |block| {
-            block.receipt_commitment = Some(receipt_commitment(100, &receipts));
+            block.receipt_commitment = receipt_commitment(100, &receipts);
         }),
         gas_limit: 100,
         receipts,
@@ -610,12 +594,12 @@ fn receipt_evidence_commits_the_refusal_kind_but_not_its_message() {
     assert!(dropped.verify(submission, &trusted_key()).is_err());
 
     let succeeded = vec![
-        ExecutionReceipt::new(submission, true, 5_000, 5_000, vec![], None)
+        ExecutionReceipt::new(submission, true, 5_000, 5_000, vec![])
             .with_refusal(Some(refusal(RefusalKind::InvalidPolicy, ""))),
     ];
     let contradictory = ReceiptResponse {
         revision: light_fixture_with(42, |block| {
-            block.receipt_commitment = Some(receipt_commitment(100, &succeeded));
+            block.receipt_commitment = receipt_commitment(100, &succeeded);
         }),
         gas_limit: 100,
         receipts: succeeded,

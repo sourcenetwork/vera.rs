@@ -34,8 +34,8 @@ const CHAIN_ID: u64 = 9001;
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     assert!(
-        args.len() <= 13,
-        "usage: operation_baseline [count] [arrivals/sec] [max outstanding] [permission reads 0/1] [fast|normal|stress] [RPC connections] [epoch revisions] [retention minimum revision] [fixed update objects, 0 for registrations] [retained consensus revisions, 0 disables pruning] [pipelined consensus 0/1] [inherit RPC listener 0/1, Unix default 1] [discovery section in node configuration 0/1, default 1]"
+        args.len() <= 12,
+        "usage: operation_baseline [count] [arrivals/sec] [max outstanding] [permission reads 0/1] [fast|normal|stress] [RPC connections] [epoch revisions] [retention minimum revision] [fixed update objects, 0 for registrations] [retained consensus revisions, 0 disables pruning] [inherit RPC listener 0/1, Unix default 1] [discovery section in node configuration 0/1, default 1]"
     );
     let parse = |index: usize, default: usize| {
         args.get(index).map_or(default, |value| {
@@ -57,7 +57,7 @@ async fn main() {
         .ok()
         .and_then(std::num::NonZeroU32::new)
         .expect("positive RPC connection limit within u32");
-    let epoch_length = u64::try_from(parse(6, 20))
+    let epoch_length = u64::try_from(parse(6, 192))
         .ok()
         .and_then(std::num::NonZeroU64::new)
         .expect("positive epoch length within u64");
@@ -69,9 +69,7 @@ async fn main() {
         "updates require permission verification"
     );
     let retained_consensus = parse(9, 0);
-    let pipelined = parse(10, 0);
-    assert!(pipelined <= 1);
-    let inherit_rpc_listener = parse(11, usize::from(cfg!(unix)));
+    let inherit_rpc_listener = parse(10, usize::from(cfg!(unix)));
     assert!(
         inherit_rpc_listener <= 1,
         "inherit RPC listener must be 0 or 1"
@@ -80,19 +78,17 @@ async fn main() {
         cfg!(unix) || inherit_rpc_listener == 0,
         "listener inheritance requires Unix"
     );
-    let discovery_section = parse(12, 1);
+    let discovery_section = parse(11, 1);
     assert!(discovery_section <= 1, "discovery section must be 0 or 1");
-    let simplex = (pipelined == 1).then(vera_domain::SimplexParameters::default);
-    let term_length =
-        std::num::NonZeroU64::new(simplex.map_or(1, |parameters| parameters.term_length)).unwrap();
+    let simplex = vera_domain::SimplexParameters::default();
+    let term_length = std::num::NonZeroU64::new(simplex.term_length).unwrap();
     assert!(
         vera_domain::max_epoch_participants(epoch_length, term_length) >= 4,
         "epoch is too short for four participants with the configured leader term"
     );
-    let mut genesis = GenesisBuilder::devnet().blocks_per_epoch(epoch_length.get());
-    if let Some(parameters) = simplex {
-        genesis = genesis.simplex(parameters);
-    }
+    let genesis = GenesisBuilder::devnet()
+        .blocks_per_epoch(epoch_length.get())
+        .simplex(simplex);
     if retained_consensus > 0 {
         let window = retained_consensus
             .checked_add(2)
@@ -177,7 +173,7 @@ async fn main() {
     })
     .await
     .expect("policy creation timed out");
-    assert_eq!(setup_receipt.status, 1);
+    assert!(setup_receipt.success);
     let ids = client.get_policy_ids().await.unwrap();
     assert_eq!(ids.len(), 1);
     let policy_id = FixedBytes::<32>::from_slice(&hex::decode(&ids[0]).unwrap());
@@ -194,7 +190,6 @@ async fn main() {
                 &client,
                 setup_receipt.transaction_hash,
                 setup_receipt.block_number,
-                setup_receipt.block_hash,
             )
             .await,
         )
@@ -266,7 +261,7 @@ async fn main() {
             "discovery_section": discovery_section == 1,
             "revisions_per_epoch": epoch_length.get(),
             "simplex": simplex,
-            "proposal_batch_wait_ms": simplex.map(|_| (timing.leader_timeout / 4).min(Duration::from_millis(100)).as_millis()),
+            "proposal_batch_wait_ms": (timing.leader_timeout / 4).min(Duration::from_millis(100)).as_millis(),
             "retention_minimum_revision": retention_height,
             "max_operations_per_revision": vera_domain::MAX_BLOCK_TXS,
             "max_encoded_operation_bytes_per_revision": vera_domain::MAX_BLOCK_TX_BYTES,
@@ -428,7 +423,7 @@ async fn main() {
     })
     .await
     .expect("three-node write timed out");
-    assert_eq!(probe_receipt.status, 1);
+    assert!(probe_receipt.success);
     let restart = Instant::now();
     cluster.restart_node(3).expect("restart replica");
     if let Err(error) = cluster.wait_ready(driver::REQUEST_TIMEOUT).await {
@@ -450,7 +445,7 @@ async fn main() {
     .expect("recovery deadline")
     .expect("recover probe receipt");
     assert_eq!(recovered_receipt.block_hash, probe_receipt.block_hash);
-    assert_eq!(recovered_receipt.status, 1);
+    assert!(recovered_receipt.success);
     let (registered, owner) = recovered
         .get_object_owner(policy_id, "file", "recovery-probe")
         .await

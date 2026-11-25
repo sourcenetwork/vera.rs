@@ -53,11 +53,12 @@ async fn certified_height(
 ) -> LightBlock {
     tokio::time::timeout(deadline(), async {
         loop {
-            let height: String = client
-                .rpc_call_typed("eth_blockNumber", json!([]))
+            let height = client
+                .node_status()
                 .await
-                .unwrap();
-            let height = u64::from_str_radix(height.trim_start_matches("0x"), 16).unwrap();
+                .unwrap()
+                .finalized_height
+                .unwrap_or(0);
             if height >= minimum {
                 let result = client
                     .rpc_call_typed::<LightBlock>(
@@ -71,8 +72,7 @@ async fn certified_height(
                         assert_eq!(light.height, height);
                         return light;
                     }
-                    Err(vera_client::ClientError::Rpc { message, .. })
-                        if message.contains("finalization certificate not found") => {}
+                    Err(vera_client::ClientError::FinalityPending(_)) => {}
                     Err(error) => panic!("light block fetch failed: {error}"),
                 }
             }
@@ -270,7 +270,7 @@ async fn recover_replica_from(
 
     let origin = VeraClient::new(cluster.node(0).rpc_url());
     tokio::time::timeout(deadline(), async {
-        while origin.chain_id().await.is_err() {
+        while origin.node_status().await.is_err() {
             tokio::time::sleep(POLL).await;
         }
     })
@@ -347,7 +347,7 @@ async fn recover_replica_from(
             .await
             .unwrap(),
     );
-    assert!(receipts.iter().all(|receipt| receipt.status == 1));
+    assert!(receipts.iter().all(|receipt| receipt.success));
     let (target, allowed) = current_access(
         &origin,
         &policies[0],
@@ -434,7 +434,7 @@ async fn recover_replica_from(
         );
         assert!(
             VeraClient::new(cluster.node(3).rpc_url())
-                .chain_id()
+                .node_status()
                 .await
                 .is_err()
         );
@@ -544,7 +544,7 @@ async fn recover_replica_from(
         )
         .await
         .unwrap();
-    assert_eq!(subsequent.status, 1);
+    assert!(subsequent.success);
     origin
         .wait_for_receipt(subsequent.transaction_hash, POLL, 900)
         .await

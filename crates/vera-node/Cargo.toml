@@ -40,8 +40,6 @@ vera-identity.workspace = true
 vera-indexer.workspace = true
 vera-jsonrpc.workspace = true
 vera-modules.workspace = true
-vera-qmdb.workspace = true
-vera-traits.workspace = true
 
 commonware-actor.workspace = true
 commonware-broadcast.workspace = true
@@ -58,8 +56,6 @@ commonware-resolver.workspace = true
 commonware-storage.workspace = true
 commonware-utils.workspace = true
 
-alloy-consensus.workspace = true
-alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 anyhow.workspace = true
@@ -82,9 +78,8 @@ zeroize = "1.8"
 libc.workspace = true
 
 [dev-dependencies]
+vera-domain = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["test-util"] }
-alloy-signer.workspace = true
-alloy-signer-local.workspace = true
 alloy-sol-types.workspace = true
 ed25519-dalek.workspace = true
 p256.workspace = true

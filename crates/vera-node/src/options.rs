@@ -64,7 +64,7 @@ pub(crate) fn default_verification_threads() -> std::num::NonZeroUsize {
         .map_or(std::num::NonZeroUsize::MIN, |machine| machine.min(LIMIT))
 }
 
-/// How a lone validator paces proposals in pipelined mode.
+/// How a lone validator paces proposals.
 ///
 /// `idle` must stay below the leader timeout and the genesis stall timeout,
 /// or the validator abandons its own views.

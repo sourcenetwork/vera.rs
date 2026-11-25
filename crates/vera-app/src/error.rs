@@ -21,13 +21,12 @@ pub enum AppError {
 
 impl AppError {
     pub(crate) const fn is_local_state_failure(&self) -> bool {
-        match self {
-            Self::Executor(error) => error.is_local_state_failure(),
+        matches!(
+            self,
             Self::State(
                 vera_backend::BackendError::Storage(_) | vera_backend::BackendError::NotInitialized,
-            ) => true,
-            _ => false,
-        }
+            )
+        )
     }
 }
 

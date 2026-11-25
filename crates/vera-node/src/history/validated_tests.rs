@@ -239,8 +239,8 @@ async fn a_damaged_epoch_boundary_is_refused_before_its_material_is_restored() {
 
 fn next_heartbeat(parent: &Block) -> Block {
     let mut next = block(parent.height + 1, parent.id());
-    next.native_targets = Some([vera_domain::DbTarget::default(); 4]);
-    next.receipt_commitment = Some(vera_executor::receipt_commitment(100, &[]));
+    next.native_targets = [vera_domain::DbTarget::default(); 4];
+    next.receipt_commitment = vera_executor::receipt_commitment(100, &[]);
     next
 }
 

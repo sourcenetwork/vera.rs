@@ -7,8 +7,8 @@ use alloy_sol_types::{SolCall, SolEvent};
 use commonware_codec::Encode as _;
 use vera_client::Secp256k1SigningKey as SigningKey;
 use vera_client::{
-    ACP_ADDRESS, BlsSigner, ClientError, DelegationScope, ModuleId, NativeReceipt,
-    RECORD_PROOF_BYTES, VERA_ADDRESS, VeraClient, create_bearer_token, create_scoped_bearer_token,
+    ACP_ADDRESS, BlsSigner, ClientError, DelegationScope, ModuleId, RECORD_PROOF_BYTES,
+    TransactionReceipt, VERA_ADDRESS, VeraClient, create_bearer_token, create_scoped_bearer_token,
 };
 use vera_domain::{ConsensusPublicKey, NativeTx};
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, TestCluster};
@@ -26,7 +26,7 @@ async fn submit(
     signer: &BlsSigner,
     target: Address,
     call: impl SolCall,
-) -> NativeReceipt {
+) -> TransactionReceipt {
     let wire = signer
         .sign_native_tx(target, call.abi_encode().into())
         .unwrap();
@@ -35,10 +35,10 @@ async fn submit(
     assert_eq!(hash, tx.tx_id().0);
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            if let Some(receipt) = client.get_native_receipt(hash).await.unwrap() {
+            if let Some(receipt) = client.get_transaction_receipt(hash).await.unwrap() {
                 assert_eq!(receipt.transaction_hash, hash);
-                assert_eq!(receipt.signer_did.as_deref(), Some(signer.did()));
-                assert_eq!(receipt.native_nonce, Some(tx.nonce));
+                assert_eq!(receipt.signer_did, signer.did());
+                assert_eq!(receipt.nonce, tx.nonce);
                 // The receipt index can publish a moment before the height's
                 // finalization certificate; retry until the evidence lands.
                 let evidence = match client.read_receipt(hash, trusted).await.unwrap() {
@@ -50,7 +50,7 @@ async fn submit(
                 };
                 let verified = evidence.verify(hash, trusted).unwrap();
                 assert_eq!(evidence.revision.height, receipt.block_number);
-                assert_eq!(verified.success(), receipt.status == 1);
+                assert_eq!(verified.success(), receipt.success);
                 assert_eq!(verified.logs().len(), receipt.logs.len());
                 for (proven, displayed) in verified.logs().iter().zip(&receipt.logs) {
                     assert_eq!(proven.address, displayed.address);
@@ -77,8 +77,8 @@ fn create(token: &str, nonce: u8) -> IAcp::bearerCreatePolicyCall {
     }
 }
 
-fn created_id(receipt: &NativeReceipt, owner: &str) -> String {
-    assert_eq!(receipt.status, 1);
+fn created_id(receipt: &TransactionReceipt, owner: &str) -> String {
+    assert!(receipt.success);
     assert_eq!(receipt.logs.len(), 1);
     let log = &receipt.logs[0];
     assert_eq!(log.address, ACP_ADDRESS);
@@ -244,7 +244,7 @@ async fn native_workers_preserve_policy_ownership_results_and_revocation() {
         },
     )
     .await;
-    assert_eq!(direct.status, 0);
+    assert!(!direct.success);
     let wrong_worker = submit(
         &client,
         &trusted,
@@ -253,7 +253,7 @@ async fn native_workers_preserve_policy_ownership_results_and_revocation() {
         create(&first_token, 3),
     )
     .await;
-    assert_eq!(wrong_worker.status, 0);
+    assert!(!wrong_worker.success);
     assert!(wrong_worker.logs.is_empty());
     let edit = || IAcp::bearerEditPolicyCall {
         bearerToken: second_edit_token.clone(),
@@ -269,15 +269,15 @@ async fn native_workers_preserve_policy_ownership_results_and_revocation() {
         create(&commands_token, 4),
     )
     .await;
-    assert_eq!(legacy_scope.status, 0);
+    assert!(!legacy_scope.success);
     assert!(legacy_scope.logs.is_empty());
     let mut wrong_scope = edit();
     wrong_scope.bearerToken = second_token.clone();
     let wrong_scope = submit(&client, &trusted, &second, ACP_ADDRESS, wrong_scope).await;
-    assert_eq!(wrong_scope.status, 0);
+    assert!(!wrong_scope.success);
     assert!(wrong_scope.logs.is_empty());
     let edited = submit(&client, &trusted, &second, ACP_ADDRESS, edit()).await;
-    assert_eq!(edited.status, 1);
+    assert!(edited.success);
     let record = policy(&client, &first_id, edited.block_number, &trusted).await;
     assert_eq!(record.raw_policy, EDITED);
     assert_eq!(record.metadata.owner_did, owner);
@@ -296,7 +296,7 @@ async fn native_workers_preserve_policy_ownership_results_and_revocation() {
         },
     )
     .await;
-    assert_eq!(revoked_edit.status, 1);
+    assert!(revoked_edit.success);
     let revoked = submit(
         &client,
         &trusted,
@@ -307,7 +307,7 @@ async fn native_workers_preserve_policy_ownership_results_and_revocation() {
         },
     )
     .await;
-    assert_eq!(revoked.status, 1);
+    assert!(revoked.success);
     let replica = VeraClient::new(cluster.node(3).rpc_url());
     policy(&replica, &first_id, revoked.block_number, &trusted).await;
     cluster.restart_node(3).unwrap();
@@ -326,11 +326,11 @@ async fn native_workers_preserve_policy_ownership_results_and_revocation() {
                 .verify(receipt.transaction_hash, &trusted)
                 .unwrap()
                 .success(),
-            receipt.status == 1
+            receipt.success
         );
     }
     let rejected = submit(&replica, &trusted, &second, ACP_ADDRESS, edit()).await;
-    assert_eq!(rejected.status, 0);
+    assert!(!rejected.success);
     assert!(rejected.logs.is_empty());
     let rejected = submit(
         &replica,
@@ -340,7 +340,7 @@ async fn native_workers_preserve_policy_ownership_results_and_revocation() {
         create(&second_token, 5),
     )
     .await;
-    assert_eq!(rejected.status, 0);
+    assert!(!rejected.success);
     assert!(rejected.logs.is_empty());
     let record = policy(&replica, &first_id, rejected.block_number, &trusted).await;
     assert_eq!(record.raw_policy, EDITED);
@@ -480,7 +480,7 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
         create(&first_token, 1),
     )
     .await;
-    assert_eq!(rejected.status, 0);
+    assert!(!rejected.success);
     assert!(rejected.logs.is_empty());
     let installed = submit(
         &client,
@@ -492,7 +492,7 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
         },
     )
     .await;
-    assert_eq!(installed.status, 1);
+    assert!(installed.success);
     let (a, b) = tokio::join!(
         submit(
             &client,
@@ -515,10 +515,7 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
         let id = created_id(receipt, &owner);
         let record = policy(&client, &id, receipt.block_number, &trusted).await;
         assert_eq!(record.metadata.owner_did, owner);
-        assert_eq!(
-            Some(record.metadata.tx_signer.as_str()),
-            receipt.signer_did.as_deref()
-        );
+        assert_eq!(record.metadata.tx_signer, receipt.signer_did);
         assert_eq!(record.metadata.tx_hash, receipt.transaction_hash.as_slice());
     }
     let wrong_worker = submit(
@@ -529,16 +526,15 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
         create(&second_token, 2),
     )
     .await;
-    assert_eq!(wrong_worker.status, 0);
+    assert!(!wrong_worker.success);
     let mut changed = create(&first_token, 1);
     changed.policy = EDITED.as_bytes().to_vec().into();
-    assert_eq!(
-        submit(&client, &trusted, &first, ACP_ADDRESS, changed)
+    assert!(
+        !submit(&client, &trusted, &first, ACP_ADDRESS, changed)
             .await
-            .status,
-        0
+            .success
     );
-    assert_eq!(
+    assert!(
         submit(
             &client,
             &trusted,
@@ -549,11 +545,10 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
             }
         )
         .await
-        .status,
-        1
+        .success
     );
-    assert_eq!(
-        submit(
+    assert!(
+        !submit(
             &client,
             &trusted,
             &first,
@@ -561,10 +556,9 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
             create(&first_token, 1)
         )
         .await
-        .status,
-        0
+        .success
     );
-    assert_eq!(
+    assert!(
         submit(
             &client,
             &trusted,
@@ -573,14 +567,13 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
             create(&token(&second, 0, 3), 3)
         )
         .await
-        .status,
-        1
+        .success
     );
 
     let replacement =
         administration_support::approve(&client, AdministrativeCommand::SetRelay(grant.clone()), 1)
             .await;
-    assert_eq!(
+    assert!(
         submit(
             &client,
             &trusted,
@@ -591,11 +584,10 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
             }
         )
         .await
-        .status,
-        1
+        .success
     );
-    assert_eq!(
-        submit(
+    assert!(
+        !submit(
             &client,
             &trusted,
             &second,
@@ -603,8 +595,7 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
             create(&token(&second, 0, 4), 4)
         )
         .await
-        .status,
-        0
+        .success
     );
     let selected = client.read_relay_grant(&issuer, 0, &trusted).await.unwrap();
     let state = selected.value.unwrap();
@@ -620,7 +611,7 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
     assert_eq!(state.grant, grant);
     assert_eq!(state.sequence, 1);
     let replacement_token = token(&second, 1, 5);
-    assert_eq!(
+    assert!(
         submit(
             &client,
             &trusted,
@@ -629,8 +620,7 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
             create(&replacement_token, 5)
         )
         .await
-        .status,
-        1
+        .success
     );
     let replica = VeraClient::new(cluster.node(3).rpc_url());
     policy(&replica, &id, selected.revision, &trusted).await;
@@ -668,7 +658,7 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
         },
     )
     .await;
-    assert_eq!(receipt.status, 1);
+    assert!(receipt.success);
     policy(&replica, &id, receipt.block_number, &trusted).await;
     cluster.restart_node(3).unwrap();
     cluster
@@ -690,8 +680,8 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
     .await;
     assert!(inspected["grant"].is_null());
 
-    assert_eq!(
-        submit(
+    assert!(
+        !submit(
             &replica,
             &trusted,
             &second,
@@ -699,8 +689,7 @@ async fn native_relay_grants_bind_workers_and_survive_revocation_restart() {
             create(&token(&second, 1, 6), 6)
         )
         .await
-        .status,
-        0
+        .success
     );
     assert_eq!(
         policy(&replica, &id, receipt.block_number, &trusted)

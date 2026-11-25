@@ -59,7 +59,8 @@ async fn cluster_observability_canonical() {
         .expect("chain_id should match across all nodes");
 
     // Proposal logs need not advance during finalized replay. Compare indexed
-    // block logs with the RPC block index, allowing both observers to catch up.
+    // block logs with the finalized height RPC reports, allowing both observers
+    // to catch up.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     let snapshots = loop {
         let nodes = state.all_nodes();
@@ -72,11 +73,8 @@ async fn cluster_observability_canonical() {
             && nodes.iter().zip(&log_heights).all(|(node, &height)| {
                 node.is_healthy
                     && node.finalized_height.is_some_and(|finalized| {
-                        finalized >= 6 && finalized.abs_diff(node.latest_block_height) <= 5
+                        finalized >= 6 && height >= 6 && height.abs_diff(finalized) <= 5
                     })
-                    && node.latest_block_height >= 4
-                    && height >= 6
-                    && height.abs_diff(node.latest_block_height) <= 5
             })
             && matches!((min, max), (Some(min), Some(max)) if max - min <= 2)
         {
@@ -114,10 +112,9 @@ async fn cluster_observability_canonical() {
         assert_eq!(snap.chain_id, chain_id, "node{} snapshot chain_id", i);
         assert!(
             snap.effective_height() >= 6,
-            "node{} effective height should be >= 6 (finalized={}, block={})",
+            "node{} effective height should be >= 6 (finalized callbacks={})",
             i,
             snap.finalized_count,
-            snap.latest_block_height,
         );
         assert!(
             snap.finalized_height.is_some_and(|height| height >= 6),
@@ -131,12 +128,6 @@ async fn cluster_observability_canonical() {
         assert_eq!(
             snap.nullified_count, None,
             "nullifications are not yet instrumented"
-        );
-        assert!(
-            snap.latest_block_height >= 4,
-            "node{} latest_block_height should be >= 4 via IndexedStateProvider (got {})",
-            i,
-            snap.latest_block_height,
         );
     }
 
@@ -315,16 +306,13 @@ async fn assert_observed_revision(
     trusted: &ConsensusPublicKey,
 ) {
     let height = status.finalized_height.expect("observed finalized height");
-    let pending = format!(
-        "finalization certificate not found for height {height} within retained proof limits"
-    );
     let revision = tokio::time::timeout(Duration::from_secs(30), async {
         let mut poll = tokio::time::interval(Duration::from_millis(100));
         loop {
             poll.tick().await;
             match client.read_finalized_revision(height, trusted).await {
                 Ok(revision) => break revision,
-                Err(ClientError::Rpc { message, .. }) if message.ends_with(&pending) => {}
+                Err(ClientError::FinalityPending(_)) => {}
                 Err(error) => panic!("verify indexed finalized revision: {error}"),
             }
         }

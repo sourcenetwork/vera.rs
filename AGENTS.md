@@ -1,6 +1,6 @@
 # vera.rs
 
-Native Rust implementation of Vera's access control, bulletin, identity and transparency services, using Commonware consensus and storage. Native requests use BLS12-381 signing. Pipelined deployments disable legacy EVM transactions; rotating deployments retain optional compatibility execution.
+Native Rust implementation of Vera's access control, bulletin, identity and transparency services, using Commonware consensus and storage. Native requests use BLS12-381 signing. Every deployment runs pipelined Simplex consensus with bounded leader terms, and blocks carry native requests only.
 
 See [architecture and request flows](docs/architecture.md) for service boundaries,
 operator-managed membership, ACP, storage, threshold services, and recovery limits.
@@ -20,14 +20,14 @@ Related repositories are independent checkouts; discover their paths rather than
 
 | Repo | Org | Purpose |
 |------|-----|---------|
-| **vera.rs** | sourcenetwork | This repo — SourceHub rewrite on Commonware |
+| **vera.rs** | sourcenetwork | This repo — native Vera on Commonware |
 | **vera** | sourcenetwork | Earlier Go service; its `acp_core` engine is the reference behind `tools/acp-oracle` |
 | **orbis-rs** | sourcenetwork | Application threshold signing and encryption, using native authorization, bulletin and ring records |
 | **defradb.rs** | sourcenetwork | Document storage with native signed submissions and verified ACP evidence |
 | **trust-api** | sourcenetwork | Separate Go gateway; this repository ships no Go client, C verifier or tests for it |
 | **backbone** | sourcenetwork | Shared Rust clients and verification used by native consumers |
 | **regolith** | sourcenetwork | Defra document storage and Vera finalized-history backend |
-| **bankd-commonware** | mizufinance | Reference: Commonware + REVM chain (infrastructure source for Phase 1) |
+| **bankd-commonware** | mizufinance | Reference Commonware chain (source of the consensus assembly and e2e harness) |
 | **monorepo** | commonwarexyz | Commonware primitives (consensus, crypto, p2p, storage) |
 
 ### Code reuse across repos
@@ -37,7 +37,7 @@ Related repositories are independent checkouts; discover their paths rather than
 | Zanzibar engine (relation-tuple graph) | vendored `crates/vera-zanzibar/` (from defradb.rs 8d34d9c) | ACP policy evaluation |
 | DID types, identity crate | vendored `crates/vera-identity/` (from defradb.rs 8d34d9c) | DID resolution |
 | YAML policy parser, DocumentACP types | vendored `crates/vera-acp/` (from defradb.rs 8d34d9c) | ACP policy creation |
-| Simplex consensus, REVM executor, e2e harness | bankd-commonware | Consensus, EVM execution, testing |
+| Simplex consensus, e2e harness | bankd-commonware | Consensus, testing |
 | BLS12-381 threshold crypto | commonware monorepo | Block signing, native tx verification |
 
 The development toolchain is pinned to Rust 1.99.1 in `rust-toolchain.toml`.
@@ -67,9 +67,9 @@ stops:
   separate hosts. See docs/operating.md#configuration-knobs-operators-own.
 - **Consensus:** the Commonware `marshal` actor (block archive + finalization
   storage) driven by the glue `orchestrator` running Simplex with a
-  `FixedEpocher` over genesis `blocks_per_epoch`. The elector uses bounded leader
-  terms when genesis selects pipelining; rotating deployments alone populate
-  per-view VRF seeds for compatibility execution.
+  `FixedEpocher` over genesis `blocks_per_epoch`. The round-robin elector
+  assigns bounded leader terms from the genesis `simplex` parameters
+  (defaults apply when the section is omitted).
 - **Execution:** the glue `Stateful` actor wrapping `vera-app`'s
   `StatefulVeraApp` (below).
 - **DKG/resharing:** the glue `probe` actor discovers the latest epoch when a
@@ -118,11 +118,6 @@ floor, keeping only the floor's parent below it; reads below it fail with
 Proposal transaction exclusion stops at the published finalized revision, including
 the recovered index head, so it does not fetch pruned finalized ancestors.
 
-The application retires cached proposal randomness for rounds behind finalized
-execution. The finalized round and newer rounds remain available, and late
-elector callbacks cannot reinsert retired seeds. This follows finality progress;
-it does not impose a cap on rounds accumulated while finality is stalled.
-
 ### Execution (`vera-app` + `vera-executor`)
 
 `StatefulVeraApp` implements `commonware_glue::stateful::Application`: it builds
@@ -132,23 +127,23 @@ proposals by re-execution, and hands finalized receipts to a `FinalizedSink`
 subscription channels. Block execution goes through `VeraExecutor`:
 
 ```
-                     VeraExecutor
-                          |
-          +---------------+---------------+
-          |                               |
-     Native BLS txs                  EVM txs
-     (processed first)               (processed second)
-          |                               |
-     BLS verify → did:key             REVM execution
-     Deserialize NativeTx                 |
-          |                          Precompile calls
-     Dispatch to module              hit same modules
-          |                               |
-          v                               v
-    module.method(args)  ←— same Rust code —→  module.method(args)
+        VeraExecutor
+             |
+      Native BLS request
+             |
+      BLS verify → did:key
+      Deserialize NativeTx
+             |
+      Dispatch to module
+             |
+             v
+      module.method(args)
 ```
 
-### Precompile addresses
+A block carries native requests only. Building skips and drops bytes that are
+not a native request; verification rejects a block that carries any.
+
+### Module addresses
 
 | Address | Module | Purpose |
 |---------|--------|---------|
@@ -156,13 +151,13 @@ subscription channels. Block execution goes through `VeraExecutor`:
 | `0x0811` | Bulletin | Coordination / DKG messages / posts |
 | `0x0812` | Vera | Identity / JWT token lifecycle |
 | `0x0813` | ValidatorRegistry | Validator identity management (feeds resharing) |
-| `0x0814` | Anchor | Latest finalized revision of other deployments (identity partition) |
+| `0x0814` | Anchor | Finalized revisions of registered deployments as one chain each, their terms and forks (identity partition) |
 
 ### Shared module pattern
 
-Each module is a plain Rust struct. Two thin shims sit on top:
-- **Precompile shim:** ABI decode calldata → `module.method(args)`
-- **Native tx shim:** BLS verify + deserialize → `module.method(args)`
+Each module is a plain Rust struct. A native request names a module address
+and carries an ABI-encoded call; the executor verifies the BLS signature and
+the dispatch shim decodes the call into `module.method(args)`.
 
 Business logic lives once.
 
@@ -230,10 +225,9 @@ a matching index, and a rewind of at most 1,024 revisions removes only the
 discarded revisions' mappings together with the head rewind. These reads return execution data, with finality verified
 separately by proof consumers.
 
-The node uses `vera-app::OrderedState`: three execution partitions (accounts,
-storage, code) and four ordered Commonware current-QMDB partitions (ACP, bulletin,
-vera, native sequences). `StatefulVeraApp` seals all seven targets into each proposal
-and verifies them by re-execution. An in-memory commitment participates in the same
+The node uses `vera-app::OrderedState`: four ordered Commonware current-QMDB
+partitions (ACP, bulletin, vera, native sequences). `StatefulVeraApp` seals all
+four targets into each proposal and verifies them by re-execution. An in-memory commitment participates in the same
 Commonware coordinator generation, binding the native current-state root to the
 selected operation-log targets. It is reconstructed from the durable recovery
 anchor, not persisted as an independent journal.
@@ -241,25 +235,21 @@ anchor, not persisted as an independent journal.
 A module call that fails on what its caller sent (an unknown selector, calldata
 that does not decode, an argument out of bounds) rejects that request with a
 failed receipt, and the block goes on. Only an error marked as the node's own
-(`precompiles::internal_fault`: stored membership or policy state that does not
+(`ModuleError::Fault`: stored membership or policy state that does not
 read back) fails the block, including inside an ACP batch. A call that exhausts
 its gas allowance is a failure too: nothing it wrote is kept, a native request
-is charged its full limit, and a contract's call returns no gas.
+is charged its full limit.
 A refused native request's receipt names why: `vera_domain::Refusal` carries the
 module, a `RefusalKind` that the receipt commitment binds, and the module's
 message, bounded to 1,024 bytes and not committed because it embeds parser and
 library text. A module error's variant decides its kind
-(`vera_executor::precompiles::refusal`). A refusal is charged what the call
+(`vera_executor::dispatch::refusal`). A refusal is charged what the call
 reported, at least 5,000; `out_of_gas` and a module panic keep the full limit.
-`vera-client` returns `ClientError::Refused` for a refused native request and
-`TxReverted` for an EVM revert; a contract caller still gets the message as
-revert data. See `docs/receipt-commitments.md#refusals`.
-Only a transaction's own call to a module carries its signer's authority. A call
-made by contract code, DELEGATECALL and CALLCODE included, has no signer, and a
-method that needs one refuses it.
-EVM transactions execute only in their canonical EIP-2718 encoding, and a legacy
-transaction must carry a chain ID. Blob (type 3) transactions are refused at
-admission and execution. ACP and token lifecycle errors reject proposal execution and re-verification.
+`vera-client` returns `ClientError::Refused` for a refused native request, with
+its receipt. See `docs/receipt-commitments.md#refusals`.
+A module method that needs a signer refuses a call without one
+(`RefusalKind::Unauthenticated`), which is how the signerless `vera_call` is kept
+to queries. ACP and token lifecycle errors reject proposal execution and re-verification.
 Malformed token records encountered during reads or expiry are errors, including a mismatch between the storage key
 and the record's token hash. Failed lifecycle work cannot publish its module view. Token expiry uses an ordered
 deadline index, leaving invalidated tokens out of each revision's sweep. Every
@@ -275,23 +265,39 @@ history checks it before persistence and before indexing a recovered record.
 See `docs/receipt-commitments.md` for the canonical encoding.
 
 First boot records a durable initialization intent before changing journals, then
-publishes `native-genesis.bin` after all seven partitions are durable. Interrupted
+publishes `native-genesis.bin` after all four partitions are durable. Interrupted
 initialization can rewind and retry only with the same genesis configuration.
 Foreign state layouts and incompatible genesis records are rejected.
+Formats are versioned: a block leads with `BLOCK_FORMAT_VERSION`, the genesis
+record and intent with `STATE_LAYOUT_VERSION` (also hashed into the genesis
+fingerprint), a native request with its type byte, and each is refused with a
+typed error (`vera_domain::UnsupportedVersion`, `NativeTxDecodeError`,
+`UnsupportedHistoryFormat`) under any other value. A release that adds a
+component raises the versions it changes; modules keep their addresses and call
+encodings. See `docs/receipt-commitments.md#format-versions`.
 Missing genesis records alongside finalized history are rejected instead of
 resetting state. A persisted native genesis must contain the expected receipt
 commitment.
 
 `genesis.json` and `config.toml` reject keys they do not define. Genesis
 validators need distinct addresses and consensus keys, and a node does not start
-without at least one. The ValidatorRegistry slot layout is defined once, in
-`vera_modules::validator_registry::layout`, for execution and genesis.
+without at least one. The validator registry keeps one record per member in
+the vera module's store (`registry/member/<address>`: consensus key, network
+address, active flag, admission, address sequence), seeded at genesis and read
+in address order; a record that does not read back fails the block. Every
+admission takes the next number of a count that removal never lowers.
+Membership commands need the membership policy's `manage` permission. A
+validator changes its network address itself: `updateP2PAddress` carries its
+Ed25519 consensus key's signature over the genesis record, its address, the
+record's admission and sequence and the new address, any native signer submits
+it, and it applies once; a member removed and admitted again signs under a new
+admission
+(`vera_client::ValidatorAddressUpdate`). See docs/consensus-membership.md#validator-records.
 
-Seven authenticated peer resolvers serve bounded operation-log ranges. Fetches
+Four authenticated peer resolvers (channels 9 to 12) serve bounded operation-log ranges. Fetches
 allow up to 64 operations, with eight-operation inspection batches and responses
 below the 4 MiB transport limit. Native keys are limited to 64 KiB; values and
-commit metadata to 1 MiB. Code-partition peer messages cap values at 1 MiB even
-though the older local journal codec permits larger records. A request for a
+commit metadata to 1 MiB. A request for a
 size the server has not reached yet waits for it, without the database lock,
 for up to one second (at most 64 waiting per database) before it is refused.
 
@@ -310,7 +316,7 @@ import API. The import selection and cursor are durable, and imported history
 remains unavailable until recovery at the matching state anchor completes.
 Starting an import marks the store as imported, so recovery keeps the blocks
 its certificates need above the anchor. The node serves chunks through Commonware's
-resolver on authenticated channel 16, producing each chunk on the blocking pool,
+resolver on authenticated channel 13, producing each chunk on the blocking pool,
 two at a time; further requests are dropped and retried by the importer.
 `HistoryPeer::import_next_from` bounds
 record and finality-proof assembly, verifies both before persistence and cancels
@@ -337,6 +343,12 @@ limits, then releases the locks before waiting for the revision's certificate.
 height and evidence before running the shared ACP evaluator. Callers supply any
 additional freshness policy. The separate `vera_getPermissionProof` endpoint
 requires the requested root to remain available.
+The Rust client verifies a revision's certificate once: it remembers up to 256
+verified revisions by height, block hash and evidence digest under one
+consensus key and term, so a remembered block with another certificate is
+verified in full, and a later term, another block at a remembered height or another key empties
+the record. Evidence is verified against the module root on every read. See
+docs/permission-proofs.md#verified-revisions-in-the-rust-client.
 `vera_getCurrentRecordProof` captures a native record and its certified revision;
 `VeraClient::read_current_record` verifies membership or absence against the requested
 module, key and minimum revision. `vera_getCurrentPrefixProof` and
@@ -368,12 +380,12 @@ their narrower byte limits. Cancelling a lookup does not release its
 slot until its blocking task finishes.
 See `docs/permission-proofs.md` for formats and limits.
 
-The application uses ordered QMDB partitions for execution and native modules.
-Native blocks select a tagged commitment encoding and carry four additional
-module log targets and a receipt commitment. Blocks lacking these commitments,
-or carrying a target with an empty range, are rejected by the application
-without executing them. Legacy block decoding remains separate from the native application. Proofs
-use Commonware QMDB only; retired JMT proof formats are not supported.
+A block has one encoding per format version: the version byte, consensus
+context, parent, height, timestamp, term, module state root, requests, optional
+DKG payload, the four module log targets and the receipt commitment. Every
+field is required. A block carrying a target
+with an empty range is rejected by the application without executing it. Proofs
+use Commonware QMDB only.
 
 ### RPC surfaces
 
@@ -384,49 +396,33 @@ payload lengths; it is not a total RSS bound. Readers hold immutable revision
 snapshots across proof assembly, so eviction cannot remove their receipts.
 Index publication and removal update all lookup maps under one lock.
 
-Revision number/hash, transaction and receipt point queries use bounded archive
-reads when absent from memory. The native receipt endpoint uses the same
-conversion for recent and historical data, including signer identity, nonce and refusal.
-Archive reconstruction uses one retained revision and the existing index builder;
-it does not populate the global memory index. Archive errors propagate, and
-occupied history-read slots return a retryable -32002 response.
+Receipt point queries use bounded archive reads when absent from memory. The
+receipt endpoint uses the same conversion for recent and historical data,
+including signer identity, nonce and refusal. Archive reconstruction uses one
+retained revision and the existing index builder; it does not populate the
+global memory index. Archive errors propagate, and occupied history-read slots
+return a retryable -32002 response.
 
-Log queries inspect at most 10,000 revisions and 10,000 log entries, accept at
-most 64 alternatives per address/topic selector over at most four topic
-positions, and return at most 1,000 logs. `eth_subscribe("logs")` applies the
-same selector limits and rejects a larger filter with -32602. A `blockHash`
-filter selects that one revision; it cannot be combined with a range, and an
-unknown hash fails with -32602.
-The result budget charges 1 MiB for record structures, topics and payload bytes.
-Ranges combine resident revisions with archive fallback under shared budgets.
-Each range holds one history-read slot and decodes at most 64 MiB of encoded
-archive records, charging each record before decoding. The backend must fetch the
-record to determine its encoded length.
-Queries exceeding a budget fail with RPC code -32005; clients must narrow their
-range or filter. Reversed ranges fail with -32602. Results are never silently
-truncated. These limits also apply when compatibility methods are enabled on a
-native service.
-
-`eth_call`, `eth_estimateGas` and `vera_simulateNativeCall` execute on the
-blocking pool against a snapshot of module state, so they hold neither an
-async worker nor the lock finalization publishes under. They share four slots
-per node, and up to 64 more callers wait at most two seconds for one; a caller
-beyond the 64, or one whose wait expires, gets the retryable -32002. A slot
-stays taken until its execution ends. Each observes the head revision's height
-and time, the deployment's genesis record and its membership limit, and writes
-nothing. `eth_call` carries no signer, so module writes revert there.
-`vera_simulateNativeCall` dry-runs a module call as a named DID without a
-signature or sequence and returns success or the refusal its receipt would
-name, gas and logs.
-It is unauthenticated: it answers what a DID could do and authorizes nothing.
-Its input is bounded like a native submission. See `docs/simulation.md`.
-An estimate is a limit the call succeeded with. The search stops within 1/64 of
-its upper bound and starts from the gas used at the cap, so a call that uses
-less gas under a lower limit can be estimated well above its smallest
-sufficient limit. `eth_getCode` returns empty bytes for an account without
-code. Account state
-reads answer for current state only: an explicit block number or `earliest`
-fails with -32004, as it does for `eth_call`.
+`vera_call` and `vera_simulateNativeCall` execute on the blocking pool against
+a snapshot of module state, so they hold neither an async worker nor the lock
+finalization publishes under. They share four slots per node, and up to 64 more
+callers wait at most two seconds for one; a caller beyond the 64, or one whose
+wait expires, gets the retryable -32002. A slot stays taken until its execution
+ends. Each observes the head revision's height and time, the deployment's
+genesis record and its membership limit, and writes nothing.
+`vera_call(target, calldata)` evaluates a module call without a signer and
+returns its output or the refusal: queries answer, and every method that needs
+a signer is refused. `vera_simulateNativeCall` dry-runs a module call as a named
+DID without a signature or sequence and returns success or the refusal its
+receipt would name, gas and logs. Both bound their input like a native
+submission.
+Both are unauthenticated: the answer is the serving node's word about its head
+revision, with no finality certificate and no state proof. Nothing that grants
+access, records a decision or acts for another party may rely on either; the
+certified record, prefix and permission reads are the authenticated path. The
+Rust client's typed queries (`get_policy`, `has_relationship`, `get_post`, …)
+go through `vera_call` and name their verified equivalents. See
+`docs/simulation.md#when-an-unauthenticated-read-is-acceptable`.
 
 `vera-jsonrpc` limits each batch to 64 calls and each connection to eight
 subscriptions, eight queued output messages and eight WebSocket request tasks.
@@ -438,10 +434,8 @@ time out after ten seconds, and socket closure after one second.
 
 | Surface | Methods | Consumer |
 |----------|---------|----------|
-| `eth_*` | `eth_sendRawTransaction`, `eth_call`, `eth_getStorageAt`, `eth_getTransactionReceipt`, … | Optional compatibility clients; legacy submissions are disabled in pipelined mode |
-| `eth_subscribe` | `newHeads`, `logs` | Indexers, light clients |
 | `vera_subscribeHeaders` | `vera_header` notifications; `vera_unsubscribeHeaders` cancellation | Native verified consumers |
-| `vera_*` | `vera_nodeStatus`, `vera_sendNativeTx`, `vera_simulateNativeCall` (unauthenticated dry run), `vera_getTransactionReceipt`, `vera_getNativeNonce`, current permission/record proofs and light blocks | Native Defra, Orbis and verification clients |
+| `vera_*` | `vera_nodeStatus`, `vera_sendNativeTx`, `vera_call` (unauthenticated module query), `vera_simulateNativeCall` (unauthenticated dry run), `vera_getTransactionReceipt`, `vera_getNativeNonce`, current permission/record proofs and light blocks | Native Defra, Orbis and verification clients |
 
 ### Light-client material
 
@@ -526,20 +520,40 @@ persisted first-boot, adoption, proposal, history, catch-up, handover,
 takeover and rewind step and check the restart keeps every finalized request
 once.
 
-### Anchored policy snapshots
+### Anchored deployments
 
-The anchor precompile records another deployment's finalized revision when its
-certificate verifies against that deployment's consensus key (verified in
-`vera-executor`, recorded by `VeraModule::record_anchor`), keeping one
-record per deployment (identifier: SHA-256 of the key) in the identity
-partition. Anchors only move up in height and never down in term; the first
-block anchored at a height wins. `vera_getCurrentPolicySnapshot` captures a
+The anchor module keeps an ordered record of other deployments in the identity
+partition. The anchoring deployment's operators register a deployment
+(consensus key, genesis block, operator policy; identifier: SHA-256 of the
+key) and grant native signers a daily quota of submissions for it, with the
+administrative commands `RegisterDeployment`, `SetAnchorSubmitter` and
+`RevokeAnchorSubmitter`; a request from a signer without a grant is refused at
+admission and at execution. `anchorRevision` records a finalized revision
+when its certificate verifies against the registered key (verified in
+`vera-executor`, recorded by `VeraModule::record_anchor`), it is above the tip
+of the deployment's anchors, it carries the term certified last, and it
+proves, against the ancestry its block carries, that it descends from the
+tip. `changeTerm` records a `TermCertificate` verified against the registered
+operator policy: the tip moves to its cut and anchors above the cut are
+superseded (`TermRecord::supersedes`). A certified block of another history is
+refused and recordable as a fork (`reportFork`). Every anchor stays in an
+append-only history (`anchor/v1/<deployment>/<sequence>`), read in bounded
+pages. A refused submission is charged the full 250,000 gas and counted
+against its signer's quota. `vera_getCurrentPolicySnapshot` captures a
 policy record and its relationship, index and object prefixes at one revision.
 `vera_client::anchoring` publishes a snapshot (capture, anchor that revision,
 read the anchor back), verifies a relayed `AnchoredSnapshot` with the
 anchoring deployment's key alone, evaluates access with the shared evaluator,
-and reports a snapshot as stale once a newer anchor is known. No partition or
-block commitment changed. See `docs/anchoring.md`.
+and reports a snapshot as stale once a newer anchor is known and as superseded
+once a term voided its anchor. No partition changed. See `docs/anchoring.md`.
+
+A block carries the peaks of a Commonware Merkle mountain range over its
+ancestors' identifiers (`vera_domain::Ancestry`, block format 2). Voters check
+that a candidate's ancestry extends its parent's, `Block::has_ancestor`
+verifies an `AncestryProof`, and `vera_getAncestryProof` rebuilds one from
+the block identifiers finalized history keeps by height, reading two records
+whatever the span, without storing the range. See
+`docs/receipt-commitments.md#ancestry`.
 
 ### Terms and the active device
 
@@ -578,7 +592,7 @@ voter with an empty journal starts on that block. See
 docs/active-term.md#consensus-storage-across-a-switch. A lone
 validator signs an epoch whose ceremony it only observed with the share its
 host holds, once the epoch's sharing confirms it. Devices ask each other where
-they stand on channel 17. An active device whose newest block is older than
+they stand on channel 14. An active device whose newest block is older than
 `Switching::freshness` asks the others under its transport key before it
 builds and again before a built block reaches consensus, and an active device
 asks again every `Switching::freshness` in the background. A question carries
@@ -618,24 +632,22 @@ vera.rs/
     bin/verad/                  # CLI binary: validator, devnet, testnet, genesis DKG, client
     crates/
         vera-app/               # Glue stateful Application around the block executor
-        vera-backend/           # Concrete QMDB backend: VeraStateSet, BatchState, DbTargets
+        vera-backend/           # QMDB storage of the native partitions, peer transfer, proofs
         vera-cli/               # CLI utilities (backtrace + SIGSEGV handlers)
-        vera-client/            # Rust client library (EVM + BLS tx paths, typed queries)
+        vera-client/            # Rust client library (native requests, verified reads, typed queries)
         vera-config/            # Node configuration types (node, network, rpc, execution)
         vera-consensus/         # Consensus application layer: mempool, proposal, traits
         vera-crypto/            # BLS12-381, actor keys (secp256k1, Ed25519, P-256), JWT
         vera-domain/            # Block, tx, light block, proof, and DKG payload types
         vera-e2e/               # End-to-end test harness (see crates/vera-e2e/README.md)
-        vera-executor/          # Block execution: REVM, precompiles, VeraExecutor
-        vera-genesis/           # Extended genesis configuration (validators, native mint)
+        vera-executor/          # Block execution: native requests, module call shims, VeraExecutor
+        vera-genesis/           # Genesis configuration (operators, policies, validators, consensus)
         vera-harness/           # Node manager, cluster builder, observability (test-only)
         vera-indexer/           # Block/tx/light-block indexes backing RPC queries
-        vera-jsonrpc/           # Native vera_* RPC, subscriptions and compatibility methods
+        vera-jsonrpc/           # Native vera_* RPC and header subscriptions
         vera-modules/           # ACP, Bulletin, Vera, ValidatorRegistry module logic
         vera-node/              # Validator assembly: p2p, marshal, DKG, stateful glue, RPC
         vera-permission/        # Permission/record/prefix evidence types and verification
-        vera-qmdb/              # EVM change sets, record encodings, combined state root
-        vera-traits/            # StateDbRead trait for EVM state reads
         vera-test-infra/            # Shared test primitives: process, ports, logs, binary resolver
 ```
 
@@ -650,7 +662,7 @@ fresh-state deployment requirements, report trust and qualification limits.
 cargo check                        # type-check workspace
 cargo build -p verad                # build binary
 cargo test --workspace --exclude vera-e2e  # run non-e2e tests
-cargo clippy --all -- -D warnings  # lint
+cargo clippy --all --all-targets -- -D warnings  # lint
 cargo fmt                    # format
 ```
 
@@ -685,11 +697,11 @@ Borrowed from [defradb.rs](https://github.com/sourcenetwork/defradb.rs):
 
 1. `cargo check` passes
 2. `cargo test --workspace --exclude vera-e2e` passes
-3. `cargo clippy --all -- -D warnings` clean
+3. `cargo clippy --all --all-targets -- -D warnings` clean
 4. `cargo fmt` applied
 5. `cargo test -p vera-e2e --test vera_e2e_canonical` passes (requires `cargo build -p verad` first)
 
-The e2e test (`vera_e2e_canonical`) is the baseline gate. It exercises both EVM and BLS transaction paths through a 4-node cluster: create policies, verify receipts, query state back, check cross-node consistency, and assert cluster health. Any change that breaks this test has broken the core pipeline.
+The e2e test (`vera_e2e_canonical`) is the baseline gate. It exercises native requests through a 4-node cluster: create policies, verify receipts, query state back, check cross-node consistency, and assert cluster health. Any change that breaks this test has broken the core pipeline.
 
 ## Git Conventions
 
@@ -706,6 +718,10 @@ The creation event also retains the submitted artifact label.
 
 Token invalidation events identify the token issuer even when an authorized
 account performs the revocation; the record retains that account in invalidated_by.
+An issuer revokes its own recorded token through any worker it names with
+`invalidateJWSByIssuer`, under an operation it signs with scope
+`vera:token:revoke` and an operation identity; the record then names the issuer
+in invalidated_by. See `docs/token-lifecycle.md#revocation-by-the-issuer`.
 
 Resource snapshots are opt-in with `RUST_LOG=warn,vera_resource_diagnostics=debug`.
 This target leaves per-revision tracing disabled. `vera_diagnostics=debug` selects

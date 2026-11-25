@@ -2,8 +2,8 @@
 
 Vera executes ACP in Rust. Policy compilation lives in `crates/vera-acp`, graph
 evaluation in `crates/vera-zanzibar`, and authenticated lifecycle operations in
-`crates/vera-modules/src/acp`. The native client and optional EVM interface dispatch
-to the same module implementation. The Go engine is used only to generate test
+`crates/vera-modules/src/acp`. Native requests dispatch to that module
+implementation. The Go engine is used only to generate test
 fixtures; it is not part of the node or its runtime dependencies.
 
 ## Engine surface
@@ -430,7 +430,7 @@ relationship and object-point evidence prevents obsolete grants from authorizing
 
 ## Batch dispatch limits
 
-Native requests and the optional EVM interface share the same `batchCalls`
+Native requests use the `batchCalls`
 validation. Before owned ABI decoding or module mutation, dispatch walks borrowed
 calldata and enforces:
 
