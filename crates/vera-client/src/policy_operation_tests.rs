@@ -131,3 +131,34 @@ fn a_stored_lead_must_be_eight_bytes_within_its_bounds() {
         assert!(decode_lead(&invalid).is_err());
     }
 }
+
+#[test]
+fn a_registration_with_derived_relationships_travels_as_one_command() {
+    let derived = vera_modules::acp::relationship_values::relationship(
+        "book",
+        "b1",
+        "author",
+        vera_modules::acp::types::Subject::Object(acp::domain::Object::new("author", "mike")),
+    );
+    let command = PolicyCmd::RegisterObjectWithRelationships {
+        object: Object {
+            resource: "book".into(),
+            id: "b1".into(),
+        },
+        relationships: vec![derived.clone()],
+    };
+    let single = PolicyOperation::command(POLICY, command).unwrap();
+    let call = IAcp::bearerPolicyCmdCall::abi_decode(&single.calldata("token").unwrap()).unwrap();
+    let decoded: PolicyCmd = serde_json::from_slice(&call.cmd).unwrap();
+    assert!(matches!(
+        &decoded,
+        PolicyCmd::RegisterObjectWithRelationships { object, relationships }
+            if object.id == "b1" && *relationships == vec![derived]
+    ));
+    assert_eq!(
+        DelegatedOperation::PolicyCommand(&hex::encode(call.policyId), &decoded)
+            .digest()
+            .unwrap(),
+        single.digest().unwrap()
+    );
+}

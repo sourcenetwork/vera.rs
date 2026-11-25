@@ -95,6 +95,51 @@ impl<S: RecordStore> Evaluation<S> {
         }
         .map_err(evaluation_error)
     }
+
+    /// Whether `actor` may create `object` under its resource's collection
+    /// `create`, over the stored grants plus `derived` (acp's
+    /// `check_create`). Nothing is stored. A derived relationship that is
+    /// not on `object` or that the policy does not admit is an error.
+    pub(super) fn check_create(
+        &self,
+        object: &Object,
+        derived: &[Relationship],
+        actor: &Did,
+    ) -> std::result::Result<bool, CreateError> {
+        let (object, actor) = canonical(object, actor)?;
+        let evaluator = Evaluator::new(&self.compiled, &self.grants).with_limits(PERMISSION_LIMITS);
+        match &self.meter {
+            Some(meter) => evaluator
+                .with_meter(meter)
+                .check_create(&object, derived, &actor),
+            None => evaluator.check_create(&object, derived, &actor),
+        }
+        .map_err(|error| match error {
+            EvalError::DerivedObject { relationship } => CreateError::Derived(format!(
+                "derived relationship `{relationship}` is not on the object being registered"
+            )),
+            EvalError::DerivedRelationship {
+                relationship,
+                error,
+            } => CreateError::Derived(format!("derived relationship `{relationship}`: {error}")),
+            other => CreateError::Record(evaluation_error(other)),
+        })
+    }
+}
+
+/// Why a collection `create` check has no answer.
+#[derive(Debug)]
+pub(super) enum CreateError {
+    /// A derived relationship the registration may not carry.
+    Derived(String),
+    /// The records or the evaluation failed.
+    Record(RecordError),
+}
+
+impl From<RecordError> for CreateError {
+    fn from(error: RecordError) -> Self {
+        Self::Record(error)
+    }
 }
 
 fn canonical(object: &Object, actor: &Did) -> Result<(AcpObject, AcpActor)> {

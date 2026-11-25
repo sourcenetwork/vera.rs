@@ -120,6 +120,17 @@ pub enum PolicyCmd {
     SetRelationship(Relationship),
     DeleteRelationship(Relationship),
     RegisterObject(Object),
+    /// Register `object` together with `relationships`, the relationships
+    /// the client derived from it (e.g. `book:<id>#author@author:mike`). The
+    /// registering actor must pass the resource's collection `create` over
+    /// the stored relationships plus these; then the owner relationship and
+    /// these are stored in one execution. Each must be on `object` and
+    /// admitted by the policy; the owner relation is not one of them.
+    /// `RegisterObject(object)` is this command with no relationships.
+    RegisterObjectWithRelationships {
+        object: Object,
+        relationships: Vec<Relationship>,
+    },
     TransferObject {
         object: Object,
         new_owner: Actor,
@@ -151,6 +162,12 @@ pub enum PolicyCmdResult {
     },
     RegisterObject {
         record: RelationshipRecord,
+    },
+    /// The owner relationship's record and the stored derived
+    /// relationships' records, in the command's order.
+    RegisterObjectWithRelationships {
+        record: RelationshipRecord,
+        relationships: Vec<RelationshipRecord>,
     },
     TransferObject {
         record: RelationshipRecord,

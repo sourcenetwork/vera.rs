@@ -99,6 +99,13 @@ pub(super) fn command(command: &mut PolicyCmd) {
             object(transferred);
             new_owner.0 = crate::actor::canonical(&new_owner.0);
         }
+        PolicyCmd::RegisterObjectWithRelationships {
+            object: named,
+            relationships,
+        } => {
+            object(named);
+            relationships.iter_mut().for_each(self::relationship);
+        }
         PolicyCmd::RegisterObject(named)
         | PolicyCmd::ArchiveObject(named)
         | PolicyCmd::UnarchiveObject(named) => object(named),

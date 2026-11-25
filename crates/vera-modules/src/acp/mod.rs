@@ -39,6 +39,7 @@ mod policy_listing;
 pub use permission_budget::PermissionBudget;
 mod query_budget;
 pub use query_budget::QueryBudget;
+mod registration;
 mod registration_queries;
 mod relation_cleanup;
 mod relation_edits;
@@ -353,6 +354,7 @@ impl AcpModule {
             }
             PolicyCmd::TransferObject { object: obj, .. }
             | PolicyCmd::RegisterObject(obj)
+            | PolicyCmd::RegisterObjectWithRelationships { object: obj, .. }
             | PolicyCmd::ArchiveObject(obj)
             | PolicyCmd::UnarchiveObject(obj) => Some(obj.id.as_str()),
             PolicyCmd::RevealRegistration { proof, .. } => Some(proof.object.id.as_str()),
@@ -373,9 +375,20 @@ impl AcpModule {
             PolicyCmd::TransferObject { object, new_owner } => self
                 .transfer_object_with_budget(creator, policy_id, &object, &new_owner.0, budget)
                 .map(|record| PolicyCmdResult::TransferObject { record }),
-            PolicyCmd::RegisterObject(obj) => {
-                self.cmd_register_object(creator, policy, obj, stamp, budget)
-            }
+            PolicyCmd::RegisterObject(obj) => self
+                .cmd_register_object(creator, policy, obj, Vec::new(), stamp, budget)
+                .map(|(record, _)| PolicyCmdResult::RegisterObject { record }),
+            PolicyCmd::RegisterObjectWithRelationships {
+                object,
+                relationships,
+            } => self
+                .cmd_register_object(creator, policy, object, relationships, stamp, budget)
+                .map(
+                    |(record, relationships)| PolicyCmdResult::RegisterObjectWithRelationships {
+                        record,
+                        relationships,
+                    },
+                ),
             PolicyCmd::ArchiveObject(obj) => {
                 self.cmd_archive_object(creator, policy_id, obj, budget)
             }
@@ -1018,36 +1031,6 @@ impl AcpModule {
         }
 
         Ok(())
-    }
-
-    fn cmd_register_object(
-        &mut self,
-        creator: &Did,
-        policy: &PolicyRecord,
-        obj: Object,
-        stamp: &CommandStamp,
-        budget: &CommandBudget,
-    ) -> Result<PolicyCmdResult> {
-        let policy_id = policy.policy.id.as_str();
-        self.validate_registration_object(policy_id, &obj)?;
-
-        self.ensure_object_unregistered_with_budget(policy_id, &obj, Some(budget))?;
-
-        let owner_rel = relationship_values::owner(&obj, creator)?;
-
-        let record = RelationshipRecord {
-            incarnation: 0,
-            generations: self.relationship_pair(policy, &owner_rel, budget)?,
-            supplied_metadata: stamp.supplied.clone(),
-            policy_id: policy_id.to_string(),
-            relationship: owner_rel,
-            archived: false,
-            metadata: stamp.metadata(creator),
-        };
-
-        self.set_relationship_with_budget(&record, budget)?;
-
-        Ok(PolicyCmdResult::RegisterObject { record })
     }
 
     fn cmd_unarchive_object(

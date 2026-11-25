@@ -24,6 +24,7 @@ Operation names follow Go `acp_core` v0.8.2, used by Go Vera at
 | SetRelationship / DeleteRelationship | `execute_policy_cmd`; actor, all-actors, object and actor-set subjects |
 | FilterRelationships | `query_filter_relationships`, `query_relationships_page` with structured selectors |
 | RegisterObject / ArchiveObject / UnarchiveObject | `execute_policy_cmd` |
+| RegisterObjectWithRelationships | `execute_policy_cmd`; registration with derived relationships under a collection `create` (below) |
 | TransferObject | `transfer_object` or `PolicyCmd::TransferObject` |
 | GetObjectRegistration | `query_object_registration`; includes archived ownership |
 | VerifyAccessRequest | `query_verify_access_request`; union, intersection, exclusion and traversal |
@@ -95,6 +96,22 @@ This is a feature port, not a claim of identical transport or parser behavior:
   policy is created. A Defra-specification policy declares `read`, `update` and
   `delete`, and `read` includes `update + delete`. Policy IDs bind acp's hash
   of the processed policy to the creator and a nonce ([policy-ids.md](policy-ids.md)).
+- A resource's `collection: { create: <expr> }` (acp-rs ADR 0028) gates who
+  registers its objects. `PolicyCmd::RegisterObjectWithRelationships { object,
+  relationships }` carries the relationships the client derived from the
+  object (for example `book:b1#author@author:mike`). Registration checks
+  `create` for the registering actor over the stored relationships plus these,
+  metered like a permission check against the command's allowance; a refusal
+  is `CreateNotAuthorized` (refusal kind `Unauthorized`) and stores nothing. On
+  success the owner relationship and the derived ones are stored in the same
+  execution; the derived writes are authorized by the check, not by management
+  rules, and carry no supplied metadata. Each derived relationship must be on
+  the object, admitted by the policy, not `owner` and not repeated, whatever the
+  collection. `RegisterObject(object)` is the same command with no
+  relationships, so it is refused in a gated collection; a collection without
+  `create` or with `create: "*"` registers as before. Vera does not see the
+  document: it trusts the relationships the client submits. Commit-and-reveal
+  registration does not run the check.
 - Relationship subjects are an actor, all actors (`actor:*`), an object (followed
   by `->` expressions) or an actor set (`object#relation`). Commands, records and
   query results carry them in acp's JSON form, for example
