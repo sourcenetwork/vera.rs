@@ -3,13 +3,15 @@
 A policy ID is derived from the policy, its creator and a nonce the creator
 chooses, so separate deployments that seed the same definition under different
 keys get different IDs without coordinating.
-`vera_modules::acp::policy_id::{policy_hash, policy_id}` implements it.
+`vera_modules::acp::policy_id::{policy_hash, policy_id}` implements it as
+`acp::ppp::{policy_hash, policy_id}` do, and reproduces acp's
+`conformance/vectors/policy-id.json`.
 
 ```text
 policy id   = lowercase_hex(SHA-256(
                 "acp/policy-id/v2" || policy hash (32 bytes) || nonce (32 bytes)
                 || u64be(len(creator)) || creator))
-policy hash = acp::ppp::policy_id(processed policy, 0)   (acp's content hash, 32 bytes)
+policy hash = acp::ppp::policy_hash(processed policy)    ("acp/policy-hash/v1", 32 bytes)
 ```
 
 - **Creator**: the policy owner's canonical DID
@@ -24,9 +26,9 @@ policy hash = acp::ppp::policy_id(processed policy, 0)   (acp's content hash, 32
 - **Policy hash**: acp's content hash of the processed policy, which covers
   the name, description, `meta`, specification, the actor's doc, every
   resource, relation (docs, `manages`, `types`), permission (docs, expression)
-  and collection `create` rule. acp sorts resources, relations and permissions
-  by name before hashing, so declaration order and YAML formatting do not
-  change it. This is not the hash of the retired vendored engine: a policy
+  and collection `create` rule. acp encodes resources, relations and
+  permissions in name order, and `manages`, `types` and the operands of `+`
+  and `&` as sets, so declaration order and YAML formatting do not change it. This is not the hash of the retired vendored engine: a policy
   stored by it does not reproduce its ID here.
 
 Creating the same definition, nonce and creator twice is refused with

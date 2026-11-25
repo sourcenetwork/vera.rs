@@ -230,6 +230,7 @@ pub(super) fn compile(record: &PolicyRecord) -> Result<Compiled> {
         ))
     })?;
     Ok(Compiled {
+        hash: ::acp::ppp::policy_hash(&record.policy),
         policy: record.policy.clone(),
         model,
     })

@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "acp"
 version = "0.0.1"
-source = "git+https://github.com/sourcenetwork/acp?rev=8b5bee58f60d51ff897d40d4de2e3b73a609aeea#8b5bee58f60d51ff897d40d4de2e3b73a609aeea"
+source = "git+https://github.com/sourcenetwork/acp?rev=d1966f7717dfd95c69674cc4b9307ce6151a4b5a#d1966f7717dfd95c69674cc4b9307ce6151a4b5a"
 dependencies = [
  "serde",
  "serde-saphyr",
@@ -6944,7 +6944,7 @@ dependencies = [
 [[package]]
 name = "zanzi"
 version = "0.0.1"
-source = "git+https://github.com/sourcenetwork/acp?rev=8b5bee58f60d51ff897d40d4de2e3b73a609aeea#8b5bee58f60d51ff897d40d4de2e3b73a609aeea"
+source = "git+https://github.com/sourcenetwork/acp?rev=d1966f7717dfd95c69674cc4b9307ce6151a4b5a#d1966f7717dfd95c69674cc4b9307ce6151a4b5a"
 dependencies = [
  "smol_str",
  "thiserror 2.0.18",

@@ -107,7 +107,9 @@ type Result<T> = std::result::Result<T, AcpError>;
 /// A processed policy from YAML, under a test's chosen ID.
 #[cfg(test)]
 pub(crate) fn test_policy(id: &str, yaml: &str) -> ProcessedPolicy {
-    let mut policy = ::acp::policy::compile_text(yaml, None, 0).unwrap().policy;
+    let mut policy = ::acp::policy::compile_text(yaml, None, None)
+        .unwrap()
+        .policy;
     policy.id = id.into();
     policy
 }
@@ -534,13 +536,11 @@ impl AcpModule {
         required: Option<PolicySpecification>,
     ) -> Result<(Compiled, PolicyHash)> {
         Self::check_definition(policy, marshal_type)?;
-        let compiled =
-            ::acp::policy::compile_text(policy, required.map(Into::into), 0).map_err(|error| {
-                AcpError::InvalidPolicy {
-                    reason: error.to_string(),
-                }
+        let compiled = ::acp::policy::compile_text(policy, required.map(Into::into), None)
+            .map_err(|error| AcpError::InvalidPolicy {
+                reason: error.to_string(),
             })?;
-        let hash = policy_id::policy_hash(&compiled.policy);
+        let hash = PolicyHash(compiled.hash.0);
         Ok((compiled, hash))
     }
 

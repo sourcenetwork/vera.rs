@@ -1,10 +1,10 @@
 //! The policy hash and the policy id.
 //!
 //! `policy id = hex(SHA-256("acp/policy-id/v2" || policy hash || nonce ||
-//! u64be(len) || creator))`. The policy hash is acp's content hash of the
-//! processed policy: the 32 bytes of `acp::ppp::policy_id(policy, 0)`, which
-//! covers every authored part (names, docs, attributes, specification,
-//! relations, permissions and collection rules) and nothing derived.
+//! u64be(len) || creator))`, as `acp::ppp::policy_id` derives it. The policy
+//! hash is `acp::ppp::policy_hash`, which covers every authored part (names,
+//! docs, attributes, specification, relations, permissions and collection
+//! rules) and nothing derived.
 
 use std::fmt;
 use std::str::FromStr;
@@ -37,12 +37,13 @@ pub struct HexError;
 
 /// The hash of `policy`'s authored content (its current id is ignored).
 pub fn policy_hash(policy: &ProcessedPolicy) -> PolicyHash {
-    let id = ::acp::ppp::policy_id(policy, 0);
-    PolicyHash(decode_hex(id.as_str()).expect("acp policy ids are 32 bytes in hex"))
+    PolicyHash(::acp::ppp::policy_hash(policy).0)
 }
 
 /// The id of a policy with hash `hash` created by `creator`, in its
-/// canonical spelling, with `nonce`.
+/// canonical spelling, with `nonce`. Unlike acp's, it takes any creator
+/// string, so a stored record whose owner is not a DID is refused by its
+/// id check rather than by a parse.
 pub fn policy_id(hash: &PolicyHash, nonce: &PolicyNonce, creator: &str) -> String {
     let mut digest = Sha256::new();
     digest.update(POLICY_ID_DOMAIN);
@@ -96,22 +97,69 @@ hex_value!(PolicyHash);
 
 #[cfg(test)]
 mod tests {
+    use ::acp::domain::{Did, PolicyOrigin};
+
     use super::*;
+
+    fn compiled(text: &str) -> ProcessedPolicy {
+        ::acp::policy::compile_text(text, None, None)
+            .unwrap()
+            .policy
+    }
+
+    /// Vectors from acp's `conformance/vectors/policy-id.json`.
+    const VECTORS: &[(&str, &str, &str, &str, &str)] = &[
+        (
+            r#"{"name": "docs", "resources": [{"name": "doc", "relations": [{"name": "reader", "types": ["actor"]}], "permissions": [{"name": "read", "expr": "reader"}]}]}"#,
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp",
+            "be8e80e54d3b5b355abb5e5575467b36a57f6d4cdb71ab6af36ba78bbf19932b",
+            "07882f5b8f69b2a95b6409bee9f3981c8aeae8d6135292e07f9f9a641eb75d0b",
+        ),
+        (
+            r#"{"name": "files", "description": "every construct", "meta": {"team": "storage", "tier": "1"}, "resources": [{"name": "file", "description": "a file", "relations": [{"name": "admin", "doc": "administers", "manages": ["reader", "parent"], "types": ["actor"]}, {"name": "parent", "types": ["dir"]}, {"name": "reader", "doc": "may read", "types": ["actor", "group->member"]}, {"name": "banned", "types": ["actor"]}], "permissions": [{"name": "read", "doc": "read it", "expr": "reader + admin + parent->read - banned"}, {"name": "edit", "expr": "(admin & reader) + parent->edit"}, {"name": "delete"}]}, {"name": "dir", "relations": [{"name": "viewer", "types": ["actor"]}], "permissions": [{"name": "read", "expr": "viewer"}, {"name": "edit"}]}, {"name": "group", "relations": [{"name": "member", "types": ["actor", "group->member"]}]}]}"#,
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp",
+            "2c80494b55154f1fe4426a61142986b8fe2881b9fb8337ad8ab8889fcc5d37c0",
+            "a0c9cda242310d142bf570e564a0837fd9be847ad85e8ab0054a626ff9cbab8a",
+        ),
+    ];
+
+    #[test]
+    fn reproduces_acp_vectors() {
+        for (text, nonce, creator, hash, id) in VECTORS {
+            let policy_hash = policy_hash(&compiled(text));
+            assert_eq!(policy_hash.to_string(), *hash);
+            assert_eq!(
+                policy_id(&policy_hash, &nonce.parse().unwrap(), creator),
+                *id
+            );
+        }
+    }
+
+    #[test]
+    fn id_is_acps_id() {
+        let policy = compiled("name: p\nresources:\n  - name: file\n");
+        let hash = policy_hash(&policy);
+        let nonce = PolicyNonce([7; 32]);
+        let creator = "did:key:a";
+        let origin = PolicyOrigin {
+            creator: Did::parse(creator).unwrap(),
+            nonce: ::acp::domain::PolicyNonce(nonce.0),
+        };
+        let acp_id = ::acp::ppp::policy_id(&::acp::domain::PolicyHash(hash.0), &origin);
+        assert_eq!(policy_id(&hash, &nonce, creator), acp_id.as_str());
+    }
 
     #[test]
     fn id_binds_hash_nonce_and_creator() {
-        let policy = ::acp::policy::compile_text("name: p\nresources:\n  - name: file\n", None, 0)
-            .unwrap()
-            .policy;
-        let hash = policy_hash(&policy);
+        let hash = policy_hash(&compiled("name: p\nresources:\n  - name: file\n"));
         let id = policy_id(&hash, &PolicyNonce::default(), "did:key:a");
         assert_eq!(id.len(), 64);
         assert_ne!(id, policy_id(&hash, &PolicyNonce([1; 32]), "did:key:a"));
         assert_ne!(id, policy_id(&hash, &PolicyNonce::default(), "did:key:b"));
-        let other = ::acp::policy::compile_text("name: q\nresources:\n  - name: file\n", None, 0)
-            .unwrap()
-            .policy;
-        assert_ne!(hash, policy_hash(&other));
+        let other = policy_hash(&compiled("name: q\nresources:\n  - name: file\n"));
+        assert_ne!(hash, other);
         assert_eq!(
             hash.to_string().parse::<PolicyHash>().unwrap(),
             hash,

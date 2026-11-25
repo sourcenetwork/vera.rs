@@ -17,7 +17,9 @@ resources:
 ";
 
 fn policy() -> ProcessedPolicy {
-    ::acp::policy::compile_text(POLICY, None, 1).unwrap().policy
+    ::acp::policy::compile_text(POLICY, None, None)
+        .unwrap()
+        .policy
 }
 
 fn edge(target: &str, subject: &str) -> Relationship {
