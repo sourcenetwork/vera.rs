@@ -32,6 +32,8 @@ mod error;
 mod native_tx;
 /// Signed threshold-service node commands and certified records.
 pub mod nodes;
+/// Certified live, archived or absent registration of one object.
+pub mod object_registration;
 mod permission;
 /// Certified native policy discovery.
 pub mod policies;
@@ -61,11 +63,11 @@ pub use vera_domain::{
     ViewCallResult,
 };
 pub use vera_permission::{
-    AccessRequest, Actor, AssignmentSelector, ModuleId, Object, Operation, PERMISSION_LIMITS,
-    PermissionLimits, PermissionProof, PermissionRead, PermissionResponse, PolicyPrefixPageProof,
-    PolicyPrefixPageResponse, PolicyPrefixProof, PolicyPrefixResponse, PrefixProof, PrefixResponse,
-    RECORD_PROOF_BYTES, ReadLimits, RecordProof, RecordResponse, object_owner_prefix,
-    verify_permission_proof,
+    AccessRequest, Actor, AssignmentSelector, ModuleId, Object, ObjectRegistration, Operation,
+    PERMISSION_LIMITS, PermissionLimits, PermissionProof, PermissionRead, PermissionResponse,
+    PolicyPrefixPageProof, PolicyPrefixPageResponse, PolicyPrefixProof, PolicyPrefixResponse,
+    PrefixProof, PrefixResponse, RECORD_PROOF_BYTES, ReadLimits, RecordProof, RecordResponse,
+    object_owner_prefix, verify_permission_proof,
 };
 mod policy_id;
 mod policy_operation;
