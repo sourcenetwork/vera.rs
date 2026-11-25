@@ -387,7 +387,7 @@ fn current_queries_skip_retired_usersets_with_a_small_read_budget() {
                 "document",
                 "doc1",
                 "reader",
-                actor_set("collection", &index.to_string(), "reader"),
+                actor_set("collection", index.to_string(), "reader"),
             ),
             false,
         );

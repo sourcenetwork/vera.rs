@@ -202,7 +202,7 @@ fn metered_steps_are_charged_and_exhaustion_is_an_error() {
         .unwrap();
     assert!(evaluation.check(&object, "reader", &did(ALICE)).unwrap());
     let steps = budget.consumed();
-    assert!(steps > 0 && steps % 32 == 0);
+    assert!(steps > 0 && steps.is_multiple_of(32));
 
     let short = PermissionBudget::new(steps - 1);
     let evaluation = evaluation_for_policy(

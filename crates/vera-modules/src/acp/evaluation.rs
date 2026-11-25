@@ -3,7 +3,7 @@
 //! acp decides what a policy means; vera serves its stored grants. A grant is
 //! stored when its record is in the current relation generations and object
 //! incarnation, and is not archived. Every read goes through a
-//! [`RecordStore`], so proof capture and proof replay see the same reads.
+//! [`RecordStore`](crate::acp::record_store::RecordStore), so proof capture and proof replay see the same reads.
 
 use std::sync::Arc;
 

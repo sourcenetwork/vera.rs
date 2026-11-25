@@ -1926,10 +1926,7 @@ resources:
 
         // Grant reader relation to bob.
         let rel = crate::acp::relationship_values::actor_relationship(
-            "document",
-            "docB",
-            "reader",
-            &reader.clone(),
+            "document", "docB", "reader", &reader,
         )
         .unwrap();
         module

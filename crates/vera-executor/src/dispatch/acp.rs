@@ -784,8 +784,7 @@ resources:
                 Default::default(),
             )
             .unwrap();
-        let policy_id =
-            FixedBytes::from_slice(&hex::decode(&record.policy.id.to_string()).unwrap());
+        let policy_id = FixedBytes::from_slice(&hex::decode(record.policy.id.to_string()).unwrap());
 
         let calldata = IAcp::batchCallsCall {
             calls: vec![

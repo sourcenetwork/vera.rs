@@ -245,10 +245,7 @@ fn expression_work_is_charged_when_record_reads_are_identical() {
             &policy,
             PolicyCmd::SetRelationship(
                 crate::acp::relationship_values::actor_relationship(
-                    "file",
-                    "report",
-                    "reader",
-                    &actor.clone(),
+                    "file", "report", "reader", &actor,
                 )
                 .unwrap(),
             ),

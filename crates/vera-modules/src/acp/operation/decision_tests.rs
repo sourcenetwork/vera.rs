@@ -21,10 +21,7 @@ fn fixture() -> (AcpModule, VeraModule, String, AccessRequest) {
         &policy,
         PolicyCmd::SetRelationship(
             crate::acp::relationship_values::actor_relationship(
-                "file",
-                "report",
-                "reader",
-                &target.clone(),
+                "file", "report", "reader", &target,
             )
             .unwrap(),
         ),
