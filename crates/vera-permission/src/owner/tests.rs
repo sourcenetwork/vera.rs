@@ -37,7 +37,7 @@ fn record() -> RelationshipRecord {
         },
     }
 }
-fn read(records: &[RelationshipRecord]) -> Result<Option<Actor>, PermissionError> {
+fn read(records: &[RelationshipRecord]) -> Result<ObjectRegistration, PermissionError> {
     let pairs: Vec<_> = records
         .iter()
         .map(|record| {
@@ -50,7 +50,7 @@ fn read(records: &[RelationshipRecord]) -> Result<Option<Actor>, PermissionError
             )
         })
         .collect();
-    owner(
+    registration(
         pairs
             .iter()
             .map(|(key, value)| (key.as_slice(), value.as_slice())),
@@ -61,7 +61,7 @@ fn read(records: &[RelationshipRecord]) -> Result<Option<Actor>, PermissionError
 
 #[test]
 fn live_owner_is_distinct_from_archived_or_absent_registration() {
-    assert!(read(&[]).unwrap().is_none());
+    assert_eq!(read(&[]).unwrap(), ObjectRegistration::Absent);
     let record = record();
     let expected = if let Subject::Entity(did) = &record.relationship.subject {
         did.clone()
@@ -70,7 +70,7 @@ fn live_owner_is_distinct_from_archived_or_absent_registration() {
     };
     assert_eq!(
         read(std::slice::from_ref(&record)).unwrap(),
-        Some(Actor(expected))
+        ObjectRegistration::Live(Actor(expected))
     );
     let mut other = record.clone();
     other.relationship.subject = Subject::Entity(
@@ -81,8 +81,14 @@ fn live_owner_is_distinct_from_archived_or_absent_registration() {
     assert!(read(&[record.clone(), other.clone()]).is_err());
     let mut archived = record;
     archived.archived = true;
-    assert!(read(std::slice::from_ref(&archived)).unwrap().is_none());
-    assert!(read(&[archived, other]).unwrap().is_some());
+    assert_eq!(
+        read(std::slice::from_ref(&archived)).unwrap(),
+        ObjectRegistration::Archived
+    );
+    assert!(matches!(
+        read(&[archived, other]).unwrap(),
+        ObjectRegistration::Live(_)
+    ));
 }
 
 #[test]
@@ -103,14 +109,14 @@ fn owner_records_and_queries_cannot_change_the_selected_object() {
     let record = record();
     let value = serde_json::to_vec(&record).unwrap();
     assert!(
-        owner(
+        registration(
             [(b"wrong-key".as_slice(), value.as_slice())],
             "policy",
             &object()
         )
         .is_err()
     );
-    assert!(owner([(b"key".as_slice(), b"{".as_slice())], "policy", &object()).is_err());
+    assert!(registration([(b"key".as_slice(), b"{".as_slice())], "policy", &object()).is_err());
     for value in ["", "a/b", "a\\b"] {
         assert!(object_owner_prefix(value, &object()).is_err());
     }
@@ -156,9 +162,13 @@ fn path_like_object_identifiers_have_an_owner() {
         assert!(key.starts_with(&object_owner_prefix("policy", &object).unwrap()));
         assert!(!key.starts_with(&object_owner_prefix("policy", &self::object()).unwrap()));
         let value = serde_json::to_vec(&record).unwrap();
-        let owner = owner([(key.as_slice(), value.as_slice())], "policy", &object).unwrap();
+        let ObjectRegistration::Live(owner) =
+            registration([(key.as_slice(), value.as_slice())], "policy", &object).unwrap()
+        else {
+            panic!("expected a live owner");
+        };
         assert_eq!(
-            owner.unwrap().0.as_str(),
+            owner.0.as_str(),
             "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH"
         );
     }
