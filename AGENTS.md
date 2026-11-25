@@ -537,8 +537,11 @@ tip. `changeTerm` records a `TermCertificate` verified against the registered
 operator policy: the tip moves to its cut and anchors above the cut are
 superseded (`TermRecord::supersedes`). A certified block of another history is
 refused and recordable as a fork (`reportFork`). Every anchor stays in an
-append-only history (`anchor/v1/<deployment>/<sequence>`), read in bounded
-pages. A refused submission is charged the full 250,000 gas and counted
+append-only history (`anchor/v2/<deployment>/<sequence>`), read in bounded
+pages. Each recorded anchor also takes the next `order` of one count across
+all deployments (`anchor-order/v1`), so anchors of different deployments,
+even in one block, compare in execution order; refusals take no number and
+superseding terms renumber nothing. A refused submission is charged the full 250,000 gas and counted
 against its signer's quota. `vera_getCurrentPolicySnapshot` captures a
 policy record and its relationship, index and object prefixes at one revision.
 `vera_client::anchoring` publishes a snapshot (capture, anchor that revision,

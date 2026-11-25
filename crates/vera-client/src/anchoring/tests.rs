@@ -14,6 +14,7 @@ fn record(sequence: u64, block: u8) -> AnchorRecord {
         deployment: deployment_id(&key),
         consensus_key: key.encode().to_vec().into(),
         sequence,
+        order: sequence * 2,
         height: sequence * 10,
         block_hash: B256::repeat_byte(block),
         term: 0,
@@ -34,6 +35,12 @@ fn a_snapshot_of_an_older_anchor_is_stale_once_a_newer_one_is_known() {
     ));
     assert!(matches!(
         ensure_not_superseded(&held, &record(2, 9)),
+        Err(AnchoringError::Conflict(2))
+    ));
+    let mut renumbered = record(2, 2);
+    renumbered.order = 5;
+    assert!(matches!(
+        ensure_not_superseded(&held, &renumbered),
         Err(AnchoringError::Conflict(2))
     ));
     let mut other = record(5, 5);
