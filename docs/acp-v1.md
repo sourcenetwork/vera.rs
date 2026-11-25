@@ -43,6 +43,32 @@ grant, or revealing a registration. A repeated grant returns its original metada
 Catalogue and relationship-page queries have `VeraClient` methods; their
 convenience responses do not carry independent finality proofs.
 
+## Registering a child under a parent
+
+Main's `create: {parent, requires}` rule is written with acp-rs's collection
+section, `collection: {create: <parent relation>-><permission>}`:
+
+```yaml
+name: agents
+resources:
+  - name: agent
+    permissions: [{name: start_session, expr: owner}]
+  - name: session
+    relations: [{name: agent, types: [agent]}]
+    collection: {create: agent->start_session}
+```
+
+`VeraClient::native_register_under_parent` sends
+`PolicyCmd::RegisterUnderParent { object, parent }`: a registration with the one
+relationship `object#agent@parent`, checked and stored as
+`RegisterObjectWithRelationships` is (below). It needs a `create` that
+follows exactly one relation; any other gated resource registers with its
+relationships named. An unregistered or archived parent has no relationships,
+so nobody passes through it. The parent relationship is an ordinary relation
+afterwards: its object's managers may set or delete it (acp-rs ADR 0028), and
+policy edits may change it. `actor:individual` relation types are not part of
+acp-rs.
+
 ## Authority and ordering
 
 ```mermaid

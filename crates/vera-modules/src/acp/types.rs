@@ -147,6 +147,13 @@ pub enum PolicyCmd {
     FlagHijackAttempt {
         event_id: u64,
     },
+    /// Register `object` with the relationship `object#<relation>@parent`,
+    /// where `<relation>` is the one relation its resource's collection
+    /// `create` follows. Returns [`PolicyCmdResult::RegisterObject`].
+    RegisterUnderParent {
+        object: Object,
+        parent: Object,
+    },
 }
 
 /// The result of executing a policy command (matches Go oneof).

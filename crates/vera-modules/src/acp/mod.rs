@@ -39,6 +39,7 @@ mod policy_listing;
 pub use permission_budget::PermissionBudget;
 mod query_budget;
 pub use query_budget::QueryBudget;
+mod parent_registration;
 mod registration;
 mod registration_queries;
 mod relation_cleanup;
@@ -355,6 +356,7 @@ impl AcpModule {
             PolicyCmd::TransferObject { object: obj, .. }
             | PolicyCmd::RegisterObject(obj)
             | PolicyCmd::RegisterObjectWithRelationships { object: obj, .. }
+            | PolicyCmd::RegisterUnderParent { object: obj, .. }
             | PolicyCmd::ArchiveObject(obj)
             | PolicyCmd::UnarchiveObject(obj) => Some(obj.id.as_str()),
             PolicyCmd::RevealRegistration { proof, .. } => Some(proof.object.id.as_str()),
@@ -389,6 +391,9 @@ impl AcpModule {
                         relationships,
                     },
                 ),
+            PolicyCmd::RegisterUnderParent { object, parent } => {
+                self.register_under_parent(creator, policy, object, parent, stamp, budget)
+            }
             PolicyCmd::ArchiveObject(obj) => {
                 self.cmd_archive_object(creator, policy_id, obj, budget)
             }

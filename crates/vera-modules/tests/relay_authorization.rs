@@ -523,3 +523,67 @@ fn recording_decisions_requires_its_own_relay_grant_even_for_retries() {
         .is_err()
     );
 }
+
+#[test]
+fn parent_registration_checks_the_relay_actor() {
+    let (mut vera, mut acp) = modules();
+    let worker = Did::new(&submission().signer).unwrap();
+    let registrant = Did::new(actor()).unwrap();
+    let policy = acp
+        .create_policy(
+            &worker,
+            "name: gates\nresources:\n- name: parent\n- name: child\n  relations: [{name: parent, types: [parent]}]\n  collection: {create: parent->owner}\n",
+            FORMAT,
+            Default::default(),
+        )
+        .unwrap()
+        .policy
+        .id
+        .to_string();
+
+    for (id, owner, allowed) in [("worker", &worker, false), ("actor", &registrant, true)] {
+        let parent = Object {
+            resource: "parent".into(),
+            id: id.into(),
+        };
+        acp.direct_policy_cmd(owner, &policy, PolicyCmd::RegisterObject(parent.clone()))
+            .unwrap();
+        let child = Object {
+            resource: "child".into(),
+            id: id.into(),
+        };
+        let command = PolicyCmd::RegisterUnderParent {
+            object: child.clone(),
+            parent,
+        };
+        let token = sign(&claims(&DelegatedOperation::PolicyCommand(
+            &policy, &command,
+        )));
+        let result = acp.bearer_policy_cmd(
+            &mut vera,
+            &context(),
+            &submission(),
+            &token,
+            &policy,
+            command,
+        );
+        if allowed {
+            result.unwrap();
+            assert_eq!(
+                acp.query_object_owner(&policy, &child)
+                    .unwrap()
+                    .1
+                    .unwrap()
+                    .metadata
+                    .owner_did,
+                actor()
+            );
+        } else {
+            assert!(matches!(
+                result,
+                Err(vera_modules::acp::error::AcpError::CreateNotAuthorized { .. })
+            ));
+            assert!(acp.query_object_owner(&policy, &child).unwrap().1.is_none());
+        }
+    }
+}
