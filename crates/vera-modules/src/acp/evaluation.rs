@@ -11,7 +11,9 @@ use ::acp::domain::{
     Actor as AcpActor, Did as AcpDid, OWNER_RELATION, Object as AcpObject, RelationName,
     Relationship, Subject,
 };
-use ::acp::eval::{EvalError, Evaluator, Grants, Limits};
+use std::num::NonZeroUsize;
+
+use ::acp::eval::{EvalError, Evaluator, Grants, Limits, Page};
 use ::acp::policy::Compiled;
 use vera_identity::Did;
 
@@ -24,11 +26,23 @@ use super::{keys, object_state, relationship_index, spelling};
 /// Bounds on one permission or management check. Execution and proof replay
 /// use the same bounds, so evidence that answers in one answers in the other.
 /// Each step is also charged to the caller's [`PermissionBudget`].
+///
+/// A relation is listed in one page: `page_size` equals `max_records`, so
+/// the evaluator never asks for a second page of a listing, and every
+/// listing is one scan of the relation's records.
 pub const PERMISSION_LIMITS: Limits = Limits {
     max_nodes: 10_000,
     max_queries: 10_000,
     max_depth: 256,
+    max_records: MAX_RECORDS,
+    page_size: match NonZeroUsize::new(MAX_RECORDS) {
+        Some(size) => size,
+        None => NonZeroUsize::MIN,
+    },
 };
+
+/// The most stored grants one evaluation may read.
+const MAX_RECORDS: usize = 10_000;
 
 /// Evaluate an access request from fallible policy and relationship records.
 /// Missing data and incomplete proof coverage remain errors, including on the
@@ -66,7 +80,7 @@ impl<S: RecordStore> Evaluation<S> {
     pub(super) fn check(&self, object: &Object, permission: &str, actor: &Did) -> Result<bool> {
         let (object, actor) = canonical(object, actor)?;
         let permission = RelationName::from(permission);
-        let evaluator = Evaluator::new(&self.compiled, &self.grants).with_limits(PERMISSION_LIMITS);
+        let evaluator = Evaluator::new(&self.compiled, &self.grants, PERMISSION_LIMITS);
         match &self.meter {
             Some(meter) => evaluator
                 .with_meter(meter)
@@ -86,7 +100,7 @@ impl<S: RecordStore> Evaluation<S> {
     ) -> Result<bool> {
         let (object, actor) = canonical(object, actor)?;
         let relation = RelationName::from(relation);
-        let evaluator = Evaluator::new(&self.compiled, &self.grants).with_limits(PERMISSION_LIMITS);
+        let evaluator = Evaluator::new(&self.compiled, &self.grants, PERMISSION_LIMITS);
         match &self.meter {
             Some(meter) => evaluator
                 .with_meter(meter)
@@ -107,7 +121,7 @@ impl<S: RecordStore> Evaluation<S> {
         actor: &Did,
     ) -> std::result::Result<bool, CreateError> {
         let (object, actor) = canonical(object, actor)?;
-        let evaluator = Evaluator::new(&self.compiled, &self.grants).with_limits(PERMISSION_LIMITS);
+        let evaluator = Evaluator::new(&self.compiled, &self.grants, PERMISSION_LIMITS);
         match &self.meter {
             Some(meter) => evaluator
                 .with_meter(meter)
@@ -296,12 +310,18 @@ impl<S: RecordStore> StoredGrants<S> {
 impl<S: RecordStore> Grants for StoredGrants<S> {
     type Error = RecordError;
 
-    fn subjects(&self, object: &AcpObject, relation: &RelationName) -> Result<Vec<Subject>> {
-        Ok(self
+    fn subjects(
+        &self,
+        object: &AcpObject,
+        relation: &RelationName,
+        after: Option<&Subject>,
+        limit: NonZeroUsize,
+    ) -> Result<Page> {
+        let subjects = self
             .live_records(object, relation)?
             .into_iter()
-            .map(|record| record.relationship.subject)
-            .collect())
+            .map(|record| record.relationship.subject);
+        Ok(Page::select(subjects, after, limit))
     }
 
     fn has(&self, relationship: &Relationship) -> Result<bool> {

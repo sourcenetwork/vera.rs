@@ -322,9 +322,11 @@ fn the_create_check_is_metered_and_an_exhausted_allowance_stores_nothing() {
     let gated = || register(object("book", "b1"), vec![authored_by("b1", "mike")]);
     let open = || register(object("artist", "a1"), vec![]);
     let gated_cost = measure(gated());
-    // Pinned: the gated check's reads and its 11 search steps at 32 units
-    // each (6,509 without the steps); the open one evaluates nothing.
-    assert_eq!((gated_cost, measure(open())), (6861, 2792));
+    // Pinned: the gated check's reads and its 10 search steps at 32 units
+    // each (6,328 without the steps); the open one evaluates nothing. acp
+    // answers the new object's relations from the derived relationships
+    // without reading them.
+    assert_eq!((gated_cost, measure(open())), (6648, 2792));
     let before = module.store.serialize();
     for limit in [gated_cost - 1, gated_cost / 2] {
         let mut candidate = module.clone();

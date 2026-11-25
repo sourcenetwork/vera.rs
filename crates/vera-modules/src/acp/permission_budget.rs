@@ -86,11 +86,21 @@ impl PermissionBudget {
     }
 }
 
+/// Charges each search step (goal-tree node) at the step price. Reads and
+/// their records are charged where they are made, by the
+/// [`ReadCapture`](super::read_capture::ReadCapture) the grants read through.
 impl ::acp::eval::Meter<super::record_error::RecordError> for PermissionBudget {
-    fn charge(&self) -> std::result::Result<(), super::record_error::RecordError> {
-        self.records
-            .pair()
-            .map_err(|error| super::record_error::RecordError::unavailable(error.to_string()))
+    fn charge(
+        &self,
+        charge: ::acp::eval::Charge,
+    ) -> std::result::Result<(), super::record_error::RecordError> {
+        match charge {
+            ::acp::eval::Charge::Node => self
+                .records
+                .pair()
+                .map_err(|error| super::record_error::RecordError::unavailable(error.to_string())),
+            _ => Ok(()),
+        }
     }
 }
 

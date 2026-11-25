@@ -178,7 +178,16 @@ fn subjects<S: RecordStore>(store: S, id: &str, relation: &str) -> Result<Vec<Su
     evaluation(store, POLICY, None, None)?
         .expect("policy")
         .grants
-        .subjects(&AcpObject::new("document", id), &relation.into())
+        .subjects(
+            &AcpObject::new("document", id),
+            &relation.into(),
+            None,
+            std::num::NonZeroUsize::MAX,
+        )
+        .map(|page| {
+            assert!(!page.more);
+            page.subjects
+        })
 }
 
 fn has<S: RecordStore>(store: S, relationship: &Relationship) -> Result<bool> {
