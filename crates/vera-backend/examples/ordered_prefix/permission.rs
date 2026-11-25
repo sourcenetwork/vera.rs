@@ -233,22 +233,27 @@ fn permission_evaluation_requires_complete_proofs_at_one_root() {
             generations.pair(&blocked).unwrap(),
             &keys::relation_prefix("document", "report", "blocked", 0),
         );
+        let blocked_key = reads
+            .iter()
+            .find_map(|(read, witness)| match (read, witness) {
+                (RecordRead::Key(key), Witness::Present(_)) if key.starts_with(&blocked_prefix) => {
+                    Some(key.clone())
+                }
+                _ => None,
+            })
+            .unwrap();
         let mut incomplete_records = VerifiedReads::verify(&reads, &old_root).unwrap();
-        incomplete_records
-            .prefixes
-            .insert(blocked_prefix.clone(), vec![]);
+        incomplete_records.points.insert(blocked_key.clone(), None);
         assert!(evaluate_access_request(incomplete_records, &policy_id, &request).unwrap());
 
         let mut omitted = reads.clone();
-        let (_, Witness::Prefix(proof)) = omitted
+        let mut neighbour = blocked_key.clone();
+        neighbour.push(0);
+        let (_, witness) = omitted
             .iter_mut()
-            .find(|(read, _)| read == &RecordRead::Prefix(blocked_prefix.clone()))
-            .unwrap()
-        else {
-            unreachable!()
-        };
-        assert_eq!(proof.entries.len(), 1);
-        proof.entries.clear();
+            .find(|(read, _)| read == &RecordRead::Key(blocked_key.clone()))
+            .unwrap();
+        *witness = Witness::Absent(db.exclusion_proof(&neighbour).await.unwrap());
         assert!(VerifiedReads::verify(&omitted, &old_root).is_err());
 
         let before = module.store().clone();
