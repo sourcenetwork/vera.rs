@@ -93,11 +93,6 @@ jobs:
           toolchain: 1.99.1
       - name: Fetch locked source dependencies
         working-directory: candidate
-        env:
-          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
-          GIT_CONFIG_COUNT: '1'
-          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
-          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: cargo fetch --locked
       - name: Compile from a clean target and record provenance
         env:

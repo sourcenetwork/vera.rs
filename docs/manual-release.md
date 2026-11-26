@@ -21,6 +21,12 @@ that version. Every validator of a deployment must run the same version.
   layout and native request type are versioned, and receipts are committed under
   `vera/receipts/v3`. Data directories, genesis records and fixtures from `0.1.x`
   are refused; every deployment starts from fresh state.
+- **ACP engine.** Policy semantics and evaluation come from acp-rs, selected
+  from the registry as `sourcenetwork-acp` and `sourcenetwork-zanzi` 0.0.1.
+  `vera-acp` and `vera-zanzibar` are no longer published; their last version
+  is `0.1.2`. Policies follow acp-rs: the theorem query is removed, `owner` is
+  implicit, and a resource's `collection: { create: <expr> }` gates who
+  registers its objects ([acp-v1.md](acp-v1.md)).
 - **Policy ids** are derived from the policy, its creator and a creator-chosen
   nonce ([policy-ids.md](policy-ids.md)).
 - **Anchoring.** A parent deployment records a proven, authenticated chain of
@@ -44,8 +50,9 @@ Before publishing:
 
 - Qualify the selected `2026.10.0` Commonware registry packages against the
   release candidate. Disclose the deferred DKG midpoint recovery limitation.
-- Verify the selected `orbis-reporting` registry package and its license against
-  the release record below.
+- Verify the selected `orbis-reporting`, `sourcenetwork-acp` and
+  `sourcenetwork-zanzi` registry packages and their licenses against the
+  release records below.
 - Inspect the license notices in every package. `vera-identity` declares
   `Apache-2.0 OR MIT` and includes the Apache 2.0 text from its Defra source
   revision as well as the MIT notice.
@@ -89,6 +96,35 @@ tar -xOzf orbis-reporting-0.0.3.crate orbis-reporting-0.0.3/.cargo_vcs_info.json
 Check `.cargo_vcs_info.json` and the license files in the archive, and record
 the source revision and archive checksum.
 
+## ACP engine crates
+
+Vera selects the published acp-rs archives:
+
+| Package | SHA-256 |
+| --- | --- |
+| `sourcenetwork-acp` 0.0.1 | `386d25b5d7316f695e9465ef7e54c98b04b3eacbc357f513094d50f5d193c04b` |
+| `sourcenetwork-zanzi` 0.0.1 | `7189b16941a44578707a9cced8823276f5c41982ba357e17373e17f2b9827d11` |
+
+Their `.cargo_vcs_info.json` identifies acp-rs commit
+`235056b861f0704c96b4f43701b41bc5e3878f39`, whose tree is that of acp-rs main
+at `d305b83c9ec653a3e79dd27284e2d374bc25bc0b`. Against the previously pinned
+Git revision `d1966f7717dfd95c69674cc4b9307ce6151a4b5a`, every file under
+`src/` and `tests/` is identical. The manifests rename the packages and keep
+the library names `acp` and `zanzi`; zanzi's README and examples name the new
+package. Both declare `BUSL-1.1` and include no license file; the text is
+`LICENSE.txt` of the acp-rs repository, SHA-256
+`9c8db4f492aff58d9f7a855c816bbc6a6c26841fa104b72df682f2de17a4fdd1`, as recorded
+in the notice inventory. Recheck the archives when qualifying a release
+candidate:
+
+```sh
+for package in sourcenetwork-acp sourcenetwork-zanzi; do
+  curl -fsSL "https://static.crates.io/crates/$package/$package-0.0.1.crate" -o "$package-0.0.1.crate"
+  shasum -a 256 "$package-0.0.1.crate"
+  tar -xOzf "$package-0.0.1.crate" "$package-0.0.1/.cargo_vcs_info.json"
+done
+```
+
 ## Validate the candidate
 
 Use the pinned Rust toolchain and a clean checkout of the selected commit:
@@ -119,9 +155,9 @@ for the current graph it is:
 
 | Order | Package |
 | --- | --- |
-| 1 | `vera-identity` |
-| 2 | `vera-crypto` |
-| 3 | `vera-domain` |
+| 1 | `vera-crypto` |
+| 2 | `vera-domain` |
+| 3 | `vera-identity` |
 | 4 | `vera-modules` |
 | 5 | `vera-permission` |
 | 6 | `vera-client` |
@@ -129,9 +165,9 @@ for the current graph it is:
 For each package, verify its archive before uploading it. Start with:
 
 ```sh
-cargo package --locked --registry crates-io -p vera-identity
-shasum -a 256 target/package/vera-identity-0.2.0.crate
-cargo publish --locked --registry crates-io -p vera-identity
+cargo package --locked --registry crates-io -p vera-crypto
+shasum -a 256 target/package/vera-crypto-0.2.0.crate
+cargo publish --locked --registry crates-io -p vera-crypto
 ```
 
 Inspect the archive contents and `.cargo_vcs_info.json`: the source must be the
@@ -140,8 +176,8 @@ actually uploaded. Once the preceding package is available in the registry,
 repeat packaging, verification and publication for each remaining package:
 
 ```sh
-cargo publish --locked --registry crates-io -p vera-crypto
 cargo publish --locked --registry crates-io -p vera-domain
+cargo publish --locked --registry crates-io -p vera-identity
 cargo publish --locked --registry crates-io -p vera-modules
 cargo publish --locked --registry crates-io -p vera-permission
 cargo publish --locked --registry crates-io -p vera-client
