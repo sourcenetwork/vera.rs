@@ -104,11 +104,6 @@ jobs:
           shared-key: performance-${{ matrix.history }}
 
       - name: Fetch locked dependencies
-        env:
-          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
-          GIT_CONFIG_COUNT: '1'
-          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
-          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: cargo +1.99.1 fetch --locked
 
       - name: Build release artifacts before measurement
@@ -316,10 +311,6 @@ jobs:
         with:
           shared-key: nuclei-rpc-performance-1.99
       - name: Fetch locked dependencies
-        env:
-          GIT_CONFIG_COUNT: '1'
-          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
-          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: cargo +1.99.1 fetch --locked
       - name: Build both daemons and the common workload driver
         run: |

@@ -37,11 +37,6 @@ jobs:
         with:
           shared-key: hosted-linux-checks
       - name: Fetch locked dependencies
-        env:
-          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
-          GIT_CONFIG_COUNT: '1'
-          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
-          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: cargo fetch --locked
       - name: Check native header wire protocol and subscription lifecycle
         run: 'cargo test --frozen -p vera-jsonrpc header_subscribe::tests::'

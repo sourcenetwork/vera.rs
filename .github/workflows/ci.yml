@@ -44,11 +44,6 @@ jobs:
           shared-key: hosted-linux-checks
 
       - name: Fetch locked dependencies
-        env:
-          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-          GIT_CONFIG_COUNT: "1"
-          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
-          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: cargo fetch --locked
 
       - name: CI cleanup and evidence checks
@@ -128,11 +123,6 @@ jobs:
           shared-key: hosted-linux-checks
 
       - name: Fetch locked dependencies
-        env:
-          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-          GIT_CONFIG_COUNT: "1"
-          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
-          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: cargo fetch --locked
 
       - name: Unit tests
@@ -160,11 +150,6 @@ jobs:
           shared-key: hosted-macos-embedded
 
       - name: Fetch locked dependencies
-        env:
-          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-          GIT_CONFIG_COUNT: "1"
-          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
-          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: cargo fetch --locked
 
       - name: In-process RPC tests
@@ -208,11 +193,6 @@ jobs:
           shared-key: hosted-linux-checks
 
       - name: Fetch locked dependencies
-        env:
-          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-          GIT_CONFIG_COUNT: "1"
-          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
-          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: cargo fetch --locked
 
       - name: Prepare test workspace
@@ -270,11 +250,6 @@ jobs:
           shared-key: hosted-linux-checks
 
       - name: Fetch locked dependencies
-        env:
-          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-          GIT_CONFIG_COUNT: "1"
-          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
-          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: cargo fetch --locked
 
       - name: Prepare test workspace
@@ -355,11 +330,6 @@ jobs:
         run: git clean -fdx -e /target
 
       - name: Fetch locked dependencies
-        env:
-          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-          GIT_CONFIG_COUNT: "1"
-          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
-          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: cargo fetch --locked
 
       - name: Build release verad
@@ -412,11 +382,6 @@ jobs:
           shared-key: linux-checks
 
       - name: Fetch locked dependencies
-        env:
-          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-          GIT_CONFIG_COUNT: "1"
-          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
-          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: cargo fetch --locked
 
       - name: Native admission regressions
@@ -620,11 +585,6 @@ jobs:
           shared-key: linux-recovery
 
       - name: Fetch locked dependencies
-        env:
-          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-          GIT_CONFIG_COUNT: "1"
-          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
-          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
 
         run: cargo fetch --locked
 

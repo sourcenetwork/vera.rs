@@ -49,11 +49,6 @@ jobs:
           shared-key: heap-profile-${{ env.HISTORY_BACKEND }}
           cache-on-failure: true
       - name: Fetch locked dependencies
-        env:
-          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
-          GIT_CONFIG_COUNT: '1'
-          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
-          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: cargo fetch --locked
       - name: Build the existing release workload with allocation symbols
         shell: bash

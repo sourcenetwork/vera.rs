@@ -57,11 +57,6 @@ jobs:
             head -> ../target/head
             base -> ../target/base
       - name: Fetch both locked dependency sets
-        env:
-          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
-          GIT_CONFIG_COUNT: '1'
-          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
-          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: |
           for side in head base; do
             (cd "$side" && cargo +1.99.1 fetch --locked)

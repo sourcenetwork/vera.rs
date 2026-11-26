@@ -37,10 +37,6 @@ jobs:
         with:
           shared-key: nuclei-rpc-1.99
       - name: Fetch locked dependencies
-        env:
-          GIT_CONFIG_COUNT: '1'
-          GIT_CONFIG_KEY_0: url.https://${{ secrets.PRIVATE_REPO_PAT }}@github.com/sourcenetwork/.insteadOf
-          GIT_CONFIG_VALUE_0: https://github.com/sourcenetwork/
         run: cargo +1.99.1 fetch --locked
       - name: Test HTTP, WebSocket and shutdown
         run: cargo +1.99.1 test --frozen -p vera-jsonrpc --features nuclei-rpc --lib nuclei_transport::tests -- --test-threads=1
