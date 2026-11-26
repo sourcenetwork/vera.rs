@@ -1532,6 +1532,9 @@ resources:
         assert!(matches!(err, AcpError::PolicyNotFound { .. }));
     }
 
+    /// With its object identifier unescaped, the descendant's owner key would
+    /// extend the parent's owner prefix: `parent/{incarnation}/{hex(owner)}/`
+    /// followed by `{incarnation}/{hex(owner)}/{subject}`.
     #[test]
     fn relationship_keys_isolate_path_fields() {
         let mut module = AcpModule::new();
@@ -1546,49 +1549,36 @@ resources:
             .policy
             .id
             .to_string();
-        for (id, actor) in [("parent", alice()), ("parent/path", bob())] {
+        let document = |id: String| Object {
+            resource: "document".into(),
+            id,
+        };
+        let descendant = document(format!(
+            "parent/{:016x}/{}",
+            0,
+            hex::encode(::acp::domain::OWNER_RELATION)
+        ));
+        let parent = document("parent".into());
+        for (object, actor) in [(&descendant, bob()), (&parent, alice())] {
             module
-                .direct_policy_cmd(
-                    &actor,
-                    &policy,
-                    PolicyCmd::RegisterObject(Object {
-                        resource: "document".into(),
-                        id: id.into(),
-                    }),
-                )
+                .direct_policy_cmd(&actor, &policy, PolicyCmd::RegisterObject(object.clone()))
                 .unwrap();
         }
-        let original = crate::acp::relationship_values::actor_relationship(
-            "document",
-            "parent/path",
-            "reader",
-            &bob(),
-        )
-        .unwrap();
-        let collision = crate::acp::relationship_values::actor_relationship(
-            "document",
-            "parent",
-            "path/reader",
-            &bob(),
-        )
-        .unwrap();
-        module
-            .direct_policy_cmd(&bob(), &policy, PolicyCmd::SetRelationship(original))
-            .unwrap();
-        for mut candidate in [
+        for candidate in [
             module.clone(),
             AcpModule::from_store(InMemoryKvStore::deserialize(&module.store.serialize()).unwrap()),
         ] {
-            let before = candidate.store.serialize();
-            for command in [
-                PolicyCmd::SetRelationship(collision.clone()),
-                PolicyCmd::DeleteRelationship(collision.clone()),
-            ] {
-                candidate
-                    .direct_policy_cmd(&alice(), &policy, command)
-                    .unwrap_err();
+            for (object, actor) in [(&descendant, bob()), (&parent, alice())] {
+                assert_eq!(
+                    candidate
+                        .registration_owner_record(&policy, object)
+                        .unwrap()
+                        .unwrap()
+                        .relationship
+                        .subject,
+                    relationship_values::actor_subject(&actor).unwrap()
+                );
             }
-            assert_eq!(candidate.store.serialize(), before);
         }
     }
 
