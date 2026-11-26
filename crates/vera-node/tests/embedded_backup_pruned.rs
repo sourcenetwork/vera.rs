@@ -30,12 +30,18 @@ fn refuses_as_pruned(node: &EmbeddedNode, height: u64) -> bool {
     matches!(refused, Err(LocalRpcError::Call { code: 4444, .. }))
 }
 
-fn receipt(node: &EmbeddedNode, submission: alloy_primitives::B256) -> Option<ReceiptResponse> {
-    block_on(
+/// Whether `node` holds no receipt for `submission`: `null` once its
+/// mapping is pruned, or `4444` while the execution index still names the
+/// pruned revision.
+fn receipt_unavailable(node: &EmbeddedNode, submission: alloy_primitives::B256) -> bool {
+    let receipt = block_on(
         node.rpc()
-            .request("vera_getReceiptProof", vec![json!(submission)]),
+            .request::<Option<ReceiptResponse>>("vera_getReceiptProof", vec![json!(submission)]),
+    );
+    matches!(
+        receipt,
+        Ok(None) | Err(LocalRpcError::Call { code: 4444, .. })
     )
-    .unwrap()
 }
 
 #[test]
@@ -56,7 +62,7 @@ fn a_backup_catches_up_from_a_pruned_active_device_and_keeps_its_window() {
         assert!(Instant::now() < deadline, "history retention deadline");
         std::thread::sleep(Duration::from_millis(500));
     }
-    assert!(receipt(&active, early).is_none());
+    assert!(receipt_unavailable(&active, early));
     let late = finalize_a_write(&active, &signer);
 
     let mut settings = backup::backup(second.path(), &dealt, &active_settings, &key);
@@ -65,7 +71,7 @@ fn a_backup_catches_up_from_a_pruned_active_device_and_keeps_its_window() {
     let follower = block_on(EmbeddedNode::start(settings.clone())).unwrap();
     backup::await_height(&follower, height(&active));
     await_certified_receipt(&follower, late);
-    assert!(receipt(&follower, early).is_none());
+    assert!(receipt_unavailable(&follower, early));
     assert!(refuses_as_pruned(&follower, written_at));
     block_on(follower.stop()).unwrap();
 
