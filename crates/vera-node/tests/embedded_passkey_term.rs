@@ -1,9 +1,15 @@
 //! A backup takes over under a term certificate approved by the account's passkey.
 
+#[allow(
+    dead_code,
+    reason = "shared with tests that switch devices in other ways"
+)]
 #[path = "support/devices.rs"]
 mod devices;
+#[allow(dead_code, reason = "shared with tests that keep keys in files")]
 #[path = "support/short_epochs.rs"]
 mod short_epochs;
+#[allow(dead_code, reason = "shared with tests that read other state")]
 mod support;
 
 use std::time::Duration;
