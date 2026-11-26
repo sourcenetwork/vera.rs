@@ -6385,6 +6385,8 @@ dependencies = [
  "commonware-codec",
  "commonware-cryptography",
  "commonware-storage",
+ "hex",
+ "k256 0.13.4",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

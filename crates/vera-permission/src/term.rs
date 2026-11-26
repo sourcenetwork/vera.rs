@@ -35,3 +35,7 @@ pub fn verify_term_certificate(
         },
     )
 }
+
+#[cfg(test)]
+#[path = "term_tests.rs"]
+mod tests;
