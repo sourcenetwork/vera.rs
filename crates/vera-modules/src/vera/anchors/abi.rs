@@ -5,10 +5,12 @@ use alloy_sol_types::sol;
 sol! {
     /// Solidity interface for the anchor precompile at `0x0814`.
     interface IAnchor {
-        /// A deployment's latest anchor moved to a new revision.
+        /// A deployment's latest anchor moved to a new revision. `order`
+        /// numbers it among every anchor recorded, of any deployment.
         event RevisionAnchored(
             bytes32 indexed deployment,
             uint64 sequence,
+            uint64 order,
             uint64 height,
             bytes32 blockHash
         );

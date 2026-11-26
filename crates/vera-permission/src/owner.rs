@@ -5,7 +5,7 @@ use vera_modules::acp::{
 };
 
 use crate::{
-    Actor, Object, PERMISSION_LIMITS, PermissionError, PolicyPrefixResponse, RECORD_PROOF_BYTES,
+    Actor, Object, ObjectRegistration, PERMISSION_LIMITS, PermissionError, PolicyPrefixResponse,
     current::MAX_KEY_BYTES, encoded_size,
 };
 
@@ -38,29 +38,23 @@ impl PolicyPrefixResponse {
         minimum_height: u64,
         trusted: &impl FinalityTrust,
     ) -> Result<Option<Actor>, PermissionError> {
-        let prefix = object_owner_prefix(policy, object)?;
-        let Some(evidence) =
-            self.verify(policy, &prefix, minimum_height, trusted, RECORD_PROOF_BYTES)?
-        else {
-            return Ok(None);
-        };
-        owner(
-            evidence
-                .entries
-                .iter()
-                .map(|entry| (entry.key.as_slice(), entry.value.as_ref())),
-            policy,
-            object,
+        Ok(
+            match self.verify_object_registration(policy, object, minimum_height, trusted)? {
+                ObjectRegistration::Live(owner) => Some(owner),
+                ObjectRegistration::Archived | ObjectRegistration::Absent => None,
+            },
         )
     }
 }
 
-fn owner<'a>(
+/// Classify one object's owner records; a live record takes precedence over archived ones.
+pub(crate) fn registration<'a>(
     records: impl IntoIterator<Item = (&'a [u8], &'a [u8])>,
     policy: &str,
     object: &Object,
-) -> Result<Option<Actor>, PermissionError> {
+) -> Result<ObjectRegistration, PermissionError> {
     let mut owner = None;
+    let mut archived = false;
     for (key, value) in records {
         let record: RelationshipRecord = serde_json::from_slice(value)
             .map_err(|_| PermissionError::Invalid("owner record encoding"))?;
@@ -89,11 +83,17 @@ fn owner<'a>(
         };
         let did = relationship_values::did(actor)
             .map_err(|_| PermissionError::Invalid("owner is not an actor"))?;
-        if !record.archived && owner.replace(Actor(did)).is_some() {
+        if record.archived {
+            archived = true;
+        } else if owner.replace(Actor(did)).is_some() {
             return Err(PermissionError::Invalid("multiple live owners"));
         }
     }
-    Ok(owner)
+    Ok(match owner {
+        Some(owner) => ObjectRegistration::Live(owner),
+        None if archived => ObjectRegistration::Archived,
+        None => ObjectRegistration::Absent,
+    })
 }
 
 #[cfg(test)]

@@ -36,6 +36,9 @@ pub struct AnchorEntry {
     pub deployment: B256,
     /// Position of the anchor among the deployment's anchors; 1 for the first.
     pub sequence: u64,
+    /// Position of the anchor among every anchor the recording deployment
+    /// recorded, of any deployment, in execution order; 1 for the first.
+    pub order: u64,
     /// Height of the anchored revision.
     pub height: u64,
     /// Identifier of the anchored block.
@@ -55,6 +58,7 @@ impl From<&AnchorRecord> for AnchorEntry {
         Self {
             deployment: record.deployment,
             sequence: record.sequence,
+            order: record.order,
             height: record.height,
             block_hash: record.block_hash,
             term: record.term,
@@ -75,6 +79,7 @@ impl AnchorEntry {
             serde_json::from_slice(bytes).map_err(|_| AnchorError::MalformedRecord)?;
         if entry.deployment != *deployment
             || entry.sequence == 0
+            || entry.order == 0
             || anchor_entry_key(deployment, entry.sequence) != key
         {
             return Err(AnchorError::MalformedRecord);

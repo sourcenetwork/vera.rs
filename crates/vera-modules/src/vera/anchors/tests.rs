@@ -1,6 +1,7 @@
 mod chain;
 mod fork;
 mod history;
+mod order;
 mod registration;
 mod term;
 

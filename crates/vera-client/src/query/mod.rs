@@ -17,7 +17,7 @@
 //! | `has_relationship`, `get_object_registration` | [`VeraClient::read_current_record`] |
 //! | `filter_relationships`, `get_relationships_page` | [`VeraClient::read_relationship_page`], [`VeraClient::read_current_policy_prefix_page`] |
 //! | `verify_access_request`, `check_management_authority` | [`VeraClient::verify_current_access`] |
-//! | `get_object_owner` | [`VeraClient::read_current_policy_prefix`] with `PolicyPrefixResponse::verify_object_owner` |
+//! | `get_object_owner` | [`VeraClient::read_object_registration`] |
 //! | `get_access_decision` | [`VeraClient::read_access_decision`] |
 //! | `get_acp_params` | [`VeraClient::read_acp_parameters`] |
 //! | `get_post` | [`VeraClient::read_bulletin_post`] |

@@ -266,6 +266,7 @@ fn anchor(
             &IAnchor::RevisionAnchored {
                 deployment: FixedBytes(record.deployment.0),
                 sequence: record.sequence,
+                order: record.order,
                 height: record.height,
                 blockHash: FixedBytes(record.block_hash.0),
             },

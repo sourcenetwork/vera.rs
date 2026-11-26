@@ -37,7 +37,9 @@ pub struct AnchoredSnapshot {
 /// A snapshot that verified, with the anchor it verified against.
 #[derive(Clone, Debug)]
 pub struct VerifiedSnapshot {
-    /// The anchor the snapshot's revision is recorded by.
+    /// The anchor the snapshot's revision is recorded by, with its `sequence`
+    /// among the deployment's anchors and its `order` among every anchor the
+    /// anchoring deployment recorded.
     pub anchor: AnchorRecord,
     /// Height of the anchoring deployment's revision the anchor was read at.
     pub anchor_revision: u64,
@@ -142,6 +144,15 @@ impl VerifiedSnapshot {
         ensure_kept(&self.anchor, terms)
     }
 
+    /// Whether this snapshot's anchor was recorded before `other`'s, which may
+    /// be of another deployment. Both must have verified against the same
+    /// anchoring key: the order is the anchoring deployment's, and says
+    /// nothing of when the anchored revisions were made.
+    #[must_use]
+    pub const fn anchored_before(&self, other: &Self) -> bool {
+        self.anchor.order < other.anchor.order
+    }
+
     /// Whether the request's actor holds every requested permission at the anchored revision.
     pub fn check(&self, request: &AccessRequest) -> Result<bool, AnchoringError> {
         Ok(self.state.check(request)?)
@@ -176,7 +187,9 @@ pub(super) fn ensure_not_superseded(
             latest: latest.sequence,
         });
     }
-    if latest.sequence == held.sequence && latest.block_hash != held.block_hash {
+    if latest.sequence == held.sequence
+        && (latest.block_hash != held.block_hash || latest.order != held.order)
+    {
         return Err(AnchoringError::Conflict(latest.sequence));
     }
     Ok(())
