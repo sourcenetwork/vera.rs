@@ -70,7 +70,7 @@ impl VeraClient {
     }
 
     /// Check if an object is registered and get its owner record.
-    /// Unauthenticated; the verified read is [`VeraClient::read_current_policy_prefix`] with `PolicyPrefixResponse::verify_object_owner`.
+    /// Unauthenticated; the verified read is [`VeraClient::read_object_registration`].
     pub async fn get_object_owner(
         &self,
         policy_id: FixedBytes<32>,

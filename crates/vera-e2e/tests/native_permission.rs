@@ -10,9 +10,9 @@ use std::time::Duration;
 
 use alloy_sol_types::SolCall;
 use vera_client::{
-    ACP_ADDRESS, AccessRequest, Actor, BlsSigner, ClientError, ModuleId, Object, Operation,
-    PERMISSION_LIMITS, PermissionProof, PermissionRead, RECORD_PROOF_BYTES, VeraClient,
-    verify_permission_proof,
+    ACP_ADDRESS, AccessRequest, Actor, BlsSigner, ClientError, ModuleId, Object,
+    ObjectRegistration, Operation, PERMISSION_LIMITS, PermissionProof, PermissionRead,
+    RECORD_PROOF_BYTES, VeraClient, verify_permission_proof,
 };
 use vera_domain::{ConsensusPublicKey, LightBlock, verify_finalized_block};
 use vera_e2e::cluster::{ConsensusPreset, GenesisBuilder, KeySet, TestCluster};
@@ -482,6 +482,24 @@ async fn pipelined_permission_reads_follow_finalized_grants_and_deletion() {
                 .unwrap()
                 .is_none()
         );
+        let live = Object {
+            resource: object.resource.clone(),
+            id: "concurrent-0".into(),
+        };
+        for (selected, expected) in [
+            (&object, ObjectRegistration::Archived),
+            (&other, ObjectRegistration::Absent),
+            (
+                &live,
+                ObjectRegistration::Live(Actor(owner.did().parse().unwrap())),
+            ),
+        ] {
+            let read = replica
+                .read_object_registration(&policy, selected, archived, &trusted)
+                .await
+                .unwrap();
+            assert_eq!(read.registration, expected);
+        }
     }
     let deleted = submit(
         &client,
@@ -550,6 +568,14 @@ async fn pipelined_permission_reads_follow_finalized_grants_and_deletion() {
             .verify_object_owner(&policy, &object, deleted, &trusted)
             .unwrap()
             .is_none()
+    );
+    assert_eq!(
+        restarted
+            .read_object_registration(&policy, &object, deleted, &trusted)
+            .await
+            .unwrap()
+            .registration,
+        ObjectRegistration::Absent
     );
 }
 

@@ -356,7 +356,10 @@ module, key and minimum revision. `vera_getCurrentPrefixProof` and
 captured-revision guarantees. `PolicyPrefixResponse::verify_object_owner` derives live
 ownership from policy and complete owner evidence at the same certified root.
 Deleted policies and archived records are unregistered; retained cleanup records
-cannot establish ownership. See `docs/native-relationship-keys.md` for the fresh-state cutover. `vera_getStateProof` and `vera_getRelationProof` are not registered. Record and
+cannot establish ownership. `verify_object_registration` and
+`VeraClient::read_object_registration` read the same evidence as live (with the
+owner), archived or absent: archived proves the object was registered and its
+owner record carries the archive mark, and yields no owner. See `docs/native-relationship-keys.md` for the fresh-state cutover. `vera_getStateProof` and `vera_getRelationProof` are not registered. Record and
 complete-prefix reads use the authenticated native endpoints.
 Historical native activity proofs are not retained.
 Proof RPCs share eight in-flight slots per node, including `vera_getLightBlock`
