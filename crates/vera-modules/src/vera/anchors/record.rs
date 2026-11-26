@@ -7,7 +7,7 @@ use sha2::{Digest as _, Sha256};
 use super::AnchorError;
 
 const DEPLOYMENT_NAMESPACE: &[u8] = b"vera/anchor/deployment/v1\0";
-const KEY_PREFIX: &[u8] = b"anchor/v1/";
+const KEY_PREFIX: &[u8] = b"anchor/v2/";
 /// Longest stored anchor record, in bytes.
 pub const MAX_ANCHOR_RECORD_BYTES: usize = 1024;
 /// Length of the canonical encoding of a deployment's consensus key.
@@ -39,6 +39,9 @@ pub struct AnchorRecord {
     pub consensus_key: Bytes,
     /// Number of anchors this deployment has recorded, this one included.
     pub sequence: u64,
+    /// Position of the anchor among every anchor the recording deployment
+    /// recorded, of any deployment, in execution order; 1 for the first.
+    pub order: u64,
     /// Height of the anchored revision.
     pub height: u64,
     /// Identifier of the anchored block.
@@ -68,6 +71,7 @@ impl AnchorRecord {
             || record.consensus_key.len() != CONSENSUS_KEY_BYTES
             || deployment_id(&record.consensus_key) != *deployment
             || record.sequence == 0
+            || record.order == 0
         {
             return Err(AnchorError::MalformedRecord);
         }

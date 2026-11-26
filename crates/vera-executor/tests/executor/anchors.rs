@@ -231,7 +231,7 @@ fn a_native_anchor_is_recorded_and_another_deployment_or_a_regression_is_refused
         event.deployment.0,
         deployment_id(&deployment.key().encode()).0
     );
-    assert_eq!((event.sequence, event.height), (1, 20));
+    assert_eq!((event.sequence, event.order, event.height), (1, 1, 20));
     assert_eq!(
         refusals(&receipts[1..]),
         [
@@ -240,6 +240,32 @@ fn a_native_anchor_is_recorded_and_another_deployment_or_a_regression_is_refused
             RefusalKind::NotNewer
         ]
     );
+}
+
+#[test]
+fn anchors_of_two_deployments_in_one_block_are_numbered_in_execution_order() {
+    let laptop = TestDeployment::new(24);
+    let phone = TestDeployment::new(25);
+    let laptop_chain = laptop.chain(40, 1);
+    let phone_chain = phone.chain(40, 1);
+    let receipts = execute(
+        &[&laptop, &phone],
+        vec![
+            anchor_call(&phone, &phone_chain, 30, 30),
+            anchor_call(&laptop, &laptop_chain, 20, 20),
+            // A refused anchor is rolled back with its number.
+            anchor_call(&laptop, &laptop_chain, 10, 10),
+            anchor_call(&phone, &phone_chain, 30, 35),
+        ],
+    );
+    assert_eq!(refusals(&receipts[2..3]), [RefusalKind::NotNewer]);
+    let numbered = [0, 1, 3].map(|index| {
+        assert!(receipts[index].success(), "{:?}", receipts[index].refusal);
+        let event =
+            IAnchor::RevisionAnchored::decode_log_data(&receipts[index].logs()[0].data).unwrap();
+        (event.sequence, event.order, event.height)
+    });
+    assert_eq!(numbered, [(1, 1, 30), (1, 2, 20), (2, 3, 35)]);
 }
 
 #[test]
@@ -273,11 +299,13 @@ fn an_anchor_extends_the_latest_one_and_another_history_is_refused_and_recorded_
 
     assert!(receipts[0].success(), "{:?}", receipts[0].refusal);
     assert_eq!(refusals(&receipts[1..4]), [RefusalKind::NotDescendant; 3]);
+    // The refusals and fork reports between them take no number.
     for (index, sequence, height) in [(4, 2, 30), (10, 3, 40)] {
         assert!(receipts[index].success(), "{:?}", receipts[index].refusal);
         let event =
             IAnchor::RevisionAnchored::decode_log_data(&receipts[index].logs()[0].data).unwrap();
         assert_eq!((event.sequence, event.height), (sequence, height));
+        assert_eq!(event.order, sequence);
         assert_eq!(event.blockHash.0, chain[height as usize].id().0.0);
     }
     for (index, height) in [(5, 30), (6, 35)] {
