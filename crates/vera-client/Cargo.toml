@@ -44,7 +44,7 @@ tracing.workspace = true
 ed25519-dalek.workspace = true
 
 [dev-dependencies]
-acp.workspace = true
+sourcenetwork-acp.workspace = true
 vera-domain = { workspace = true, features = ["testing"] }
 vera-crypto = { workspace = true, features = ["testing"] }
 k256.workspace = true

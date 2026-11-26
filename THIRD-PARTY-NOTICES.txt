@@ -8,14 +8,11 @@ Original texts are reproduced below and identified by SHA-256. For texts from
 upstream source trees, the source URL includes the reviewed revision. Aurora's
 package records a dirty source tree; see its package-specific notice below.
 
-Cargo.lock SHA-256: 58e026f92a1e902574a261a2aa0b02b1fa15b8f79e4072ac864671c20e237a84
+Cargo.lock SHA-256: 6e436544973f2994e6128513847ee6787c13d00036f85107160aa602f1a8c199
 Packages: 469
 
 PACKAGE INDEX
 =============
-
-acp 0.0.1 | BUSL-1.1
-  9c8db4f492aff58d9f7a855c816bbc6a6c26841fa104b72df682f2de17a4fdd1  https://github.com/sourcenetwork/acp/blob/d1966f7717dfd95c69674cc4b9307ce6151a4b5a/LICENSE.txt
 
 aead 0.6.1 | MIT OR Apache-2.0
   b1cf9a3333ca78152b859012cd4a804156e5243e9ca20ad1df7327ba5ea7405c  LICENSE-APACHE
@@ -1392,6 +1389,12 @@ soketto 0.8.1 | Apache-2.0 OR MIT
   a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
   b611b692ad9b66a7d9654464084d98a6a454990025908bd0bd70360737e5ee2a  LICENSE-MIT
 
+sourcenetwork-acp 0.0.1 | BUSL-1.1
+  9c8db4f492aff58d9f7a855c816bbc6a6c26841fa104b72df682f2de17a4fdd1  https://github.com/sourcenetwork/acp/blob/235056b861f0704c96b4f43701b41bc5e3878f39/LICENSE.txt
+
+sourcenetwork-zanzi 0.0.1 | BUSL-1.1
+  9c8db4f492aff58d9f7a855c816bbc6a6c26841fa104b72df682f2de17a4fdd1  https://github.com/sourcenetwork/acp/blob/235056b861f0704c96b4f43701b41bc5e3878f39/LICENSE.txt
+
 spin 0.10.1 | MIT
   6ac8711fb340c62ce0a4ecd463342d3fa0e8e70de697c863a2e1c0c53006003c  LICENSE
 
@@ -1723,9 +1726,6 @@ yoke 0.8.1 | Unicode-3.0
 
 yoke-derive 0.8.1 | Unicode-3.0
   f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2  LICENSE
-
-zanzi 0.0.1 | BUSL-1.1
-  9c8db4f492aff58d9f7a855c816bbc6a6c26841fa104b72df682f2de17a4fdd1  https://github.com/sourcenetwork/acp/blob/d1966f7717dfd95c69674cc4b9307ce6151a4b5a/LICENSE.txt
 
 zerocopy 0.8.39 | BSD-2-Clause OR Apache-2.0 OR MIT
   9d185ac6703c4b0453974c0d85e9eee43e6941009296bb1f5eb0b54e2329e9f3  LICENSE-APACHE
