@@ -1,6 +1,7 @@
 //! Term certificates checked against a deployment's operator policy.
 
 use alloy_primitives::B256;
+use vera_crypto::webauthn::Assertion;
 use vera_domain::{TermCertificate, TermError};
 use vera_modules::vera::administration::OperatorPolicy;
 
@@ -20,6 +21,17 @@ pub fn verify_term_certificate(
         genesis_id,
         policy.threshold,
         policy.keys.len(),
-        |signer, digest, signature| policy.verifies(signer, digest, signature),
+        |approval, digest| {
+            let assertion = approval.webauthn.as_ref().map(|webauthn| Assertion {
+                authenticator_data: &webauthn.authenticator_data,
+                client_data_json: &webauthn.client_data_json,
+            });
+            policy.verifies(
+                approval.signer,
+                digest,
+                &approval.signature.0,
+                assertion.as_ref(),
+            )
+        },
     )
 }

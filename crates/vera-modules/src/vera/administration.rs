@@ -4,6 +4,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
+pub use super::passkey_approval::PasskeyAssertion;
 use super::{Result, VeraError, VeraModule, operator_key};
 use crate::acp::{AcpModule, types::AcpParams};
 use crate::kv_store::ModuleKvStore;
@@ -53,7 +54,9 @@ impl OperatorPolicy {
     /// Verify one approval of `digest` against the key at its signer index.
     ///
     /// The signature is 64 bytes of lowercase hexadecimal. ECDSA keys sign the
-    /// digest as the prehash with low `s`; Ed25519 signs it as the message.
+    /// digest as the prehash with low `s`; Ed25519 signs it as the message. A
+    /// P-256 key may instead sign a passkey assertion of the digest, carried
+    /// in [`OperatorApproval::webauthn`] with the same raw low-S signature.
     pub fn verify_approval(&self, digest: &[u8; 32], approval: &OperatorApproval) -> Result<()> {
         let key = self
             .keys
@@ -66,16 +69,37 @@ impl OperatorPolicy {
         if hex::encode(&signature) != approval.signature {
             return Err(invalid("operator signature must use lowercase hexadecimal"));
         }
-        operator_key::verify(key, digest, &signature).map_err(invalid)
+        let parts = approval
+            .webauthn
+            .as_ref()
+            .map(PasskeyAssertion::decode)
+            .transpose()
+            .map_err(invalid)?;
+        let assertion = parts
+            .as_ref()
+            .map(
+                |(authenticator_data, client_data_json)| vera_crypto::webauthn::Assertion {
+                    authenticator_data,
+                    client_data_json,
+                },
+            );
+        operator_key::verify(key, digest, &signature, assertion.as_ref()).map_err(invalid)
     }
 
-    /// Whether `signature` is the operator at `signer`'s signature of
-    /// `digest`, in the encoding [`Self::verify_approval`] requires.
+    /// Whether `signature` is the operator at `signer`'s approval of `digest`:
+    /// its signature of the digest, or with `assertion` its passkey assertion
+    /// of the digest, in the encoding [`Self::verify_approval`] requires.
     #[must_use]
-    pub fn verifies(&self, signer: u16, digest: &[u8; 32], signature: &[u8; 64]) -> bool {
+    pub fn verifies(
+        &self,
+        signer: u16,
+        digest: &[u8; 32],
+        signature: &[u8; 64],
+        assertion: Option<&vera_crypto::webauthn::Assertion<'_>>,
+    ) -> bool {
         self.keys
             .get(usize::from(signer))
-            .is_some_and(|key| operator_key::verify(key, digest, signature).is_ok())
+            .is_some_and(|key| operator_key::verify(key, digest, signature, assertion).is_ok())
     }
 }
 
@@ -159,6 +183,9 @@ pub struct OperatorApproval {
     pub signer: u16,
     /// Lowercase hexadecimal encoding of the 64-byte signature.
     pub signature: String,
+    /// The passkey assertion a P-256 operator signed instead of the digest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webauthn: Option<PasskeyAssertion>,
 }
 
 /// Administrative request and its independent operator approvals.

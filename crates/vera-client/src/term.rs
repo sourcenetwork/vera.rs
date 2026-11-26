@@ -20,6 +20,7 @@ pub fn approve_term(
     Ok(TermApproval {
         signer,
         signature: FixedBytes::from_slice(&signature.to_bytes()),
+        webauthn: None,
     })
 }
 
@@ -66,7 +67,7 @@ fn checked(
     let signature: [u8; 64] = signature
         .try_into()
         .map_err(|_| ClientError::Signing("operator signature must contain 64 bytes".into()))?;
-    if !policy.verifies(signer, &change.signing_digest(), &signature) {
+    if !policy.verifies(signer, &change.signing_digest(), &signature, None) {
         return Err(ClientError::Signing(
             "signature is not the operator's approval of this term change".into(),
         ));
@@ -74,6 +75,7 @@ fn checked(
     Ok(TermApproval {
         signer,
         signature: FixedBytes::from(signature),
+        webauthn: None,
     })
 }
 
@@ -214,7 +216,7 @@ mod tests {
         let approval = operators.device(&other);
         let certificate = TermCertificate {
             change: change(),
-            approvals: vec![approval],
+            approvals: vec![approval.clone()],
         };
         assert_eq!(
             verify_term_certificate(&certificate, &GENESIS, &operators.policy),

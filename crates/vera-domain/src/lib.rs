@@ -34,7 +34,9 @@ mod term;
 pub use term::term_extends;
 
 mod term_certificate;
-pub use term_certificate::{TermApproval, TermCertificate, TermChange, TermCut, TermError};
+pub use term_certificate::{
+    TermApproval, TermCertificate, TermChange, TermCut, TermError, TermPasskeyAssertion,
+};
 
 mod idents;
 pub use idents::{BlockId, Idents, TxId};

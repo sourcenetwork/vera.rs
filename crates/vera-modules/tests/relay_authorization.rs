@@ -110,6 +110,7 @@ fn admin(
             approvals: vec![OperatorApproval {
                 signer: 0,
                 signature: hex::encode(signature.to_bytes()),
+                webauthn: None,
             }],
         },
     )

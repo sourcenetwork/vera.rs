@@ -2,9 +2,11 @@
 //!
 //! A secp256k1 operator is 66 lowercase hexadecimal characters of its
 //! compressed key. An Ed25519 or P-256 operator is its `did:key`. A key has
-//! exactly one entry form, so it cannot be listed twice.
+//! exactly one entry form, so it cannot be listed twice. Any P-256 operator
+//! may approve with a passkey assertion instead of a raw signature.
 
 use vera_crypto::actor::{self, ActorKeyType};
+use vera_crypto::webauthn::{self, Assertion};
 
 /// The `did:key` of the key a policy entry names, or why the entry is invalid.
 pub(super) fn did(entry: &str) -> Result<String, String> {
@@ -28,6 +30,20 @@ pub(super) fn did(entry: &str) -> Result<String, String> {
 }
 
 /// Verify one approval signature by the key a policy entry names.
-pub(super) fn verify(entry: &str, digest: &[u8; 32], signature: &[u8]) -> Result<(), String> {
-    actor::verify_digest(&did(entry)?, digest, signature).map_err(|error| error.to_string())
+///
+/// Without an assertion the key signs the digest itself. With one, the key
+/// is P-256 and signs the assertion that carries the digest as its challenge.
+pub(super) fn verify(
+    entry: &str,
+    digest: &[u8; 32],
+    signature: &[u8],
+    assertion: Option<&Assertion<'_>>,
+) -> Result<(), String> {
+    let did = did(entry)?;
+    match assertion {
+        None => actor::verify_digest(&did, digest, signature).map_err(|error| error.to_string()),
+        Some(assertion) => {
+            webauthn::verify(&did, digest, assertion, signature).map_err(|error| error.to_string())
+        }
+    }
 }

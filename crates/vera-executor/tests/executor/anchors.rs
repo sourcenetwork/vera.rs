@@ -93,6 +93,7 @@ fn registered(deployments: &[&TestDeployment]) -> ModuleState {
             approvals: vec![OperatorApproval {
                 signer: 0,
                 signature: hex::encode(signature.to_bytes()),
+                webauthn: None,
             }],
         };
         modules
@@ -383,6 +384,7 @@ fn term_call(
         approvals: vec![TermApproval {
             signer: 0,
             signature: FixedBytes::from_slice(&signature.to_bytes()),
+            webauthn: None,
         }],
     };
     IAnchor::changeTermCall {

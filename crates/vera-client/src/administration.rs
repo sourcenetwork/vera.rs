@@ -26,6 +26,7 @@ pub fn approve_administration(
     Ok(OperatorApproval {
         signer,
         signature: hex::encode(signature.to_bytes()),
+        webauthn: None,
     })
 }
 
@@ -76,6 +77,7 @@ fn checked_approval(
     let approval = OperatorApproval {
         signer,
         signature: hex::encode(signature),
+        webauthn: None,
     };
     policy
         .verify_approval(&digest, &approval)

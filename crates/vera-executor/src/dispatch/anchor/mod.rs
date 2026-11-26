@@ -7,6 +7,7 @@ mod tests;
 
 use alloy_primitives::{B256, FixedBytes};
 use alloy_sol_types::SolCall;
+use vera_crypto::webauthn::Assertion;
 use vera_domain::{FinalizedArtifacts, RefusalKind, TermCertificate};
 use vera_modules::types::{BlockExecCtx, TxExecCtx};
 use vera_modules::vera::VeraModule;
@@ -215,7 +216,18 @@ fn change_term(
         &registered.genesis_id,
         operators.threshold,
         operators.keys.len(),
-        |signer, digest, signature| operators.verifies(signer, digest, signature),
+        |approval, digest| {
+            let assertion = approval.webauthn.as_ref().map(|webauthn| Assertion {
+                authenticator_data: &webauthn.authenticator_data,
+                client_data_json: &webauthn.client_data_json,
+            });
+            operators.verifies(
+                approval.signer,
+                digest,
+                &approval.signature.0,
+                assertion.as_ref(),
+            )
+        },
     )?;
     let change = certificate.change;
     let record = module.record_term(

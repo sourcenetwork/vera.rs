@@ -82,6 +82,7 @@ fn approve(
         .map(|&index| OperatorApproval {
             signer: index as u16,
             signature: hex::encode(operators[index].sign(&digest)),
+            webauthn: None,
         })
         .collect();
     SignedAdministrativeRequest { request, approvals }
@@ -128,6 +129,7 @@ fn a_signature_by_another_key_or_in_another_encoding_is_rejected() {
         let approval = |signature: Vec<u8>| OperatorApproval {
             signer: index as u16,
             signature: hex::encode(signature),
+            webauthn: None,
         };
         policy
             .verify_approval(&digest, &approval(operator.sign(&digest)))

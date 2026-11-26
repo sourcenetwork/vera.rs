@@ -1,6 +1,6 @@
 //! The certificate that records a switch of the active device.
 
-use alloy_primitives::{B256, FixedBytes};
+use alloy_primitives::{B256, Bytes, FixedBytes};
 use commonware_cryptography::{Hasher as _, Sha256};
 use serde::{Deserialize, Serialize};
 
@@ -53,7 +53,7 @@ impl TermChange {
 }
 
 /// One operator's signature over [`TermChange::signing_digest`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TermApproval {
     /// Index of the signing key in the deployment's operator policy.
@@ -61,6 +61,20 @@ pub struct TermApproval {
     /// The 64-byte signature, in the encoding the key's type signs
     /// administrative requests with.
     pub signature: FixedBytes<64>,
+    /// The passkey assertion a P-256 operator signed instead of the digest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webauthn: Option<TermPasskeyAssertion>,
+}
+
+/// The authenticator output of a passkey approval, as the authenticator
+/// signed it: the assertion's challenge is the change's signing digest.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TermPasskeyAssertion {
+    /// The 37 bytes of authenticator data.
+    pub authenticator_data: Bytes,
+    /// The client data JSON, exactly as hashed.
+    pub client_data_json: Bytes,
 }
 
 /// A term change approved under the deployment's operator policy.
@@ -100,15 +114,16 @@ impl TermCertificate {
     /// Verify the certificate for the deployment `genesis_id` under an
     /// operator policy of `operators` keys that requires `threshold` of them.
     ///
-    /// `approved` checks one signature of the 32-byte digest against the
-    /// policy's key at the given index. Every listed approval must verify,
-    /// not only the first `threshold`.
+    /// `approved` checks one approval of the 32-byte digest, its signature
+    /// and any passkey assertion, against the policy's key at the approval's
+    /// signer index. Every listed approval must verify, not only the first
+    /// `threshold`.
     pub fn verify(
         &self,
         genesis_id: &B256,
         threshold: u16,
         operators: usize,
-        mut approved: impl FnMut(u16, &[u8; 32], &[u8; 64]) -> bool,
+        mut approved: impl FnMut(&TermApproval, &[u8; 32]) -> bool,
     ) -> Result<(), TermError> {
         if self.change.genesis_id != *genesis_id {
             return Err(TermError::Deployment);
@@ -128,9 +143,7 @@ impl TermCertificate {
         }
         let digest = self.change.signing_digest();
         for approval in &self.approvals {
-            if usize::from(approval.signer) >= operators
-                || !approved(approval.signer, &digest, &approval.signature.0)
-            {
+            if usize::from(approval.signer) >= operators || !approved(approval, &digest) {
                 return Err(TermError::Signature(approval.signer));
             }
         }
@@ -177,14 +190,15 @@ mod tests {
                 .map(|&signer| TermApproval {
                     signer,
                     signature: FixedBytes::repeat_byte(signer as u8),
+                    webauthn: None,
                 })
                 .collect(),
         }
     }
 
     /// Accepts the signature `certificate` gives the operator at each index.
-    fn matching(signer: u16, _: &[u8; 32], signature: &[u8; 64]) -> bool {
-        signature == &[signer as u8; 64]
+    fn matching(approval: &TermApproval, _: &[u8; 32]) -> bool {
+        approval.signature.0 == [approval.signer as u8; 64]
     }
 
     #[test]
@@ -291,9 +305,34 @@ mod tests {
             json["approvals"][0]["signature"],
             format!("0x{}", "01".repeat(64))
         );
+        assert!(json["approvals"][0].get("webauthn").is_none());
         assert_eq!(
             serde_json::from_value::<TermCertificate>(json).unwrap(),
             certificate
         );
+    }
+
+    #[test]
+    fn a_passkey_approval_carries_its_assertion_in_hex() {
+        let mut certificate = certificate(&[0]);
+        certificate.approvals[0].webauthn = Some(TermPasskeyAssertion {
+            authenticator_data: Bytes::from(vec![0xab; 37]),
+            client_data_json: Bytes::from_static(b"{}"),
+        });
+        let json = serde_json::to_value(&certificate).unwrap();
+        assert_eq!(
+            json["approvals"][0]["webauthn"],
+            serde_json::json!({
+                "authenticator_data": format!("0x{}", "ab".repeat(37)),
+                "client_data_json": "0x7b7d",
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<TermCertificate>(json.clone()).unwrap(),
+            certificate
+        );
+        let mut unknown = json;
+        unknown["approvals"][0]["webauthn"]["credential_id"] = "0x00".into();
+        assert!(serde_json::from_value::<TermCertificate>(unknown).is_err());
     }
 }
