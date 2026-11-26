@@ -2,8 +2,8 @@
 //! deployments, each one embedded validator. A reader that trusts only the
 //! parent's key verifies relayed policy snapshots and learns when they are
 //! stale; a baby's anchors are one chain, each proven to descend from the one
-//! before; a second device's history under the same key is refused and
-//! recorded as a fork.
+//! before; one count orders the anchors of both babies; a second device's
+//! history under the same key is refused and recorded as a fork.
 //!
 //! Requires `cargo build -p verad` before running.
 
@@ -140,6 +140,11 @@ async fn a_parent_orders_and_attests_the_policies_of_two_babies() {
     assert_eq!(phone_verified.anchor.sequence, 1);
     assert!(phone_verified.check(&read(OTHER)).unwrap());
     assert!(!phone_verified.check(&read(READER)).unwrap());
+    // The parent numbers the anchors of both babies in one order, so a reader
+    // compares the two verified anchors although each baby counts its own.
+    assert_eq!((verified.anchor.order, phone_verified.anchor.order), (1, 2));
+    assert!(verified.anchored_before(&phone_verified));
+    assert!(!phone_verified.anchored_before(&verified));
     // Each baby's snapshot is bound to its own deployment.
     assert!(
         relayed
@@ -159,10 +164,16 @@ async fn a_parent_orders_and_attests_the_policies_of_two_babies() {
     let versions = [&first, &second, &third];
     for (earlier, later) in versions.iter().zip(&versions[1..]) {
         assert_eq!(later.record.sequence, earlier.record.sequence + 1);
+        assert!(later.record.order > earlier.record.order);
         assert!(later.record.height > earlier.record.height);
         assert!(later.parent_height > earlier.parent_height);
         assert!(later.parent_time >= earlier.parent_time);
     }
+    // The phone's anchor came between the laptop's first and second.
+    assert_eq!(
+        [first.record.order, second.record.order, third.record.order],
+        [1, 3, 4]
+    );
     let newest = third
         .snapshot
         .verify(&laptop_id, &laptop_policy, &parent.key, 0)
@@ -184,7 +195,10 @@ async fn a_parent_orders_and_attests_the_policies_of_two_babies() {
     // the parent's revision that recorded it.
     for version in versions {
         let (event, time) = parent.anchored_event(version.submission).await;
-        assert_eq!(event.sequence, version.record.sequence);
+        assert_eq!(
+            (event.sequence, event.order),
+            (version.record.sequence, version.record.order)
+        );
         assert_eq!(time, version.parent_time);
     }
 
@@ -323,7 +337,8 @@ async fn a_parent_orders_and_attests_the_policies_of_two_babies() {
     let fourth = parent
         .anchor_policy(&laptop, &laptop_relay, &laptop_policy)
         .await;
-    assert_eq!(fourth.record.sequence, 4);
+    // The refused anchors and the fork reports took no number.
+    assert_eq!((fourth.record.sequence, fourth.record.order), (4, 5));
     assert!(fourth.record.height > anchored);
     assert!(matches!(
         newest.ensure_current(&latest().await),
@@ -454,6 +469,21 @@ async fn a_parent_orders_and_attests_the_policies_of_two_babies() {
     assert_eq!(
         parent.try_anchor(&laptop_relay, &laptop, &void).await,
         Err(RefusalKind::NotNewer)
+    );
+    // The term voided the third and fourth anchors and renumbered none.
+    let after_term = parent
+        .client
+        .read_anchor_history(&laptop_id, 1, 16, 0, &parent.key)
+        .await
+        .unwrap()
+        .entries;
+    assert_eq!(after_term, history);
+    assert_eq!(
+        after_term
+            .iter()
+            .map(|entry| entry.order)
+            .collect::<Vec<_>>(),
+        [1, 3, 4, 5]
     );
 
     for node in [fork, laptop, phone] {

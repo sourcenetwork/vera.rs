@@ -113,8 +113,13 @@ impl Parent {
         let (event, parent_time) = self.anchored_event(submission).await;
         assert_eq!(event.deployment.0, deployment.0);
         assert_eq!(
-            (event.sequence, event.height, event.blockHash.0),
-            (record.sequence, record.height, record.block_hash.0),
+            (event.sequence, event.order, event.height, event.blockHash.0),
+            (
+                record.sequence,
+                record.order,
+                record.height,
+                record.block_hash.0
+            ),
         );
         assert_eq!(record.anchored_at, parent_height);
         Anchored {

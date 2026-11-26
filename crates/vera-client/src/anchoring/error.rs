@@ -46,7 +46,7 @@ pub enum AnchoringError {
         /// The term that voided it.
         term: u64,
     },
-    /// Two anchor records with one sequence name different revisions.
+    /// Two anchor records with one sequence differ in revision or order.
     #[error("anchor records with sequence {0} disagree")]
     Conflict(u64),
     /// The anchoring deployment refused the anchor.

@@ -50,11 +50,16 @@ positive eight-byte big-endian counter. Proven absence means initial zero; a
 missing proof is an error. This point does not establish registration or ownership.
 Archive advances the counter with checked arithmetic, invalidating outgoing grants
 without moving the owner. Unarchive does not restore previous incarnations.
+Archive marks the owner record and keeps it under its zero key, so the complete
+owner prefix proves an object archived rather than never registered:
+`PolicyPrefixResponse::verify_object_registration` answers live, archived or
+absent. An archived record reserves the object and grants no ownership.
 See [policy edits and archive](acp-policy-edits.md) for counts and cleanup.
 
 Readers authenticate policy liveness, relation generations and needed object
 points at the same finalized root as the relationships. Use verified permission
-evaluation, `PolicyPrefixResponse::verify_object_owner`, or the policy-scoped
+evaluation, `PolicyPrefixResponse::verify_object_owner` or
+`verify_object_registration`, or the policy-scoped
 page APIs in [permission proofs](permission-proofs.md). Raw storage evidence can
 contain obsolete grants and does not establish current access.
 

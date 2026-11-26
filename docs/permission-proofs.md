@@ -140,6 +140,18 @@ v5 key before liveness filtering. Owners always use zero and need no object poin
 its canonical key and requested policy/object, returning the single live actor.
 Absent policies, empty ownership and entirely archived ownership return `None`.
 Malformed records, conflicting live owners and unavailable evidence are errors.
+
+`PolicyPrefixResponse::verify_object_registration` reads the same evidence and
+returns an `ObjectRegistration`: `Live` with the owner, `Archived`, or `Absent`.
+`VeraClient::read_object_registration` returns it with the evidence as a
+`CertifiedRegistration`. `Archived` proves that at the certified revision the
+policy is live and the object's owner record exists with its archive mark: the
+object was registered, and an actor with authority over its owner relation
+archived it. Nobody may register it again while that record remains; only its
+previous owner can unarchive it, so a later revision may read `Live` again.
+`Archived` carries no owner, and an archived record never establishes ownership.
+`Absent` means no owner record, or an absent policy; it does not distinguish a
+registration that never happened from one still to come.
 Ownership alone does not replace permission evaluation. Set the minimum revision
 to the finalized deletion height when a read must observe that deletion.
 

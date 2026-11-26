@@ -76,7 +76,7 @@ function anchorRevision(
     bytes32 deployment, bytes block, bytes[] descendants,
     bytes finalization, bytes epochMaterial, bytes ancestryProof
 ) external returns (bytes record);
-event RevisionAnchored(bytes32 indexed deployment, uint64 sequence, uint64 height, bytes32 blockHash);
+event RevisionAnchored(bytes32 indexed deployment, uint64 sequence, uint64 order, uint64 height, bytes32 blockHash);
 ```
 
 The byte fields are those of D's `LightBlock` for the revision, decoded from
@@ -101,7 +101,9 @@ and `VeraModule::record_anchor` records it:
    [receipt-commitments.md](receipt-commitments.md#ancestry)). The tip is the
    latest anchor recorded in the current term, or else that term's cut. The
    first anchor of a deployment in term 0 has no tip and starts the chain.
-6. S stores the new record, numbered one above the previous anchor.
+6. S stores the new record, numbered one above D's previous anchor
+   (`sequence`) and one above the previous anchor S recorded of any
+   deployment (`order`).
 
 Steps 1, 2 and the proof check of step 5 run in `vera-executor`, which holds
 the consensus types; the module receives the verified block's fields and the
@@ -122,7 +124,7 @@ A refused anchor has a failed receipt from module `anchor` (code 5):
 
 ### The records
 
-The latest anchor is a constant-size JSON value at `"anchor/v1/" ||
+The latest anchor is a constant-size JSON value at `"anchor/v2/" ||
 hex(deployment)`:
 
 | Field | Meaning |
@@ -130,24 +132,33 @@ hex(deployment)`:
 | `deployment` | The identifier above |
 | `consensus_key` | D's canonical consensus key |
 | `sequence` | How many anchors D has; 1 for the first |
+| `order` | How many anchors S has recorded, of every deployment; 1 for the first |
 | `height`, `block_hash`, `term`, `timestamp` | The anchored block |
 | `module_state_root` | The anchored block's native module root |
 | `anchored_at` | Height of S's revision that recorded it |
 
 `AnchorRecord::decode` refuses a record that does not name the deployment its
-key belongs to or whose key is not 96 bytes long; a reader decodes the key
+key belongs to, whose key is not 96 bytes long, or whose `sequence` or
+`order` is 0; a reader decodes the key
 itself when it verifies a revision against it. `vera_getCurrentRecordProof`
 returns the record, or its absence, with S's light block, and
 `VeraClient::read_latest_anchor(deployment, minimum, s_key)` verifies it.
 
 Every anchor also stays in D's history, the same fields without the key, at
-`"anchor/v1/" || hex(deployment) || "/" || sequence` with the sequence as 16
+`"anchor/v2/" || hex(deployment) || "/" || sequence` with the sequence as 16
 lowercase hexadecimal digits, so the entries of a deployment are adjacent and
 in order. `VeraClient::read_anchor_history(deployment, from, limit, minimum,
 s_key)` reads up to 128 consecutive entries as one certified prefix page and
 returns the sequence the next page starts at; the page's proof shows no entry
 between them. This is how a reader that trusts only S's key walks the versions
 of D's policies in order and dates each by S's revision (`anchored_at`).
+
+S counts the anchors it records at `"anchor-order/v1"`, eight big-endian
+bytes, absent before the first anchor; `VeraModule::anchors_recorded` reads
+it. Recording an anchor writes the count in the same module update as the
+record and the history entry, so a refused anchor, whose module changes are
+rolled back, takes no number, and neither does a resubmission of the latest
+anchor, a term or a fork report. Numbers are never reused or rewritten.
 
 History is never pruned. An entry is about 0.5 KiB of key and value in S's
 identity partition, and, like every native record, in the memory of every node
@@ -159,6 +170,16 @@ rate at which they accrue.
 Within a term every anchor descends from the one before, so a deployment's
 anchors are blocks of one history in increasing height, and S's revisions
 order them in time. A new term continues the chain from its cut.
+
+Anchors of different deployments are ordered by `order`: S executes the
+requests of a block in one order, and each anchor recorded takes the next
+number, so two anchors in one block of S are never tied and every reader
+that verified both against S's key compares them the same way
+(`VerifiedSnapshot::anchored_before`). Within one deployment `order` rises
+with `sequence`. The order is that of S's records, not of D's: an anchor
+with the lower number may be of a revision its deployment made later,
+because each deployment decides when to anchor. A term that supersedes
+anchors leaves their numbers, and the anchors after it continue the count.
 
 The proof is checked against the ancestry the anchored block commits to, and
 that block is certified by D's key. A deployment whose validators follow the
@@ -347,8 +368,8 @@ needs no contact with D or S:
 3. The policy record and the three complete prefixes verify against that
    module root.
 
-`VerifiedSnapshot` carries the anchor (with its `sequence`), the height and
-time of S's revision it was read at, and the policy state.
+`VerifiedSnapshot` carries the anchor (with its `sequence` and `order`), the
+height and time of S's revision it was read at, and the policy state.
 `VerifiedSnapshot::check(request)` evaluates an access request with the shared
 ACP evaluator, the same one current permission evidence replays; a read outside
 the snapshot is an error, never a denial.
@@ -361,7 +382,7 @@ S held that revision as D's latest anchor at S's stated revision. A reader:
 - keeps the highest anchor `sequence` it has verified for D, and refuses a
   snapshot below it: `VerifiedSnapshot::ensure_current(&latest)` returns
   `Stale` when `latest` is newer, and `Conflict` if S ever shows two records
-  with one sequence;
+  with one sequence that differ in block or `order`;
 - reads D's terms above the snapshot anchor's own term
   (`read_anchor_terms_above(deployment, anchor.term, ...)`; a term at or
   below it was recorded before the anchor and cannot void it) and refuses a
@@ -374,6 +395,10 @@ S held that revision as D's latest anchor at S's stated revision. A reader:
   the minimum;
 - decides how old an anchor it accepts offline, from the anchor's `timestamp`
   and the S revision's timestamp.
+
+`order` tells which of two anchors S recorded first, not whether either is
+current: a reader that compares snapshots of two deployments checks each
+for freshness as above.
 
 Offline, a reader cannot know whether D has anchored since, whether D revoked
 something without anchoring, whether D switched devices, or whether D's key is
@@ -403,8 +428,8 @@ Blocks carry their ancestry, which raised the block format to 2
 ([receipt-commitments.md](receipt-commitments.md#format-versions)): a
 deployment and the deployment that anchors it run releases of the same block
 format, because S decodes D's block. Anchor, history, term, fork, registration
-and submitter records live in the existing identity partition under their own
-prefixes, so the module state root, the four native log targets and the
+and submitter records and the anchor count live in the existing identity
+partition under their own keys, so the module state root, the four native log targets and the
 receipt commitment keep their structure. Administrative requests gained three
 commands. Receipts can name refusal module code 5 and refusal kinds 20 and 21;
 both are committed through the receipt commitment, so every validator must run
@@ -425,6 +450,9 @@ a release that knows them.
 - S decodes one block format. Accepting an older or newer format of D would
   be a second decoder in `vera_domain::light_block::decode_block`, selected by
   the block's first byte; nothing activates a format in protocol.
+- `order` orders S's records of anchors. It says nothing of when D made the
+  anchored revisions, nor of anchors other deployments hold of the same
+  deployments.
 - History, terms and forks are never pruned (see above for the size). Every
   read of them is a page or a single record, so no read stops working as they
   grow.

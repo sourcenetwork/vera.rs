@@ -749,3 +749,4 @@ mod page;
 mod policy;
 
 mod objects;
+mod registrations;

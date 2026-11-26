@@ -10,7 +10,9 @@
 //! term the deployment's operators certified last. A certified term moves the
 //! chain's tip to its cut and supersedes the anchors above it. A finalized block that does not descend from the latest
 //! anchor is recorded as a fork. Every anchor stays in the deployment's
-//! history, in sequence order. Records are kept in the identity partition
+//! history, in sequence order, and takes the next number of one count across
+//! every deployment, so anchors of different deployments compare in the order
+//! they were recorded. Records are kept in the identity partition
 //! under the deployment's identifier, which is derived from the key, so
 //! nobody can record revisions under another deployment's identifier.
 
@@ -20,6 +22,7 @@ mod deployment;
 mod error;
 mod fork;
 mod history;
+mod order;
 mod record;
 mod revision;
 mod submitter;
@@ -33,6 +36,7 @@ pub use deployment::{
 pub use error::AnchorError;
 pub use fork::{ForkRecord, MAX_FORK_RECORD_BYTES, fork_block_of_key, fork_key, fork_prefix};
 pub use history::{AnchorEntry, MAX_ANCHOR_ENTRY_BYTES, anchor_entry_key, anchor_history_prefix};
+pub use order::{ANCHOR_ORDER_KEY, decode_order};
 pub use record::{
     AnchorRecord, CONSENSUS_KEY_BYTES, MAX_ANCHOR_RECORD_BYTES, anchor_key, deployment_id,
 };
@@ -120,6 +124,7 @@ impl VeraModule {
             deployment,
             consensus_key: registered.consensus_key,
             sequence: latest.map_or(1, |latest| latest.sequence + 1),
+            order: self.next_anchor_order()?,
             height: revision.height,
             block_hash: revision.block_hash,
             term: revision.term,
