@@ -5,6 +5,59 @@ use sha2::{Digest as _, Sha256};
 
 use super::Assertion;
 
+/// Assertions captured from Chrome's virtual authenticator by
+/// `tools/webauthn-vectors/capture.mjs`, all by the key of
+/// `Authenticator::new([0x2a; 32])`.
+pub const CHROME_VECTORS: &str = include_str!("chrome_vectors.json");
+
+/// One captured assertion, its bytes in hexadecimal.
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct ChromeVector {
+    /// What the digest approves: `digest` for an arbitrary one,
+    /// `administrative` or `token` for the fixed request and delegation the
+    /// capture script names.
+    pub purpose: String,
+    /// `extra` when Chrome added `other_keys_can_be_added_here`, else `plain`.
+    pub client_data_form: String,
+    /// The credential's `did:key`.
+    pub did: String,
+    /// The uncompressed SEC1 public key.
+    pub public_key: String,
+    /// The challenge's 32 bytes.
+    pub digest: String,
+    /// The 37 bytes of authenticator data.
+    pub authenticator_data: String,
+    /// The client data JSON, as text.
+    pub client_data_json: String,
+    /// The signature as Chrome returned it.
+    pub der_signature: String,
+    /// The raw low-S `r || s`.
+    pub signature: String,
+}
+
+/// The captured assertion for `purpose`.
+///
+/// # Panics
+///
+/// When no vector has that purpose.
+#[must_use]
+pub fn chrome_vector(purpose: &str) -> ChromeVector {
+    chrome_vectors()
+        .into_iter()
+        .find(|vector| vector.purpose == purpose)
+        .expect("a captured vector for the purpose")
+}
+
+/// Every captured assertion.
+///
+/// # Panics
+///
+/// Never: the vectors are checked in.
+#[must_use]
+pub fn chrome_vectors() -> Vec<ChromeVector> {
+    serde_json::from_str(CHROME_VECTORS).expect("valid vectors")
+}
+
 /// Flags of a synced passkey's assertion: user present and verified,
 /// backup eligible and backed up.
 pub const SYNCED_FLAGS: u8 = 0x1d;

@@ -182,3 +182,56 @@ fn assertion_fields_are_lowercase_hex_within_bounds() {
             .is_none()
     );
 }
+
+#[test]
+fn an_assertion_on_an_ed25519_entry_is_refused() {
+    use ed25519_dalek::Signer as _;
+    let passkey = Authenticator::new([3; 32]);
+    let device = ed25519_dalek::SigningKey::from_bytes(&[4; 32]);
+    let entry = vera_crypto::actor::ed25519_did(&device.verifying_key().to_bytes()).unwrap();
+    let policy = OperatorPolicy {
+        threshold: 1,
+        keys: vec![entry],
+    };
+    let digest = request(0).signing_digest().unwrap();
+    let mut approval = approval(0, &passkey.assert(&digest));
+    for signature in [
+        approval.signature.clone(),
+        hex::encode(device.sign(&digest).to_bytes()),
+    ] {
+        approval.signature = signature;
+        let error = policy.verify_approval(&digest, &approval).unwrap_err();
+        assert!(error.to_string().contains("P-256"), "{error}");
+    }
+    approval.webauthn = None;
+    policy.verify_approval(&digest, &approval).unwrap();
+}
+
+/// An assertion Chrome made of this request's digest approves it.
+#[test]
+fn a_chrome_assertion_approves_its_request() {
+    let vector = vera_crypto::webauthn::testing::chrome_vector("administrative");
+    let digest = request(0).signing_digest().unwrap();
+    assert_eq!(hex::encode(digest), vector.digest);
+    let policy = OperatorPolicy {
+        threshold: 1,
+        keys: vec![vector.did.clone()],
+    };
+    let chrome = OperatorApproval {
+        signer: 0,
+        signature: vector.signature.clone(),
+        webauthn: Some(PasskeyAssertion::new(
+            &hex::decode(&vector.authenticator_data).unwrap(),
+            vector.client_data_json.as_bytes(),
+        )),
+    };
+    policy.verify_approval(&digest, &chrome).unwrap();
+    assert!(
+        policy
+            .verify_approval(&request(1).signing_digest().unwrap(), &chrome)
+            .is_err()
+    );
+    let (mut vera, mut acp) = deployment(policy);
+    apply(&mut vera, &mut acp, request(0), chrome).unwrap();
+    assert_eq!(vera.administration().unwrap().unwrap().sequence, 1);
+}

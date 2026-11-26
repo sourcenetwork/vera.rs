@@ -1,4 +1,4 @@
-use super::testing::{Authenticator, Signed};
+use super::testing::{self, Authenticator, Signed};
 use super::*;
 
 const DIGEST: [u8; 32] = [0x5a; 32];
@@ -198,6 +198,28 @@ fn only_a_raw_low_s_signature_by_the_key_verifies() {
     );
 }
 
+/// `r` or `s` equal to or above the P-256 group order `n` is refused.
+#[test]
+fn a_scalar_at_or_above_the_group_order_is_refused() {
+    let order =
+        hex::decode("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551").unwrap();
+    let mut order_plus_one = order.clone();
+    order_plus_one[31] += 1;
+    let signed = authenticator().assert(&DIGEST);
+    for scalar in [order, order_plus_one, vec![0xff; 32]] {
+        for half in [0..32, 32..64] {
+            let mut bad = signed.signature;
+            bad[half].copy_from_slice(&scalar);
+            assert_eq!(
+                verify(&authenticator().did(), &DIGEST, &signed.assertion(), &bad),
+                Err(WebauthnError::Signature),
+                "{}",
+                hex::encode(bad)
+            );
+        }
+    }
+}
+
 #[test]
 fn a_raw_signature_of_the_digest_is_not_an_assertion_and_back() {
     use p256::ecdsa::signature::hazmat::PrehashSigner as _;
@@ -259,28 +281,29 @@ fn token_signature_segments_split_and_join() {
     assert!(split_token_signature(&vec![b'{'; 101 + MAX_CLIENT_DATA_BYTES]).is_ok());
 }
 
-/// Assertions captured from Chrome's virtual authenticator by
-/// `tools/webauthn-vectors/capture.mjs`, with and without the member Chrome
-/// inserts at random.
+/// Assertions captured from Chrome's virtual authenticator, with and without
+/// the member Chrome inserts at random, and of a real administrative digest
+/// and token challenge.
 #[test]
 fn chrome_assertions_verify() {
-    let vectors: Vec<serde_json::Map<String, serde_json::Value>> =
-        serde_json::from_str(include_str!("chrome_vectors.json")).unwrap();
     let mut forms = Vec::new();
-    for vector in &vectors {
-        let field = |name: &str| vector[name].as_str().unwrap();
-        let bytes = |name: &str| hex::decode(field(name)).unwrap();
-        let did = field("did");
-        assert_eq!(crate::actor::p256_did(&bytes("public_key")).unwrap(), did);
-        let digest: [u8; 32] = bytes("digest").try_into().unwrap();
-        let authenticator_data = bytes("authenticator_data");
+    for vector in testing::chrome_vectors() {
+        let bytes = |text: &str| hex::decode(text).unwrap();
+        let did = vector.did.as_str();
+        assert_eq!(
+            crate::actor::p256_did(&bytes(&vector.public_key)).unwrap(),
+            did
+        );
+        assert_eq!(Authenticator::new([0x2a; 32]).did(), did);
+        let digest: [u8; 32] = bytes(&vector.digest).try_into().unwrap();
+        let authenticator_data = bytes(&vector.authenticator_data);
         let assertion = Assertion {
             authenticator_data: &authenticator_data,
-            client_data_json: field("client_data_json").as_bytes(),
+            client_data_json: vector.client_data_json.as_bytes(),
         };
-        let signature = bytes("signature");
+        let signature = bytes(&vector.signature);
         assert_eq!(
-            crate::actor::canonical_der_signature(did, &bytes("der_signature")).unwrap(),
+            crate::actor::canonical_der_signature(did, &bytes(&vector.der_signature)).unwrap(),
             signature
         );
         verify(did, &digest, &assertion, &signature).unwrap();
@@ -288,10 +311,15 @@ fn chrome_assertions_verify() {
             verify(did, &[0; 32], &assertion, &signature),
             Err(WebauthnError::Challenge)
         );
-        forms.push(field("client_data_form").to_owned());
+        if vector.purpose == "digest" {
+            forms.push(vector.client_data_form);
+        }
     }
     forms.sort();
     assert_eq!(forms, ["extra", "plain"]);
+    for purpose in ["administrative", "token"] {
+        assert_eq!(testing::chrome_vector(purpose).purpose, purpose);
+    }
 }
 
 #[path = "client_data_tests.rs"]

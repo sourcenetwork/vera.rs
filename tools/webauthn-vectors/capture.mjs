@@ -3,12 +3,16 @@
 // Usage: node tools/webauthn-vectors/capture.mjs [chrome] > vectors.json
 //
 // Chrome runs headless with a CTAP2 internal authenticator that verifies the
-// user. One ES256 credential is registered on http://localhost, and assertions
-// are requested for fixed digests until both client data forms Chrome emits
-// have been seen: with and without `other_keys_can_be_added_here`.
+// user. One ES256 credential on http://localhost holds the fixed P-256 key
+// below, so its did:key is known before capture. Assertions are requested for
+// fixed digests until both client data forms Chrome emits have been seen:
+// with and without `other_keys_can_be_added_here`. Two more approve real
+// digests of that key: the administrative request and the delegation token
+// that the vera-modules and vera-client tests rebuild and compare with these
+// digests.
 
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createECDH, createHash, createPrivateKey } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -18,6 +22,14 @@ const chrome = process.argv[2]
   ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const N = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
 const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+// The secret scalar of `Authenticator::new([0x2a; 32])` in vera-crypto.
+const SECRET = Buffer.alloc(32, 0x2a);
+// `AdministrativeRequest { genesis_id: [7; 32], sequence: 0, expires_at: 100,
+// command: SetPolicyOperationLead(1200) }.signing_digest()`.
+const ADMINISTRATIVE = '7f5e040f523ba03d4fa247af75fef8abbd92e121b171e6a3b68741f87b9acee0';
+// `UnsignedToken::delegation(<this key's did>, "did:key:worker", 9001, 50, 100,
+// DelegationScope::CreatePolicy).webauthn_challenge()`.
+const TOKEN = '6cb84aeec97cfbf389479d08359fa9f72479b39f33a19f4288a48d692b2ea865';
 
 const hex = (bytes) => Buffer.from(bytes).toString('hex');
 const sha256 = (text) => createHash('sha256').update(text).digest();
@@ -98,16 +110,6 @@ function session(url) {
 const PAGE = `<!doctype html><meta charset="utf-8"><script>
 const b64 = (buffer) => btoa(String.fromCharCode(...new Uint8Array(buffer)));
 const bytes = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
-window.register = async () => {
-  const credential = await navigator.credentials.create({ publicKey: {
-    rp: { id: 'localhost', name: 'vectors' },
-    user: { id: new Uint8Array(16), name: 'vectors', displayName: 'vectors' },
-    challenge: new Uint8Array(32),
-    pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
-    authenticatorSelection: { userVerification: 'required', residentKey: 'required' },
-  } });
-  return { id: b64(credential.rawId), spki: b64(credential.response.getPublicKey()) };
-};
 window.assert = async (id, digest) => {
   const assertion = await navigator.credentials.get({ publicKey: {
     rpId: 'localhost',
@@ -151,29 +153,36 @@ async function main() {
     await page.send('Page.navigate', { url: `http://localhost:${server.address().port}/` });
     await new Promise((resolve) => setTimeout(resolve, 1000));
     await page.send('WebAuthn.enable', { enableUI: false });
-    await page.send('WebAuthn.addVirtualAuthenticator', { options: {
+    const { authenticatorId } = await page.send('WebAuthn.addVirtualAuthenticator', { options: {
       protocol: 'ctap2', transport: 'internal', hasResidentKey: true,
       hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true,
     } });
-    const credential = await evaluate(page, 'window.register()');
-    const spki = Buffer.from(credential.spki, 'base64');
-    const point = spki.subarray(spki.length - 65);
+    const ecdh = createECDH('prime256v1');
+    ecdh.setPrivateKey(SECRET);
+    const point = ecdh.getPublicKey();
+    const url = (bytes) => bytes.toString('base64url');
+    const pkcs8 = createPrivateKey({ format: 'jwk', key: {
+      kty: 'EC', crv: 'P-256', d: url(SECRET),
+      x: url(point.subarray(1, 33)), y: url(point.subarray(33)),
+    } }).export({ format: 'der', type: 'pkcs8' });
+    const credential = { id: Buffer.alloc(16, 1).toString('base64') };
+    await page.send('WebAuthn.addCredential', { authenticatorId, credential: {
+      credentialId: credential.id, isResidentCredential: true, rpId: 'localhost',
+      privateKey: pkcs8.toString('base64'), userHandle: Buffer.alloc(16).toString('base64'),
+      signCount: 0,
+    } });
     const actor = did(point);
     const vectors = [];
-    const seen = new Set();
-    for (let attempt = 0; attempt < 200 && seen.size < 2; attempt += 1) {
-      const digest = sha256(`vera passkey vector ${attempt}`);
+    const capture = async (purpose, digest) => {
       const signed = await evaluate(
         page, `window.assert(${JSON.stringify(credential.id)}, ${JSON.stringify(digest.toString('base64'))})`,
       );
       const clientData = Buffer.from(signed.clientDataJSON, 'base64');
-      const form = clientData.includes('other_keys_can_be_added_here') ? 'extra' : 'plain';
-      if (seen.has(form)) continue;
-      seen.add(form);
       const der = Buffer.from(signed.signature, 'base64');
-      vectors.push({
+      return {
         source: version.result.value,
-        client_data_form: form,
+        purpose,
+        client_data_form: clientData.includes('other_keys_can_be_added_here') ? 'extra' : 'plain',
         did: actor,
         public_key: hex(point),
         digest: hex(digest),
@@ -181,8 +190,17 @@ async function main() {
         client_data_json: clientData.toString('utf8'),
         der_signature: hex(der),
         signature: rawSignature(der),
-      });
+      };
+    };
+    const seen = new Set();
+    for (let attempt = 0; attempt < 200 && seen.size < 2; attempt += 1) {
+      const vector = await capture('digest', sha256(`vera passkey vector ${attempt}`));
+      if (seen.has(vector.client_data_form)) continue;
+      seen.add(vector.client_data_form);
+      vectors.push(vector);
     }
+    vectors.push(await capture('administrative', Buffer.from(ADMINISTRATIVE, 'hex')));
+    vectors.push(await capture('token', Buffer.from(TOKEN, 'hex')));
     page.close();
     process.stdout.write(`${JSON.stringify(vectors, null, 2)}\n`);
   } finally {
