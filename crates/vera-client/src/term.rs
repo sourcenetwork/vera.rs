@@ -3,7 +3,10 @@
 use alloy_primitives::{B256, FixedBytes};
 use k256_native::ecdsa::{Signature, SigningKey, signature::hazmat::PrehashSigner as _};
 
-pub use vera_domain::{TermApproval, TermCertificate, TermChange, TermCut, TermError};
+pub use crate::passkey_approval::webauthn_term_approval;
+pub use vera_domain::{
+    TermApproval, TermCertificate, TermChange, TermCut, TermError, TermPasskeyAssertion,
+};
 pub use vera_permission::verify_term_certificate;
 
 use crate::{ClientError, VeraClient, administration::OperatorPolicy};

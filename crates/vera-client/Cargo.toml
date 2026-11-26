@@ -45,6 +45,7 @@ ed25519-dalek.workspace = true
 
 [dev-dependencies]
 vera-domain = { workspace = true, features = ["testing"] }
+vera-crypto = { workspace = true, features = ["testing"] }
 k256.workspace = true
 p256.workspace = true
 ark-std.workspace = true

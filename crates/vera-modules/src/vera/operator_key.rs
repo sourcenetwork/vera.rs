@@ -40,10 +40,10 @@ pub(super) fn verify(
     assertion: Option<&Assertion<'_>>,
 ) -> Result<(), String> {
     let did = did(entry)?;
-    match assertion {
-        None => actor::verify_digest(&did, digest, signature).map_err(|error| error.to_string()),
-        Some(assertion) => {
+    assertion.map_or_else(
+        || actor::verify_digest(&did, digest, signature).map_err(|error| error.to_string()),
+        |assertion| {
             webauthn::verify(&did, digest, assertion, signature).map_err(|error| error.to_string())
-        }
-    }
+        },
+    )
 }

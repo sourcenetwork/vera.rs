@@ -32,6 +32,7 @@ mod error;
 mod native_tx;
 /// Signed threshold-service node commands and certified records.
 pub mod nodes;
+mod passkey_approval;
 mod permission;
 /// Certified native policy discovery.
 pub mod policies;

@@ -2,8 +2,10 @@
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use vera_crypto::jwt::{DelegationScope, JwtClaims};
+use sha2::{Digest as _, Sha256};
+use vera_crypto::jwt::{DELEGATION_TOKEN_TYPE, DelegationScope, JwtClaims, WEBAUTHN_TOKEN_TYPE};
 use vera_crypto::operation::{DEFAULT_OPERATION_LEAD, MAX_OPERATION_LEAD};
+use vera_crypto::webauthn;
 
 use crate::error::ClientError;
 
@@ -15,9 +17,15 @@ use crate::error::ClientError;
 ///
 /// secp256k1 (ES256K) and P-256 (ES256) keys sign the SHA-256 digest of
 /// [`signing_input`](Self::signing_input). Ed25519 keys sign the input itself.
+///
+/// A P-256 issuer may sign a delegation with a passkey instead: it asserts
+/// [`webauthn_challenge`](Self::webauthn_challenge), and
+/// [`finish_webauthn`](Self::finish_webauthn) completes the token.
 #[derive(Clone, Debug)]
 pub struct UnsignedToken {
     issuer: String,
+    token_type: String,
+    payload: String,
     input: String,
 }
 
@@ -58,7 +66,7 @@ impl UnsignedToken {
             scope,
             sub: subject,
         })?;
-        Self::new(issuer, "vera-delegation-v1+jwt", &payload)
+        Self::new(issuer, DELEGATION_TOKEN_TYPE, &payload)
     }
 
     /// One exact caller operation, bound to its ID, digest and genesis identity.
@@ -99,23 +107,67 @@ impl UnsignedToken {
             .map_err(|e| ClientError::Signing(e.to_string()))?;
         Self::new(
             &claims.iss,
-            "vera-delegation-v1+jwt",
+            DELEGATION_TOKEN_TYPE,
             &serde_json::to_string(claims)?,
         )
     }
 
     pub(crate) fn new(issuer: &str, token_type: &str, payload: &str) -> Result<Self, ClientError> {
-        let algorithm = vera_crypto::actor::algorithm(issuer)
-            .map_err(|e| ClientError::Signing(e.to_string()))?;
-        let header = format!(r#"{{"alg":"{algorithm}","typ":"{token_type}"}}"#);
+        let payload = URL_SAFE_NO_PAD.encode(payload);
         Ok(Self {
             issuer: issuer.to_owned(),
-            input: format!(
-                "{}.{}",
-                URL_SAFE_NO_PAD.encode(header),
-                URL_SAFE_NO_PAD.encode(payload)
-            ),
+            token_type: token_type.to_owned(),
+            input: signing_input(issuer, token_type, &payload)?,
+            payload,
         })
+    }
+
+    /// The challenge a passkey asserts to sign this delegation: the SHA-256
+    /// digest of the signing input under the passkey token type.
+    ///
+    /// The issuer must be a P-256 `did:key`, and relay tokens cannot be
+    /// signed with a passkey. Pass these bytes as the `challenge` of
+    /// `navigator.credentials.get`, or its platform equivalent, with user
+    /// verification required.
+    pub fn webauthn_challenge(&self) -> Result<[u8; 32], ClientError> {
+        Ok(Sha256::digest(self.webauthn_input()?.as_bytes()).into())
+    }
+
+    /// Complete the token with a passkey assertion of
+    /// [`webauthn_challenge`](Self::webauthn_challenge): the authenticator
+    /// data, the client data JSON exactly as returned, and the ASN.1 DER
+    /// signature. An assertion that does not verify is an error.
+    pub fn finish_webauthn(
+        self,
+        authenticator_data: &[u8],
+        client_data_json: &[u8],
+        signature: &[u8],
+    ) -> Result<String, ClientError> {
+        let input = self.webauthn_input()?;
+        let signature = vera_crypto::actor::canonical_der_signature(&self.issuer, signature)
+            .map_err(|e| ClientError::Signing(e.to_string()))?;
+        let segment = webauthn::join_token_signature(
+            &webauthn::Assertion {
+                authenticator_data,
+                client_data_json,
+            },
+            &signature,
+        );
+        let token = format!("{input}.{}", URL_SAFE_NO_PAD.encode(segment));
+        vera_crypto::jwt::verify_bearer_token(&token)
+            .map_err(|e| ClientError::Signing(e.to_string()))?;
+        Ok(token)
+    }
+
+    fn webauthn_input(&self) -> Result<String, ClientError> {
+        let p256 = vera_crypto::actor::key_type(&self.issuer)
+            .is_ok_and(|key| key == vera_crypto::actor::ActorKeyType::P256);
+        if !p256 || self.token_type != DELEGATION_TOKEN_TYPE {
+            return Err(ClientError::Signing(
+                "only a P-256 issuer's delegation can be signed with a passkey".into(),
+            ));
+        }
+        signing_input(&self.issuer, WEBAUTHN_TOKEN_TYPE, &self.payload)
     }
 
     /// The bytes the issuer's key signs.
@@ -152,6 +204,13 @@ impl UnsignedToken {
     pub(crate) fn assemble(self, signature: &[u8]) -> String {
         format!("{}.{}", self.input, URL_SAFE_NO_PAD.encode(signature))
     }
+}
+
+fn signing_input(issuer: &str, token_type: &str, payload: &str) -> Result<String, ClientError> {
+    let algorithm =
+        vera_crypto::actor::algorithm(issuer).map_err(|e| ClientError::Signing(e.to_string()))?;
+    let header = format!(r#"{{"alg":"{algorithm}","typ":"{token_type}"}}"#);
+    Ok(format!("{}.{payload}", URL_SAFE_NO_PAD.encode(header)))
 }
 
 #[cfg(test)]
