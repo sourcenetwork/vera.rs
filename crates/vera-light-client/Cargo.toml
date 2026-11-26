@@ -32,7 +32,7 @@ tokio-tungstenite.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-vera-backend.workspace = true
+vera-backend = { path = "../vera-backend" }
 commonware-consensus.workspace = true
 commonware-cryptography.workspace = true
 commonware-glue.workspace = true
