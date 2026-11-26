@@ -478,6 +478,16 @@ the skipped heights are not replayed.
 Consumers authenticate headers against their configured finality trust; receiving a
 notification alone does not establish its authority.
 
+`vera-light-client` is the consumer side of this material for DefraDB's query
+gate and Orbis's signing gate: `HeaderChain` follows `vera_subscribeHeaders`
+and verifies each revision's light block against a configured consensus key,
+`FreshnessPolicy` bounds revision age and clock skew, the client tracks the
+term certified last, and `AcpCache` keeps verified records per module root.
+`AcpLightClient::verify_access` evaluates fetched permission evidence with the
+shared evaluator. Consumers previously took it from Backbone as
+`acp-light-client`; its API is unchanged apart from the crate name. Its tests
+run mock nodes and need no `verad`. See `crates/vera-light-client/README.md`.
+
 ### Embedded node
 
 `vera_node::EmbeddedNode` hosts a single-validator deployment inside another
@@ -664,6 +674,7 @@ vera.rs/
         vera-harness/           # Node manager, cluster builder, observability (test-only)
         vera-indexer/           # Block/tx/light-block indexes backing RPC queries
         vera-jsonrpc/           # Native vera_* RPC and header subscriptions
+        vera-light-client/      # Proof-validated ACP cache: header sync, freshness, terms, verified reads
         vera-modules/           # ACP, Bulletin, Vera, ValidatorRegistry module logic
         vera-node/              # Validator assembly: p2p, marshal, DKG, stateful glue, RPC
         vera-permission/        # Permission/record/prefix evidence types and verification

@@ -65,6 +65,7 @@ vera-jsonrpc = { path = "crates/vera-jsonrpc", version = "=0.2.0" }
 vera-app = { path = "crates/vera-app", version = "=0.2.0" }
 vera-node = { path = "crates/vera-node", version = "=0.2.0" }
 vera-client = { path = "crates/vera-client", version = "=0.2.0" }
+vera-light-client = { path = "crates/vera-light-client", version = "=0.2.0" }
 vera-permission = { path = "crates/vera-permission", version = "=0.2.0" }
 vera-executor = { path = "crates/vera-executor", version = "=0.2.0" }
 vera-genesis = { path = "crates/vera-genesis", version = "=0.2.0" }
@@ -146,6 +147,7 @@ tower = { version = "0.5", features = ["limit"] }
 tower-http = { version = "0.6", features = ["cors"] }
 jsonrpsee = { version = "0.26", features = ["server-core", "macros", "ws-client"] }
 reqwest = { version = "0.12", features = ["json", "blocking"] }
+tokio-tungstenite = "0.26"
 
 # Concurrency
 parking_lot = "0.12"

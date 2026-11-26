@@ -1,13 +1,15 @@
 {
   "schema_version": 1,
   "roots": [
-    "vera-client"
+    "vera-client",
+    "vera-light-client"
   ],
   "packages": [
     "vera-client",
     "vera-crypto",
     "vera-domain",
     "vera-identity",
+    "vera-light-client",
     "vera-modules",
     "vera-permission"
   ]

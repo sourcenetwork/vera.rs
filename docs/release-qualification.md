@@ -29,7 +29,7 @@ repeats them for its own candidate:
 | Gate | Required result |
 | --- | --- |
 | Official Commonware source | Qualify the official `2026.10.0` registry release, including its upstream archive, synchronization and DKG boundary changes, against the selected Vera candidate. |
-| Publishable crates | Version every packaged dependency, complete package metadata and verify the registry dependency graph without workspace patches. The six-crate client closure has explicit publication boundaries, versioned internal dependencies and package metadata. `orbis-reporting` 0.0.3 and `sourcenetwork-acp` and `sourcenetwork-zanzi` 0.0.1 are published and selected from the registry, so the closure has no Git dependency. |
+| Publishable crates | Version every packaged dependency, complete package metadata and verify the registry dependency graph without workspace patches. The seven-crate client closure has explicit publication boundaries, versioned internal dependencies and package metadata. `orbis-reporting` 0.0.3 and `sourcenetwork-acp` and `sourcenetwork-zanzi` 0.0.1 are published and selected from the registry, so the closure has no Git dependency. |
 | Release automation | Validate versions and packages and produce tagged daemon assets with checksums and provenance from the same commit. The release workflow builds and compares two clean daemon artifacts and creates a draft GitHub release for an existing matching version tag. Keep crate uploads manual; CI needs no crates.io publishing credentials. |
 | Candidate validation | Run focused native authorization, membership, receipt and recovery checks affected by the dependency change. Verify the packaged client from a clean registry consumer, independent trust configuration, and the chosen daemon artifact. Reuse earlier source-bound evidence for unchanged code. |
 | Publication handoff | Record exact source, versions, dependencies, target and limitations. Provide package checksums and dependency-ordered commands for the maintainer to publish manually, followed by registry installation and download checks. Crate uploads belong to the maintainer, not the automated workflow. |
@@ -41,9 +41,9 @@ below remain requirements for the maintainer's later crates.io publication.
 See [SDK access](manual-release.md#sdk-access).
 
 The workspace version names the release candidate; `0.1.0` was the first.
-The approved packaging scope is `vera-client` and its five required Vera
-libraries, plus daemon binaries. An installable `verad` crate, test
-harnesses and development tools are outside the published set.
+The approved packaging scope is `vera-client`, `vera-light-client` and their
+five required Vera libraries, plus daemon binaries. An installable `verad`
+crate, test harnesses and development tools are outside the published set.
 Crates.io cannot reproduce Git-only or path-only dependencies from this checkout;
 adding version strings alone does not establish that the registry packages have
 the APIs or behavior qualified here. See Cargo's
