@@ -51,6 +51,15 @@ fn native_from(secret: u64, nonce: u64, calldata: Vec<u8>) -> Bytes {
 /// Module state in which the operator registered `deployments` and granted
 /// the signer with secret 13 the right to submit for each.
 fn registered(deployments: &[&TestDeployment]) -> ModuleState {
+    registered_under(deployments, None)
+}
+
+/// [`registered`], with `operators` approving the deployments' term changes
+/// instead of the registering operator.
+fn registered_under(
+    deployments: &[&TestDeployment],
+    operators: Option<&OperatorPolicy>,
+) -> ModuleState {
     use k256::ecdsa::{Signature, SigningKey, signature::hazmat::PrehashSigner as _};
     let operator = SigningKey::from_bytes(&[1; 32].into()).unwrap();
     let policy = OperatorPolicy {
@@ -69,7 +78,7 @@ fn registered(deployments: &[&TestDeployment]) -> ModuleState {
             AdministrativeCommand::RegisterDeployment(DeploymentRegistration {
                 consensus_key: hex::encode(&key),
                 genesis_id: [9; 32],
-                operators: policy.clone(),
+                operators: operators.unwrap_or(&policy).clone(),
             }),
             AdministrativeCommand::SetAnchorSubmitter(AnchorSubmitterGrant {
                 deployment: deployment_id(&key).0,
@@ -93,6 +102,7 @@ fn registered(deployments: &[&TestDeployment]) -> ModuleState {
             approvals: vec![OperatorApproval {
                 signer: 0,
                 signature: hex::encode(signature.to_bytes()),
+                webauthn: None,
             }],
         };
         modules
@@ -411,6 +421,7 @@ fn term_call(
         approvals: vec![TermApproval {
             signer: 0,
             signature: FixedBytes::from_slice(&signature.to_bytes()),
+            webauthn: None,
         }],
     };
     IAnchor::changeTermCall {
@@ -482,4 +493,70 @@ fn a_term_is_anchored_only_under_its_certificate_and_continues_from_its_cut() {
         assert_eq!(event.blockHash.0, taken[height as usize].id().0.0);
     }
     assert_eq!(refusals(&receipts[10..11]), [RefusalKind::NotNewer]);
+}
+
+#[test]
+fn a_passkey_operator_approves_a_term_change() {
+    use vera_crypto::webauthn::testing::{Authenticator, Signed};
+    use vera_domain::{TermApproval, TermCertificate, TermChange, TermCut, TermPasskeyAssertion};
+    let deployment = TestDeployment::new(27);
+    let chain = deployment.chain(12, 1);
+    let passkey = Authenticator::new([4; 32]);
+    let operators = OperatorPolicy {
+        threshold: 1,
+        keys: vec![passkey.did()],
+    };
+    let change = TermChange {
+        genesis_id: B256::repeat_byte(9),
+        term: 1,
+        holder: B256::repeat_byte(0xd0),
+        cut: TermCut {
+            height: chain[10].height,
+            block: chain[10].id().0,
+        },
+    };
+    let call = |signed: Signed| {
+        let certificate = TermCertificate {
+            change,
+            approvals: vec![TermApproval {
+                signer: 0,
+                signature: FixedBytes::from(signed.signature),
+                webauthn: Some(TermPasskeyAssertion {
+                    authenticator_data: signed.authenticator_data.into(),
+                    client_data_json: signed.client_data_json.into(),
+                }),
+            }],
+        };
+        IAnchor::changeTermCall {
+            deployment: deployment_id(&deployment.key().encode()),
+            certificate: serde_json::to_vec(&certificate).unwrap().into(),
+        }
+        .abi_encode()
+    };
+    let mut unverified = passkey.clone();
+    unverified.flags = 0x01;
+    let txs: Vec<Bytes> = [
+        anchor_call(&deployment, &chain, 5, 5),
+        call(unverified.assert(&change.signing_digest())),
+        call(passkey.assert(&change.signing_digest())),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(nonce, call)| native(nonce as u64, call))
+    .collect();
+    let executor = VeraExecutor::new(9001);
+    executor.set_base_modules(registered_under(&[&deployment], Some(&operators)));
+    let (outcome, _) = executor
+        .execute_with_modules(
+            &BlockContext::new(1, 100, 30_000_000),
+            &txs,
+            executor.snapshot(),
+        )
+        .unwrap();
+    let receipts = outcome.receipts;
+    assert!(receipts[0].success(), "{:?}", receipts[0].refusal);
+    assert_eq!(refusals(&receipts[1..2]), [RefusalKind::InvalidProof]);
+    assert!(receipts[2].success(), "{:?}", receipts[2].refusal);
+    let event = IAnchor::TermChanged::decode_log_data(&receipts[2].logs()[0].data).unwrap();
+    assert_eq!((event.term, event.cutHeight), (1, 10));
 }

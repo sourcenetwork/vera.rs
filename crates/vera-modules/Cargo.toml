@@ -32,6 +32,7 @@ prost = "0.14"
 thiserror.workspace = true
 
 [dev-dependencies]
+vera-crypto = { workspace = true, features = ["testing"] }
 jubjub.workspace = true
 group.workspace = true
 blst = "0.3"

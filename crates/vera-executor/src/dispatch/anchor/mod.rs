@@ -7,12 +7,13 @@ mod tests;
 
 use alloy_primitives::{B256, FixedBytes};
 use alloy_sol_types::SolCall;
-use vera_domain::{FinalizedArtifacts, RefusalKind, TermCertificate};
+use vera_domain::{FinalizedArtifacts, MAX_TERM_CERTIFICATE_BYTES, RefusalKind, TermCertificate};
 use vera_modules::types::{BlockExecCtx, TxExecCtx};
 use vera_modules::vera::VeraModule;
 use vera_modules::vera::anchors::{
     AnchorError, DeploymentRecord, MAX_ANCHOR_ARTIFACT_BYTES, VerifiedTerm, abi::IAnchor,
 };
+use vera_permission::verify_term_certificate;
 
 use submission::{AnchorRefusal, AnchorSubmission, VerifiedSubmission};
 
@@ -194,9 +195,6 @@ fn admit(
     Ok((registered, verified))
 }
 
-/// Largest term certificate a term change carries, in bytes.
-const MAX_TERM_CERTIFICATE_BYTES: usize = 32 << 10;
-
 fn change_term(
     module: &mut VeraModule,
     block_ctx: &BlockExecCtx,
@@ -210,13 +208,7 @@ fn change_term(
     }
     let certificate: TermCertificate =
         serde_json::from_slice(certificate).map_err(|_| AnchorRefusal::Certificate)?;
-    let operators = &registered.operators;
-    certificate.verify(
-        &registered.genesis_id,
-        operators.threshold,
-        operators.keys.len(),
-        |signer, digest, signature| operators.verifies(signer, digest, signature),
-    )?;
+    verify_term_certificate(&certificate, &registered.genesis_id, &registered.operators)?;
     let change = certificate.change;
     let record = module.record_term(
         block_ctx,

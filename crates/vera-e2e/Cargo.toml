@@ -38,7 +38,7 @@ futures.workspace = true
 hex.workspace = true
 vera-client.workspace = true
 vera-domain = { workspace = true, features = ["testing"] }
-vera-crypto.workspace = true
+vera-crypto = { workspace = true, features = ["testing"] }
 vera-modules.workspace = true
 vera-permission.workspace = true
 vera-identity.workspace = true

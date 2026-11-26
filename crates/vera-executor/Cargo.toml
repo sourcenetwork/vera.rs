@@ -14,6 +14,7 @@ fault-injection = []
 vera-crypto.workspace = true
 vera-domain.workspace = true
 vera-modules.workspace = true
+vera-permission.workspace = true
 
 acp.workspace = true
 commonware-codec.workspace = true
@@ -28,6 +29,8 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+vera-crypto = { workspace = true, features = ["testing"] }
+sha2.workspace = true
 vera-domain = { workspace = true, features = ["testing"] }
 k256.workspace = true
 ed25519-dalek.workspace = true

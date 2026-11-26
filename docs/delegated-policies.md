@@ -17,7 +17,9 @@ the algorithm the token header must name:
 A token naming another key type's algorithm is rejected. Token records and
 revocation are keyed by the token hash, so each signature has one accepted
 encoding: a high-`s` ECDSA signature and a non-strict Ed25519 signature are
-rejected, as are small-order Ed25519 keys.
+rejected, as are small-order Ed25519 keys. A P-256 issuer's passkey form,
+below, is a distinct token type whose segment no one but the key holder can
+re-encode.
 
 A secp256k1 issuer uses Base58BTC (`z`) or unpadded Base64URL (`u`), with a
 compressed or uncompressed public key. All four spellings name one actor, which
@@ -38,6 +40,19 @@ key the library cannot hold, such as a hardware-backed key. The caller signs
 `finish_der` (ASN.1 DER ECDSA, as platform key stores return it). Either ECDSA
 `s` is accepted and normalized, and a signature the issuer's key did not make
 over that token is refused locally. The secp256k1 helpers below are unchanged.
+
+A P-256 issuer may sign a delegation with a passkey. The token names
+`{"alg":"ES256","typ":"vera-delegation-webauthn-v1+jwt"}`, and its third
+segment is the unpadded base64url of `authenticatorData || r || s ||
+clientDataJSON`: an assertion whose challenge is the SHA-256 digest of the
+signing input. `UnsignedToken::webauthn_challenge` returns that challenge and
+`finish_webauthn` completes the token from the authenticator data, client data
+JSON and DER signature. Only delegation tokens have this form; relay tokens
+remain secp256k1. The token is hashed, limited, recorded and revoked as any
+other, and its issuer is the same actor as a raw ES256 token by that key. Each
+delegation costs the user an authenticator prompt, so size lifetimes for it.
+[passkeys.md](passkeys.md) gives the verification rules and what an assertion
+does not prove; the credential must be dedicated to Vera.
 
 The supported scopes are separate:
 

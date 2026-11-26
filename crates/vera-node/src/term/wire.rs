@@ -2,11 +2,16 @@
 
 use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};
-use vera_domain::TermCertificate;
+use vera_domain::{MAX_TERM_CERTIFICATE_BYTES, TermCertificate};
 
-/// Largest message accepted. A certificate holds at most one approval for
-/// each of the 128 operators a policy may list.
-const MAX_BYTES: usize = 64 * 1024;
+/// Bytes a status takes besides its certificate: its kind, height, block and
+/// flag.
+const STATUS_BYTES: usize = 256;
+
+/// Largest message accepted: a status carrying the largest certificate that
+/// verifies. A device holds and sends only certificates that verify, and an
+/// answer naming [`MAX_HEIGHTS`] blocks is smaller.
+const MAX_BYTES: usize = MAX_TERM_CERTIFICATE_BYTES + STATUS_BYTES;
 
 /// Most heights one question about blocks names.
 pub(crate) const MAX_HEIGHTS: usize = 256;
@@ -86,8 +91,35 @@ mod tests {
             assert_eq!(Message::decode(&message.encode()), Some(message));
         }
         assert_eq!(Message::decode(b"{\"kind\":\"vote\"}"), None);
+        assert_eq!(Message::decode(b"{\"kind\":\"status\"}"), None);
         let mut padded = Message::Query(standing).encode();
         padded.resize(MAX_BYTES + 1, b' ');
         assert_eq!(Message::decode(&padded), None);
+    }
+
+    #[test]
+    fn the_largest_messages_fit() {
+        let status = Status {
+            height: u64::MAX,
+            block: B256::repeat_byte(0xff),
+            certificate: None,
+            waiting: false,
+        };
+        for message in [Message::Query(status.clone()), Message::Status(status)] {
+            let without = message.encode().len() - "null".len();
+            assert!(
+                without + MAX_TERM_CERTIFICATE_BYTES <= MAX_BYTES,
+                "{without}"
+            );
+        }
+        let blocks = Message::Blocks {
+            floor: u64::MAX,
+            blocks: vec![(u64::MAX, B256::repeat_byte(0xff)); MAX_HEIGHTS],
+        };
+        assert!(blocks.encode().len() <= MAX_BYTES);
+        let ancestry = Message::Ancestry {
+            heights: vec![u64::MAX; MAX_HEIGHTS],
+        };
+        assert!(ancestry.encode().len() <= MAX_BYTES);
     }
 }

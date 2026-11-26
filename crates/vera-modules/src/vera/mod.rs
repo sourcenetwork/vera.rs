@@ -19,6 +19,7 @@ pub mod nodes;
 /// Encrypted documents and signing derivations.
 pub mod objects;
 mod operator_key;
+mod passkey_approval;
 /// Operator-authorized relay grants.
 pub mod relay;
 mod restoration;

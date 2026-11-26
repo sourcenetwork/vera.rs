@@ -34,6 +34,7 @@ mod native_tx;
 pub mod nodes;
 /// Certified live, archived or absent registration of one object.
 pub mod object_registration;
+mod passkey_approval;
 mod permission;
 /// Certified native policy discovery.
 pub mod policies;

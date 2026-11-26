@@ -512,12 +512,7 @@ where
             .map_err(|error| TermRefusal::Policy(error.to_string()))?
             .ok_or_else(|| TermRefusal::Policy("operator authority is not configured".into()))?
             .policy;
-        certificate.verify(
-            &self.genesis_id,
-            policy.threshold,
-            policy.keys.len(),
-            |signer, digest, signature| policy.verifies(signer, digest, signature),
-        )?;
+        vera_permission::verify_term_certificate(certificate, &self.genesis_id, &policy)?;
         Ok(())
     }
 
