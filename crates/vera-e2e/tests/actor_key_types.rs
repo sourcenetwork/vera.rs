@@ -1,4 +1,4 @@
-//! Ed25519 and P-256 actors own policies and objects through native workers.
+//! Ed25519, P-256 and passkey actors own policies and objects through native workers.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -11,6 +11,7 @@ use vera_client::{
 use vera_crypto::{
     jwt::{DelegationScope, JwtClaims},
     operation::{OperationClaim, OperationId},
+    webauthn::testing::Authenticator,
 };
 use vera_domain::ConsensusPublicKey;
 use vera_e2e::cluster::{ConsensusPreset, KeySet, TestCluster};
@@ -23,6 +24,7 @@ use vera_modules::acp::{
 enum Actor {
     Ed25519(ed25519_dalek::SigningKey),
     P256(p256::ecdsa::SigningKey),
+    Passkey(Authenticator),
 }
 
 impl Actor {
@@ -32,6 +34,7 @@ impl Actor {
             Self::P256(key) => {
                 vera_crypto::actor::p256_did(key.verifying_key().to_encoded_point(true).as_bytes())
             }
+            Self::Passkey(authenticator) => Ok(authenticator.did()),
         }
         .unwrap()
     }
@@ -46,6 +49,14 @@ impl Actor {
             Self::P256(key) => {
                 let signature: p256::ecdsa::Signature = key.sign(unsigned.signing_input());
                 unsigned.finish_der(signature.to_der().as_bytes())
+            }
+            Self::Passkey(authenticator) => {
+                let signed = authenticator.assert(&unsigned.webauthn_challenge().unwrap());
+                unsigned.finish_webauthn(
+                    &signed.authenticator_data,
+                    &signed.client_data_json,
+                    &signed.der,
+                )
             }
         }
         .unwrap()
@@ -77,7 +88,7 @@ async fn submit(
 }
 
 #[tokio::test]
-async fn ed25519_and_p256_actors_own_policies_and_objects() {
+async fn ed25519_p256_and_passkey_actors_own_policies_and_objects() {
     let deployment = 9089;
     let keys = KeySet::builder().seed(deployment).build().unwrap();
     let trusted = *keys.epoch_info().output.public().public();
@@ -116,6 +127,7 @@ async fn ed25519_and_p256_actors_own_policies_and_objects() {
     let actors = [
         Actor::Ed25519(ed25519_dalek::SigningKey::from_bytes(&[42; 32])),
         Actor::P256(p256::ecdsa::SigningKey::from_slice(&[42; 32]).unwrap()),
+        Actor::Passkey(Authenticator::new([43; 32])),
     ];
     for (index, actor) in actors.iter().enumerate() {
         let did = actor.did();
@@ -152,7 +164,7 @@ async fn ed25519_and_p256_actors_own_policies_and_objects() {
         )
         .await;
         let policy = client
-            .read_policy_page(None, 2, created, &trusted)
+            .read_policy_page(None, 3, created, &trusted)
             .await
             .unwrap()
             .records
