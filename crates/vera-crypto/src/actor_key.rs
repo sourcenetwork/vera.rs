@@ -4,12 +4,15 @@
 //! compared as DID strings. Every key therefore has one recorded spelling,
 //! [`ActorKey::canonical_did`], and one accepted signature encoding. Ed25519
 //! and P-256 keys are accepted in that spelling only; a secp256k1 key is
-//! accepted in four and recorded in one.
+//! accepted in four and recorded in one. A P-256 key may instead sign a
+//! passkey assertion ([`crate::webauthn`]), which callers carry in a form of
+//! its own; neither form verifies as the other.
 
 use k256::ecdsa::signature::hazmat::PrehashVerifier as _;
 use sha2::{Digest as _, Sha256};
 
 use crate::jwt::JwtError;
+use crate::webauthn::WebauthnError;
 
 const SECP256K1_MULTICODEC: u64 = 0xe7;
 const ED25519_MULTICODEC: u64 = 0xed;
@@ -167,6 +170,27 @@ impl ActorKey {
                 .is_ok_and(|signature| key.verify_strict(digest, &signature).is_ok()),
         };
         verified.then_some(()).ok_or(JwtError::InvalidSignature)
+    }
+
+    /// Verify a passkey assertion of `digest` with its raw 64-byte low-S signature.
+    ///
+    /// Only P-256 keys sign assertions.
+    pub(crate) fn verify_assertion(
+        &self,
+        digest: &[u8; 32],
+        assertion: &crate::webauthn::Assertion<'_>,
+        signature: &[u8],
+    ) -> Result<(), WebauthnError> {
+        let Self::P256(key) = self else {
+            return Err(WebauthnError::KeyType(self.canonical_did()));
+        };
+        let message = assertion.signed_hash(digest)?;
+        p256::ecdsa::Signature::from_slice(signature)
+            .ok()
+            .filter(|signature| signature.normalize_s().is_none())
+            .filter(|signature| key.verify_prehash(&message, signature).is_ok())
+            .map(|_| ())
+            .ok_or(WebauthnError::Signature)
     }
 
     /// The one accepted encoding of a raw fixed-width signature.

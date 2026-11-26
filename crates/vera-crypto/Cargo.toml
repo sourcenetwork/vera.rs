@@ -41,6 +41,10 @@ serde_json.workspace = true
 # Error handling
 thiserror.workspace = true
 
+[features]
+# A software authenticator that signs passkey assertions, for tests.
+testing = []
+
 [dev-dependencies]
 alloy-primitives.workspace = true
 ark-std.workspace = true

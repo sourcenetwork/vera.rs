@@ -4,11 +4,24 @@
 //! or ES256 (P-256). The issuer (`iss`) claim is a `did:key:` identifier; its
 //! key verifies the signature and fixes the algorithm the header must name.
 //! Relay tokens are ES256K only.
+//!
+//! A P-256 issuer may instead sign with a passkey. Such a token names the
+//! type [`WEBAUTHN_TOKEN_TYPE`], and its third segment is the unpadded
+//! base64url of `authenticatorData || r || s || clientDataJSON`: an assertion
+//! whose challenge is the SHA-256 digest of the signing input, the prehash
+//! ES256 signs. See [`crate::webauthn`].
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
 use crate::actor_key::ActorKey;
+
+/// Token type of a delegation signed with a key's raw signature.
+pub const DELEGATION_TOKEN_TYPE: &str = "vera-delegation-v1+jwt";
+/// Token type of a delegation signed with a passkey assertion.
+pub const WEBAUTHN_TOKEN_TYPE: &str = "vera-delegation-webauthn-v1+jwt";
+/// Token type of a relay assertion.
+pub const RELAY_TOKEN_TYPE: &str = "vera-relay-v1+jwt";
 
 /// Operations an actor authorizes a worker to submit.
 #[derive(
@@ -137,6 +150,9 @@ pub enum JwtError {
     /// Payload decoding or deserialization failed.
     #[error("payload decode: {0}")]
     PayloadDecode(String),
+    /// A passkey token's assertion does not approve its signing input.
+    #[error("invalid passkey assertion: {0}")]
+    Assertion(#[from] crate::webauthn::WebauthnError),
 }
 
 /// Verify a JWT bearer token against the key its `did:key:` issuer names.
@@ -167,7 +183,9 @@ pub fn verify_bearer_token(token: &str) -> Result<JwtClaims, JwtError> {
     if !matches!(header.alg.as_str(), "ES256K" | "EdDSA" | "ES256") {
         return Err(JwtError::UnsupportedAlgorithm(header.alg));
     }
-    if header.typ != "vera-delegation-v1+jwt" && header.typ != "vera-relay-v1+jwt" {
+    let relay = header.typ == RELAY_TOKEN_TYPE;
+    let webauthn = header.typ == WEBAUTHN_TOKEN_TYPE;
+    if !relay && !webauthn && header.typ != DELEGATION_TOKEN_TYPE {
         return Err(JwtError::InvalidClaims("unsupported token type".into()));
     }
     let payload_bytes = URL_SAFE_NO_PAD
@@ -175,7 +193,7 @@ pub fn verify_bearer_token(token: &str) -> Result<JwtClaims, JwtError> {
         .map_err(|e| JwtError::PayloadDecode(format!("payload base64: {e}")))?;
     let raw: JwtClaims = serde_json::from_slice(&payload_bytes)
         .map_err(|e| JwtError::PayloadDecode(format!("payload JSON: {e}")))?;
-    if raw.relay.is_some() != (header.typ == "vera-relay-v1+jwt") {
+    if raw.relay.is_some() != relay {
         return Err(JwtError::InvalidClaims(
             "token type and relay claims differ".into(),
         ));
@@ -183,7 +201,8 @@ pub fn verify_bearer_token(token: &str) -> Result<JwtClaims, JwtError> {
 
     let issuer = ActorKey::from_did(&raw.iss)?;
     if issuer.algorithm() != header.alg
-        || (raw.relay.is_some() && !matches!(issuer, ActorKey::Secp256k1(_)))
+        || (relay && !matches!(issuer, ActorKey::Secp256k1(_)))
+        || (webauthn && !matches!(issuer, ActorKey::P256(_)))
     {
         return Err(JwtError::UnsupportedAlgorithm(header.alg));
     }
@@ -191,7 +210,14 @@ pub fn verify_bearer_token(token: &str) -> Result<JwtClaims, JwtError> {
         .decode(sig_b64)
         .map_err(|e| JwtError::MalformedToken(format!("signature base64: {e}")))?;
     let signing_input = format!("{header_b64}.{payload_b64}");
-    issuer.verify(signing_input.as_bytes(), &sig_bytes)?;
+    if webauthn {
+        let (assertion, signature) = crate::webauthn::split_token_signature(&sig_bytes)?;
+        let digest: [u8; 32] =
+            <sha2::Sha256 as sha2::Digest>::digest(signing_input.as_bytes()).into();
+        issuer.verify_assertion(&digest, &assertion, signature)?;
+    } else {
+        issuer.verify(signing_input.as_bytes(), &sig_bytes)?;
+    }
 
     if raw.sub.is_empty() || raw.nbf > raw.iat || raw.iat >= raw.exp {
         return Err(JwtError::InvalidClaims(
@@ -227,6 +253,10 @@ pub fn matches_issuer(issuer: &str, caller: &str) -> bool {
 #[cfg(test)]
 #[path = "jwt_key_type_tests.rs"]
 mod key_type_tests;
+
+#[cfg(test)]
+#[path = "jwt_webauthn_tests.rs"]
+mod webauthn_tests;
 
 #[cfg(test)]
 mod tests {
