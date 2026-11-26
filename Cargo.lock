@@ -6191,6 +6191,7 @@ dependencies = [
  "vera-domain",
  "vera-identity",
  "vera-modules",
+ "vera-permission",
 ]
 
 [[package]]
@@ -6374,6 +6375,7 @@ dependencies = [
  "vera-indexer",
  "vera-jsonrpc",
  "vera-modules",
+ "vera-permission",
  "zeroize",
 ]
 
