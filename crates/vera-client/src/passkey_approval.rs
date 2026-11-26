@@ -13,7 +13,6 @@
 //! server obtain an approval of any digest.
 
 use alloy_primitives::{Bytes, FixedBytes};
-use vera_crypto::webauthn::Assertion;
 use vera_domain::{TermApproval, TermChange, TermPasskeyAssertion};
 use vera_modules::vera::administration::{
     AdministrativeRequest, OperatorApproval, OperatorPolicy, PasskeyAssertion,
@@ -58,29 +57,20 @@ pub fn webauthn_term_approval(
     client_data_json: &[u8],
     signature: &[u8],
 ) -> Result<TermApproval, ClientError> {
-    let signature = raw_signature(policy, signer, signature)?;
-    let assertion = Assertion {
-        authenticator_data,
-        client_data_json,
-    };
-    if !policy.verifies(
+    let approval = TermApproval {
         signer,
-        &change.signing_digest(),
-        &signature,
-        Some(&assertion),
-    ) {
-        return Err(ClientError::Signing(
-            "assertion is not the operator's approval of this term change".into(),
-        ));
-    }
-    Ok(TermApproval {
-        signer,
-        signature: FixedBytes::from(signature),
+        signature: FixedBytes::from(raw_signature(policy, signer, signature)?),
         webauthn: Some(TermPasskeyAssertion {
             authenticator_data: Bytes::copy_from_slice(authenticator_data),
             client_data_json: Bytes::copy_from_slice(client_data_json),
         }),
-    })
+    };
+    if !vera_permission::approves_term(policy, &approval, &change.signing_digest()) {
+        return Err(ClientError::Signing(
+            "assertion is not the operator's approval of this term change".into(),
+        ));
+    }
+    Ok(approval)
 }
 
 /// The raw low-S form of the DER signature an authenticator returns.

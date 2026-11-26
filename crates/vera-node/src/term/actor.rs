@@ -7,7 +7,6 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 use alloy_primitives::B256;
 use commonware_p2p::{Receiver, Recipients, Sender};
 use commonware_runtime::{Supervisor as _, tokio::Context};
-use vera_crypto::webauthn::Assertion;
 use vera_domain::{PublicKey, TermCertificate, TermChange, TermCut};
 use vera_executor::SharedModuleState;
 use vera_indexer::BlockIndex;
@@ -513,23 +512,7 @@ where
             .map_err(|error| TermRefusal::Policy(error.to_string()))?
             .ok_or_else(|| TermRefusal::Policy("operator authority is not configured".into()))?
             .policy;
-        certificate.verify(
-            &self.genesis_id,
-            policy.threshold,
-            policy.keys.len(),
-            |approval, digest| {
-                let assertion = approval.webauthn.as_ref().map(|webauthn| Assertion {
-                    authenticator_data: &webauthn.authenticator_data,
-                    client_data_json: &webauthn.client_data_json,
-                });
-                policy.verifies(
-                    approval.signer,
-                    digest,
-                    &approval.signature.0,
-                    assertion.as_ref(),
-                )
-            },
-        )?;
+        vera_permission::verify_term_certificate(certificate, &self.genesis_id, &policy)?;
         Ok(())
     }
 

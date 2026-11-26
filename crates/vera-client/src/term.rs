@@ -70,16 +70,17 @@ fn checked(
     let signature: [u8; 64] = signature
         .try_into()
         .map_err(|_| ClientError::Signing("operator signature must contain 64 bytes".into()))?;
-    if !policy.verifies(signer, &change.signing_digest(), &signature, None) {
+    let approval = TermApproval {
+        signer,
+        signature: FixedBytes::from(signature),
+        webauthn: None,
+    };
+    if !vera_permission::approves_term(policy, &approval, &change.signing_digest()) {
         return Err(ClientError::Signing(
             "signature is not the operator's approval of this term change".into(),
         ));
     }
-    Ok(TermApproval {
-        signer,
-        signature: FixedBytes::from(signature),
-        webauthn: None,
-    })
+    Ok(approval)
 }
 
 impl VeraClient {

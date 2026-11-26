@@ -40,6 +40,7 @@ vera-identity.workspace = true
 vera-indexer.workspace = true
 vera-jsonrpc.workspace = true
 vera-modules.workspace = true
+vera-permission.workspace = true
 
 commonware-actor.workspace = true
 commonware-broadcast.workspace = true

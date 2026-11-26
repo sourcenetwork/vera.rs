@@ -7,13 +7,13 @@ mod tests;
 
 use alloy_primitives::{B256, FixedBytes};
 use alloy_sol_types::SolCall;
-use vera_crypto::webauthn::Assertion;
 use vera_domain::{FinalizedArtifacts, RefusalKind, TermCertificate};
 use vera_modules::types::{BlockExecCtx, TxExecCtx};
 use vera_modules::vera::VeraModule;
 use vera_modules::vera::anchors::{
     AnchorError, DeploymentRecord, MAX_ANCHOR_ARTIFACT_BYTES, VerifiedTerm, abi::IAnchor,
 };
+use vera_permission::verify_term_certificate;
 
 use submission::{AnchorRefusal, AnchorSubmission, VerifiedSubmission};
 
@@ -211,24 +211,7 @@ fn change_term(
     }
     let certificate: TermCertificate =
         serde_json::from_slice(certificate).map_err(|_| AnchorRefusal::Certificate)?;
-    let operators = &registered.operators;
-    certificate.verify(
-        &registered.genesis_id,
-        operators.threshold,
-        operators.keys.len(),
-        |approval, digest| {
-            let assertion = approval.webauthn.as_ref().map(|webauthn| Assertion {
-                authenticator_data: &webauthn.authenticator_data,
-                client_data_json: &webauthn.client_data_json,
-            });
-            operators.verifies(
-                approval.signer,
-                digest,
-                &approval.signature.0,
-                assertion.as_ref(),
-            )
-        },
-    )?;
+    verify_term_certificate(&certificate, &registered.genesis_id, &registered.operators)?;
     let change = certificate.change;
     let record = module.record_term(
         block_ctx,
