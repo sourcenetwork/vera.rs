@@ -571,11 +571,13 @@ A block carries a `term` that never decreases along a chain, and `GossipHeader`
 repeats it. A `TermCertificate` (deployment, term, holder device, cut) moves
 the active role between an account's devices; the operator policy approves it,
 raw or by passkey, and it changes no key. The node signs none: the host
-collects approvals. Messages between devices are limited to 512 KiB, enough
-for an approval by every operator a policy may list.
-`vera-domain` holds the type and digest,
+collects approvals. A certificate verifies only when its JSON encoding is at
+most `MAX_TERM_CERTIFICATE_BYTES` (32 KiB): 128 raw approvals, or at least 13
+passkey approvals. Messages between devices are limited to that plus 256
+bytes. `vera-domain` holds the type and digest,
 `vera_permission::verify_term_certificate` checks it against an
-`OperatorPolicy`, and `VeraClient` checks it against certified state.
+`OperatorPolicy` for the node, the executor and the client, and `VeraClient`
+checks it against certified state.
 
 `EmbeddedConfig::switching` names the account's devices. `hand_over` holds
 proposals, including blocks built ahead of their turn, so nothing finalizes
