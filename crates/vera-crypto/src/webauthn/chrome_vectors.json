@@ -1,0 +1,50 @@
+[
+  {
+    "source": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/158.0.0.0 Safari/537.36",
+    "purpose": "digest",
+    "client_data_form": "plain",
+    "did": "did:key:zDnaeRH1PoZ4PSSawThYR9z1ZFsDxRj2VdN93ACtMg3ck3Dxn",
+    "public_key": "040c901d423c831ca85e27c73c263ba132721bb9d7a84c4f0380b2a6756fd601331c8870234dec878504c174144fa4b14b66a651691606d8173e55bd37e381569e",
+    "digest": "2dce3405c95fd2229bb79012632616f9d1a339a0de4824ea9c9300678bb79081",
+    "authenticator_data": "49960de5880e8c687434170f6476605b8fe4aeb9a28632c7995cf3ba831d97630500000001",
+    "client_data_json": "{\"type\":\"webauthn.get\",\"challenge\":\"Lc40Bclf0iKbt5ASYyYW-dGjOaDeSCTqnJMAZ4u3kIE\",\"origin\":\"http://localhost:58171\",\"crossOrigin\":false}",
+    "der_signature": "3045022100bb97be629d87bf418b7b77805a8715ef6f93660b69d8ea1bf0a9da5f6d4ad0cd022006b3e9aa60b535b537ac068ca5a41d0bda18eb6d5c7372358ff336588363fc2d",
+    "signature": "bb97be629d87bf418b7b77805a8715ef6f93660b69d8ea1bf0a9da5f6d4ad0cd06b3e9aa60b535b537ac068ca5a41d0bda18eb6d5c7372358ff336588363fc2d"
+  },
+  {
+    "source": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/158.0.0.0 Safari/537.36",
+    "purpose": "digest",
+    "client_data_form": "extra",
+    "did": "did:key:zDnaeRH1PoZ4PSSawThYR9z1ZFsDxRj2VdN93ACtMg3ck3Dxn",
+    "public_key": "040c901d423c831ca85e27c73c263ba132721bb9d7a84c4f0380b2a6756fd601331c8870234dec878504c174144fa4b14b66a651691606d8173e55bd37e381569e",
+    "digest": "7d69630f3b096b07504f6c11c0bb48000efc4b256d4679a8341bbe908c794051",
+    "authenticator_data": "49960de5880e8c687434170f6476605b8fe4aeb9a28632c7995cf3ba831d9763050000000d",
+    "client_data_json": "{\"type\":\"webauthn.get\",\"challenge\":\"fWljDzsJawdQT2wRwLtIAA78SyVtRnmoNBu-kIx5QFE\",\"origin\":\"http://localhost:58171\",\"crossOrigin\":false,\"other_keys_can_be_added_here\":\"do not compare clientDataJSON against a template. See https://goo.gl/yabPex\"}",
+    "der_signature": "3044022056ea61db4c41fdf69aee60734d2d673b8405ec43525cb22a72ea564184a553be022054d9efe5717c033a36113284413cb1effb89f413dfbb5f315eaadfa1a263ccd5",
+    "signature": "56ea61db4c41fdf69aee60734d2d673b8405ec43525cb22a72ea564184a553be54d9efe5717c033a36113284413cb1effb89f413dfbb5f315eaadfa1a263ccd5"
+  },
+  {
+    "source": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/158.0.0.0 Safari/537.36",
+    "purpose": "administrative",
+    "client_data_form": "plain",
+    "did": "did:key:zDnaeRH1PoZ4PSSawThYR9z1ZFsDxRj2VdN93ACtMg3ck3Dxn",
+    "public_key": "040c901d423c831ca85e27c73c263ba132721bb9d7a84c4f0380b2a6756fd601331c8870234dec878504c174144fa4b14b66a651691606d8173e55bd37e381569e",
+    "digest": "7f5e040f523ba03d4fa247af75fef8abbd92e121b171e6a3b68741f87b9acee0",
+    "authenticator_data": "49960de5880e8c687434170f6476605b8fe4aeb9a28632c7995cf3ba831d9763050000000e",
+    "client_data_json": "{\"type\":\"webauthn.get\",\"challenge\":\"f14ED1I7oD1Pokevdf74q72S4SGxceajtodB-HuazuA\",\"origin\":\"http://localhost:58171\",\"crossOrigin\":false}",
+    "der_signature": "304402201150bed48ea537a888dc75fd869c617ebfec74d20ea477d370b7b009181bb6d802207635b2ae9b54eb27ad5a37b7ee6d9d9e8f73bdbc6f98023b218d2b29f79da232",
+    "signature": "1150bed48ea537a888dc75fd869c617ebfec74d20ea477d370b7b009181bb6d87635b2ae9b54eb27ad5a37b7ee6d9d9e8f73bdbc6f98023b218d2b29f79da232"
+  },
+  {
+    "source": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/158.0.0.0 Safari/537.36",
+    "purpose": "token",
+    "client_data_form": "plain",
+    "did": "did:key:zDnaeRH1PoZ4PSSawThYR9z1ZFsDxRj2VdN93ACtMg3ck3Dxn",
+    "public_key": "040c901d423c831ca85e27c73c263ba132721bb9d7a84c4f0380b2a6756fd601331c8870234dec878504c174144fa4b14b66a651691606d8173e55bd37e381569e",
+    "digest": "6cb84aeec97cfbf389479d08359fa9f72479b39f33a19f4288a48d692b2ea865",
+    "authenticator_data": "49960de5880e8c687434170f6476605b8fe4aeb9a28632c7995cf3ba831d9763050000000f",
+    "client_data_json": "{\"type\":\"webauthn.get\",\"challenge\":\"bLhK7sl8-_OJR50INZ-p9yR5s58zoZ9CiKSNaSsuqGU\",\"origin\":\"http://localhost:58171\",\"crossOrigin\":false}",
+    "der_signature": "304502204155f74b1318e52e6aa16dcf8f886f0bfac84f48f80303e4225db894a316cf5d022100d8c575c37f45dc37c3dd432fd7a195cc59d8b67184f8c5cf20d965e76f84dc23",
+    "signature": "4155f74b1318e52e6aa16dcf8f886f0bfac84f48f80303e4225db894a316cf5d273a8a3b80ba23c93c22bcd0285e6a33630e443c221ed8b5d2e064db8cde492e"
+  }
+]

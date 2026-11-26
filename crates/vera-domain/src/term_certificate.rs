@@ -1,10 +1,19 @@
 //! The certificate that records a switch of the active device.
 
-use alloy_primitives::{B256, FixedBytes};
+use alloy_primitives::{B256, Bytes, FixedBytes};
 use commonware_cryptography::{Hasher as _, Sha256};
 use serde::{Deserialize, Serialize};
+use vera_crypto::webauthn::{AUTHENTICATOR_DATA_BYTES, MAX_CLIENT_DATA_BYTES};
 
 const SIGNING_NAMESPACE: &[u8] = b"vera/term/v1\0";
+
+/// Longest JSON encoding of a term certificate, in bytes. A certificate a
+/// chain records and one a device holds or sends are both bounded by it.
+///
+/// It holds an approval from each of the 128 operators a policy may list
+/// when they sign raw, and at least 13 passkey approvals with the longest
+/// client data an assertion may carry.
+pub const MAX_TERM_CERTIFICATE_BYTES: usize = 32 << 10;
 
 /// The last block of the term before: the block a new term builds on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,7 +62,7 @@ impl TermChange {
 }
 
 /// One operator's signature over [`TermChange::signing_digest`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TermApproval {
     /// Index of the signing key in the deployment's operator policy.
@@ -61,6 +70,58 @@ pub struct TermApproval {
     /// The 64-byte signature, in the encoding the key's type signs
     /// administrative requests with.
     pub signature: FixedBytes<64>,
+    /// The passkey assertion a P-256 operator signed instead of the digest.
+    /// An approval without one omits the member; `null` does not decode.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub webauthn: Option<TermPasskeyAssertion>,
+}
+
+fn present<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<TermPasskeyAssertion>, D::Error> {
+    TermPasskeyAssertion::deserialize(deserializer).map(Some)
+}
+
+/// The authenticator output of a passkey approval, as the authenticator
+/// signed it: the assertion's challenge is the change's signing digest.
+///
+/// Decoding refuses authenticator data other than 37 bytes and client data
+/// over 1,024 bytes, before any verification work.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, try_from = "PasskeyFields")]
+pub struct TermPasskeyAssertion {
+    /// The 37 bytes of authenticator data.
+    pub authenticator_data: Bytes,
+    /// The client data JSON, exactly as hashed, at most 1,024 bytes.
+    pub client_data_json: Bytes,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PasskeyFields {
+    authenticator_data: Bytes,
+    client_data_json: Bytes,
+}
+
+impl TryFrom<PasskeyFields> for TermPasskeyAssertion {
+    type Error = &'static str;
+
+    fn try_from(fields: PasskeyFields) -> Result<Self, Self::Error> {
+        if fields.authenticator_data.len() != AUTHENTICATOR_DATA_BYTES {
+            return Err("authenticator data must contain 37 bytes");
+        }
+        if fields.client_data_json.len() > MAX_CLIENT_DATA_BYTES {
+            return Err("client data must not exceed 1,024 bytes");
+        }
+        Ok(Self {
+            authenticator_data: fields.authenticator_data,
+            client_data_json: fields.client_data_json,
+        })
+    }
 }
 
 /// A term change approved under the deployment's operator policy.
@@ -94,21 +155,25 @@ pub enum TermError {
     /// An approval is not a signature of the change by the operator it names.
     #[error("term approval by operator {0} does not verify")]
     Signature(u16),
+    /// The certificate's JSON encoding is longer than [`MAX_TERM_CERTIFICATE_BYTES`].
+    #[error("term certificate exceeds {MAX_TERM_CERTIFICATE_BYTES} bytes")]
+    TooLarge,
 }
 
 impl TermCertificate {
     /// Verify the certificate for the deployment `genesis_id` under an
     /// operator policy of `operators` keys that requires `threshold` of them.
     ///
-    /// `approved` checks one signature of the 32-byte digest against the
-    /// policy's key at the given index. Every listed approval must verify,
-    /// not only the first `threshold`.
+    /// `approved` checks one approval of the 32-byte digest, its signature
+    /// and any passkey assertion, against the policy's key at the approval's
+    /// signer index. Every listed approval must verify, not only the first
+    /// `threshold`.
     pub fn verify(
         &self,
         genesis_id: &B256,
         threshold: u16,
         operators: usize,
-        mut approved: impl FnMut(u16, &[u8; 32], &[u8; 64]) -> bool,
+        mut approved: impl FnMut(&TermApproval, &[u8; 32]) -> bool,
     ) -> Result<(), TermError> {
         if self.change.genesis_id != *genesis_id {
             return Err(TermError::Deployment);
@@ -128,9 +193,7 @@ impl TermCertificate {
         }
         let digest = self.change.signing_digest();
         for approval in &self.approvals {
-            if usize::from(approval.signer) >= operators
-                || !approved(approval.signer, &digest, &approval.signature.0)
-            {
+            if usize::from(approval.signer) >= operators || !approved(approval, &digest) {
                 return Err(TermError::Signature(approval.signer));
             }
         }
@@ -177,14 +240,15 @@ mod tests {
                 .map(|&signer| TermApproval {
                     signer,
                     signature: FixedBytes::repeat_byte(signer as u8),
+                    webauthn: None,
                 })
                 .collect(),
         }
     }
 
     /// Accepts the signature `certificate` gives the operator at each index.
-    fn matching(signer: u16, _: &[u8; 32], signature: &[u8; 64]) -> bool {
-        signature == &[signer as u8; 64]
+    fn matching(approval: &TermApproval, _: &[u8; 32]) -> bool {
+        approval.signature.0 == [approval.signer as u8; 64]
     }
 
     #[test]
@@ -291,9 +355,61 @@ mod tests {
             json["approvals"][0]["signature"],
             format!("0x{}", "01".repeat(64))
         );
+        assert!(json["approvals"][0].get("webauthn").is_none());
+        assert_eq!(
+            serde_json::from_value::<TermCertificate>(json).unwrap(),
+            certificate
+        );
+    }
+
+    #[test]
+    fn a_passkey_approval_carries_its_assertion_in_hex() {
+        let mut certificate = certificate(&[0]);
+        certificate.approvals[0].webauthn = Some(TermPasskeyAssertion {
+            authenticator_data: Bytes::from(vec![0xab; 37]),
+            client_data_json: Bytes::from_static(b"{}"),
+        });
+        let json = serde_json::to_value(&certificate).unwrap();
+        assert_eq!(
+            json["approvals"][0]["webauthn"],
+            serde_json::json!({
+                "authenticator_data": format!("0x{}", "ab".repeat(37)),
+                "client_data_json": "0x7b7d",
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<TermCertificate>(json.clone()).unwrap(),
+            certificate
+        );
+        let mut unknown = json.clone();
+        unknown["approvals"][0]["webauthn"]["credential_id"] = "0x00".into();
+        assert!(serde_json::from_value::<TermCertificate>(unknown).is_err());
+        let mut null = json;
+        null["approvals"][0]["webauthn"] = serde_json::Value::Null;
+        assert!(serde_json::from_value::<TermCertificate>(null).is_err());
+    }
+
+    /// Hexadecimal fields decode as `alloy_primitives` decodes them, with or
+    /// without `0x` and in either case; verification compares the bytes.
+    #[test]
+    fn hex_fields_compare_as_decoded_bytes() {
+        let mut certificate = certificate(&[0]);
+        certificate.approvals[0].webauthn = Some(TermPasskeyAssertion {
+            authenticator_data: Bytes::from(vec![0xab; 37]),
+            client_data_json: Bytes::from_static(b"{}"),
+        });
+        let mut json = serde_json::to_value(&certificate).unwrap();
+        json["change"]["holder"] = "02".repeat(32).into();
+        json["approvals"][0]["signature"] = format!("0X{}", "00".repeat(64)).into();
+        json["approvals"][0]["webauthn"]["authenticator_data"] = "AB".repeat(37).into();
+        json["approvals"][0]["webauthn"]["client_data_json"] = "0x7B7D".into();
         assert_eq!(
             serde_json::from_value::<TermCertificate>(json).unwrap(),
             certificate
         );
     }
 }
+
+#[cfg(test)]
+#[path = "term_certificate_limits.rs"]
+mod limits;

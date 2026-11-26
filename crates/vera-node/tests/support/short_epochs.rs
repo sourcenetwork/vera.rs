@@ -20,16 +20,29 @@ const ACCOUNT_KEY: &str = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f
 
 /// A deployment dealt from `seed`, as `SoloDeployment::create` deals one but for the epoch length.
 pub(crate) fn deployment(chain_id: u64, seed: u64) -> SoloDeployment {
+    deployment_under(
+        chain_id,
+        seed,
+        OperatorPolicy {
+            threshold: 1,
+            keys: vec![ACCOUNT_KEY.into()],
+        },
+    )
+}
+
+/// [`deployment`], administered by `operators`.
+pub(crate) fn deployment_under(
+    chain_id: u64,
+    seed: u64,
+    operators: OperatorPolicy,
+) -> SoloDeployment {
     let key = PrivateKey::from_seed(seed);
     let local = key.public_key();
     let (epoch_info, shares) = vera_node::trusted_setup(seed, [local.clone()]).unwrap();
     let share = shares.get_value(&local).unwrap();
     let genesis = VeraGenesis {
         chain_id,
-        operators: Some(OperatorPolicy {
-            threshold: 1,
-            keys: vec![ACCOUNT_KEY.into()],
-        }),
+        operators: Some(operators),
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

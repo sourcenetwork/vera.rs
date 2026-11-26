@@ -6122,6 +6122,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "vera-crypto",
 ]
 
 [[package]]
@@ -6182,6 +6183,7 @@ dependencies = [
  "rstest",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
@@ -6190,6 +6192,7 @@ dependencies = [
  "vera-domain",
  "vera-identity",
  "vera-modules",
+ "vera-permission",
 ]
 
 [[package]]
@@ -6373,6 +6376,7 @@ dependencies = [
  "vera-indexer",
  "vera-jsonrpc",
  "vera-modules",
+ "vera-permission",
  "zeroize",
 ]
 
@@ -6385,6 +6389,8 @@ dependencies = [
  "commonware-codec",
  "commonware-cryptography",
  "commonware-storage",
+ "hex",
+ "k256 0.13.4",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

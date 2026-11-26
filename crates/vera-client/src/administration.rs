@@ -4,9 +4,10 @@ use alloy_sol_types::SolCall;
 use k256_native::ecdsa::{Signature, SigningKey, signature::hazmat::PrehashSigner as _};
 use vera_modules::vera::abi::IVera;
 
+pub use crate::passkey_approval::webauthn_approval;
 pub use vera_modules::vera::administration::{
     AdministrationState, AdministrativeCommand, AdministrativeRequest, OperatorApproval,
-    OperatorPolicy, SignedAdministrativeRequest,
+    OperatorPolicy, PasskeyAssertion, SignedAdministrativeRequest,
 };
 
 use crate::{BlsSigner, ClientError, TransactionReceipt, VERA_ADDRESS, VeraClient};
@@ -26,6 +27,7 @@ pub fn approve_administration(
     Ok(OperatorApproval {
         signer,
         signature: hex::encode(signature.to_bytes()),
+        webauthn: None,
     })
 }
 
@@ -76,6 +78,7 @@ fn checked_approval(
     let approval = OperatorApproval {
         signer,
         signature: hex::encode(signature),
+        webauthn: None,
     };
     policy
         .verify_approval(&digest, &approval)

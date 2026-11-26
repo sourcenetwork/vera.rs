@@ -3,7 +3,10 @@
 use alloy_primitives::{B256, FixedBytes};
 use k256_native::ecdsa::{Signature, SigningKey, signature::hazmat::PrehashSigner as _};
 
-pub use vera_domain::{TermApproval, TermCertificate, TermChange, TermCut, TermError};
+pub use crate::passkey_approval::webauthn_term_approval;
+pub use vera_domain::{
+    TermApproval, TermCertificate, TermChange, TermCut, TermError, TermPasskeyAssertion,
+};
 pub use vera_permission::verify_term_certificate;
 
 use crate::{ClientError, VeraClient, administration::OperatorPolicy};
@@ -20,6 +23,7 @@ pub fn approve_term(
     Ok(TermApproval {
         signer,
         signature: FixedBytes::from_slice(&signature.to_bytes()),
+        webauthn: None,
     })
 }
 
@@ -66,15 +70,17 @@ fn checked(
     let signature: [u8; 64] = signature
         .try_into()
         .map_err(|_| ClientError::Signing("operator signature must contain 64 bytes".into()))?;
-    if !policy.verifies(signer, &change.signing_digest(), &signature) {
+    let approval = TermApproval {
+        signer,
+        signature: FixedBytes::from(signature),
+        webauthn: None,
+    };
+    if !vera_permission::approves_term(policy, &approval, &change.signing_digest()) {
         return Err(ClientError::Signing(
             "signature is not the operator's approval of this term change".into(),
         ));
     }
-    Ok(TermApproval {
-        signer,
-        signature: FixedBytes::from(signature),
-    })
+    Ok(approval)
 }
 
 impl VeraClient {
@@ -214,7 +220,7 @@ mod tests {
         let approval = operators.device(&other);
         let certificate = TermCertificate {
             change: change(),
-            approvals: vec![approval],
+            approvals: vec![approval.clone()],
         };
         assert_eq!(
             verify_term_certificate(&certificate, &GENESIS, &operators.policy),

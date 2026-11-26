@@ -124,3 +124,84 @@ fn operation_tokens_keep_their_binding_checks_for_every_key_type() {
         assert!(UnsignedToken::operation(&invalid).is_err());
     }
 }
+
+#[test]
+fn a_passkey_signs_a_delegation_through_its_challenge() {
+    let authenticator = vera_crypto::webauthn::testing::Authenticator::new([42; 32]);
+    let did = authenticator.did();
+    let unsigned = delegation(&did);
+    let signed = authenticator.assert(&unsigned.webauthn_challenge().unwrap());
+    let token = unsigned
+        .finish_webauthn(
+            &signed.authenticator_data,
+            &signed.client_data_json,
+            &signed.der,
+        )
+        .unwrap();
+    let claims = verify_bearer_token(&token).unwrap();
+    assert_eq!(claims.iss, did);
+    claims.authorize("did:key:worker", 9001, 50).unwrap();
+    assert_ne!(
+        delegation(&did).webauthn_challenge().unwrap(),
+        <[u8; 32]>::from(Sha256::digest(delegation(&did).signing_input())),
+        "the passkey form names its own token type"
+    );
+    let other = authenticator.assert(&[0; 32]);
+    assert!(
+        delegation(&did)
+            .finish_webauthn(
+                &other.authenticator_data,
+                &other.client_data_json,
+                &other.der
+            )
+            .is_err()
+    );
+    assert!(
+        delegation(&did)
+            .finish_webauthn(
+                &signed.authenticator_data,
+                &signed.client_data_json,
+                &signed.signature
+            )
+            .is_err(),
+        "the authenticator's DER signature is expected"
+    );
+}
+
+#[test]
+fn only_a_p256_delegation_has_a_passkey_form() {
+    let (_, ed25519) = ed25519();
+    assert!(delegation(&ed25519).webauthn_challenge().is_err());
+    let secp256k1 = vera_crypto::secp256k1::did_from_secp256k1_pubkey(
+        &k256::ecdsa::SigningKey::from_slice(&[1; 32])
+            .unwrap()
+            .verifying_key()
+            .to_sec1_bytes(),
+    )
+    .unwrap();
+    assert!(delegation(&secp256k1).webauthn_challenge().is_err());
+    let (_, p256) = p256();
+    let relay = UnsignedToken::new(&p256, vera_crypto::jwt::RELAY_TOKEN_TYPE, "{}").unwrap();
+    assert!(relay.webauthn_challenge().is_err());
+}
+
+/// An assertion Chrome made of this delegation's challenge completes it.
+#[test]
+fn a_chrome_assertion_signs_its_delegation() {
+    let vector = vera_crypto::webauthn::testing::chrome_vector("token");
+    let unsigned = delegation(&vector.did);
+    assert_eq!(
+        hex::encode(unsigned.webauthn_challenge().unwrap()),
+        vector.digest
+    );
+    let token = unsigned
+        .finish_webauthn(
+            &hex::decode(&vector.authenticator_data).unwrap(),
+            vector.client_data_json.as_bytes(),
+            &hex::decode(&vector.der_signature).unwrap(),
+        )
+        .unwrap();
+    let claims = verify_bearer_token(&token).unwrap();
+    assert_eq!(claims.iss, vector.did);
+    claims.authorize("did:key:worker", 9001, 50).unwrap();
+}

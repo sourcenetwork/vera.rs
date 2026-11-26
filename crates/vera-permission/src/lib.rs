@@ -55,7 +55,7 @@ pub use snapshot::{
 };
 pub use snapshot_state::PolicyState;
 mod term;
-pub use term::verify_term_certificate;
+pub use term::{approves_term, verify_term_certificate};
 
 /// Shared service limits; consumers may impose tighter limits.
 pub const PERMISSION_LIMITS: PermissionLimits = PermissionLimits {

@@ -26,6 +26,9 @@ that version. Every validator of a deployment must run the same version.
 - **Anchoring.** A parent deployment records a proven, authenticated chain of
   anchors per registered deployment, with fork evidence and term changes
   ([anchoring.md](anchoring.md)).
+- **Passkeys.** A P-256 operator or delegation issuer may sign with a WebAuthn
+  passkey: operator approvals and term certificates carry the assertion, and
+  delegation tokens have their own token type ([passkeys.md](passkeys.md)).
 - **Client API.** `VeraDocumentACP` is no longer exported, the anchoring and
   signing helpers changed, and `ClientError` has new variants. Consumers with
   exhaustive matches or direct calls need review.

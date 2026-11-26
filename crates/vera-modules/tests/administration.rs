@@ -47,6 +47,7 @@ fn approve(request: AdministrativeRequest, keys: &[SigningKey]) -> SignedAdminis
             OperatorApproval {
                 signer: index as u16,
                 signature: hex::encode(signature.to_bytes()),
+                webauthn: None,
             }
         })
         .collect();
