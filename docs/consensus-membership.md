@@ -159,6 +159,17 @@ a signature made outside the library, raw or ASN.1 DER, into an approval after
 checking it against the policy entry. The threshold applies to the whole list;
 no key counts for more than one approval.
 
+A P-256 operator may instead approve with a passkey: an assertion whose
+challenge is the signing digest, carried in the approval's `webauthn` member
+beside the same raw low-S signature ([passkeys.md](passkeys.md)).
+`webauthn_approval` in `vera-client` builds one from the authenticator data,
+client data JSON and DER signature a platform authenticator returns. An
+assertion requires user verification and proves only that the key's holder
+signed: it carries no attestation, custody belongs to the platform account
+that syncs the key, and the credential must be dedicated to Vera approvals,
+since a credential that also signs server-chosen challenges lets that server
+obtain an approval of any digest.
+
 `VeraClient::read_administration` verifies the current operator configuration and
 next administrative sequence against independently configured consensus trust.
 It returns the selected revision, timestamp and decoded state, or certified

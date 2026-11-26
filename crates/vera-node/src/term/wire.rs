@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 use vera_domain::TermCertificate;
 
 /// Largest message accepted. A certificate holds at most one approval for
-/// each of the 128 operators a policy may list.
-const MAX_BYTES: usize = 64 * 1024;
+/// each of the 128 operators a policy may list, and a passkey approval is at
+/// most about 2.3 KB.
+const MAX_BYTES: usize = 512 * 1024;
 
 /// Most heights one question about blocks names.
 pub(crate) const MAX_HEIGHTS: usize = 256;

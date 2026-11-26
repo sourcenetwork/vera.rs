@@ -34,3 +34,6 @@ mod native_refusals;
 
 #[path = "executor/anchors.rs"]
 mod anchors;
+
+#[path = "executor/passkeys.rs"]
+mod passkeys;

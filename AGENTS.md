@@ -172,6 +172,15 @@ Commonware's runtime, glue, consensus, p2p or storage crates, or `vera-domain`.
 Operator policies list secp256k1 keys in hexadecimal and Ed25519 or P-256 keys
 as `did:key`; every operator signs the same administrative digest. See
 docs/consensus-membership.md#operator-keys.
+Any P-256 key may approve an administrative request or a term change, or
+issue a delegation, with a passkey (WebAuthn) assertion whose challenge is the
+digest: `vera_crypto::webauthn` checks 37-byte authenticator data with user
+presence and verification, parses client data strictly (no duplicate member,
+no trailing data, scalar extras, challenge compared as a string) and verifies
+the raw low-S signature over the WebAuthn message. Approvals carry it in a
+`webauthn` member; delegations use the `vera-delegation-webauthn-v1+jwt` type.
+It proves only that the key's holder signed; the credential must be dedicated.
+See docs/passkeys.md.
 Provider relay grants use the same operator quorum as administrative changes.
 Relay assertions bind a stable `did:opk` actor, native worker, genesis, scope,
 grant generation and exact operation. ACP stores the actor as owner; token
@@ -188,7 +197,8 @@ vectors; creating the same triple twice is refused, and the record keeps the
 nonce and creation hash. See `docs/policy-ids.md`.
 Delegation issuers are secp256k1 (ES256K), Ed25519 (EdDSA) or P-256 (ES256)
 `did:key` actors; the key type fixes the token algorithm. Ed25519 and P-256
-actors have one DID spelling and one signature encoding. Relay issuers remain
+actors have one DID spelling and one signature encoding per token type; a
+P-256 actor's passkey tokens are a type of their own. Relay issuers remain
 secp256k1.
 A secp256k1 key is accepted in four spellings (compressed or uncompressed,
 Base58BTC or Base64URL) and is one actor: state, results, events and proof
@@ -559,8 +569,10 @@ whatever the span, without storing the range. See
 
 A block carries a `term` that never decreases along a chain, and `GossipHeader`
 repeats it. A `TermCertificate` (deployment, term, holder device, cut) moves
-the active role between an account's devices; the operator policy approves it
-and it changes no key. The node signs none: the host collects approvals.
+the active role between an account's devices; the operator policy approves it,
+raw or by passkey, and it changes no key. The node signs none: the host
+collects approvals. Messages between devices are limited to 512 KiB, enough
+for an approval by every operator a policy may list.
 `vera-domain` holds the type and digest,
 `vera_permission::verify_term_certificate` checks it against an
 `OperatorPolicy`, and `VeraClient` checks it against certified state.
@@ -637,7 +649,7 @@ vera.rs/
         vera-client/            # Rust client library (native requests, verified reads, typed queries)
         vera-config/            # Node configuration types (node, network, rpc, execution)
         vera-consensus/         # Consensus application layer: mempool, proposal, traits
-        vera-crypto/            # BLS12-381, actor keys (secp256k1, Ed25519, P-256), JWT
+        vera-crypto/            # BLS12-381, actor keys (secp256k1, Ed25519, P-256), JWT, passkeys
         vera-domain/            # Block, tx, light block, proof, and DKG payload types
         vera-e2e/               # End-to-end test harness (see crates/vera-e2e/README.md)
         vera-executor/          # Block execution: native requests, module call shims, VeraExecutor

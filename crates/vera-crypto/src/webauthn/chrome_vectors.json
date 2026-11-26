@@ -1,0 +1,24 @@
+[
+  {
+    "source": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/158.0.0.0 Safari/537.36",
+    "client_data_form": "plain",
+    "did": "did:key:zDnaenBa5tiQ5vUUp36X6id6mBBWAVCxfiUNTWpuxzuEo2AAE",
+    "public_key": "04433104d90686b1b9a041b837a13e46dc4da1e36ee739c99cf78b4c9637f703037f7389a908441cf41faa74f7235c391556884faa242e0d977f1fab0d4a6380c3",
+    "digest": "2dce3405c95fd2229bb79012632616f9d1a339a0de4824ea9c9300678bb79081",
+    "authenticator_data": "49960de5880e8c687434170f6476605b8fe4aeb9a28632c7995cf3ba831d97630500000002",
+    "client_data_json": "{\"type\":\"webauthn.get\",\"challenge\":\"Lc40Bclf0iKbt5ASYyYW-dGjOaDeSCTqnJMAZ4u3kIE\",\"origin\":\"http://localhost:62692\",\"crossOrigin\":false}",
+    "der_signature": "304602210091246bc243e464c8f9ede10b60a96c6241e3a8a91f660dd1fa247058d49e083302210083f55ea3de08b32c153ed3ee4d621ce1e28877f218b307add80aa7aaf599b90e",
+    "signature": "91246bc243e464c8f9ede10b60a96c6241e3a8a91f660dd1fa247058d49e08337c0aa15b21f74cd4eac12c11b29de31dda5e82bb8e6496d71baf231806c96c43"
+  },
+  {
+    "source": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/158.0.0.0 Safari/537.36",
+    "client_data_form": "extra",
+    "did": "did:key:zDnaenBa5tiQ5vUUp36X6id6mBBWAVCxfiUNTWpuxzuEo2AAE",
+    "public_key": "04433104d90686b1b9a041b837a13e46dc4da1e36ee739c99cf78b4c9637f703037f7389a908441cf41faa74f7235c391556884faa242e0d977f1fab0d4a6380c3",
+    "digest": "15a66eff2f2fddc3015aa0026307f21bedd66c636ce27448b8d163c574dc2a61",
+    "authenticator_data": "49960de5880e8c687434170f6476605b8fe4aeb9a28632c7995cf3ba831d97630500000003",
+    "client_data_json": "{\"type\":\"webauthn.get\",\"challenge\":\"FaZu_y8v3cMBWqACYwfyG-3WbGNs4nRIuNFjxXTcKmE\",\"origin\":\"http://localhost:62692\",\"crossOrigin\":false,\"other_keys_can_be_added_here\":\"do not compare clientDataJSON against a template. See https://goo.gl/yabPex\"}",
+    "der_signature": "3044022023aba5bc0dc5f110ce27e5cb4882400f7f5637092f88fa1fd8074297a787c11102201c1d0ddb08fcc48749a336e7052e3e1b736cb50c0ce728c1b81d179c4d074a63",
+    "signature": "23aba5bc0dc5f110ce27e5cb4882400f7f5637092f88fa1fd8074297a787c1111c1d0ddb08fcc48749a336e7052e3e1b736cb50c0ce728c1b81d179c4d074a63"
+  }
+]

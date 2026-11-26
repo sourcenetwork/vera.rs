@@ -63,7 +63,17 @@ SHA-256("vera/term/v1\0" || genesis_id || term || holder || cut.height || cut.bl
 with both integers as 8 bytes, big-endian. The signature encoding is the one
 [operator keys](consensus-membership.md#operator-keys) use for administrative
 approvals: ECDSA keys sign the digest as the prehash with low `s`, and Ed25519
-keys sign the 32 digest bytes as the message.
+keys sign the 32 digest bytes as the message. A P-256 operator may approve
+with a passkey assertion of the digest instead, carried in the approval's
+`webauthn` member in `0x` hexadecimal:
+
+```json
+{"signer": 0, "signature": "0x<64 bytes>",
+ "webauthn": {"authenticator_data": "0x<37 bytes>", "client_data_json": "0x<the exact bytes>"}}
+```
+
+[passkeys.md](passkeys.md) gives the rules and what such an approval does not
+prove; in particular the credential must be dedicated to these approvals.
 
 The certificate does not carry the policy. A certificate verifies when it
 names the verifier's deployment, starts a term above 0, and lists at least the
@@ -72,13 +82,15 @@ verifies; an approval that does not verify fails the certificate even when
 enough others do. The same certificate therefore serves a policy of one key at
 threshold 1 and a policy of an account key and a device key at threshold 2.
 The node holds no operator key and signs no certificate: the host collects the
-approvals. `approve_term`, `external_term_approval` and
-`external_der_term_approval` in `vera-client` build them.
+approvals. `approve_term`, `external_term_approval`,
+`external_der_term_approval` and `webauthn_term_approval` in `vera-client`
+build them.
 
 ### Verifying one
 
 - `TermCertificate::verify` in `vera-domain` checks the structure and calls
-  back for each signature. It takes the policy's threshold and size.
+  back for each approval, with its signature and any passkey assertion. It
+  takes the policy's threshold and size.
 - `vera_permission::verify_term_certificate` checks a certificate against an
   `OperatorPolicy`.
 - `VeraClient::verify_term_certificate` reads the operator policy from

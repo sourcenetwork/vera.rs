@@ -443,3 +443,38 @@ fn token_signature_segments_split_and_join() {
     }
     assert!(split_token_signature(&vec![b'{'; 101 + MAX_CLIENT_DATA_BYTES]).is_ok());
 }
+
+/// Assertions captured from Chrome's virtual authenticator by
+/// `tools/webauthn-vectors/capture.mjs`, with and without the member Chrome
+/// inserts at random.
+#[test]
+fn chrome_assertions_verify() {
+    let vectors: Vec<serde_json::Map<String, serde_json::Value>> =
+        serde_json::from_str(include_str!("chrome_vectors.json")).unwrap();
+    let mut forms = Vec::new();
+    for vector in &vectors {
+        let field = |name: &str| vector[name].as_str().unwrap();
+        let bytes = |name: &str| hex::decode(field(name)).unwrap();
+        let did = field("did");
+        assert_eq!(crate::actor::p256_did(&bytes("public_key")).unwrap(), did);
+        let digest: [u8; 32] = bytes("digest").try_into().unwrap();
+        let authenticator_data = bytes("authenticator_data");
+        let assertion = Assertion {
+            authenticator_data: &authenticator_data,
+            client_data_json: field("client_data_json").as_bytes(),
+        };
+        let signature = bytes("signature");
+        assert_eq!(
+            crate::actor::canonical_der_signature(did, &bytes("der_signature")).unwrap(),
+            signature
+        );
+        verify(did, &digest, &assertion, &signature).unwrap();
+        assert_eq!(
+            verify(did, &[0; 32], &assertion, &signature),
+            Err(WebauthnError::Challenge)
+        );
+        forms.push(field("client_data_form").to_owned());
+    }
+    forms.sort();
+    assert_eq!(forms, ["extra", "plain"]);
+}
