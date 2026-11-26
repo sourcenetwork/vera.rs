@@ -1,6 +1,7 @@
 # ACP v1 in Vera
 
-Vera executes ACP with acp-rs. Its `acp` crate defines what a policy means:
+Vera executes ACP with acp-rs. Its `acp` crate, published as
+`sourcenetwork-acp`, defines what a policy means:
 the policy language, policy processing and IDs, relationship validation, the
 wire form of relationships, and evaluation through its `zanzi` engine. Vera's
 module in `crates/vera-modules/src/acp` defines the operations: records and

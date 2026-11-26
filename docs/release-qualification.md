@@ -29,7 +29,7 @@ repeats them for its own candidate:
 | Gate | Required result |
 | --- | --- |
 | Official Commonware source | Qualify the official `2026.10.0` registry release, including its upstream archive, synchronization and DKG boundary changes, against the selected Vera candidate. |
-| Publishable crates | Version every packaged dependency, complete package metadata and verify the registry dependency graph without workspace patches. The eight-crate client closure has explicit publication boundaries, versioned internal dependencies and package metadata. `orbis-reporting` 0.0.3 is published and selected from the registry. |
+| Publishable crates | Version every packaged dependency, complete package metadata and verify the registry dependency graph without workspace patches. The eight-crate client closure has explicit publication boundaries, versioned internal dependencies and package metadata. `orbis-reporting` 0.0.3 and `sourcenetwork-acp` 0.0.1 are published and selected from the registry. |
 | Release automation | Validate versions and packages and produce tagged daemon assets with checksums and provenance from the same commit. The release workflow builds and compares two clean daemon artifacts and creates a draft GitHub release for an existing matching version tag. Keep crate uploads manual; CI needs no crates.io publishing credentials. |
 | Candidate validation | Run focused native authorization, membership, receipt and recovery checks affected by the dependency change. Verify the packaged client from a clean registry consumer, independent trust configuration, and the chosen daemon artifact. Reuse earlier source-bound evidence for unchanged code. |
 | Publication handoff | Record exact source, versions, dependencies, target and limitations. Provide package checksums and dependency-ordered commands for the maintainer to publish manually, followed by registry installation and download checks. Crate uploads belong to the maintainer, not the automated workflow. |
@@ -245,7 +245,7 @@ included conservatively. The Aurora notice records its package's dirty source
 revision. The inventory is tied to `Cargo.lock`; review and update it whenever
 the lockfile changes. The allowlist and the inventory do not replace review of
 the applicable terms, including the Business Source License of the Orbis
-reporting package and of acp and zanzi. The vendored `jsonrpsee-server 0.26.1` includes its upstream MIT
+reporting package and of `sourcenetwork-acp` and `sourcenetwork-zanzi`. The vendored `jsonrpsee-server 0.26.1` includes its upstream MIT
 notice from [source revision `bcc84901`](https://github.com/paritytech/jsonrpsee/blob/bcc84901f3c882f4233f293e5acf018643cbd412/LICENSE).
 Artifact provenance,
 key handling and process-crash tests are distinct

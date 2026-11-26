@@ -111,8 +111,8 @@ checksums, source commit and check results with the release record.
 
 ## Publish crates manually
 
-`vera-modules` depends on acp-rs's `acp` and `zanzi` crates; publish them, and
-select them from the registry, before packaging Vera.
+`vera-modules` depends on acp-rs's `acp` crate, published as `sourcenetwork-acp`
+with its `sourcenetwork-zanzi` engine; both are selected from the registry.
 
 The candidate version is `0.2.0`. Use the dependency order in the generated plan;
 for the current graph it is:

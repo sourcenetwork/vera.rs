@@ -35,7 +35,7 @@ Related repositories are independent checkouts; discover their paths rather than
 | Component | Source repo | Used in vera.rs for |
 |-----------|-----------|-------------------|
 | DID types, identity crate | vendored `crates/vera-identity/` (from defradb.rs 8d34d9c) | DID resolution |
-| ACP policy semantics and evaluation | `acp` crate of **acp-rs** (with its `zanzi` engine) | Policy language, processing, relationship form and evaluation |
+| ACP policy semantics and evaluation | `acp` crate of **acp-rs**, published as `sourcenetwork-acp` (with its `sourcenetwork-zanzi` engine) | Policy language, processing, relationship form and evaluation |
 | Simplex consensus, e2e harness | bankd-commonware | Consensus, testing |
 | BLS12-381 threshold crypto | commonware monorepo | Block signing, native tx verification |
 

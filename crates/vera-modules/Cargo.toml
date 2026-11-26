@@ -11,7 +11,7 @@ repository.workspace = true
 readme = "README.md"
 
 [dependencies]
-acp.workspace = true
+sourcenetwork-acp.workspace = true
 vera-crypto.workspace = true
 vera-identity.workspace = true
 orbis-reporting.workspace = true

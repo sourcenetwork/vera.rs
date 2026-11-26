@@ -3,21 +3,6 @@
 version = 4
 
 [[package]]
-name = "acp"
-version = "0.0.1"
-source = "git+https://github.com/sourcenetwork/acp?rev=d1966f7717dfd95c69674cc4b9307ce6151a4b5a#d1966f7717dfd95c69674cc4b9307ce6151a4b5a"
-dependencies = [
- "serde",
- "serde-saphyr",
- "serde_json",
- "sha2 0.10.9",
- "smol_str",
- "thiserror 2.0.18",
- "winnow 1.0.4",
- "zanzi",
-]
-
-[[package]]
 name = "aead"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5183,6 +5168,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "sourcenetwork-acp"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "386d25b5d7316f695e9465ef7e54c98b04b3eacbc357f513094d50f5d193c04b"
+dependencies = [
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+ "sha2 0.10.9",
+ "smol_str",
+ "sourcenetwork-zanzi",
+ "thiserror 2.0.18",
+ "winnow 1.0.4",
+]
+
+[[package]]
+name = "sourcenetwork-zanzi"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7189b16941a44578707a9cced8823276f5c41982ba357e17373e17f2b9827d11"
+dependencies = [
+ "smol_str",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "spin"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5992,7 +6003,6 @@ dependencies = [
 name = "vera-client"
 version = "0.2.0"
 dependencies = [
- "acp",
  "alloy-primitives",
  "alloy-sol-types",
  "ark-bls12-381",
@@ -6013,6 +6023,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "sourcenetwork-acp",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -6139,7 +6150,6 @@ dependencies = [
 name = "vera-executor"
 version = "0.2.0"
 dependencies = [
- "acp",
  "alloy-primitives",
  "alloy-sol-types",
  "ark-bls12-381",
@@ -6157,6 +6167,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "sourcenetwork-acp",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
@@ -6267,7 +6278,6 @@ dependencies = [
 name = "vera-modules"
 version = "0.2.0"
 dependencies = [
- "acp",
  "alloy-primitives",
  "alloy-sol-types",
  "base64",
@@ -6288,6 +6298,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "sourcenetwork-acp",
  "thiserror 2.0.18",
  "vera-crypto",
  "vera-identity",
@@ -6945,15 +6956,6 @@ dependencies = [
  "quote",
  "syn 2.0.119",
  "synstructure",
-]
-
-[[package]]
-name = "zanzi"
-version = "0.0.1"
-source = "git+https://github.com/sourcenetwork/acp?rev=d1966f7717dfd95c69674cc4b9307ce6151a4b5a#d1966f7717dfd95c69674cc4b9307ce6151a4b5a"
-dependencies = [
- "smol_str",
- "thiserror 2.0.18",
 ]
 
 [[package]]

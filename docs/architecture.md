@@ -92,7 +92,7 @@ live; the release starts with fresh state and uses these package names directly.
 
 | Location | Responsibility |
 | --- | --- |
-| `acp` (acp-rs) | Policy language, processing and IDs, relationship form and evaluation |
+| `acp` (acp-rs, package `sourcenetwork-acp`) | Policy language, processing and IDs, relationship form and evaluation |
 | [`vera-identity`](../crates/vera-identity/src/lib.rs) | DID types and validation |
 | [`vera-modules/src/acp`](../crates/vera-modules/src/acp/mod.rs) | ACP commands, ownership, relationships, decisions, stored records, work accounting and the store acp evaluates over |
 | [`vera-permission`](../crates/vera-permission/src/lib.rs) | Authenticate read evidence and replay the shared ACP evaluator for consumers |
