@@ -169,6 +169,16 @@ fn assertion_fields_are_lowercase_hex_within_bounds() {
         assert!(policy.verify_approval(&digest, &invalid).is_err());
     }
     let mut json = serde_json::to_value(&valid).unwrap();
+    let mut null = json.clone();
     json["webauthn"]["credential_id"] = "00".into();
     assert!(serde_json::from_value::<OperatorApproval>(json).is_err());
+    null["webauthn"] = serde_json::Value::Null;
+    assert!(serde_json::from_value::<OperatorApproval>(null.clone()).is_err());
+    null.as_object_mut().unwrap().remove("webauthn");
+    assert!(
+        serde_json::from_value::<OperatorApproval>(null)
+            .unwrap()
+            .webauthn
+            .is_none()
+    );
 }

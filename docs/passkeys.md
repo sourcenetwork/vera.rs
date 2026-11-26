@@ -30,8 +30,12 @@ their signature does:
  "webauthn": {"authenticator_data": "<74 hex>", "client_data_json": "<hex of the exact bytes>"}}
 ```
 
-Term approvals use `0x`-prefixed hexadecimal, like their other fields. An
-approval without `webauthn` is a raw signature of the digest. The credential
+Term approvals write `0x`-prefixed lowercase hexadecimal, like their other
+fields. They decode every field as `alloy_primitives` does, with or without
+`0x` and in either case, and compare the decoded bytes: the client data that
+is hashed is the decoded bytes, whatever spelling carried them. An approval
+without `webauthn` is a raw signature of the digest. In both forms the member
+is omitted to say so; `"webauthn": null` does not decode. The credential
 id is not carried: a verifier needs only the key.
 
 A passkey delegation names `{"alg":"ES256","typ":"vera-delegation-webauthn-v1+jwt"}`

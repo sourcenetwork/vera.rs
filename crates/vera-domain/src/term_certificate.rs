@@ -71,8 +71,19 @@ pub struct TermApproval {
     /// administrative requests with.
     pub signature: FixedBytes<64>,
     /// The passkey assertion a P-256 operator signed instead of the digest.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// An approval without one omits the member; `null` does not decode.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub webauthn: Option<TermPasskeyAssertion>,
+}
+
+fn present<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<TermPasskeyAssertion>, D::Error> {
+    TermPasskeyAssertion::deserialize(deserializer).map(Some)
 }
 
 /// The authenticator output of a passkey approval, as the authenticator
@@ -370,9 +381,32 @@ mod tests {
             serde_json::from_value::<TermCertificate>(json.clone()).unwrap(),
             certificate
         );
-        let mut unknown = json;
+        let mut unknown = json.clone();
         unknown["approvals"][0]["webauthn"]["credential_id"] = "0x00".into();
         assert!(serde_json::from_value::<TermCertificate>(unknown).is_err());
+        let mut null = json;
+        null["approvals"][0]["webauthn"] = serde_json::Value::Null;
+        assert!(serde_json::from_value::<TermCertificate>(null).is_err());
+    }
+
+    /// Hexadecimal fields decode as `alloy_primitives` decodes them, with or
+    /// without `0x` and in either case; verification compares the bytes.
+    #[test]
+    fn hex_fields_compare_as_decoded_bytes() {
+        let mut certificate = certificate(&[0]);
+        certificate.approvals[0].webauthn = Some(TermPasskeyAssertion {
+            authenticator_data: Bytes::from(vec![0xab; 37]),
+            client_data_json: Bytes::from_static(b"{}"),
+        });
+        let mut json = serde_json::to_value(&certificate).unwrap();
+        json["change"]["holder"] = "02".repeat(32).into();
+        json["approvals"][0]["signature"] = format!("0X{}", "00".repeat(64)).into();
+        json["approvals"][0]["webauthn"]["authenticator_data"] = "AB".repeat(37).into();
+        json["approvals"][0]["webauthn"]["client_data_json"] = "0x7B7D".into();
+        assert_eq!(
+            serde_json::from_value::<TermCertificate>(json).unwrap(),
+            certificate
+        );
     }
 }
 

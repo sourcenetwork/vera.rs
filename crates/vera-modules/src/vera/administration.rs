@@ -184,8 +184,19 @@ pub struct OperatorApproval {
     /// Lowercase hexadecimal encoding of the 64-byte signature.
     pub signature: String,
     /// The passkey assertion a P-256 operator signed instead of the digest.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// An approval without one omits the member; `null` does not decode.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub webauthn: Option<PasskeyAssertion>,
+}
+
+fn present<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<PasskeyAssertion>, D::Error> {
+    PasskeyAssertion::deserialize(deserializer).map(Some)
 }
 
 /// Administrative request and its independent operator approvals.
