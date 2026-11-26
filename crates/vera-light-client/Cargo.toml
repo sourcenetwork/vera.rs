@@ -1,0 +1,46 @@
+[package]
+name = "vera-light-client"
+publish = ["crates-io"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Proof-validated ACP cache for vera consumers: header sync, freshness and verified reads"
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+vera-domain.workspace = true
+vera-permission.workspace = true
+vera-modules.workspace = true
+commonware-codec.workspace = true
+
+alloy-primitives = { workspace = true, features = ["serde"] }
+eyre.workspace = true
+futures.workspace = true
+hex.workspace = true
+parking_lot.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+vera-backend.workspace = true
+commonware-consensus.workspace = true
+commonware-cryptography.workspace = true
+commonware-glue.workspace = true
+commonware-parallel.workspace = true
+commonware-runtime.workspace = true
+commonware-utils.workspace = true
+axum.workspace = true
+borsh.workspace = true
+k256 = { workspace = true, features = ["ecdsa"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["full", "test-util"] }

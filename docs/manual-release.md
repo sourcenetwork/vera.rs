@@ -161,6 +161,7 @@ for the current graph it is:
 | 4 | `vera-modules` |
 | 5 | `vera-permission` |
 | 6 | `vera-client` |
+| 7 | `vera-light-client` |
 
 For each package, verify its archive before uploading it. Start with:
 
@@ -181,6 +182,7 @@ cargo publish --locked --registry crates-io -p vera-identity
 cargo publish --locked --registry crates-io -p vera-modules
 cargo publish --locked --registry crates-io -p vera-permission
 cargo publish --locked --registry crates-io -p vera-client
+cargo publish --locked --registry crates-io -p vera-light-client
 ```
 
 Run those commands one at a time. Preserve Cargo's package verification; do not
