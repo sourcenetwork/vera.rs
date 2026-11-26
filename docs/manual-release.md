@@ -1,6 +1,6 @@
 # Publishing the first Vera release
 
-The maintainer publishes the six client crates from a clean, reviewed
+The maintainer publishes the seven client crates from a clean, reviewed
 commit. CI validates the package boundary and prepares daemon artifacts; it has
 no crates.io upload step or publishing credentials. `verad`, the node internals,
 test harnesses and development tools are not published as crates.
@@ -57,7 +57,7 @@ Before publishing:
   `Apache-2.0 OR MIT` and includes the Apache 2.0 text from its Defra source
   revision as well as the MIT notice.
   The other packages declare `MIT` and include its notice.
-- Confirm ownership and publishing rights for all six Vera names. Log in to
+- Confirm ownership and publishing rights for all seven Vera names. Log in to
   crates.io locally with the maintainer account. Do not put publishing tokens
   in workflow secrets, release notes or repository files.
 
@@ -238,7 +238,7 @@ git push origin "refs/tags/$VERA_RELEASE_TAG"
 ```
 
 The workflow rejects a tag pointing to a different source or a version that does
-not match `verad` and the six public crates. Source must be in `main`'s history.
+not match `verad` and the seven public crates. Source must be in `main`'s history.
 It binds the comparison to the checkout's source tree, lockfile and toolchain
 file. Only the final draft-release job has repository write permission.
 Protect release tags against updates and deletion; do not move an existing tag.
