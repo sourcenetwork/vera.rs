@@ -210,16 +210,46 @@ fn request(permission: &str) -> AccessRequest {
     }
 }
 
+/// With its object identifier unescaped, the descendant's key would extend the
+/// parent's relation prefix in the same relation generation:
+/// `parent/{incarnation}/{hex(reader)}/` followed by
+/// `{incarnation}/{hex(reader)}/{subject}`.
 #[test]
 fn relationship_keys_isolate_path_fields() {
     let mut kv = InMemoryKvStore::default();
-    let original = alice("document", "parent/path", "reader");
-    let collision = alice("document", "parent", "a");
-    seed(&mut kv, &original, false);
-    assert_ne!(physical_key(&kv, &original), physical_key(&kv, &collision));
-    assert!(has(kv.clone(), &original).unwrap());
-    assert!(!has(kv.clone(), &collision).unwrap());
-    assert!(subjects(kv, "parent", "reader").unwrap().is_empty());
+    let descendant = alice(
+        "document",
+        &format!("parent/{:016x}/{}", 0, hex::encode("reader")),
+        "reader",
+    );
+    let parent = alice("document", "parent", "reader");
+    seed(&mut kv, &descendant, false);
+    let policy = read_policy(&kv, POLICY).unwrap().unwrap();
+    assert_eq!(
+        policy.relations.pair(&descendant).unwrap(),
+        policy.relations.pair(&parent).unwrap()
+    );
+    let (descendant_key, parent_key) = (physical_key(&kv, &descendant), physical_key(&kv, &parent));
+    assert_ne!(descendant_key, parent_key);
+    let parent_prefix = keys::relationship_generation_prefix(
+        POLICY,
+        policy.relations.pair(&parent).unwrap(),
+        &keys::relation_prefix("document", "parent", "reader", 0),
+    );
+    assert!(!descendant_key.starts_with(&parent_prefix));
+    assert!(has(kv.clone(), &descendant).unwrap());
+    assert!(!has(kv.clone(), &parent).unwrap());
+    assert!(subjects(kv.clone(), "parent", "reader").unwrap().is_empty());
+    seed(&mut kv, &parent, false);
+    assert!(has(kv.clone(), &parent).unwrap());
+    assert_eq!(
+        subjects(kv.clone(), "parent", "reader").unwrap(),
+        vec![parent.subject.clone()]
+    );
+    assert_eq!(
+        subjects(kv, descendant.object.id.as_str(), "reader").unwrap(),
+        vec![descendant.subject]
+    );
 }
 
 #[test]
