@@ -190,13 +190,19 @@ resources:
             .unwrap();
     }
     let before = module.store.serialize();
-    for cmd in [
-        under(object("session", "s"), object("agent", "a")),
-        under(object("open", "o"), object("agent", "a")),
+    for (cmd, expected) in [
+        (
+            under(object("session", "s"), object("agent", "a")),
+            "create follows more than one relation; register with its relationships",
+        ),
+        (
+            under(object("open", "o"), object("agent", "a")),
+            "resource has no create rule",
+        ),
     ] {
         assert!(matches!(
             module.direct_policy_cmd(&owner, &policy, cmd),
-            Err(AcpError::InvalidAccessRequest { .. })
+            Err(AcpError::InvalidAccessRequest { reason }) if reason == expected
         ));
     }
     assert_eq!(before, module.store.serialize());
@@ -218,4 +224,13 @@ resources:
             },
         )
         .unwrap();
+}
+
+#[test]
+fn a_create_rule_following_no_relation_names_that_cause() {
+    assert!(matches!(
+        super::followed_relation(&::acp::domain::Expression::ComputedUserset("agent".into())),
+        Err(AcpError::InvalidAccessRequest { reason })
+            if reason == "create follows no relation; register the object without a parent"
+    ));
 }

@@ -33,16 +33,7 @@ impl AcpModule {
             .ok_or_else(|| AcpError::InvalidAccessRequest {
                 reason: "resource has no create rule".into(),
             })?;
-        let mut followed = std::collections::BTreeSet::new();
-        tuplesets(rule, &mut followed);
-        let [relation] =
-            Vec::from_iter(followed)
-                .try_into()
-                .map_err(|_| AcpError::InvalidAccessRequest {
-                    reason:
-                        "create follows more than one relation; register with its relationships"
-                            .into(),
-                })?;
+        let relation = followed_relation(rule)?;
         let link = relationship_values::relationship(
             &object.resource,
             &object.id,
@@ -52,6 +43,20 @@ impl AcpModule {
         self.cmd_register_object(actor, policy, object, vec![link], stamp, budget)
             .map(|(record, _)| PolicyCmdResult::RegisterObject { record })
     }
+}
+
+/// The one relation `rule` follows to a parent.
+fn followed_relation(rule: &Expression) -> Result<&RelationName> {
+    let mut followed = std::collections::BTreeSet::new();
+    tuplesets(rule, &mut followed);
+    let reason = match Vec::from_iter(followed).as_slice() {
+        [relation] => return Ok(relation),
+        [] => "create follows no relation; register the object without a parent",
+        _ => "create follows more than one relation; register with its relationships",
+    };
+    Err(AcpError::InvalidAccessRequest {
+        reason: reason.into(),
+    })
 }
 
 /// The relations `expression`'s tuple to usersets follow.
