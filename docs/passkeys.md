@@ -79,11 +79,17 @@ handling is not part of its contract.
 
 ## Bounds and cost
 
-An approval is at most about 2.3 KB of JSON, so the 32 KiB limits on an
-administrative request and on a term certificate submitted for anchoring each
-hold at least 13 passkey approvals. The 512 KiB limit on a message between an
-account's devices holds a certificate with an approval from each of the 128
-operators a policy may list. Verifying one costs two SHA-256 passes over at most 1,093 bytes, a parse
+A passkey approval is at most 2,346 bytes of JSON, with 1,024 bytes of
+client data. A term certificate verifies only when its JSON encoding is at
+most 32 KiB (`vera_domain::MAX_TERM_CERTIFICATE_BYTES`), wherever it is
+checked: it holds at least 13 such approvals, about 57 with the 135 bytes of
+client data Chrome writes, and an approval from each of the 128 operators a
+policy may list when they sign raw. A message between an account's devices
+is at most that limit plus 256 bytes, the rest of a status carrying a
+certificate, and a longer one is dropped before it is parsed. An
+administrative request has its own 32 KiB limit and holds as many. A term
+approval whose authenticator data is not 37 bytes, or whose client data
+exceeds 1,024 bytes, does not decode. Verifying one costs two SHA-256 passes over at most 1,093 bytes, a parse
 of at most 1 KiB, and one P-256 verification, as a raw approval does.
 Administrative requests keep their fixed 500,000 gas.
 

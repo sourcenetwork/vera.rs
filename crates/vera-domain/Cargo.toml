@@ -22,6 +22,9 @@ commonware-parallel.workspace = true
 commonware-storage.workspace = true
 commonware-utils.workspace = true
 
+# Vera
+vera-crypto.workspace = true
+
 # Primitives
 alloy-primitives = { workspace = true, features = ["serde", "rlp"] }
 

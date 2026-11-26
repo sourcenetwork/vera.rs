@@ -2,7 +2,7 @@
 
 use alloy_primitives::B256;
 use vera_crypto::webauthn::Assertion;
-use vera_domain::{TermApproval, TermCertificate, TermError};
+use vera_domain::{MAX_TERM_CERTIFICATE_BYTES, TermApproval, TermCertificate, TermError};
 use vera_modules::vera::administration::OperatorPolicy;
 
 /// Verify that `certificate` records a switch of the active device of the
@@ -12,11 +12,19 @@ use vera_modules::vera::administration::OperatorPolicy;
 /// carries no key, so a policy taken from an unverified source lets its author
 /// approve any switch. A certificate that verifies says who may propose from
 /// its term on; it does not say that its cut is a finalized block.
+///
+/// A certificate whose JSON encoding exceeds [`MAX_TERM_CERTIFICATE_BYTES`]
+/// does not verify, so a device never holds or sends one that a chain
+/// recording terms would refuse.
 pub fn verify_term_certificate(
     certificate: &TermCertificate,
     genesis_id: &B256,
     policy: &OperatorPolicy,
 ) -> Result<(), TermError> {
+    if serde_json::to_vec(certificate).map_or(true, |json| json.len() > MAX_TERM_CERTIFICATE_BYTES)
+    {
+        return Err(TermError::TooLarge);
+    }
     certificate.verify(
         genesis_id,
         policy.threshold,

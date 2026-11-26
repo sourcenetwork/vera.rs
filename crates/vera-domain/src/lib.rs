@@ -35,7 +35,8 @@ pub use term::term_extends;
 
 mod term_certificate;
 pub use term_certificate::{
-    TermApproval, TermCertificate, TermChange, TermCut, TermError, TermPasskeyAssertion,
+    MAX_TERM_CERTIFICATE_BYTES, TermApproval, TermCertificate, TermChange, TermCut, TermError,
+    TermPasskeyAssertion,
 };
 
 mod idents;

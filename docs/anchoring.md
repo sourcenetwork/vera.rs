@@ -188,7 +188,7 @@ event TermChanged(bytes32 indexed deployment, uint64 term, uint64 cutHeight, byt
 ```
 
 `certificate` is the JSON certificate, at most 32 KiB. The executor verifies
-it with `TermCertificate::verify` against the registered genesis block and
+it with `vera_permission::verify_term_certificate` against the registered genesis block and
 operator policy, and `VeraModule::record_term` records it when its term is
 above the one recorded last. A certificate that does not verify is refused
 with `invalid_proof`, a term that is not newer with `not_newer`. Terms may

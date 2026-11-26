@@ -92,7 +92,12 @@ build them.
   back for each approval, with its signature and any passkey assertion. It
   takes the policy's threshold and size.
 - `vera_permission::verify_term_certificate` checks a certificate against an
-  `OperatorPolicy`.
+  `OperatorPolicy`, and `vera_permission::approves_term` checks one approval.
+  The node, the executor and the client verify through them. A certificate
+  whose JSON encoding exceeds `MAX_TERM_CERTIFICATE_BYTES` (32 KiB) does not
+  verify: that holds an approval from each of 128 operators signing raw, or
+  at least 13 passkey approvals with 1,024 bytes of client data each (about
+  57 with the 135 bytes Chrome writes).
 - `VeraClient::verify_term_certificate` reads the operator policy from
   certified state, as `read_administration` does, and checks the certificate
   against it. It returns the revision the policy was read at.
@@ -364,7 +369,10 @@ like the [host-held share](embedded-node.md#the-share-after-the-first-epoch).
   fetches it.
 - Devices ask each other where they stand on p2p channel 14: a question, and
   an answer with the newest block and the newest certificate. The active
-  device uses it to confirm a successor is current.
+  device uses it to confirm a successor is current. A message is at most
+  `MAX_TERM_CERTIFICATE_BYTES` plus 256 bytes for the rest of a status, and
+  a longer one is dropped before it is parsed; a device holds and sends only
+  certificates that verify.
 - A backup that holds a certificate refuses a finalized block above the cut
   in a lower term: such a block comes from a device that was replaced. The
   node stops with `TermRefusal::LowerTerm` before the block reaches

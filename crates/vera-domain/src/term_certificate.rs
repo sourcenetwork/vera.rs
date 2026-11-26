@@ -3,8 +3,17 @@
 use alloy_primitives::{B256, Bytes, FixedBytes};
 use commonware_cryptography::{Hasher as _, Sha256};
 use serde::{Deserialize, Serialize};
+use vera_crypto::webauthn::{AUTHENTICATOR_DATA_BYTES, MAX_CLIENT_DATA_BYTES};
 
 const SIGNING_NAMESPACE: &[u8] = b"vera/term/v1\0";
+
+/// Longest JSON encoding of a term certificate, in bytes. A certificate a
+/// chain records and one a device holds or sends are both bounded by it.
+///
+/// It holds an approval from each of the 128 operators a policy may list
+/// when they sign raw, and at least 13 passkey approvals with the longest
+/// client data an assertion may carry.
+pub const MAX_TERM_CERTIFICATE_BYTES: usize = 32 << 10;
 
 /// The last block of the term before: the block a new term builds on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,13 +77,40 @@ pub struct TermApproval {
 
 /// The authenticator output of a passkey approval, as the authenticator
 /// signed it: the assertion's challenge is the change's signing digest.
+///
+/// Decoding refuses authenticator data other than 37 bytes and client data
+/// over 1,024 bytes, before any verification work.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, try_from = "PasskeyFields")]
 pub struct TermPasskeyAssertion {
     /// The 37 bytes of authenticator data.
     pub authenticator_data: Bytes,
-    /// The client data JSON, exactly as hashed.
+    /// The client data JSON, exactly as hashed, at most 1,024 bytes.
     pub client_data_json: Bytes,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PasskeyFields {
+    authenticator_data: Bytes,
+    client_data_json: Bytes,
+}
+
+impl TryFrom<PasskeyFields> for TermPasskeyAssertion {
+    type Error = &'static str;
+
+    fn try_from(fields: PasskeyFields) -> Result<Self, Self::Error> {
+        if fields.authenticator_data.len() != AUTHENTICATOR_DATA_BYTES {
+            return Err("authenticator data must contain 37 bytes");
+        }
+        if fields.client_data_json.len() > MAX_CLIENT_DATA_BYTES {
+            return Err("client data must not exceed 1,024 bytes");
+        }
+        Ok(Self {
+            authenticator_data: fields.authenticator_data,
+            client_data_json: fields.client_data_json,
+        })
+    }
 }
 
 /// A term change approved under the deployment's operator policy.
@@ -108,6 +144,9 @@ pub enum TermError {
     /// An approval is not a signature of the change by the operator it names.
     #[error("term approval by operator {0} does not verify")]
     Signature(u16),
+    /// The certificate's JSON encoding is longer than [`MAX_TERM_CERTIFICATE_BYTES`].
+    #[error("term certificate exceeds {MAX_TERM_CERTIFICATE_BYTES} bytes")]
+    TooLarge,
 }
 
 impl TermCertificate {
@@ -336,3 +375,7 @@ mod tests {
         assert!(serde_json::from_value::<TermCertificate>(unknown).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "term_certificate_limits.rs"]
+mod limits;

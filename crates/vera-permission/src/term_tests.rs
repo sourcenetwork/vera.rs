@@ -121,3 +121,19 @@ fn an_assertion_without_its_member_or_on_another_key_fails() {
         Err(TermError::Signature(account_index as u16))
     );
 }
+
+#[test]
+fn a_certificate_longer_than_a_chain_records_does_not_verify() {
+    let passkey = Authenticator::new([8; 32]);
+    let signed = passkey.assert(&change().signing_digest());
+    let mut certificate = certificate(&passkey, &signed);
+    let approval = certificate.approvals[0].clone();
+    while serde_json::to_vec(&certificate).unwrap().len() <= vera_domain::MAX_TERM_CERTIFICATE_BYTES
+    {
+        certificate.approvals.push(approval.clone());
+    }
+    assert_eq!(
+        verify_term_certificate(&certificate, &GENESIS, &policy(&passkey)),
+        Err(TermError::TooLarge)
+    );
+}

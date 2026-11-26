@@ -7,7 +7,7 @@ mod tests;
 
 use alloy_primitives::{B256, FixedBytes};
 use alloy_sol_types::SolCall;
-use vera_domain::{FinalizedArtifacts, RefusalKind, TermCertificate};
+use vera_domain::{FinalizedArtifacts, MAX_TERM_CERTIFICATE_BYTES, RefusalKind, TermCertificate};
 use vera_modules::types::{BlockExecCtx, TxExecCtx};
 use vera_modules::vera::VeraModule;
 use vera_modules::vera::anchors::{
@@ -194,9 +194,6 @@ fn admit(
     let verified = submission.verify(&registered.consensus_key)?;
     Ok((registered, verified))
 }
-
-/// Largest term certificate a term change carries, in bytes.
-const MAX_TERM_CERTIFICATE_BYTES: usize = 32 << 10;
 
 fn change_term(
     module: &mut VeraModule,
