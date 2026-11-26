@@ -11,7 +11,10 @@ SCHEMAS = {
 # binds them, and creation takes the nonce, so a runner of one cannot drive or
 # verify a node of the other.
 POLICY_ORIGIN = {**SCHEMAS['relationship/v5/'], 'policy_origin': 'required'}
-KNOWN_SCHEMAS = [*SCHEMAS.values(), POLICY_ORIGIN]
+# A record that stores acp's processed policy: a runner reading the earlier
+# engine's policy encoding cannot decode it, nor the reverse.
+ACP_POLICY = {**POLICY_ORIGIN, 'policy_model': 'acp'}
+KNOWN_SCHEMAS = [*SCHEMAS.values(), POLICY_ORIGIN, ACP_POLICY]
 KEYS = 'crates/vera-modules/src/acp/keys.rs'
 TYPES = 'crates/vera-modules/src/acp/types.rs'
 DISCOVERY = 'crates/vera-config/src/discovery.rs'
@@ -46,12 +49,17 @@ def source_schema(source, revision):
     if re.search(r'#\[\s*serde\s*\([^\]]*\b(default|skip|skip_deserializing|deserialize_with|with)\b',
                  attributes + fields[0][0]):
         raise ValueError('ACP relationship incarnation must not default or use custom decoding')
+    policies = re.findall(r'^pub struct PolicyRecord\s*\{(.*?)^\}', types, re.MULTILINE | re.DOTALL)
     origin = [re.findall(rf'^[ \t]*pub\s+{field}\s*:\s*([^,\n]+),', policy, re.MULTILINE)
-              for policy in re.findall(r'^pub struct PolicyRecord\s*\{(.*?)^\}', types,
-                                       re.MULTILINE | re.DOTALL)
+              for policy in policies
               for field in ('nonce', 'policy_hash')]
+    model = [re.findall(r'^[ \t]*pub\s+policy\s*:\s*([^,\n]+),', policy, re.MULTILINE)
+             for policy in policies]
+    acp = model == [['ProcessedPolicy']]
     if origin == [['PolicyNonce'], ['PolicyHash']]:
-        return dict(POLICY_ORIGIN)
+        return dict(ACP_POLICY if acp else POLICY_ORIGIN)
+    if acp:
+        raise ValueError('ACP policy record of acp must name its nonce and creation hash')
     if any(origin):
         raise ValueError('ACP policy record must name both its nonce and its creation hash')
     return dict(SCHEMAS[namespaces[0]])
