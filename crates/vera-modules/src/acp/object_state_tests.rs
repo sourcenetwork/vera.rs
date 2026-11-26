@@ -1,4 +1,5 @@
 use super::*;
+use crate::acp::types::Subject;
 use crate::kv_store::{InMemoryKvStore, ModuleKvStore};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -118,7 +119,8 @@ impl RecordStore for Unavailable {
 
 #[test]
 fn owner_is_stable_and_missing_nonowner_proof_is_not_initial_state() {
-    let owner = Relationship::new("file", "one", "owner", vera_acp::Subject::Wildcard);
+    let owner =
+        crate::acp::relationship_values::relationship("file", "one", "owner", Subject::AllActors);
     assert_eq!(for_relationship(&Unavailable, "policy", &owner).unwrap(), 0);
     let mut grant = owner.clone();
     grant.relation = "reader".into();

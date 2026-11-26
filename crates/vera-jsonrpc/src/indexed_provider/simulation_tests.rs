@@ -99,7 +99,7 @@ pub(super) fn committed() -> (SharedModuleState, B256) {
     let record: PolicyRecord = serde_json::from_slice(&returned[64..64 + length]).unwrap();
     (
         Arc::new(RwLock::new(modules)),
-        record.policy.id.parse().unwrap(),
+        record.policy.id.as_str().parse().unwrap(),
     )
 }
 

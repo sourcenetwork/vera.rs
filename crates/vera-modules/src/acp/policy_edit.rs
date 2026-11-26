@@ -4,27 +4,6 @@ use super::policy_edit_budget::EditRecords;
 use super::record_store::RecordStore;
 use super::*;
 
-fn registration_parent(resource: &vera_zanzibar::Resource) -> Result<Option<(&str, &str)>> {
-    let Some(rule) = &resource.create else {
-        return Ok(None);
-    };
-    let restriction = resource
-        .get_relation(&rule.parent)
-        .and_then(|parent| parent.subject_restriction.as_ref());
-    match restriction {
-        Some(vera_zanzibar::SubjectRestriction::EntitySet {
-            resource: target,
-            relation,
-        }) if relation.is_empty() => Ok(Some((&rule.parent, target))),
-        _ => Err(AcpError::InvalidPolicy {
-            reason: format!(
-                "invalid registration parent for resource '{}'",
-                resource.name
-            ),
-        }),
-    }
-}
-
 impl AcpModule {
     /// Replace the current definition without an expected-parent check or revision DAG.
     /// Runtime callers use the budgeted variant; this convenience method has no work limit.
@@ -105,43 +84,16 @@ impl AcpModule {
         }
 
         budget.definition(policy.len())?;
-        let (mut new_zanzibar, _) =
-            Self::compile_policy(policy, &marshal_type, Some(existing.policy.specification))?;
-
-        let new_resources: std::collections::BTreeMap<_, _> = new_zanzibar
-            .resources
-            .iter()
-            .map(|resource| (resource.name.as_str(), resource))
-            .collect();
-        for resource in &existing.policy.resources {
-            let Some(updated) = new_resources.get(resource.name.as_str()) else {
-                return Err(AcpError::InvalidPolicy {
-                    reason: format!(
-                        "resource '{}' cannot be removed from an existing policy",
-                        resource.name
-                    ),
-                });
-            };
-            if registration_parent(resource)? != registration_parent(updated)? {
-                return Err(AcpError::InvalidPolicy {
-                    reason: format!(
-                        "registration parent for resource '{}' is immutable",
-                        resource.name
-                    ),
-                });
+        Self::check_definition(policy, &marshal_type)?;
+        let plan = ::acp::policy::plan_edit_text(&existing.policy, policy).map_err(|error| {
+            AcpError::InvalidPolicy {
+                reason: error.to_string(),
             }
-        }
-        if existing.policy.actor.as_ref().map(|actor| &actor.name)
-            != new_zanzibar.actor.as_ref().map(|actor| &actor.name)
-        {
-            return Err(AcpError::InvalidPolicy {
-                reason: "actor resource cannot be renamed".into(),
-            });
-        }
-        new_zanzibar.id = policy_id.to_string();
+        })?;
+        let compiled = plan.compiled;
         let (relations, retired) = existing
             .relations
-            .updated(&existing.policy, &new_zanzibar)
+            .updated(&existing.policy, &compiled.policy)
             .map_err(relation_state_error)?;
         let (removed, changes) = self
             .prepare_relation_edit(policy_id, &existing.relations, &relations, &retired, budget)
@@ -156,7 +108,7 @@ impl AcpModule {
             relations,
             supplied_metadata: existing.supplied_metadata.clone(),
             last_modified: modified_at.cloned().or(existing.last_modified.clone()),
-            policy: new_zanzibar.clone(),
+            policy: compiled.policy.clone(),
             raw_policy: policy.to_string(),
             marshal_type,
             metadata: existing.metadata,
@@ -172,8 +124,8 @@ impl AcpModule {
         }
 
         self.store.put(&policy_key, encoded);
-        self.zanzibar_policies
-            .insert(policy_id.to_string(), Arc::new(new_zanzibar));
+        self.policies
+            .insert(policy_id.to_string(), Arc::new(compiled));
 
         Ok((removed, new_record))
     }

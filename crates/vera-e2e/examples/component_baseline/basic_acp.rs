@@ -12,7 +12,8 @@ use vera_modules::{
     types::{BlockExecCtx, Timestamp, TxExecCtx},
 };
 
-const POLICY: &str = "name: basic-component\nresources:\n  - name: file\n    permissions:\n      - name: read\n        expr: owner\n";
+const POLICY: &str =
+    "name: basic-component\nresources:\n  - name: file\n    permissions:\n      - name: read\n";
 
 struct Fixture {
     owner: Did,
@@ -93,7 +94,7 @@ pub(super) fn run() {
     assert_eq!(policy.metadata.owner_did, fixture.owner.as_str());
     assert_eq!(policy.metadata.creation_ts, fixture.block.timestamp);
     assert_eq!(policy.metadata.tx_hash, fixture.submission.tx_hash);
-    let id = &policy.policy.id;
+    let id = &policy.policy.id.to_string();
     assert!(!fixture.allowed(&created, id));
     let original = created.store().serialize();
     let mut registered = created.clone();

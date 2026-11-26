@@ -1,6 +1,5 @@
 //! Logical edit cost with fixed definitions and growing retained relationship counts.
 
-use vera_acp::Relationship;
 use vera_identity::Did;
 use vera_modules::{
     acp::{
@@ -27,7 +26,6 @@ resources:
   - name: file
     permissions:
       - name: read
-        expr: owner
 ";
 
 struct Fixture {
@@ -52,7 +50,8 @@ impl Fixture {
             )
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         for index in 0..objects {
             let object = Object {
                 resource: "file".into(),
@@ -65,12 +64,15 @@ impl Fixture {
                 .direct_policy_cmd(
                     &owner,
                     &policy,
-                    PolicyCmd::SetRelationship(Relationship::with_entity(
-                        "file",
-                        &object.id,
-                        "reader",
-                        reader.clone(),
-                    )),
+                    PolicyCmd::SetRelationship(
+                        vera_modules::acp::relationship_values::actor_relationship(
+                            "file",
+                            &object.id,
+                            "reader",
+                            &reader.clone(),
+                        )
+                        .unwrap(),
+                    ),
                 )
                 .unwrap();
         }
@@ -138,7 +140,7 @@ impl Fixture {
         let mut edited = self.module.clone();
         let (removed, record) = self.edit(&mut edited);
         assert_eq!(removed, self.objects as u64);
-        assert_eq!(record.policy.id, self.policy);
+        assert_eq!(record.policy.id.to_string(), self.policy);
         // No end_blocker call: logical revocation must work while old rows remain.
         for (key, value) in &retained {
             assert_eq!(edited.store().get_ref(key), Some(value.as_slice()));

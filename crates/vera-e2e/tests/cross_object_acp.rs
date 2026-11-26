@@ -1,11 +1,10 @@
 //! Cross-object ACP: storage, replication, and resolution across a cluster.
 //!
-//! Seeds a cross-object "parent edge" (a relationship whose subject is an
-//! `EntitySet`, i.e. another object's userset) plus a child grant on node 0,
-//! then on every other node asserts both that they replicate and that an access
-//! check *resolves* across the edge: a subject granted on the parent inherits
-//! access to the child through `TupleToUserset`, evaluated on-chain by the
-//! zanzibar `PermissionEngine`. (Simplex BFT requires ≥4 nodes for quorum, so
+//! Seeds a cross-object "parent edge" (a relationship whose subject is another
+//! object) plus a child grant on node 0, then on every other node asserts both
+//! that they replicate and that an access check *resolves* across the edge: a
+//! subject granted on the parent inherits access to the child through
+//! `parent->reader`, evaluated on-chain by acp. (Simplex BFT requires ≥4 nodes for quorum, so
 //! the "seed on one, resolve on another" check uses the 4-node minimum.)
 //!
 //! Requires `cargo build -p verad` (and `VERAD_BINARY`) before running.
@@ -27,33 +26,28 @@ use vera_modules::acp::abi::IAcp;
 
 /// Policy with a `document` whose `read` inherits from `reader` on its parent
 /// `collection` (`parent->reader`), so a `document#parent` edge can point at a
-/// collection userset.
+/// collection.
 const TEST_POLICY_YAML: &str = "\
 name: cross-object-policy
 resources:
   - name: collection
     relations:
-      - name: owner
       - name: reader
     permissions:
       - name: read
-        expr: owner + reader
+        expr: reader
       - name: update
-        expr: owner
       - name: delete
-        expr: owner
   - name: document
     relations:
-      - name: owner
       - name: parent
+        types: [collection]
       - name: reader
     permissions:
       - name: read
-        expr: owner + reader + parent->reader
+        expr: reader + parent->reader
       - name: update
-        expr: owner
       - name: delete
-        expr: owner
 ";
 
 fn parse_policy_id(hex_str: &str) -> FixedBytes<32> {
@@ -123,25 +117,25 @@ async fn cross_object_grant_replicates_across_nodes() {
     }
 
     // ── 2. Seed the parent edge via setRelationshipSubject ───────────────
-    // document:doc1#parent @ collection:col1#reader — a userset subject
-    // (subjectKind 3), the cross-object shape the entity-only setRelationship
-    // cannot express. The signer registered both objects and owns them.
+    // document:doc1#parent @ collection:col1 — an object subject (subjectKind
+    // 2), the cross-object shape the actor-only setRelationship cannot express.
+    // The signer registered both objects and owns them.
     let parent_calldata = IAcp::setRelationshipSubjectCall {
         policyId: policy_id,
         resource: "document".into(),
         objectId: "doc1".into(),
         relation: "parent".into(),
-        subjectKind: 3,
+        subjectKind: 2,
         subjectResource: "collection".into(),
         subjectObjectId: "col1".into(),
-        subjectRelation: "reader".into(),
+        subjectRelation: String::new(),
     }
     .abi_encode();
     let parent_receipt =
         broadcast::native(&cluster, &client, &signer, ACP_ADDRESS, parent_calldata).await;
     assert!(
         parent_receipt.success,
-        "setting the userset parent edge should succeed"
+        "setting the parent edge should succeed"
     );
 
     // ── 3. Seed the child grant: collection:col1#reader @ alice ──────────
@@ -169,7 +163,7 @@ async fn cross_object_grant_replicates_across_nodes() {
     for node_idx in 0..cluster.node_count() {
         let node = VeraClient::new(cluster.node(node_idx).rpc_url());
 
-        // The parent edge (EntitySet subject) is stored and queryable. Empty
+        // The parent edge (object subject) is stored and queryable. Empty
         // actor → no subject filter → all subjects on document:doc1#parent.
         let parent_rels = node
             .filter_relationships(policy_id, "document", "doc1", "parent", "")
@@ -177,8 +171,8 @@ async fn cross_object_grant_replicates_across_nodes() {
             .unwrap_or_else(|e| panic!("node{node_idx} filter_relationships(parent): {e}"));
         let parent_json = String::from_utf8_lossy(&parent_rels);
         assert!(
-            parent_json.contains("EntitySet") && parent_json.contains("col1"),
-            "node{node_idx} should have the EntitySet parent edge to col1, got: {parent_json}"
+            parent_json.contains(r#""subject":{"object":{"resource":"collection","id":"col1"}}"#),
+            "node{node_idx} should have the parent edge to col1, got: {parent_json}"
         );
 
         // The child grant (entity subject) replicated too.
@@ -192,10 +186,9 @@ async fn cross_object_grant_replicates_across_nodes() {
         );
 
         // Cross-object RESOLUTION: alice has no direct grant on doc1, but
-        // document#read = owner + reader + parent->reader, so the chain inherits
-        // her read of doc1 from her reader grant on doc1's parent collection
-        // col1 — resolved on-chain through the zanzibar PermissionEngine
-        // (TupleToUserset) via a module query.
+        // document#read = reader + parent->reader (and the owner), so she
+        // inherits read of doc1 from her reader grant on doc1's parent
+        // collection col1, resolved on-chain by acp via a module query.
         let can_read = node
             .verify_access_request(
                 policy_id,
@@ -229,17 +222,17 @@ async fn cross_object_grant_replicates_across_nodes() {
     }
 
     // ── 5. Revoke the cross-object edge via deleteRelationshipSubject ─────
-    // Removing the parent edge (the same userset subject) must revoke the
+    // Removing the parent edge (the same object subject) must revoke the
     // inherited access everywhere.
     let revoke_calldata = IAcp::deleteRelationshipSubjectCall {
         policyId: policy_id,
         resource: "document".into(),
         objectId: "doc1".into(),
         relation: "parent".into(),
-        subjectKind: 3,
+        subjectKind: 2,
         subjectResource: "collection".into(),
         subjectObjectId: "col1".into(),
-        subjectRelation: "reader".into(),
+        subjectRelation: String::new(),
     }
     .abi_encode();
     let revoke_receipt =

@@ -16,6 +16,7 @@ fn policy(acp: &mut AcpModule) -> String {
     .unwrap()
     .policy
     .id
+    .to_string()
 }
 
 fn object(name: &str) -> Object {
@@ -32,12 +33,15 @@ fn register(policy: &str, name: &str) -> (String, PolicyCmd) {
 fn grant(policy: &str, name: &str) -> (String, PolicyCmd) {
     (
         policy.into(),
-        PolicyCmd::SetRelationship(vera_acp::Relationship::with_entity(
-            "file",
-            name,
-            "reader",
-            vera_identity::Did::new(submission(9).signer).unwrap(),
-        )),
+        PolicyCmd::SetRelationship(
+            crate::acp::relationship_values::actor_relationship(
+                "file",
+                name,
+                "reader",
+                &vera_identity::Did::new(submission(9).signer).unwrap(),
+            )
+            .unwrap(),
+        ),
     )
 }
 
@@ -128,6 +132,7 @@ fn policy_with_name(acp: &mut AcpModule) -> String {
     .unwrap()
     .policy
     .id
+    .to_string()
 }
 
 #[test]

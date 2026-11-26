@@ -150,12 +150,13 @@ pub(super) async fn verify_state(
 ) {
     for observation in &observations[..objects] {
         let request = &observation.request;
-        let relationship = vera_acp::Relationship::with_entity(
+        let relationship = vera_modules::acp::relationship_values::actor_relationship(
             "file",
             &request.object_id,
             "owner",
-            request.owner.parse().unwrap(),
-        );
+            &request.owner.parse().unwrap(),
+        )
+        .unwrap();
         let key = vera_modules::acp::keys::relationship_key(
             &reads.policy,
             &vera_modules::acp::keys::relationship_storage_key(&relationship, 0),

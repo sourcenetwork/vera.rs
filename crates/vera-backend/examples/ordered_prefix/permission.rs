@@ -6,19 +6,18 @@ use commonware_storage::{
     mmr,
     qmdb::{any::value::VariableEncoding, current::ordered::proof::constant::ExclusionProof},
 };
+use vera_modules::acp::types::{Relationship, Subject};
 use vera_modules::{
     acp::{
-        AcpModule, keys,
+        AcpModule,
+        evaluation::evaluate_access_request,
+        keys,
         read_capture::{ReadCapture, ReadLimits, RecordRead},
+        record_error::{RecordError, Result},
         record_store::RecordStore,
         types::{AccessRequest, Actor, Object, Operation, PolicyCmd, PolicyMarshalingType},
-        zanzibar_store::evaluate_access_request,
     },
     kv_store::ModuleKvStore,
-};
-use vera_zanzibar::{
-    Relationship, Subject,
-    error::{Error, Result},
 };
 
 type Absent = ExclusionProof<mmr::Family, Vec<u8>, VariableEncoding<Bytes>, Digest, 32>;
@@ -106,13 +105,13 @@ impl RecordStore for VerifiedReads {
         self.points
             .get(key)
             .cloned()
-            .ok_or_else(|| Error::Serialization("missing point coverage".into()))
+            .ok_or_else(|| RecordError::unavailable("missing point coverage"))
     }
     fn scan_records(&self, prefix: &[u8]) -> Result<Entries> {
         self.prefixes
             .get(prefix)
             .cloned()
-            .ok_or_else(|| Error::Serialization("missing prefix coverage".into()))
+            .ok_or_else(|| RecordError::unavailable("missing prefix coverage"))
     }
 }
 
@@ -148,7 +147,8 @@ fn permission_evaluation_requires_complete_proofs_at_one_root() {
             )
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         module
             .direct_policy_cmd(
                 &owner,
@@ -159,14 +159,17 @@ fn permission_evaluation_requires_complete_proofs_at_one_root() {
                 }),
             )
             .unwrap();
-        let blocked = Relationship::new(
+        let blocked = vera_modules::acp::relationship_values::relationship(
             "document",
             "report",
             "blocked",
-            Subject::typed_wildcard("document"),
+            Subject::AllActors,
         );
         for relationship in [
-            Relationship::with_entity("document", "report", "reader", actor),
+            vera_modules::acp::relationship_values::actor_relationship(
+                "document", "report", "reader", &actor,
+            )
+            .unwrap(),
             blocked.clone(),
         ] {
             module
@@ -230,22 +233,27 @@ fn permission_evaluation_requires_complete_proofs_at_one_root() {
             generations.pair(&blocked).unwrap(),
             &keys::relation_prefix("document", "report", "blocked", 0),
         );
+        let blocked_key = reads
+            .iter()
+            .find_map(|(read, witness)| match (read, witness) {
+                (RecordRead::Key(key), Witness::Present(_)) if key.starts_with(&blocked_prefix) => {
+                    Some(key.clone())
+                }
+                _ => None,
+            })
+            .unwrap();
         let mut incomplete_records = VerifiedReads::verify(&reads, &old_root).unwrap();
-        incomplete_records
-            .prefixes
-            .insert(blocked_prefix.clone(), vec![]);
+        incomplete_records.points.insert(blocked_key.clone(), None);
         assert!(evaluate_access_request(incomplete_records, &policy_id, &request).unwrap());
 
         let mut omitted = reads.clone();
-        let (_, Witness::Prefix(proof)) = omitted
+        let mut neighbour = blocked_key.clone();
+        neighbour.push(0);
+        let (_, witness) = omitted
             .iter_mut()
-            .find(|(read, _)| read == &RecordRead::Prefix(blocked_prefix.clone()))
-            .unwrap()
-        else {
-            unreachable!()
-        };
-        assert_eq!(proof.entries.len(), 1);
-        proof.entries.clear();
+            .find(|(read, _)| read == &RecordRead::Key(blocked_key.clone()))
+            .unwrap();
+        *witness = Witness::Absent(db.exclusion_proof(&neighbour).await.unwrap());
         assert!(VerifiedReads::verify(&omitted, &old_root).is_err());
 
         let before = module.store().clone();

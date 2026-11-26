@@ -14,7 +14,8 @@ fn fixture() -> (AcpModule, String) {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     (module, policy)
 }
 fn record(policy: &str) -> RegistrationsCommitment {

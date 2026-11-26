@@ -1,5 +1,4 @@
 //! Policy and object lifecycle authorization, metadata and restoration.
-use vera_acp::{Relationship, Subject};
 use vera_identity::Did;
 use vera_modules::{
     acp::{
@@ -12,7 +11,7 @@ use vera_modules::{
     types::{BlockExecCtx, Timestamp, TxExecCtx},
 };
 
-const POLICY: &str = "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: admin\n        types: [group->member]\n        manages: [reader, owner]\n    permissions:\n      - name: read\n        expr: reader\n  - name: group\n    relations:\n      - name: member\n        types: [actor]\n";
+const POLICY: &str = "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n      - name: admin\n        types: [group->member]\n        manages: [reader]\n    permissions:\n      - name: read\n        expr: reader\n  - name: group\n    relations:\n      - name: member\n        types: [actor]\n";
 fn did(name: &str) -> Did {
     Did::new(format!("did:key:{name}")).unwrap()
 }
@@ -33,7 +32,8 @@ fn setup() -> (AcpModule, String) {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     let block = BlockExecCtx {
         timestamp: Timestamp {
             seconds: 10,
@@ -71,7 +71,13 @@ mod deletion;
 fn policy_creator_cannot_manage_another_actors_object() {
     let (mut module, policy) = setup();
     let before = module.store().serialize();
-    let grant = Relationship::with_entity("file", "report", "reader", did("reader"));
+    let grant = vera_modules::acp::relationship_values::actor_relationship(
+        "file",
+        "report",
+        "reader",
+        &did("reader"),
+    )
+    .unwrap();
     assert!(
         !module
             .check_management_authority(&did("creator"), &policy, &object(), "reader")
@@ -106,7 +112,13 @@ fn transfer_preserves_priority_and_grants_and_revokes_old_ownership() {
         .query_object_registration(&policy, &object())
         .unwrap()
         .unwrap();
-    let grant = Relationship::with_entity("file", "report", "reader", did("reader"));
+    let grant = vera_modules::acp::relationship_values::actor_relationship(
+        "file",
+        "report",
+        "reader",
+        &did("reader"),
+    )
+    .unwrap();
     module
         .direct_policy_cmd(&did("owner"), &policy, PolicyCmd::SetRelationship(grant))
         .unwrap();
@@ -148,7 +160,13 @@ fn userset_managers_can_delegate_and_revocation_survives_restore() {
             }),
         )
         .unwrap();
-    let member = Relationship::with_entity("group", "admins", "member", did("manager"));
+    let member = vera_modules::acp::relationship_values::actor_relationship(
+        "group",
+        "admins",
+        "member",
+        &did("manager"),
+    )
+    .unwrap();
     module
         .direct_policy_cmd(
             &did("owner"),
@@ -160,11 +178,11 @@ fn userset_managers_can_delegate_and_revocation_survives_restore() {
         .direct_policy_cmd(
             &did("owner"),
             &policy,
-            PolicyCmd::SetRelationship(Relationship::new(
+            PolicyCmd::SetRelationship(vera_modules::acp::relationship_values::relationship(
                 "file",
                 "report",
                 "admin",
-                Subject::entity_set("group", "admins", "member"),
+                vera_modules::acp::relationship_values::actor_set("group", "admins", "member"),
             )),
         )
         .unwrap();
@@ -252,7 +270,8 @@ fn policy_deletion_removes_only_its_registration_indexes() {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     let mut ids = Vec::new();
     for target in [&policy, &other] {
         let result = module
@@ -283,86 +302,4 @@ fn policy_deletion_removes_only_its_registration_indexes() {
             .policy_id,
         other
     );
-}
-
-#[test]
-fn theorem_results_cover_denial_management_ranges_and_invalid_inputs() {
-    use vera_modules::acp::theorem::TheoremStatus;
-    let (module, policy) = setup();
-    let source = "Authorizations { file:report#read@did:key:owner !file:report#read@did:key:stranger }\nDelegations { did:key:owner > file:report#reader !did:key:creator > file:report#reader }";
-    let report = module.evaluate_theorem(&policy, source).unwrap();
-    assert!(report.ok);
-    assert_eq!(report.theorem_count, 4);
-    for result in report.results {
-        assert_eq!(result.status, TheoremStatus::Accept);
-        assert!(!source[result.theorem.start..result.theorem.end].is_empty());
-    }
-    let rejected = module
-        .evaluate_theorem(
-            &policy,
-            "Authorizations { file:report#read@did:key:stranger } Delegations {}",
-        )
-        .unwrap();
-    assert!(!rejected.ok);
-    assert_eq!(rejected.failures, 1);
-    assert_eq!(rejected.results[0].status, TheoremStatus::Reject);
-    let bad = module
-        .evaluate_theorem(
-            &policy,
-            "Authorizations { file:report#unknown@did:key:owner } Delegations {}",
-        )
-        .unwrap();
-    assert_eq!(bad.results[0].status, TheoremStatus::Error);
-    for malformed in [
-        "",
-        "Authorizations {}",
-        "Authorizations {} Delegations {} trailing",
-        "Authorizations {} Delegations {} ImpliedRelations { file:report#read => file:report#write }",
-        "Authorizations { file:report#read@group:admins#member } Delegations {}",
-    ] {
-        assert!(
-            module.evaluate_theorem(&policy, malformed).is_err(),
-            "{malformed}"
-        );
-    }
-    let oversized = format!(
-        "Authorizations {{ {} }} Delegations {{}}",
-        "file:report#read@did:key:owner ".repeat(65)
-    );
-    assert!(module.evaluate_theorem(&policy, &oversized).is_err());
-}
-
-#[test]
-fn theorem_allowance_spans_all_assertions_and_exhaustion_is_not_a_report() {
-    use vera_modules::acp::{CommandBudget, error::AcpError};
-    let (module, policy) = setup();
-    let source = "Authorizations { file:report#read@did:key:owner !file:report#read@did:key:stranger }\nDelegations { did:key:owner > file:report#reader }";
-    let single = CommandBudget::new(u64::MAX);
-    module
-        .evaluate_theorem_with_budget(
-            &policy,
-            "Authorizations { file:report#read@did:key:owner } Delegations {}",
-            &single,
-        )
-        .unwrap();
-    let budget = CommandBudget::new(u64::MAX);
-    let report = module
-        .evaluate_theorem_with_budget(&policy, source, &budget)
-        .unwrap();
-    assert!(report.ok);
-    assert!(budget.consumed() > single.consumed());
-    assert!(
-        module
-            .evaluate_theorem_with_budget(&policy, source, &CommandBudget::new(budget.consumed()))
-            .unwrap()
-            .ok
-    );
-    for limit in [budget.consumed() - 1, single.consumed(), 0] {
-        let short = CommandBudget::new(limit);
-        assert!(matches!(
-            module.evaluate_theorem_with_budget(&policy, source, &short),
-            Err(AcpError::CommandBudgetExceeded)
-        ));
-        assert!(short.is_exhausted());
-    }
 }

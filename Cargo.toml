@@ -89,10 +89,11 @@ commonware-stream = { version = "=2026.10.0" }
 
 orbis-reporting = "=0.0.3"
 
+# Policy semantics and evaluation (acp-rs)
+acp = { git = "https://github.com/sourcenetwork/acp", rev = "d1966f7717dfd95c69674cc4b9307ce6151a4b5a", version = "=0.0.1" }
+
 # Shared Defra types and policy evaluation
-vera-acp = { path = "crates/vera-acp", version = "=0.2.0" }
 vera-identity = { path = "crates/vera-identity", version = "=0.2.0" }
-vera-zanzibar = { path = "crates/vera-zanzibar", version = "=0.2.0" }
 
 # Alloy
 alloy-primitives = "1.7"

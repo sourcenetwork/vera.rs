@@ -123,7 +123,7 @@ async fn actor_signed_command_rejects_substitution_and_deduplicates_across_worke
         id: "report".into(),
     };
     let command = PolicyCmd::RegisterObject(object.clone());
-    let digest = DelegatedOperation::PolicyCommand(&policy.policy.id, &command)
+    let digest = DelegatedOperation::PolicyCommand(&policy.policy.id.to_string(), &command)
         .digest()
         .unwrap();
     let mut id = [1; 32];
@@ -145,7 +145,7 @@ async fn actor_signed_command_rejects_substitution_and_deduplicates_across_worke
     };
     let signed = vera_client::create_operation_token(&key, &claims).unwrap();
     let call = |token: String, command: &PolicyCmd| IAcp::bearerPolicyCmdCall {
-        policyId: policy.policy.id.parse().unwrap(),
+        policyId: policy.policy.id.as_str().parse().unwrap(),
         bearerToken: token,
         cmd: serde_json::to_vec(command).unwrap().into(),
     };
@@ -180,10 +180,10 @@ async fn actor_signed_command_rejects_substitution_and_deduplicates_across_worke
     claims.sub = other.did().into();
     let retry = vera_client::create_operation_token(&key, &claims).unwrap();
     let retried = submit(&client, &other, &trusted, call(retry, &command), true).await;
-    let prefix = vera_client::object_owner_prefix(&policy.policy.id, &object).unwrap();
+    let prefix = vera_client::object_owner_prefix(&policy.policy.id.to_string(), &object).unwrap();
     let owner = client
         .read_current_policy_prefix(
-            &policy.policy.id,
+            &policy.policy.id.to_string(),
             &prefix,
             retried,
             &trusted,
@@ -193,7 +193,7 @@ async fn actor_signed_command_rejects_substitution_and_deduplicates_across_worke
         .unwrap();
     assert_eq!(
         owner
-            .verify_object_owner(&policy.policy.id, &object, retried, &trusted)
+            .verify_object_owner(&policy.policy.id.to_string(), &object, retried, &trusted)
             .unwrap()
             .unwrap()
             .0
@@ -202,7 +202,7 @@ async fn actor_signed_command_rejects_substitution_and_deduplicates_across_worke
     );
     let records = owner
         .verify(
-            &policy.policy.id,
+            &policy.policy.id.to_string(),
             &prefix,
             retried,
             &trusted,
@@ -267,9 +267,10 @@ async fn actor_signed_command_rejects_substitution_and_deduplicates_across_worke
     claims.sub = worker.did().into();
     let request = claims.request.as_mut().unwrap();
     request.id.0[8..].fill(2);
-    request.digest = DelegatedOperation::PolicyCommand(&policy.policy.id, &unused_command)
-        .digest()
-        .unwrap();
+    request.digest =
+        DelegatedOperation::PolicyCommand(&policy.policy.id.to_string(), &unused_command)
+            .digest()
+            .unwrap();
     let unused = vera_client::create_operation_token(&key, &claims).unwrap();
     let unused_hash = vera_modules::vera::keys::hash_jws_token(&unused)
         .parse()
@@ -321,10 +322,11 @@ async fn actor_signed_command_rejects_substitution_and_deduplicates_across_worke
         false,
     )
     .await;
-    let prefix = vera_client::object_owner_prefix(&policy.policy.id, &unused_object).unwrap();
+    let prefix =
+        vera_client::object_owner_prefix(&policy.policy.id.to_string(), &unused_object).unwrap();
     let absent = client
         .read_current_policy_prefix(
-            &policy.policy.id,
+            &policy.policy.id.to_string(),
             &prefix,
             rejected,
             &trusted,
@@ -334,7 +336,12 @@ async fn actor_signed_command_rejects_substitution_and_deduplicates_across_worke
         .unwrap();
     assert!(
         absent
-            .verify_object_owner(&policy.policy.id, &unused_object, rejected, &trusted)
+            .verify_object_owner(
+                &policy.policy.id.to_string(),
+                &unused_object,
+                rejected,
+                &trusted
+            )
             .unwrap()
             .is_none()
     );

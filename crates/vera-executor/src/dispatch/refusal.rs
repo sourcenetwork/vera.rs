@@ -55,7 +55,9 @@ impl Refuse for AcpError {
             }
             Self::CommitmentExpired { .. } => RefusalKind::Expired,
             Self::InvalidProof { .. } => RefusalKind::InvalidProof,
-            Self::Unauthorized { .. } => RefusalKind::Unauthorized,
+            Self::Unauthorized { .. } | Self::CreateNotAuthorized { .. } => {
+                RefusalKind::Unauthorized
+            }
             Self::InvalidBearerToken { .. } => RefusalKind::InvalidToken,
             Self::PolicyCreateBudgetExceeded
             | Self::PolicyEditBudgetExceeded

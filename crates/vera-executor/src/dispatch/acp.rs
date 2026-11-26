@@ -29,13 +29,12 @@ mod queries;
 mod query_budget_tests;
 #[cfg(test)]
 mod spelling_tests;
-#[cfg(test)]
-mod theorem_budget_tests;
 mod validation;
 #[cfg(test)]
 mod validation_tests;
 
 use crate::dispatch::{ModuleError, ModuleOutput, ModuleStatus};
+use acp::domain::{ActorSet, Object as AcpObject, Relationship, Subject};
 use alloy_primitives::{B256, Bytes};
 use alloy_sol_types::SolCall;
 use vera_identity::Did;
@@ -87,22 +86,22 @@ fn did_from_actor(actor: &str) -> Result<Did, ModuleError> {
 
 /// Decode a structured subject — a `subjectKind` discriminant plus the discrete
 /// `subjectResource` / `subjectObjectId` / `subjectRelation` fields — into a
-/// [`vera_acp::Subject`]. Subjects are never parsed from a single string: object IDs
+/// [`Subject`]. Subjects are never parsed from a single string: object IDs
 /// are path-like and may be quoted, so a string grammar would be fragile on this
 /// security boundary.
 ///
 /// | kind | fields | subject |
 /// |------|--------|---------|
-/// | 0 Entity | `object_id` = DID | `Entity` |
-/// | 1 Wildcard | — | `Wildcard` |
-/// | 2 Object (edge) | `resource`, `object_id` | `EntitySet{…, relation: ""}` |
-/// | 3 Userset | `resource`, `object_id`, `relation` | `EntitySet{…, relation}` |
+/// | 0 Actor | `object_id` = DID | `Actor` |
+/// | 1 All actors | — | `AllActors` |
+/// | 2 Object (edge) | `resource`, `object_id` | `Object` |
+/// | 3 Actor set | `resource`, `object_id`, `relation` | `ActorSet` |
 fn decode_subject(
     kind: u8,
     resource: &str,
     object_id: &str,
     relation: &str,
-) -> Result<vera_acp::Subject, ModuleError> {
+) -> Result<Subject, ModuleError> {
     match kind {
         // Entity — DID in object_id; no cross-object fields.
         0 => {
@@ -116,14 +115,14 @@ fn decode_subject(
                     "entity takes no subjectResource/subjectRelation",
                 ));
             }
-            Ok(vera_acp::Subject::entity(did_from_actor(object_id)?))
+            actor_subject(&did_from_actor(object_id)?)
         }
         // Wildcard — all-actors; no fields.
         1 => {
             if !resource.is_empty() || !object_id.is_empty() || !relation.is_empty() {
                 return Err(subject_field_error("wildcard takes no subject fields"));
             }
-            Ok(vera_acp::Subject::wildcard())
+            Ok(Subject::AllActors)
         }
         // Object edge — resource:object_id, empty relation.
         2 => {
@@ -135,7 +134,7 @@ fn decode_subject(
             if !relation.is_empty() {
                 return Err(subject_field_error("object takes no subjectRelation"));
             }
-            Ok(vera_acp::Subject::entity_set(resource, object_id, ""))
+            Ok(Subject::Object(AcpObject::new(resource, object_id)))
         }
         // Userset — resource:object_id#relation.
         3 => {
@@ -144,13 +143,22 @@ fn decode_subject(
                     "userset requires subjectResource, subjectObjectId and subjectRelation",
                 ));
             }
-            Ok(vera_acp::Subject::entity_set(resource, object_id, relation))
+            Ok(Subject::ActorSet(ActorSet {
+                object: AcpObject::new(resource, object_id),
+                relation: relation.into(),
+            }))
         }
-        // 4 is reserved for TypedWildcard (not yet supported).
         other => Err(subject_field_error(&format!(
             "unsupported subjectKind {other}"
         ))),
     }
+}
+
+/// `did` as a relationship subject.
+fn actor_subject(did: &Did) -> Result<Subject, ModuleError> {
+    vera_modules::acp::relationship_values::actor(did)
+        .map(Subject::Actor)
+        .map_err(|error| subject_field_error(&error.to_string()))
 }
 
 fn subject_field_error(msg: &str) -> ModuleError {
@@ -627,7 +635,7 @@ fn build_relationship_selector(
         None
     } else {
         let actor_did = did_from_actor(actor)?;
-        Some(SubjectSelector::Exact(vera_acp::Subject::entity(actor_did)))
+        Some(SubjectSelector::Exact(actor_subject(&actor_did)?))
     };
 
     Ok(RelationshipSelector {
@@ -648,15 +656,12 @@ name: test-policy
 resources:
   - name: document
     relations:
-      - name: owner
       - name: reader
     permissions:
       - name: read
-        expr: owner + reader
+        expr: reader
       - name: update
-        expr: owner
       - name: delete
-        expr: owner
 ";
 
     #[test]
@@ -779,7 +784,7 @@ resources:
                 Default::default(),
             )
             .unwrap();
-        let policy_id = FixedBytes::from_slice(&hex::decode(&record.policy.id).unwrap());
+        let policy_id = FixedBytes::from_slice(&hex::decode(record.policy.id.to_string()).unwrap());
 
         let calldata = IAcp::batchCallsCall {
             calls: vec![
@@ -825,7 +830,7 @@ resources:
 
         let (registered, _) = module
             .query_object_owner(
-                &record.policy.id,
+                &record.policy.id.to_string(),
                 &Object {
                     resource: "document".into(),
                     id: "doc-1".into(),
@@ -843,21 +848,25 @@ resources:
     #[test]
     fn decode_subject_entity() {
         let got = decode_subject(0, "", ALICE_DID, "").unwrap();
-        assert_eq!(got, vera_acp::Subject::entity(Did::new(ALICE_DID).unwrap()));
+        assert_eq!(
+            got,
+            vera_modules::acp::relationship_values::actor_subject(&Did::new(ALICE_DID).unwrap())
+                .unwrap()
+        );
     }
 
     #[test]
     fn decode_subject_wildcard() {
-        assert_eq!(
-            decode_subject(1, "", "", "").unwrap(),
-            vera_acp::Subject::wildcard()
-        );
+        assert_eq!(decode_subject(1, "", "", "").unwrap(), Subject::AllActors);
     }
 
     #[test]
     fn decode_subject_object_edge_has_empty_relation() {
         let got = decode_subject(2, "collection", "col1", "").unwrap();
-        assert_eq!(got, vera_acp::Subject::entity_set("collection", "col1", ""));
+        assert_eq!(
+            got,
+            vera_modules::acp::relationship_values::object_subject("collection", "col1")
+        );
     }
 
     #[test]
@@ -865,7 +874,7 @@ resources:
         let got = decode_subject(3, "collection", "col1", "reader").unwrap();
         assert_eq!(
             got,
-            vera_acp::Subject::entity_set("collection", "col1", "reader")
+            vera_modules::acp::relationship_values::actor_set("collection", "col1", "reader")
         );
     }
 
@@ -873,10 +882,13 @@ resources:
     fn decode_subject_rejects_malformed() {
         assert!(
             decode_subject(4, "", "", "").is_err(),
-            "kind 4 (TypedWildcard) reserved"
+            "kind 4 is not a subject kind"
         );
         assert!(decode_subject(7, "", "", "").is_err(), "unknown kind");
-        assert!(decode_subject(0, "", "", "").is_err(), "entity needs a DID");
+        assert!(
+            decode_subject(0, "", "", "").is_err(),
+            "an actor needs a DID"
+        );
         assert!(
             decode_subject(0, "", "not-a-did", "").is_err(),
             "entity DID must be valid"
@@ -909,26 +921,23 @@ name: cross-policy
 resources:
   - name: collection
     relations:
-      - name: owner
       - name: reader
     permissions:
       - name: read
-        expr: owner + reader
+        expr: reader
       - name: update
-        expr: owner
       - name: delete
-        expr: owner
   - name: document
     relations:
-      - name: owner
       - name: parent
+        types: [collection]
+      - name: viewer
+        types: [collection->reader]
     permissions:
       - name: read
-        expr: owner + parent->reader
+        expr: parent->reader + viewer
       - name: update
-        expr: owner
       - name: delete
-        expr: owner
 ";
 
     fn policy_fixed(id: &str) -> FixedBytes<32> {
@@ -965,7 +974,7 @@ resources:
                 Default::default(),
             )
             .unwrap();
-        let policy_id = record.policy.id;
+        let policy_id = record.policy.id.to_string();
         module
             .direct_policy_cmd(
                 &creator,
@@ -983,7 +992,7 @@ resources:
             policyId: pid,
             resource: "document".into(),
             objectId: "doc1".into(),
-            relation: "parent".into(),
+            relation: "viewer".into(),
             subjectKind: 3,
             subjectResource: "collection".into(),
             subjectObjectId: "col1".into(),
@@ -1011,7 +1020,7 @@ resources:
                 resource: "document".into(),
                 id: "doc1".into(),
             })),
-            relation_selector: Some(RelationSelector::Exact("parent".into())),
+            relation_selector: Some(RelationSelector::Exact("viewer".into())),
             subject_selector: None,
         };
         let rels = module
@@ -1020,8 +1029,8 @@ resources:
         assert_eq!(rels.len(), 1, "userset edge stored");
         assert_eq!(
             rels[0].relationship.subject,
-            vera_acp::Subject::entity_set("collection", "col1", "reader"),
-            "subject decoded to the userset EntitySet"
+            vera_modules::acp::relationship_values::actor_set("collection", "col1", "reader"),
+            "subject decoded to the actor set"
         );
 
         let c = fields();

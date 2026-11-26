@@ -121,9 +121,14 @@ fn main() {
     });
     let owner = signer.did().parse().unwrap();
     let mut module = AcpModule::new();
-    let policy = module.create_policy(&owner,
-        "name: benchmark\nresources:\n  - name: file\n    permissions:\n      - name: read\n        expr: owner\n",
-        PolicyMarshalingType::ShortYaml, Default::default()).unwrap();
+    let policy = module
+        .create_policy(
+            &owner,
+            "name: benchmark\nresources:\n  - name: file\n    permissions:\n      - name: read\n",
+            PolicyMarshalingType::ShortYaml,
+            Default::default(),
+        )
+        .unwrap();
     let object = Object {
         resource: "file".into(),
         id: "report".into(),
@@ -131,7 +136,7 @@ fn main() {
     module
         .direct_policy_cmd(
             &owner,
-            &policy.policy.id,
+            &policy.policy.id.to_string(),
             vera_modules::acp::types::PolicyCmd::RegisterObject(object.clone()),
         )
         .unwrap();
@@ -145,7 +150,7 @@ fn main() {
     measure("acp_owner_read_capture", || {
         let reads = capture_reads(
             black_box(module.store().clone()),
-            black_box(&policy.policy.id),
+            black_box(&policy.policy.id.to_string()),
             black_box(&request),
             PERMISSION_LIMITS,
         )

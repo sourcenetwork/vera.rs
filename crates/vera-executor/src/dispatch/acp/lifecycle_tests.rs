@@ -2,7 +2,6 @@ use super::*;
 use crate::dispatch::ModuleStatus;
 use vera_modules::acp::{
     pages::{RecordPage, RelationshipPageRequest},
-    theorem::TheoremReport,
     types::{
         PolicyCmdResult, PolicyCommandRequest, PolicyCreation, PolicyRecord, RelationshipRecord,
         SuppliedMetadata,
@@ -87,7 +86,7 @@ impl Fixture {
         assert_eq!(record.metadata.creation_ts, self.block.timestamp);
         assert_eq!(record.metadata.tx_signer, self.tx.signer);
         assert_eq!(record.supplied_metadata.blob, b"policy");
-        record.policy.id.parse().unwrap()
+        record.policy.id.as_str().parse().unwrap()
     }
 }
 
@@ -134,11 +133,6 @@ fn native_lifecycle_dispatch_preserves_metadata_and_enforces_ownership() {
         actor: "did:key:owner".into(),
     });
     assert!(!IAcp::checkManagementAuthorityCall::abi_decode_returns(&output).unwrap());
-    let output = f.call(IAcp::evaluateTheoremCall { policyId: policy, source: "Authorizations { file:report#read@did:key:next } Delegations { !did:key:owner > file:report#reader }".into() });
-    let bytes = IAcp::evaluateTheoremCall::abi_decode_returns(&output).unwrap();
-    let report: TheoremReport = serde_json::from_slice(&bytes).unwrap();
-    assert!(report.ok);
-    assert_eq!(report.theorem_count, 2);
     let output = f.call(IAcp::getRelationshipsPageCall {
         policyId: policy,
         request: serde_json::to_vec(&RelationshipPageRequest {
@@ -281,4 +275,81 @@ fn relationship_selector_supports_resource_only_and_rejects_missing_resource() {
         matches!(selector.object_selector, Some(ObjectSelector::ResourcePredicate(name)) if name == "file")
     );
     assert!(build_relationship_selector("", "report", "", "").is_err());
+}
+
+#[test]
+fn native_registration_carries_derived_relationships_through_the_collection_create() {
+    const LIBRARY: &str = "name: library\nresources:\n  - name: author\n    relations:\n      - name: publisher\n    permissions:\n      - name: publish\n        expr: publisher\n  - name: book\n    relations:\n      - name: author\n        types: [author]\n    permissions:\n      - name: read\n        expr: author->publish\n    collection:\n      create: author->publish\n";
+    let mut f = Fixture::new();
+    let policy: B256 = f
+        .acp
+        .create_policy(
+            &"did:key:owner".parse().unwrap(),
+            LIBRARY,
+            PolicyMarshalingType::ShortYaml,
+            Default::default(),
+        )
+        .unwrap()
+        .policy
+        .id
+        .as_str()
+        .parse()
+        .unwrap();
+    let object = |resource: &str, id: &str| Object {
+        resource: resource.into(),
+        id: id.into(),
+    };
+    f.command(policy, PolicyCmd::RegisterObject(object("author", "mike")));
+    let derived = |book: &str| {
+        vec![vera_modules::acp::relationship_values::relationship(
+            "book",
+            book,
+            "author",
+            Subject::Object(acp::domain::Object::new("author", "mike")),
+        )]
+    };
+    let PolicyCmdResult::RegisterObjectWithRelationships {
+        record,
+        relationships,
+    } = f.command(
+        policy,
+        PolicyCmd::RegisterObjectWithRelationships {
+            object: object("book", "b1"),
+            relationships: derived("b1"),
+        },
+    )
+    else {
+        panic!("not a registration with relationships");
+    };
+    assert_eq!(record.metadata.owner_did, "did:key:owner");
+    assert_eq!(record.metadata.tx_signer, f.tx.signer);
+    assert_eq!(relationships[0].relationship, derived("b1")[0]);
+
+    f.tx.signer = "did:key:eve".into();
+    let before = f.acp.store().serialize();
+    for command in [
+        PolicyCmd::RegisterObjectWithRelationships {
+            object: object("book", "b2"),
+            relationships: derived("b2"),
+        },
+        PolicyCmd::RegisterObject(object("book", "b2")),
+    ] {
+        let call = IAcp::executePolicyCommandCall {
+            policyId: policy,
+            request: serde_json::to_vec(&PolicyCommandRequest {
+                command,
+                metadata: Default::default(),
+            })
+            .unwrap()
+            .into(),
+        }
+        .abi_encode();
+        let refused = dispatch(&mut f.acp, &mut f.vera, &f.block, &f.tx, &call, 1_000_000).unwrap();
+        assert!(refused.output.status.is_revert());
+        assert_eq!(
+            refused.refusal,
+            Some(vera_domain::RefusalKind::Unauthorized)
+        );
+        assert_eq!(f.acp.store().serialize(), before);
+    }
 }

@@ -30,17 +30,18 @@ impl Fixture {
             .create_policy(&actor, POLICY, FORMAT, Default::default())
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         for command in [
             PolicyCmd::RegisterObject(Object {
                 resource: "file".into(),
                 id: "report".into(),
             }),
-            PolicyCmd::SetRelationship(vera_acp::Relationship::new(
+            PolicyCmd::SetRelationship(vera_modules::acp::relationship_values::relationship(
                 "file",
                 "report",
                 "reader",
-                vera_acp::Subject::entity(actor.clone()),
+                vera_modules::acp::relationship_values::actor_subject(&actor.clone()).unwrap(),
             )),
         ] {
             acp.direct_policy_cmd(&actor, &policy, command).unwrap();

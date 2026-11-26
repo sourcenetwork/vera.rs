@@ -76,6 +76,7 @@ impl AcpModule {
                 request.command,
                 PolicyCmd::SetRelationship(_)
                     | PolicyCmd::RegisterObject(_)
+                    | PolicyCmd::RegisterObjectWithRelationships { .. }
                     | PolicyCmd::RevealRegistration { .. }
             )
         {

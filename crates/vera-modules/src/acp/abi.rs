@@ -29,7 +29,6 @@ sol! {
         function transferObject(bytes32 policyId, string resource, string objectId, string newOwner) external returns (bytes);
         function deletePolicy(bytes32 policyId) external returns (bool);
         function editPolicyMetadata(bytes32 policyId, bytes metadata) external returns (bytes);
-        function evaluateTheorem(bytes32 policyId, string source) external view returns (bytes);
         function getPolicyCatalogue(bytes32 policyId) external view returns (bytes);
         function getPoliciesPage(bytes cursor) external view returns (bytes);
         function getRelationshipsPage(bytes32 policyId, bytes request) external view returns (bytes);

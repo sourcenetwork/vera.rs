@@ -16,7 +16,7 @@ vera-domain.workspace = true
 vera-modules.workspace = true
 vera-permission.workspace = true
 
-vera-acp.workspace = true
+acp.workspace = true
 commonware-codec.workspace = true
 commonware-parallel.workspace = true
 alloy-primitives.workspace = true

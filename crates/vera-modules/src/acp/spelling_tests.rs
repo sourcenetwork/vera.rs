@@ -1,19 +1,13 @@
-use futures::executor::block_on;
 use k256::ecdsa::SigningKey;
 use vera_identity::Did;
-use vera_zanzibar::ZanzibarStore as _;
 
-use super::super::{
-    types::{PolicyMarshalingType, RecordMetadata, RegistrationProof, RelationshipRecord},
-    zanzibar_store::QmdbZanzibarStore,
+use super::super::types::{
+    PolicyMarshalingType, RecordMetadata, RegistrationProof, RelationshipRecord,
 };
 use super::*;
 use crate::types::Timestamp;
 
 const DEFINITION: &str = "name: files
-actor:
-  relations:
-    - name: member
 resources:
   - name: file
     relations:
@@ -45,7 +39,8 @@ fn module() -> (AcpModule, String) {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     (module, policy)
 }
 
@@ -60,19 +55,31 @@ fn object(resource: &str, id: &str) -> Object {
 fn commands(written: usize) -> Vec<PolicyCmd> {
     let (subject, member) = (&spellings(2)[written], &spellings(3)[written]);
     let relationships = [
-        Relationship::with_entity("file", "report", "reader", did(subject)),
-        Relationship::with_entity("actor", member.as_str(), "member", did(subject)),
-        Relationship::new(
+        crate::acp::relationship_values::actor_relationship(
             "file",
             "report",
             "reader",
-            Subject::entity_set("actor", member.as_str(), "member"),
+            &did(subject),
+        )
+        .unwrap(),
+        crate::acp::relationship_values::actor_relationship(
+            "actor",
+            member.as_str(),
+            "member",
+            &did(subject),
+        )
+        .unwrap(),
+        crate::acp::relationship_values::relationship(
+            "file",
+            "report",
+            "reader",
+            crate::acp::relationship_values::actor_set("actor", member.as_str(), "member"),
         ),
-        Relationship::new(
+        crate::acp::relationship_values::relationship(
             "file",
             "report",
             "reader",
-            Subject::entity_set("actor", member.as_str(), ""),
+            crate::acp::relationship_values::object_subject("actor", member.as_str()),
         ),
     ];
     let actor = object("actor", member);
@@ -105,13 +112,11 @@ fn commands(written: usize) -> Vec<PolicyCmd> {
 
 #[test]
 fn every_command_names_its_actors_canonically() {
-    let (module, policy) = module();
-    let policy = &module.query_policy(&policy).unwrap().policy;
     for (mut written, canonical) in commands(1).into_iter().zip(commands(0)) {
         let expected = serde_json::to_value(&canonical).unwrap();
         assert_ne!(serde_json::to_value(&written).unwrap(), expected);
         for _ in 0..2 {
-            command(policy, &mut written);
+            command(&mut written);
             assert_eq!(serde_json::to_value(&written).unwrap(), expected);
         }
     }
@@ -119,28 +124,28 @@ fn every_command_names_its_actors_canonically() {
 
 #[test]
 fn identifiers_outside_the_actor_resource_are_not_rewritten() {
-    let (module, policy) = module();
-    let policy = &module.query_policy(&policy).unwrap().policy;
     let written = &spellings(2)[1];
-    let mut relationship = Relationship::new(
+    let mut relationship = crate::acp::relationship_values::relationship(
         "file",
         written.as_str(),
         "reader",
-        Subject::entity_set("file", written.as_str(), "reader"),
+        crate::acp::relationship_values::actor_set("file", written.as_str(), "reader"),
     );
     let before = relationship.clone();
-    self::relationship(policy, &mut relationship);
+    self::relationship(&mut relationship);
     assert_eq!(relationship, before);
-    assert!(is_canonical(policy, &relationship));
-    assert_eq!(object_id(policy, "file", written), written.as_str());
-    assert_eq!(object_id(policy, "actor", written), spellings(2)[0]);
+    assert!(is_canonical(&relationship));
+    assert_eq!(object_id("file", written), written.as_str());
+    assert_eq!(object_id("actor", written), spellings(2)[0]);
 
     let mut query = RelationshipSelector {
         object_selector: Some(ObjectSelector::Exact(object("actor", written))),
         relation_selector: None,
-        subject_selector: Some(SubjectSelector::Exact(Subject::Entity(did(written)))),
+        subject_selector: Some(SubjectSelector::Exact(
+            crate::acp::relationship_values::actor_subject(&did(written)).unwrap(),
+        )),
     };
-    selector(policy, &mut query);
+    selector(&mut query);
     let query = serde_json::to_string(&query).unwrap();
     assert!(query.contains(&spellings(2)[0]) && !query.contains(written.as_str()));
 }
@@ -172,24 +177,23 @@ fn storage_refuses_a_relationship_that_names_an_actor_in_another_spelling() {
         let canonical = &spellings(2)[0];
         [
             record(
-                Relationship::with_entity("file", "report", "reader", did(actor)),
-                &spellings(1)[0],
-            ),
-            record(
-                Relationship::with_entity("actor", actor.as_str(), "member", did(canonical)),
-                &spellings(1)[0],
-            ),
-            record(
-                Relationship::new(
+                crate::acp::relationship_values::actor_relationship(
                     "file",
-                    "ledger",
+                    "report",
                     "reader",
-                    Subject::entity_set("actor", actor.as_str(), ""),
-                ),
+                    &did(actor),
+                )
+                .unwrap(),
                 &spellings(1)[0],
             ),
             record(
-                Relationship::with_entity("file", "notes", "reader", did(canonical)),
+                crate::acp::relationship_values::actor_relationship(
+                    "file",
+                    "notes",
+                    "reader",
+                    &did(canonical),
+                )
+                .unwrap(),
                 owner,
             ),
         ]
@@ -203,60 +207,49 @@ fn storage_refuses_a_relationship_that_names_an_actor_in_another_spelling() {
 }
 
 #[test]
-fn the_store_adapter_meets_every_spelling_at_one_relationship() {
-    let (module, policy) = module();
+fn evaluation_meets_every_spelling_at_one_relationship() {
+    let (mut module, policy) = module();
     let [canonical, written] = spellings(2);
-    let adapter = QmdbZanzibarStore::new(module.store.clone());
-    let relationship =
-        |spelling: &str| Relationship::with_entity("file", "report", "reader", did(spelling));
-    let actor_edge = |spelling: &str| {
-        Relationship::new(
-            "actor",
-            spelling,
-            "member",
-            Subject::entity_set("actor", spelling, ""),
+    let grant = |spelling: &str| {
+        crate::acp::relationship_values::actor_relationship(
+            "file",
+            "report",
+            "reader",
+            &did(spelling),
         )
+        .unwrap()
     };
-    block_on(adapter.store_relationship(&policy, &relationship(&written))).unwrap();
-    block_on(adapter.store_relationship(&policy, &actor_edge(&written))).unwrap();
+    let record = RelationshipRecord {
+        incarnation: 0,
+        generations: module
+            .query_policy(&policy)
+            .unwrap()
+            .relations
+            .pair(&grant(&canonical))
+            .unwrap(),
+        supplied_metadata: Default::default(),
+        policy_id: policy.clone(),
+        relationship: grant(&canonical),
+        archived: false,
+        metadata: RecordMetadata {
+            creation_ts: Timestamp::default(),
+            tx_hash: Vec::new(),
+            tx_signer: String::new(),
+            owner_did: spellings(1)[0].clone(),
+        },
+    };
+    module.set_relationship(&record).unwrap();
     for spelling in [&canonical, &written] {
         assert!(
-            block_on(adapter.has_relationship(
-                &policy,
-                "file",
-                "report",
-                "reader",
-                &Subject::Entity(did(spelling))
-            ))
-            .unwrap()
-        );
-        assert!(
-            block_on(adapter.has_relationship(
-                &policy,
-                "actor",
-                spelling,
-                "member",
-                &Subject::entity_set("actor", spelling.as_str(), "")
-            ))
-            .unwrap()
+            module
+                .check_permission(&policy, &object("file", "report"), "reader", &did(spelling))
+                .unwrap()
         );
     }
     assert_eq!(
-        block_on(adapter.get_relation_subjects(&policy, "file", "report", "reader")).unwrap(),
-        [Subject::Entity(did(&canonical))]
-    );
-    assert_eq!(
         module
-            .recorded_relationship(&policy, actor_edge(&written))
+            .recorded_relationship(&policy, grant(&written))
             .unwrap(),
-        actor_edge(&canonical)
-    );
-    assert!(block_on(adapter.delete_relationship(&policy, &relationship(&canonical))).unwrap());
-    assert!(!block_on(adapter.delete_relationship(&policy, &relationship(&written))).unwrap());
-    block_on(adapter.delete_object_relationships(&policy, "actor", &written)).unwrap();
-    assert!(
-        block_on(adapter.get_relation_subjects(&policy, "actor", &canonical, "member"))
-            .unwrap()
-            .is_empty()
+        grant(&canonical)
     );
 }

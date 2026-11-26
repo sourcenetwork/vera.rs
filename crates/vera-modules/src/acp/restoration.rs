@@ -19,22 +19,16 @@ impl AcpModule {
             let record = self
                 .get_policy_record(id)?
                 .ok_or_else(|| AcpError::State("restored policy record is missing".into()))?;
-            let (mut compiled, _) = Self::compile_policy(
-                &record.raw_policy,
-                &record.marshal_type,
-                Some(record.policy.specification),
-            )
-            .map_err(|error| AcpError::State(format!("invalid restored policy: {error}")))?;
             if record.derived_id() != id {
                 return Err(AcpError::State(
                     "restored policy id differs from its origin".into(),
                 ));
             }
-            compiled.id = id.to_owned();
-            let encode = |policy: &Policy| {
-                serde_json::to_vec(policy).map_err(|error| AcpError::State(error.to_string()))
-            };
-            if encode(&compiled)? != encode(&record.policy)? {
+            Self::check_definition(&record.raw_policy, &record.marshal_type)
+                .map_err(|error| AcpError::State(format!("invalid restored policy: {error}")))?;
+            let plan = ::acp::policy::plan_edit_text(&record.policy, &record.raw_policy)
+                .map_err(|error| AcpError::State(format!("invalid restored policy: {error}")))?;
+            if plan.compiled.policy != record.policy {
                 return Err(AcpError::State(
                     "restored policy differs from its definition".into(),
                 ));
@@ -104,7 +98,7 @@ mod tests {
     #[test]
     fn restored_policy_must_match_its_definition_after_edit() {
         let owner = Did::new("did:key:owner").unwrap();
-        let resources = "resources:\n  - name: file\n    permissions:\n      - name: read\n        expr: owner\n      - name: write\n        expr: owner\n";
+        let resources = "resources:\n  - name: file\n    permissions:\n      - name: read\n      - name: update\n      - name: delete\n";
         for specification in ["", "spec: defra\n"] {
             let mut module = AcpModule::new();
             let record = module
@@ -115,7 +109,7 @@ mod tests {
                     Default::default(),
                 )
                 .unwrap();
-            let id = record.policy.id;
+            let id = record.policy.id.to_string();
             module
                 .edit_policy(
                     &owner,
@@ -262,7 +256,8 @@ mod tests {
             )
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         let PolicyCmdResult::CommitRegistrations {
             registrations_commitment: mut commitment,
         } = module
@@ -343,7 +338,8 @@ mod tests {
             )
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         module
             .direct_policy_cmd(
                 &owner,
@@ -355,7 +351,13 @@ mod tests {
             )
             .unwrap();
         let original = module.store.clone();
-        let owner_relation = Relationship::with_entity("file", "report", "owner", owner.clone());
+        let owner_relation = crate::acp::relationship_values::actor_relationship(
+            "file",
+            "report",
+            "owner",
+            &owner.clone(),
+        )
+        .unwrap();
         let canonical =
             keys::relationship_key(&policy, &keys::relationship_storage_key(&owner_relation, 0));
         let legacy = keys::relationship_key(&policy, "/rel/file/report/owner/0000000000000000");
@@ -374,7 +376,10 @@ mod tests {
         let owner_key = keys::relationship_key(
             &policy,
             &keys::relationship_storage_key(
-                &Relationship::with_entity("file", "report", "owner", owner),
+                &crate::acp::relationship_values::actor_relationship(
+                    "file", "report", "owner", &owner,
+                )
+                .unwrap(),
                 0,
             ),
         );

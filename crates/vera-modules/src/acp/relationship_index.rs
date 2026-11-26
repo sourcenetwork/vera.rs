@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use vera_zanzibar::error::{Error, Result};
+use super::record_error::{RecordError, Result};
 
 use super::{
     record_store::{RecordChange, RecordStore},
@@ -332,6 +332,6 @@ pub(super) fn prepare_archive_count<S: RecordStore>(
     .ok_or_else(|| invalid("archive must remove a positive logical count"))
 }
 
-pub(super) fn invalid(message: &str) -> Error {
-    Error::Serialization(message.into())
+pub(super) fn invalid(message: &str) -> RecordError {
+    RecordError::invalid(message)
 }

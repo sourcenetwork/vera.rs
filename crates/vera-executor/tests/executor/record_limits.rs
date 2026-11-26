@@ -29,7 +29,7 @@ fn fixture() -> (VeraExecutor, B256) {
             Default::default(),
         )
         .unwrap();
-    let policy = record.policy.id.parse().unwrap();
+    let policy = record.policy.id.as_str().parse().unwrap();
     let executor = VeraExecutor::new(9001);
     executor.set_base_modules(modules);
     (executor, policy)

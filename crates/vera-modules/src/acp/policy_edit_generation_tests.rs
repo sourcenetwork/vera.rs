@@ -4,10 +4,19 @@ use crate::acp::types::Operation;
 const READER: &str = "did:key:reader";
 
 fn definition(reader: bool, member: bool) -> String {
+    let types = if member {
+        "        types: [actor, group->member]\n"
+    } else {
+        ""
+    };
     format!(
-        "name: generations\nresources:\n  - name: file\n    relations:\n{}      - name: writer\n    permissions:\n      - name: read\n        expr: {}\n  - name: group\n{}",
-        if reader { "      - name: reader\n" } else { "" },
-        if reader { "reader" } else { "owner" },
+        "name: generations\nresources:\n  - name: file\n    relations:\n{}      - name: writer\n{types}    permissions:\n      - name: read\n{}  - name: group\n{}",
+        if reader {
+            format!("      - name: reader\n{types}")
+        } else {
+            String::new()
+        },
+        if reader { "        expr: reader\n" } else { "" },
         if member {
             "    relations:\n      - name: member\n"
         } else {
@@ -28,7 +37,8 @@ fn fixture() -> (AcpModule, Did, String) {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     for (resource, id) in [("file", "report"), ("group", "staff")] {
         module
             .direct_policy_cmd(
@@ -64,16 +74,22 @@ fn grant(
 }
 
 fn edge(relation: &str) -> Relationship {
-    Relationship::new(
+    crate::acp::relationship_values::relationship(
         "file",
         "report",
         relation,
-        vera_acp::Subject::entity_set("group", "staff", "member"),
+        crate::acp::relationship_values::actor_set("group", "staff", "member"),
     )
 }
 
 fn member() -> Relationship {
-    Relationship::with_entity("group", "staff", "member", Did::new(READER).unwrap())
+    crate::acp::relationship_values::actor_relationship(
+        "group",
+        "staff",
+        "member",
+        &Did::new(READER).unwrap(),
+    )
+    .unwrap()
 }
 
 fn can_read(module: &AcpModule, policy: &str, object: &str) -> bool {
@@ -175,7 +191,13 @@ fn edit_counts_archived_rows_and_double_invalid_pairs_exactly_once() {
         &mut module,
         &owner,
         &policy,
-        Relationship::with_entity("file", "report", "reader", Did::new(READER).unwrap()),
+        crate::acp::relationship_values::actor_relationship(
+            "file",
+            "report",
+            "reader",
+            &Did::new(READER).unwrap(),
+        )
+        .unwrap(),
     );
     module.validate_restored_state().unwrap();
     let before = module
@@ -252,7 +274,13 @@ fn current_reads_ignore_many_retired_rows_during_partial_cleanup_and_restart() {
             &mut module,
             &owner,
             &policy,
-            Relationship::with_entity("file", object, "reader", Did::new(READER).unwrap()),
+            crate::acp::relationship_values::actor_relationship(
+                "file",
+                object,
+                "reader",
+                &Did::new(READER).unwrap(),
+            )
+            .unwrap(),
         );
         old_pair = Some(record.generations);
     }
@@ -281,7 +309,13 @@ fn current_reads_ignore_many_retired_rows_during_partial_cleanup_and_restart() {
         &mut module,
         &owner,
         &policy,
-        Relationship::with_entity("file", "doc-000", "reader", Did::new(READER).unwrap()),
+        crate::acp::relationship_values::actor_relationship(
+            "file",
+            "doc-000",
+            "reader",
+            &Did::new(READER).unwrap(),
+        )
+        .unwrap(),
     );
     let prefix = keys::relationship_generation_prefix(&policy, old_pair, "");
     assert_eq!(module.store.prefix_iter(&prefix).count(), count);

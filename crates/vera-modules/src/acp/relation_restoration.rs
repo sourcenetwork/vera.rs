@@ -7,8 +7,8 @@ use super::relation_cleanup::{
 use super::relation_edits::{self as edits, RetiredRelation};
 use super::retirement_cleanup::record_size;
 use super::*;
+use ::acp::domain::{OWNER_RELATION, Subject};
 use std::collections::{BTreeMap, BTreeSet};
-use vera_acp::Subject;
 
 type Catalogs = BTreeMap<String, (RelationGenerations, bool)>;
 type Descriptors = BTreeMap<(String, u64), RetiredRelation>;
@@ -71,25 +71,23 @@ impl AcpModule {
                 &descriptors,
                 &record.policy_id,
                 record.generations.target,
-                &record.relationship.resource,
-                &record.relationship.relation,
+                record.relationship.object.resource.as_str(),
+                record.relationship.relation.as_str(),
             )?;
             match &record.relationship.subject {
-                Subject::EntitySet {
-                    resource, relation, ..
-                } if !relation.is_empty() => {
+                Subject::ActorSet(set) => {
                     validate_binding(
                         catalog,
                         &descriptors,
                         &record.policy_id,
                         record.generations.subject,
-                        resource,
-                        relation,
+                        set.object.resource.as_str(),
+                        set.relation.as_str(),
                     )?;
                 }
                 subject => {
                     if record.generations.subject != 0
-                        || matches!(subject, Subject::EntitySet { resource, .. } if !catalog.active.contains_key(resource))
+                        || matches!(subject, Subject::Object(object) if !catalog.active.contains_key(object.resource.as_str()))
                     {
                         return Err(AcpError::State(
                             "relationship subject generation mismatch".into(),
@@ -108,16 +106,13 @@ impl AcpModule {
                     "relationship incarnation exceeds object state".into(),
                 ));
             }
-            if record.relationship.relation == "owner" && record.incarnation != 0 {
+            if record.relationship.relation.as_str() == OWNER_RELATION && record.incarnation != 0 {
                 return Err(AcpError::State("owner incarnation must be zero".into()));
             }
             if record.incarnation < incarnation
                 && !object_jobs.contains(&object_cleanup::marker_key(
                     &record.policy_id,
-                    &Object {
-                        resource: record.relationship.resource.clone(),
-                        id: record.relationship.object_id.clone(),
-                    },
+                    &relationship_values::object(&record.relationship),
                     record.incarnation,
                 ))
             {

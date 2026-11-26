@@ -71,19 +71,31 @@ fn an_owner_who_received_the_object_back_reclaims_it_from_a_later_amendment() {
 }
 
 #[test]
-fn a_managers_transfer_marks_the_owner_it_moved_the_object_from() {
+fn only_the_owner_transfers_an_object() {
     let (mut module, first, second, _, object) = setup();
     let manager = Did::new("did:key:manager").unwrap();
+    assert!(
+        module
+            .create_policy(
+                &first,
+                "name: managed\nresources:\n  - name: file\n    relations:\n      - name: admin\n        manages: [owner]\n",
+                PolicyMarshalingType::ShortYaml,
+                Default::default(),
+            )
+            .is_err(),
+        "only the owner manages ownership"
+    );
     let policy = module
         .create_policy(
             &first,
-            "name: managed\nresources:\n  - name: file\n    relations:\n      - name: admin\n        types: [actor]\n        manages: [owner]\n",
-            PolicyMarshalingType::ShortYaml, Default::default(),
+            "name: managed\nresources:\n  - name: file\n    relations:\n      - name: admin\n        manages: [admin]\n",
+            PolicyMarshalingType::ShortYaml,
+            Default::default(),
         )
         .unwrap()
         .policy
-        .id;
-    let reserve = commit(&mut module, &first, &policy, &object, 4);
+        .id
+        .to_string();
     execute(
         &mut module,
         &first,
@@ -96,19 +108,35 @@ fn a_managers_transfer_marks_the_owner_it_moved_the_object_from() {
         &mut module,
         &first,
         &policy,
-        PolicyCmd::SetRelationship(Relationship::with_entity(
-            object.resource.clone(),
-            object.id.clone(),
-            "admin",
-            manager.clone(),
-        )),
+        PolicyCmd::SetRelationship(
+            crate::acp::relationship_values::actor_relationship(
+                object.resource.clone(),
+                object.id.clone(),
+                "admin",
+                &manager,
+            )
+            .unwrap(),
+        ),
         6,
     )
     .unwrap();
-    transfer(&mut module, &manager, &second, &policy, &object, 7);
+    let before = module.store.serialize();
+    assert!(matches!(
+        execute(
+            &mut module,
+            &manager,
+            &policy,
+            PolicyCmd::TransferObject {
+                object: object.clone(),
+                new_owner: Actor(second.clone()),
+            },
+            7,
+        ),
+        Err(AcpError::Unauthorized { .. })
+    ));
+    assert_eq!(module.store.serialize(), before);
+    transfer(&mut module, &first, &second, &policy, &object, 8);
     assert!(marked(&module, &policy, &object, &first));
-    assert!(!marked(&module, &policy, &object, &manager));
-    refused(&mut module, &first, &policy, &reserve, 8);
 }
 
 #[test]

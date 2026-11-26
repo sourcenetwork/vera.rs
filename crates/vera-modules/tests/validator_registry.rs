@@ -49,7 +49,8 @@ fn managed() -> (VeraModule, AcpModule) {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     acp.direct_policy_cmd(
         &did,
         &policy,
@@ -62,12 +63,12 @@ fn managed() -> (VeraModule, AcpModule) {
     acp.direct_policy_cmd(
         &did,
         &policy,
-        PolicyCmd::SetRelationship(vera_acp::Relationship::new(
-            "registry",
-            "registry",
-            "admin",
-            vera_acp::Subject::entity(did.clone()),
-        )),
+        PolicyCmd::SetRelationship(
+            vera_modules::acp::relationship_values::actor_relationship(
+                "registry", "registry", "admin", &did,
+            )
+            .unwrap(),
+        ),
     )
     .unwrap();
 

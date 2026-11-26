@@ -82,9 +82,10 @@ async fn run(args: Vec<String>) {
         .sign_native_tx(
             ACP_ADDRESS,
             IAcp::createPolicyCall {
-                policy: b"name: wan\nresources:\n  - name: file\n    permissions:\n      - name: read\n        expr: owner\n"
-                    .to_vec()
-                    .into(),
+                policy:
+                    b"name: wan\nresources:\n  - name: file\n    permissions:\n      - name: read\n"
+                        .to_vec()
+                        .into(),
                 marshalType: 1,
                 nonce: Default::default(),
             }
@@ -111,11 +112,11 @@ async fn run(args: Vec<String>) {
     let policy = &policies.records[0];
     assert_eq!(policy.metadata.tx_hash.as_slice(), hash.as_slice());
     assert_eq!(policy.metadata.owner_did, setup.did());
-    let policy_id = vera_client::parse_policy_id(&policy.policy.id).unwrap();
+    let policy_id = vera_client::parse_policy_id(&policy.policy.id.to_string()).unwrap();
 
     let reads = Arc::new(driver::ReadContext {
         trusted,
-        policy: policy.policy.id.clone(),
+        policy: policy.policy.id.to_string(),
         permissions: permission_reads == 1,
     });
     let requests: Vec<_> = (0..count)

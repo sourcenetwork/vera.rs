@@ -20,7 +20,7 @@ use vera_modules::acp::{
 };
 
 const DEPLOYMENT: u64 = 9109;
-const POLICY: &str = "name: native-object-archive\nresources:\n  - name: file\n    relations:\n      - name: reader\n    permissions:\n      - name: read\n        expr: reader\n";
+const POLICY: &str = "name: native-object-archive\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor, file->reader]\n    permissions:\n      - name: read\n        expr: reader\n";
 
 #[tokio::test]
 async fn pipelined_object_archive_preserves_exact_counts_and_regrants_after_restart() {
@@ -92,7 +92,7 @@ async fn pipelined_object_archive_preserves_exact_counts_and_regrants_after_rest
         .unwrap();
     assert!(page.continuation.is_none());
     assert_eq!(page.records.len(), 1);
-    let policy = page.records[0].policy.id.clone();
+    let policy = page.records[0].policy.id.to_string();
     assert_eq!(page.records[0].metadata.owner_did, actor);
     let policy_id: B256 = policy.parse().unwrap();
     let genesis = client
@@ -123,14 +123,19 @@ async fn pipelined_object_archive_preserves_exact_counts_and_regrants_after_rest
         resource: "file".into(),
         id: "report".into(),
     };
-    let incoming = vera_acp::Relationship::new(
+    let incoming = vera_modules::acp::relationship_values::relationship(
         "file",
         "child",
         "reader",
-        vera_acp::Subject::entity_set("file", "report", "reader"),
+        vera_modules::acp::relationship_values::actor_set("file", "report", "reader"),
     );
-    let reader_grant =
-        vera_acp::Relationship::with_entity("file", "report", "reader", reader.parse().unwrap());
+    let reader_grant = vera_modules::acp::relationship_values::actor_relationship(
+        "file",
+        "report",
+        "reader",
+        &reader.parse().unwrap(),
+    )
+    .unwrap();
     let commands = [
         PolicyCmd::RegisterObject(object.clone()),
         PolicyCmd::RegisterObject(Object {
@@ -138,12 +143,15 @@ async fn pipelined_object_archive_preserves_exact_counts_and_regrants_after_rest
             id: "child".into(),
         }),
         PolicyCmd::SetRelationship(reader_grant.clone()),
-        PolicyCmd::SetRelationship(vera_acp::Relationship::with_entity(
-            "file",
-            "report",
-            "reader",
-            other_reader.parse().unwrap(),
-        )),
+        PolicyCmd::SetRelationship(
+            vera_modules::acp::relationship_values::actor_relationship(
+                "file",
+                "report",
+                "reader",
+                &other_reader.parse().unwrap(),
+            )
+            .unwrap(),
+        ),
         PolicyCmd::SetRelationship(incoming.clone()),
     ];
     let setup = support::submit(
@@ -177,7 +185,8 @@ async fn pipelined_object_archive_preserves_exact_counts_and_regrants_after_rest
         .records
         .iter()
         .filter(|row| {
-            row.relationship.object_id == "report" && row.relationship.relation == "reader"
+            row.relationship.object.id.as_str() == "report"
+                && row.relationship.relation.as_str() == "reader"
         })
         .cloned()
         .collect();

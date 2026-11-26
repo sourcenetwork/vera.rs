@@ -19,12 +19,19 @@ fn setup(count: usize) -> (AcpModule, String) {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     for index in 0..count {
         put(
             &mut module,
             &policy,
-            Relationship::with_entity("file", format!("item-{index:03}"), "owner", actor()),
+            crate::acp::relationship_values::actor_relationship(
+                "file",
+                format!("item-{index:03}"),
+                "owner",
+                &actor(),
+            )
+            .unwrap(),
         );
     }
     (module, policy)
@@ -154,7 +161,8 @@ fn relationship_batches_stop_at_pair_boundaries() {
     let reader = put(
         &mut module,
         &policy,
-        Relationship::with_entity("file", "other", "reader", actor()),
+        crate::acp::relationship_values::actor_relationship("file", "other", "reader", &actor())
+            .unwrap(),
     );
     module.delete_policy(&actor(), &policy).unwrap();
     let first = first_key(&module, &policy);
@@ -192,7 +200,7 @@ fn malformed_later_row_rolls_back_prior_relationship_batches() {
         let mut candidate = module.clone();
         let mut row: RelationshipRecord = serde_json::from_slice(&original).unwrap();
         match corruption {
-            0 => row.relationship.object_id = "other".into(),
+            0 => row.relationship.object.id = "other".into(),
             1 => row.generations.subject = 1,
             2 => row.policy_id = "0".repeat(64),
             _ => unreachable!(),
@@ -214,11 +222,11 @@ fn incoming_userset_cleanup_combines_the_pair_without_touching_new_generations()
         let key = put(
             &mut module,
             &policy,
-            Relationship::new(
+            crate::acp::relationship_values::relationship(
                 "file",
                 format!("item-{index:03}"),
                 "reader",
-                vera_acp::Subject::entity_set("group", "staff", "member"),
+                crate::acp::relationship_values::actor_set("group", "staff", "member"),
             ),
         );
         first.get_or_insert(key);
@@ -239,11 +247,11 @@ fn incoming_userset_cleanup_combines_the_pair_without_touching_new_generations()
     let fresh = put(
         &mut module,
         &policy,
-        Relationship::new(
+        crate::acp::relationship_values::relationship(
             "file",
             "item-000",
             "reader",
-            vera_acp::Subject::entity_set("group", "staff", "member"),
+            crate::acp::relationship_values::actor_set("group", "staff", "member"),
         ),
     );
     assert_ne!(fresh, first);
@@ -275,12 +283,13 @@ fn same_object(count: usize) -> (AcpModule, String, Vec<u8>, Vec<u8>) {
         put(
             &mut module,
             &policy,
-            Relationship::with_entity(
+            crate::acp::relationship_values::actor_relationship(
                 "file",
                 "shared",
                 "reader",
-                Did::new(format!("did:key:reader-{index}")).unwrap(),
-            ),
+                &Did::new(format!("did:key:reader-{index}")).unwrap(),
+            )
+            .unwrap(),
         );
     }
     let first = first_key(&module, &policy);

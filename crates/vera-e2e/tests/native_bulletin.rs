@@ -165,7 +165,10 @@ async fn certified_bulletin_reads_follow_grants_pages_and_restart() {
         .read_policy(policy_id, bulletin_policy.revision, &trusted)
         .await
         .unwrap();
-    assert_eq!(policy.value.unwrap().policy.id, hex::encode(policy_id));
+    assert_eq!(
+        policy.value.unwrap().policy.id.to_string(),
+        hex::encode(policy_id)
+    );
     let namespace = reader
         .read_bulletin_namespace("team", minimum, &trusted)
         .await

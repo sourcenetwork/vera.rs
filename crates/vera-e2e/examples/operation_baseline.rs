@@ -150,7 +150,8 @@ async fn main() {
     let policy = if permission_reads == 0 {
         b"name: baseline\nresources:\n  - name: file\n    permissions:\n      - name: read\n        expr: \"\"\n".as_slice()
     } else {
-        b"name: baseline\nresources:\n  - name: file\n    permissions:\n      - name: read\n        expr: owner\n".as_slice()
+        b"name: baseline\nresources:\n  - name: file\n    permissions:\n      - name: read\n"
+            .as_slice()
     };
     let raw = setup
         .sign_native_tx(

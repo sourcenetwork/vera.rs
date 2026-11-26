@@ -168,7 +168,7 @@ fn relay_preserves_actor_in_create_edit_and_registration() {
         .unwrap();
     assert_eq!(record.issuer_did, issuer());
     assert_eq!(record.authorized_account, submission().signer);
-    let policy = created.policy.id;
+    let policy = created.policy.id.to_string();
     let mut edit = claims(&DelegatedOperation::EditPolicy(&policy, POLICY, &FORMAT));
     let worker = Did::new(&submission().signer).unwrap();
     edit.relay.as_mut().unwrap().actor = format!("did:opk:{}", "cd".repeat(32));
@@ -449,7 +449,8 @@ fn recording_decisions_requires_its_own_relay_grant_even_for_retries() {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     let object = Object {
         resource: "file".into(),
         id: "report".into(),
@@ -529,11 +530,17 @@ fn parent_registration_checks_the_relay_actor() {
     let (mut vera, mut acp) = modules();
     let worker = Did::new(&submission().signer).unwrap();
     let registrant = Did::new(actor()).unwrap();
-    let policy = acp.create_policy(
-        &worker,
-        "name: gates\nresources:\n- name: parent\n- name: child\n  relations: [{name: parent, types: [parent]}]\n  create: {parent: parent, requires: owner}\n",
-        FORMAT, Default::default(),
-    ).unwrap().policy.id;
+    let policy = acp
+        .create_policy(
+            &worker,
+            "name: gates\nresources:\n- name: parent\n- name: child\n  relations: [{name: parent, types: [parent]}]\n  collection: {create: parent->owner}\n",
+            FORMAT,
+            Default::default(),
+        )
+        .unwrap()
+        .policy
+        .id
+        .to_string();
 
     for (id, owner, allowed) in [("worker", &worker, false), ("actor", &registrant, true)] {
         let parent = Object {
@@ -575,7 +582,7 @@ fn parent_registration_checks_the_relay_actor() {
         } else {
             assert!(matches!(
                 result,
-                Err(vera_modules::acp::error::AcpError::Unauthorized { .. })
+                Err(vera_modules::acp::error::AcpError::CreateNotAuthorized { .. })
             ));
             assert!(acp.query_object_owner(&policy, &child).unwrap().1.is_none());
         }

@@ -8,11 +8,14 @@ Original texts are reproduced below and identified by SHA-256. For texts from
 upstream source trees, the source URL includes the reviewed revision. Aurora's
 package records a dirty source tree; see its package-specific notice below.
 
-Cargo.lock SHA-256: 95e989dd782676d1361c6e7ba59b4ceea44443d32d25579b7163e376de28c7b1
-Packages: 468
+Cargo.lock SHA-256: 58e026f92a1e902574a261a2aa0b02b1fa15b8f79e4072ac864671c20e237a84
+Packages: 469
 
 PACKAGE INDEX
 =============
+
+acp 0.0.1 | BUSL-1.1
+  9c8db4f492aff58d9f7a855c816bbc6a6c26841fa104b72df682f2de17a4fdd1  https://github.com/sourcenetwork/acp/blob/d1966f7717dfd95c69674cc4b9307ce6151a4b5a/LICENSE.txt
 
 aead 0.6.1 | MIT OR Apache-2.0
   b1cf9a3333ca78152b859012cd4a804156e5243e9ca20ad1df7327ba5ea7405c  LICENSE-APACHE
@@ -68,6 +71,10 @@ alloy-sol-types 1.7.3 | MIT OR Apache-2.0
 anes 0.1.6 | MIT OR Apache-2.0
   a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  https://github.com/zrzka/anes-rs/blob/378ac7461ecac29fde9e10df7b08359d1315a9ad/LICENSE-APACHE
   23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3  https://github.com/zrzka/anes-rs/blob/378ac7461ecac29fde9e10df7b08359d1315a9ad/LICENSE-MIT
+
+annotate-snippets 0.12.18 | MIT OR Apache-2.0
+  249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe  LICENSE-APACHE
+  6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6  LICENSE-MIT
 
 anstream 0.6.21 | MIT OR Apache-2.0
   c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08  LICENSE-APACHE
@@ -128,13 +135,12 @@ ark-std 0.4.0 | MIT/Apache-2.0
   a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
   8f71659370c5268d9a1dc962a46232540e8fca63462586d8efaa95aab492a208  LICENSE-MIT
 
+arraydeque 0.5.1 | MIT/Apache-2.0
+  0aab2eeeaa27c8e946c235e5e605c6d52cb0a56d254c660bdcf618d6f7faf4af  LICENSE
+
 arrayvec 0.7.6 | MIT OR Apache-2.0
   a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
   4da95ec4ecb65b738d470b7d762894ad9c97da93e6cbfb18b570fc2c96f4b871  LICENSE-MIT
-
-async-lock 3.4.2 | Apache-2.0 OR MIT
-  a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
-  23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3  LICENSE-MIT
 
 async-trait 0.1.92 | MIT OR Apache-2.0
   62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a  LICENSE-APACHE
@@ -366,10 +372,6 @@ commonware-utils 2026.10.0 | MIT OR Apache-2.0
   335998abc649a326acdae907b666b5adc3d2e4811e71946fa2ee930731307eac  https://github.com/commonwarexyz/monorepo/blob/92a2f68a0e131c8b69de41e84aec37da6280f212/LICENSE-APACHE
   32ff3cca43d7fcec3458ae2a517a4a6b3cdf27ae82ae3dec1aa5ba78ceab8ff5  https://github.com/commonwarexyz/monorepo/blob/92a2f68a0e131c8b69de41e84aec37da6280f212/LICENSE-MIT
 
-concurrent-queue 2.5.0 | Apache-2.0 OR MIT
-  a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
-  23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3  LICENSE-MIT
-
 const-hex 1.19.1 | MIT OR Apache-2.0
   62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a  LICENSE-APACHE
   23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3  LICENSE-MIT
@@ -533,6 +535,11 @@ encoding_rs 0.8.35 | (Apache-2.0 OR MIT) AND BSD-3-Clause
   3fa4ca83dcc9237839b1bdeb2e6d16bdfb5ec0c5ce42b24694d8bbf0dcbef72c  LICENSE-MIT
   838118388fe5c2e7f1dbbaeed13e1c7f3ebf88be91319c7c1d77c18e987d1a50  LICENSE-WHATWG
 
+encoding_rs_io 0.1.8 | MIT OR Apache-2.0
+  13361f93b3db60ddb43f8fdc97ba469461019bbf7589f6bde833eb3d995d2497  COPYING
+  a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
+  0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f  LICENSE-MIT
+
 equivalent 1.0.2 | Apache-2.0 OR MIT
   a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
   7365cc8878a1d7ce155a58c4ca09c3d7a6be413efa5334a80ea842912b669349  LICENSE-MIT
@@ -540,14 +547,6 @@ equivalent 1.0.2 | Apache-2.0 OR MIT
 errno 0.3.14 | MIT OR Apache-2.0
   a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
   8764a597675778ddfd4e25f81b08a05dbcf089ac05662df7613fe67f150e3aa2  LICENSE-MIT
-
-event-listener 5.4.1 | Apache-2.0 OR MIT
-  a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
-  23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3  LICENSE-MIT
-
-event-listener-strategy 0.5.4 | Apache-2.0 OR MIT
-  a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
-  23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3  LICENSE-MIT
 
 eyre 0.6.12 | MIT OR Apache-2.0
   a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
@@ -655,6 +654,9 @@ getrandom 0.4.3 | MIT OR Apache-2.0
 
 governor 0.10.4 | MIT
   2248fdedb215c73b6431d4c0419c6476c0aa19621fa94041aa7c5a3ce952e5cc  https://github.com/boinkor-net/governor/blob/9f3a79dd47dd32acd589c562b8d4fefe99b93372/LICENSE
+
+granit-parser 2.2.0 | MIT OR Apache-2.0
+  1af262e6647807eecaec988ecf2b783fb8fdbdecba396d582c1aab90615f6845  LICENSE
 
 group 0.13.0 | MIT/Apache-2.0
   a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
@@ -879,7 +881,7 @@ libc 0.2.189 | MIT OR Apache-2.0
 libm 0.2.16 | MIT
   3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7  LICENSE.txt
 
-linux-raw-sys 0.11.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
+linux-raw-sys 0.12.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
   a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
   268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5  LICENSE-Apache-2.0_WITH_LLVM-exception
   23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3  LICENSE-MIT
@@ -923,6 +925,10 @@ mio 1.2.3 | MIT
 native-tls 0.2.16 | MIT OR Apache-2.0
   c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08  LICENSE-APACHE
   f2ad7982ddbfa8c45eb965315718c55b70b9cc311b49afacb50d5fe84173ae2c  LICENSE-MIT
+
+nohash-hasher 0.2.0 | Apache-2.0 OR MIT
+  cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30  LICENSE-APACHE
+  ec353d4fecf7963b4c054384557e5dbc3c7a717997eb4a3815b315721a6aa75a  LICENSE-MIT
 
 nonzero_ext 0.3.0 | Apache-2.0
   3b842ae825a82c84830590457664b56d3b45390892bb5a1b73b1468c023a270e  LICENSE.txt
@@ -1003,11 +1009,6 @@ p256 0.14.0 | Apache-2.0 OR MIT
 page_size 0.6.0 | MIT/Apache-2.0
   769f80b5bcb42ed0af4e4d2fd74e1ac9bf843cb80c5a29219d1ef3544428a6bb  LICENSE-APACHE
   14435fbcd271e2783f721b57b7bf4f6502c1379249a4300e0e5bb774686c2d90  LICENSE-MIT
-
-parking 2.2.1 | Apache-2.0 OR MIT
-  a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
-  23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3  LICENSE-MIT
-  9a6d7a3c1b8edcc706c4b6c37f8dae9a77f02c7f9051df603f975db136b55419  LICENSE-THIRD-PARTY
 
 parking_lot 0.12.5 | MIT OR Apache-2.0
   a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
@@ -1137,7 +1138,7 @@ rand 0.8.8 | MIT OR Apache-2.0
   35242e7a83f69875e6edeff02291e688c97caafe2f8902e4e19b49d3e78b4cab  LICENSE-APACHE
   209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b  LICENSE-MIT
 
-rand 0.9.2 | MIT OR Apache-2.0
+rand 0.9.5 | MIT OR Apache-2.0
   35242e7a83f69875e6edeff02291e688c97caafe2f8902e4e19b49d3e78b4cab  LICENSE-APACHE
   209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b  LICENSE-MIT
 
@@ -1242,7 +1243,7 @@ rustc_version 0.4.1 | MIT OR Apache-2.0
   a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
   c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5  LICENSE-MIT
 
-rustix 1.1.3 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
+rustix 1.1.6 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
   a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
   268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5  LICENSE-Apache-2.0_WITH_LLVM-exception
   23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3  LICENSE-MIT
@@ -1302,6 +1303,10 @@ serde 1.0.228 | MIT OR Apache-2.0
   62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a  LICENSE-APACHE
   23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3  LICENSE-MIT
 
+serde-saphyr 2.2.0 | MIT OR Apache-2.0
+  62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a  LICENSE-APACHE
+  23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3  LICENSE-MIT
+
 serde_core 1.0.228 | MIT OR Apache-2.0
   62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a  LICENSE-APACHE
   23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3  LICENSE-MIT
@@ -1329,10 +1334,6 @@ serde_spanned 1.1.1 | MIT OR Apache-2.0
 serde_urlencoded 0.7.1 | MIT/Apache-2.0
   62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a  LICENSE-APACHE
   b9eb266294324f672cbe945fe8f2e32f85024f0d61a1a7d14382cdde0ac44769  LICENSE-MIT
-
-serde_yaml 0.9.34+deprecated | MIT OR Apache-2.0
-  62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a  LICENSE-APACHE
-  23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3  LICENSE-MIT
 
 sha1 0.10.6 | MIT OR Apache-2.0
   a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5  LICENSE-APACHE
@@ -1375,6 +1376,10 @@ slab 0.4.12 | MIT
 smallvec 1.15.1 | MIT OR Apache-2.0
   a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
   0b28172679e0009b655da42797c03fd163a3379d5cfa67ba1f1655e974a2a1a9  LICENSE-MIT
+
+smol_str 0.3.7 | MIT OR Apache-2.0
+  a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
+  23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3  LICENSE-MIT
 
 snap 1.1.1 | BSD-3-Clause
   7ca1297d23644e30bd489193a82a33f324e5fe33f25df4195649b91b883df967  COPYING
@@ -1584,6 +1589,10 @@ unicode-segmentation 1.12.0 | MIT OR Apache-2.0
   a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
   7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0  LICENSE-MIT
 
+unicode-width 0.2.3 | MIT OR Apache-2.0
+  a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
+  7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0  LICENSE-MIT
+
 unicode-xid 0.2.6 | MIT OR Apache-2.0
   a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2  LICENSE-APACHE
   7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0  LICENSE-MIT
@@ -1591,9 +1600,6 @@ unicode-xid 0.2.6 | MIT OR Apache-2.0
 universal-hash 0.6.1 | MIT OR Apache-2.0
   a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5  LICENSE-APACHE
   efa52eb70a774b62c50cf50f5e57e2625c29d375d09b91132f4f020e47b9944e  LICENSE-MIT
-
-unsafe-libyaml 0.2.11 | MIT
-  23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3  LICENSE-MIT
 
 unsigned-varint 0.8.0 | MIT
   ec353d4fecf7963b4c054384557e5dbc3c7a717997eb4a3815b315721a6aa75a  LICENSE
@@ -1619,10 +1625,6 @@ utf8parse 0.2.2 | Apache-2.0 OR MIT
 vcpkg 0.2.15 | MIT/Apache-2.0
   60c93a31f490375aadf64098b75f10715010379541021e00261045d7800611d3  LICENSE-APACHE
   016d20f335060a70e79d9fcf8dfaa6201114d65d592211f4bdfb8ae9ca2bc1dc  LICENSE-MIT
-
-vera-acp 0.2.0 | Apache-2.0 OR MIT
-  5adb10269dde2c65f174ce3e2d2e877e70bd3f525ec9f9e0888af53588f73bd5  LICENSE-APACHE
-  f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
 
 vera-app 0.2.0 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
@@ -1673,10 +1675,6 @@ vera-node 0.2.0 | MIT
 vera-permission 0.2.0 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
 
-vera-zanzibar 0.2.0 | Apache-2.0 OR MIT
-  5adb10269dde2c65f174ce3e2d2e877e70bd3f525ec9f9e0888af53588f73bd5  LICENSE-APACHE
-  f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  LICENSE-MIT
-
 verad 0.2.0 | MIT
   f7b481209c8afe3f224ba4ad6c2249eb26c7a6061a146f2c5821d60ae6e4ff0f  https://github.com/sourcenetwork/vera.rs/blob/2be99d56e9faeeffaf33658f03840863263744f1/LICENSE-MIT
 
@@ -1725,6 +1723,9 @@ yoke 0.8.1 | Unicode-3.0
 
 yoke-derive 0.8.1 | Unicode-3.0
   f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2  LICENSE
+
+zanzi 0.0.1 | BUSL-1.1
+  9c8db4f492aff58d9f7a855c816bbc6a6c26841fa104b72df682f2de17a4fdd1  https://github.com/sourcenetwork/acp/blob/d1966f7717dfd95c69674cc4b9307ce6151a4b5a/LICENSE.txt
 
 zerocopy 0.8.39 | BSD-2-Clause OR Apache-2.0 OR MIT
   9d185ac6703c4b0453974c0d85e9eee43e6941009296bb1f5eb0b54e2329e9f3  LICENSE-APACHE
@@ -2855,6 +2856,30 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 
+--- SHA-256 0aab2eeeaa27c8e946c235e5e605c6d52cb0a56d254c660bdcf618d6f7faf4af ---
+The MIT License (MIT)
+
+Copyright (c) 2018 Andy Lok <andylokandy@hotmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
 --- SHA-256 0b28172679e0009b655da42797c03fd163a3379d5cfa67ba1f1655e974a2a1a9 ---
 Copyright (c) 2018 The Servo Project Developers
 
@@ -3188,6 +3213,17 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 
+--- SHA-256 13361f93b3db60ddb43f8fdc97ba469461019bbf7589f6bde833eb3d995d2497 ---
+This project is licensed under either of
+
+ * Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or
+   http://www.apache.org/licenses/LICENSE-2.0)
+ * MIT license ([LICENSE-MIT](LICENSE-MIT) or
+   http://opensource.org/licenses/MIT)
+
+at your option.
+
+
 --- SHA-256 13f4cc9fbc8d4a447b28aa84019c10ad4abf4b5f6919db061bf6690ccc23bc02 ---
 MIT License
 
@@ -3322,6 +3358,24 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
+
+
+--- SHA-256 1af262e6647807eecaec988ecf2b783fb8fdbdecba396d582c1aab90615f6845 ---
+Inherited license notices:
+
+Code up to and including commit `da52a68615f2ecdd6b7e4567019f280c433c1521` is licensed by Chen Yuheng under either of:
+  - [Apache License, Version 2.0](.licenses/ChenYuheng-Apache) (http://www.apache.org/licenses/LICENSE-2.0)
+  - [MIT License](.licenses/ChenYuheng-MIT) (http://opensource.org/licenses/MIT)
+
+Code modifications starting with commit `1d71a23b151dcc12b289d0f06d8207dd9c764216` (included) are licensed by Ethiraric under either of:
+  - [Apache License, Version 2.0](.licenses/Ethiraric-Apache) (http://www.apache.org/licenses/LICENSE-2.0)
+  - [MIT License](.licenses/Ethiraric-MIT) (http://opensource.org/licenses/MIT)
+
+granit-parser modification notice:
+
+Modifications after commit `825edf857426d034954523fed19599635cbb5043` are Copyright (c) 2026 Bourumir Wyngs and licensed under MIT OR Apache-2.0.
+
+Redistributions of this Work must include all inherited and new license notices, including the notices for Chen Yuheng, Ethiraric, and Bourumir Wyngs.
 
 
 --- SHA-256 1c7cf76689c837a68ed8d704994e52a0f2940c087958f860d17f3186afbdcc0c ---
@@ -3862,6 +3916,211 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+
+--- SHA-256 249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe ---
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "{}"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright Individual contributors
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
 
 
 --- SHA-256 251ea8ccb1205ce5fa847d6e264d6b6753af62de2cecf2fd9abc0eb02c7c83fc ---
@@ -12897,18 +13156,6 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
---- SHA-256 9a6d7a3c1b8edcc706c4b6c37f8dae9a77f02c7f9051df603f975db136b55419 ---
-===============================================================================
-
-Copyright 2014-2020 The Rust Project Developers
-
-Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-<LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-option. All files in the project carrying such notice may not be
-copied, modified, or distributed except according to those terms.
-
-
 --- SHA-256 9aa4f92bfcde293ebeca9e2379fa18d1d61f000977da144c7b74c2986c9b6466 ---
 Copyright (c) 2018-2026 RustCrypto Developers
 
@@ -12959,6 +13206,151 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+--- SHA-256 9c8db4f492aff58d9f7a855c816bbc6a6c26841fa104b72df682f2de17a4fdd1 ---
+Business Source License 1.1
+
+
+Parameters
+
+
+Licensor:                   Democratized Data (D2) Foundation
+
+
+Licensed Work:              Source Access Control Policy 
+                            The Licensed Work is (c) 2025 D2 Foundation.
+
+
+Additional Use Grant:       You may only use the Licensed Work for the 
+                            following conditions
+                            
+                            For an application that is connected  to the 
+                            SourceHub mainnet or another protocol connected 
+                            to the SourceHub by way of the Inter-Blockchain
+                            Communication (IBC) protocol. 
+
+                            A non-profit project in both a production and
+                            pre-production state.
+
+                            A for-profit project in a pre-production state
+                            only.
+
+                            
+
+
+Change Date:                2029-10-31
+
+
+Change License:             Apache License, Version 2.0
+
+
+For information about alternative licensing arrangements for the Software,
+please contact us: license@source.network
+
+
+Notice
+
+
+The Business Source License (this document, or the “License”) is not an Open
+Source license. However, the Licensed Work will eventually be made available
+under an Open Source License, as stated in this License.
+
+
+License text copyright (c) 2017 MariaDB Corporation Ab, All Rights Reserved.
+“Business Source License” is a trademark of MariaDB Corporation Ab.
+
+
+-----------------------------------------------------------------------------
+
+
+Business Source License 1.1
+
+
+Terms
+
+
+The Licensor hereby grants you the right to copy, modify, create derivative
+works, redistribute, and make non-production use of the Licensed Work. The
+Licensor may make an Additional Use Grant, above, permitting limited
+production use.
+
+
+Effective on the Change Date, or the fourth anniversary of the first publicly
+available distribution of a specific version of the Licensed Work under this
+License, whichever comes first, the Licensor hereby grants you rights under
+the terms of the Change License, and the rights granted in the paragraph
+above terminate.
+
+
+If your use of the Licensed Work does not comply with the requirements
+currently in effect as described in this License, you must purchase a
+commercial license from the Licensor, its affiliated entities, or authorized
+resellers, or you must refrain from using the Licensed Work.
+
+
+All copies of the original and modified Licensed Work, and derivative works
+of the Licensed Work, are subject to this License. This License applies
+separately for each version of the Licensed Work and the Change Date may vary
+for each version of the Licensed Work released by Licensor.
+
+
+You must conspicuously display this License on each original or modified copy
+of the Licensed Work. If you receive the Licensed Work in original or
+modified form from a third party, the terms and conditions set forth in this
+License apply to your use of that work.
+
+
+Any use of the Licensed Work in violation of this License will automatically
+terminate your rights under this License for the current and all other
+versions of the Licensed Work.
+
+
+This License does not grant you any right in any trademark or logo of
+Licensor or its affiliates (provided that you may use a trademark or logo of
+Licensor as expressly required by this License).
+
+
+TO THE EXTENT PERMITTED BY APPLICABLE LAW, THE LICENSED WORK IS PROVIDED ON 
+AN “AS IS” BASIS. LICENSOR HEREBY DISCLAIMS ALL WARRANTIES AND CONDITIONS, 
+EXPRESS OR IMPLIED, INCLUDING (WITHOUT LIMITATION) WARRANTIES OF 
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, AND 
+TITLE.
+
+
+MariaDB hereby grants you permission to use this License’s text to license
+your works, and to refer to it using the trademark “Business Source License”,
+as long as you comply with the Covenants of Licensor below.
+
+
+Covenants of Licensor
+
+
+In consideration of the right to use this License’s text and the “Business
+Source License” name and trademark, Licensor covenants to MariaDB, and to all 
+other recipients of the licensed work to be provided by Licensor:
+
+
+1. To specify as the Change License the GPL Version 2.0 or any later version, 
+or a license that is compatible with GPL Version 2.0 or a later version, 
+where “compatible” means that software provided under the Change License can 
+be included in a program with software provided under GPL Version 2.0 or a 
+later version. Licensor may specify additional Change Licenses without 
+limitation.
+
+
+2. To either: (a) specify an additional grant of rights to use that does not 
+impose any additional restriction on the right granted in this License, as 
+the Additional Use Grant; or (b) insert the text “None”.
+
+
+3. To specify a Change Date.
+
+
+4. Not to modify this License in any other way.
+
+-----------------------------------------------------------------------------
+
 
 
 --- SHA-256 9d185ac6703c4b0453974c0d85e9eee43e6941009296bb1f5eb0b54e2329e9f3 ---

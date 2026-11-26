@@ -6,9 +6,10 @@ pub(super) fn setup() -> (AcpModule, Did, Did, String, Object) {
     let mut module = AcpModule::new();
     let policy = module.create_policy(
         &first,
-        "name: registrations\nresources:\n  - name: file\n    relations:\n      - name: reader\n    permissions:\n      - name: read\n        expr: owner\n",
-        PolicyMarshalingType::ShortYaml, Default::default(),
-    ).unwrap().policy.id;
+        "name: registrations\nresources:\n  - name: file\n    relations:\n      - name: reader\n    permissions:\n      - name: read\n",
+        PolicyMarshalingType::ShortYaml,
+        Default::default(),
+    ).unwrap().policy.id.to_string();
     (
         module,
         first,
@@ -143,8 +144,7 @@ fn amendment_moves_the_owner_key_and_revokes_the_previous_owner() {
     .unwrap();
     assert!(
         module
-            .permission_engine(&module.zanzibar_policies[&policy])
-            .check_blocking(&policy, "file", "report", "read", &first)
+            .check_permission(&policy, &object, "read", &first)
             .unwrap()
     );
     let PolicyCmdResult::RevealRegistration {
@@ -166,7 +166,13 @@ fn amendment_moves_the_owner_key_and_revokes_the_previous_owner() {
     };
     assert_eq!(event.previous_owner.0, first);
     assert_eq!(event.new_owner.0, second);
-    let old = Relationship::with_entity("file", "report", "owner", first.clone());
+    let old = crate::acp::relationship_values::actor_relationship(
+        "file",
+        "report",
+        "owner",
+        &first.clone(),
+    )
+    .unwrap();
     assert!(!module.has_relationship(&policy, &keys::relationship_storage_key(&old, 0)));
     let stored = module
         .get_relationship(&policy, &record.relationship)
@@ -189,14 +195,12 @@ fn amendment_moves_the_owner_key_and_revokes_the_previous_owner() {
     );
     assert!(
         module
-            .permission_engine(&module.zanzibar_policies[&policy])
-            .check_blocking(&policy, "file", "report", "read", &second)
+            .check_permission(&policy, &object, "read", &second)
             .unwrap()
     );
     assert!(
         !module
-            .permission_engine(&module.zanzibar_policies[&policy])
-            .check_blocking(&policy, "file", "report", "read", &first)
+            .check_permission(&policy, &object, "read", &first)
             .unwrap()
     );
     assert!(
@@ -224,7 +228,8 @@ fn reveal_cannot_reassign_a_commitment_to_another_policy() {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     let generated = module
         .query_generate_commitment(&policy, &[object], &Actor(second.clone()))
         .unwrap();
@@ -407,7 +412,8 @@ fn registration_leaf_binds_object_field_boundaries() {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     let object = Object {
         resource: "a".into(),
         id: "bc".into(),
@@ -590,12 +596,18 @@ fn corrupt_policy_and_relationship_records_cannot_authorize_or_be_overwritten() 
     module
         .direct_policy_cmd(&second, &policy, PolicyCmd::RegisterObject(object))
         .unwrap();
-    let grant = Relationship::with_entity("file", "report", "reader", first.clone());
+    let grant = crate::acp::relationship_values::actor_relationship(
+        "file",
+        "report",
+        "reader",
+        &first.clone(),
+    )
+    .unwrap();
     let policy_key = keys::policy_key(&policy);
     let policy_bytes = module.store.get(&policy_key).unwrap();
     for invalid in [b"{".to_vec(), {
         let mut record: PolicyRecord = serde_json::from_slice(&policy_bytes).unwrap();
-        record.policy.id = "other".into();
+        record.policy.id = ::acp::domain::PolicyId::new("other");
         serde_json::to_vec(&record).unwrap()
     }] {
         module.store.put(&policy_key, invalid);
@@ -615,7 +627,13 @@ fn corrupt_policy_and_relationship_records_cannot_authorize_or_be_overwritten() 
         assert_eq!(module.store.serialize(), before);
     }
     module.store.put(&policy_key, policy_bytes);
-    let owner = Relationship::with_entity("file", "report", "owner", second.clone());
+    let owner = crate::acp::relationship_values::actor_relationship(
+        "file",
+        "report",
+        "owner",
+        &second.clone(),
+    )
+    .unwrap();
     let relations = module.query_policy(&policy).unwrap().relations;
     let owner_key = keys::relationship_generation_key(
         &policy,
@@ -720,7 +738,9 @@ fn fresh_reveal_has_no_amendment_event() {
 fn empty_object_commands_fail_without_effects_and_opaque_ids_roundtrip() {
     let (mut module, actor, _, policy, mut object) = setup();
     object.id.clear();
-    let relation = Relationship::with_entity("file", "", "reader", actor.clone());
+    let relation =
+        crate::acp::relationship_values::actor_relationship("file", "", "reader", &actor.clone())
+            .unwrap();
     let commands = [
         PolicyCmd::RegisterObject(object.clone()),
         PolicyCmd::ArchiveObject(object.clone()),
@@ -768,7 +788,7 @@ fn empty_object_commands_fail_without_effects_and_opaque_ids_roundtrip() {
         else {
             panic!("expected registration");
         };
-        assert_eq!(record.relationship.object_id, id);
+        assert_eq!(record.relationship.object.id.as_str(), id);
         let generated = AcpModule::generate_registration_commitment(
             &policy,
             std::slice::from_ref(&object),

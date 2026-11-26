@@ -244,8 +244,8 @@ dependency graph with original license and notice texts. Build-time packages are
 included conservatively. The Aurora notice records its package's dirty source
 revision. The inventory is tied to `Cargo.lock`; review and update it whenever
 the lockfile changes. The allowlist and the inventory do not replace review of
-the applicable terms, including the Orbis reporting package's Business Source
-License. The vendored `jsonrpsee-server 0.26.1` includes its upstream MIT
+the applicable terms, including the Business Source License of the Orbis
+reporting package and of acp and zanzi. The vendored `jsonrpsee-server 0.26.1` includes its upstream MIT
 notice from [source revision `bcc84901`](https://github.com/paritytech/jsonrpsee/blob/bcc84901f3c882f4233f293e5acf018643cbd412/LICENSE).
 Artifact provenance,
 key handling and process-crash tests are distinct

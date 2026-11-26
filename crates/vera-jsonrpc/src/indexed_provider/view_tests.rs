@@ -50,7 +50,7 @@ async fn a_view_returns_the_output_at_the_head_revision() {
     assert_eq!(result.timestamp, U64::from(HEAD_TIME));
     let length = U256::from_be_slice(&result.output[32..64]).to::<usize>();
     let record: PolicyRecord = serde_json::from_slice(&result.output[64..64 + length]).unwrap();
-    assert_eq!(record.policy.id.parse::<B256>().unwrap(), policy);
+    assert_eq!(record.policy.id.as_str().parse::<B256>().unwrap(), policy);
 }
 
 #[tokio::test]

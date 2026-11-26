@@ -1,6 +1,5 @@
 //! Policy mutation costs; fixtures and invariant checks run outside measurement.
 
-use vera_acp::{Relationship, Subject};
 use vera_identity::Did;
 use vera_modules::{
     acp::{
@@ -22,7 +21,7 @@ resources:
         types: [actor]
       - name: admin
         types: [group->member]
-        manages: [reader, owner]
+        manages: [reader]
     permissions:
       - name: read
         expr: reader
@@ -37,10 +36,8 @@ resources:
     relations:
       - name: admin
         types: [actor]
-        manages: [owner]
     permissions:
       - name: read
-        expr: owner
   - name: group
 ";
 
@@ -113,12 +110,15 @@ fn populate(
         module,
         claimant,
         policy,
-        PolicyCmd::SetRelationship(Relationship::with_entity(
-            "group",
-            "members",
-            "member",
-            reader.clone(),
-        )),
+        PolicyCmd::SetRelationship(
+            vera_modules::acp::relationship_values::actor_relationship(
+                "group",
+                "members",
+                "member",
+                &reader.clone(),
+            )
+            .unwrap(),
+        ),
         2,
     );
     (0..objects)
@@ -171,12 +171,18 @@ fn populate(
                 panic!("expected ownership amendment");
             };
             for relationship in [
-                Relationship::with_entity("file", &object.id, "reader", reader.clone()),
-                Relationship::new(
+                vera_modules::acp::relationship_values::actor_relationship(
+                    "file",
+                    &object.id,
+                    "reader",
+                    &reader.clone(),
+                )
+                .unwrap(),
+                vera_modules::acp::relationship_values::relationship(
                     "file",
                     &object.id,
                     "admin",
-                    Subject::entity_set("group", "members", "member"),
+                    vera_modules::acp::relationship_values::actor_set("group", "members", "member"),
                 ),
             ] {
                 command(
@@ -207,7 +213,8 @@ impl Fixture {
             )
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         let registrations = populate(&mut module, &policy, objects, &creator, &claimant, &reader);
         let before_unrelated = module.clone();
         let other = module
@@ -219,7 +226,8 @@ impl Fixture {
             )
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         populate(&mut module, &other, unrelated, &creator, &claimant, &reader);
         let unrelated = module
             .store()
@@ -301,7 +309,7 @@ impl Fixture {
         let mut edited = self.module.clone();
         let (removed, record) = self.edit(&mut edited);
         assert_eq!(removed, (2 * count + 1) as u64);
-        assert_eq!(record.policy.id, self.policy);
+        assert_eq!(record.policy.id.to_string(), self.policy);
         assert_eq!(record.last_modified, Some(revision(6)));
         // Logical edits retire generations; physical rows remain until bounded cleanup.
         assert_eq!(edited.store().prefix_iter(&prefix).count(), 3 * count + 2);
@@ -314,7 +322,7 @@ impl Fixture {
                 .pair(&relationship.relationship)
                 .is_ok_and(|pair| pair == relationship.generations)
             {
-                assert_eq!(relationship.relationship.relation, "owner");
+                assert_eq!(relationship.relationship.relation.as_str(), "owner");
                 current_owners += 1;
             }
         }

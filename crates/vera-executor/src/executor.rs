@@ -442,7 +442,8 @@ mod tests {
             )
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         let object = Object {
             resource: "file".into(),
             id: "report".into(),
@@ -997,7 +998,7 @@ mod tests {
         let creator = bls::did_from_bls_pubkey(&pubkey).unwrap();
         let actor = creator.parse().unwrap();
         let mut acp = AcpModule::new();
-        let policy = acp.create_policy(&actor, "name: decisions\nresources:\n  - name: file\n    permissions:\n      - name: read\n", PolicyMarshalingType::ShortYaml, Default::default()).unwrap().policy.id;
+        let policy = acp.create_policy(&actor, "name: decisions\nresources:\n  - name: file\n    permissions:\n      - name: read\n", PolicyMarshalingType::ShortYaml, Default::default()).unwrap().policy.id.to_string();
         let object = Object {
             resource: "file".into(),
             id: "report".into(),

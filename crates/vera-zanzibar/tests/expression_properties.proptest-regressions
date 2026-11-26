@@ -1,8 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc 02f9a273e1447c3f20e1d0d09344dc3ca0e056fd15fd19bc0e40c2adbc2490a0 # shrinks to expression = Union([ComputedUserset { relation: "r0" }])
-cc c73b62ec5ea7a84b9b5e9f85d46053a559e5657e1261b26b60e2c9be385a07a5 # shrinks to expression = Union([ComputedUserset { relation: "r0" }, Union([ComputedUserset { relation: "r0" }, ComputedUserset { relation: "r0" }])])

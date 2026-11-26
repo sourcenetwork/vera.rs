@@ -29,19 +29,22 @@ pub fn policy_key(id: &str) -> Vec<u8> {
     key
 }
 
-/// Canonical native key suffix, independent of the shared engine's storage format.
-pub fn relationship_storage_key(relationship: &vera_acp::Relationship, incarnation: u64) -> String {
+/// Canonical native key suffix: the relation prefix and a digest of acp's
+/// canonical subject bytes (`acp::encoding::canonical`).
+pub fn relationship_storage_key(
+    relationship: &::acp::domain::Relationship,
+    incarnation: u64,
+) -> String {
     use sha2::{Digest, Sha256};
     let mut digest = Sha256::new();
-    digest.update(b"vera/acp-subject/v1\0");
-    digest
-        .update(serde_json::to_vec(&relationship.subject).expect("serialize relationship subject"));
+    digest.update(b"vera/acp-subject/v2\0");
+    digest.update(::acp::encoding::canonical(&relationship.subject));
     format!(
         "{}{}",
         relation_prefix(
-            &relationship.resource,
-            &relationship.object_id,
-            &relationship.relation,
+            relationship.object.resource.as_str(),
+            relationship.object.id.as_str(),
+            relationship.relation.as_str(),
             incarnation,
         ),
         hex::encode(digest.finalize())
@@ -231,15 +234,14 @@ mod tests {
 
     #[test]
     fn native_relationship_key_format() {
-        let relationship = vera_acp::Relationship::new(
-            "file",
-            "report/child",
+        let relationship = ::acp::domain::Relationship::new(
+            ::acp::domain::Object::new("file", "report/child"),
             "reader",
-            vera_acp::Subject::Wildcard,
+            ::acp::domain::Subject::AllActors,
         );
         assert_eq!(
             relationship_storage_key(&relationship, 10),
-            "v3/66696c65/7265706f72742f6368696c64/000000000000000a/726561646572/00414ab1420d5a968b2ab88ef68b22497b031cd04a26bf22380cb3f845fa18b1"
+            "v3/66696c65/7265706f72742f6368696c64/000000000000000a/726561646572/c7bd05d67bab51f82148702f5460f724db10540ea32127a2491544cb1b1035fe"
         );
         assert!(
             !relationship_storage_key(&relationship, 10)
@@ -258,11 +260,10 @@ mod tests {
 
     #[test]
     fn relationship_incarnations_have_distinct_delimited_prefixes() {
-        let relationship = vera_acp::Relationship::new(
-            "file/雪",
-            "report/child",
+        let relationship = ::acp::domain::Relationship::new(
+            ::acp::domain::Object::new("file/雪", "report/child"),
             "reader",
-            vera_acp::Subject::Wildcard,
+            ::acp::domain::Subject::AllActors,
         );
         let first = relationship_storage_key(&relationship, 0);
         let next = relationship_storage_key(&relationship, 1);

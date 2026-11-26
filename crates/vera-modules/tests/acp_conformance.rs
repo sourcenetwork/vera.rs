@@ -1,7 +1,6 @@
 //! Ownership and revocation cases from Vera 205df1ad (acp_core v0.8.2).
 //! Reference: https://github.com/sourcenetwork/vera/tree/205df1ad/tests/integration/acp/suite
 
-use vera_acp::Relationship;
 use vera_identity::Did;
 use vera_modules::{
     acp::{
@@ -64,11 +63,11 @@ fn setup() -> (AcpModule, String) {
     module
         .direct_policy_cmd(
             &owner(),
-            &policy.policy.id,
+            &policy.policy.id.to_string(),
             PolicyCmd::RegisterObject(object()),
         )
         .unwrap();
-    (module, policy.policy.id)
+    (module, policy.policy.id.to_string())
 }
 
 #[test]
@@ -100,12 +99,15 @@ fn check_access_rejects_invalid_context_missing_policies_and_partial_denials() {
         .direct_policy_cmd(
             &owner(),
             &policy_id,
-            PolicyCmd::SetRelationship(Relationship::with_entity(
-                "file",
-                "report",
-                "reader",
-                reader(),
-            )),
+            PolicyCmd::SetRelationship(
+                vera_modules::acp::relationship_values::actor_relationship(
+                    "file",
+                    "report",
+                    "reader",
+                    &reader(),
+                )
+                .unwrap(),
+            ),
         )
         .unwrap();
     let granted = AccessRequest {
@@ -213,7 +215,8 @@ fn edit_and_read_policy_guards_reject_without_side_effects() {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     let before = module.store().serialize();
     assert!(matches!(
         module.query_policy("missing-policy"),
@@ -401,11 +404,18 @@ fn revocation_survives_restore_and_stays_within_its_policy() {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     module
         .direct_policy_cmd(&owner(), &other_policy, PolicyCmd::RegisterObject(object()))
         .unwrap();
-    let grant = Relationship::with_entity("file", "report", "reader", reader());
+    let grant = vera_modules::acp::relationship_values::actor_relationship(
+        "file",
+        "report",
+        "reader",
+        &reader(),
+    )
+    .unwrap();
     for id in [&policy_id, &other_policy] {
         module
             .direct_policy_cmd(&owner(), id, PolicyCmd::SetRelationship(grant.clone()))
@@ -441,12 +451,15 @@ fn delegated_management_is_limited_to_declared_relations() {
             .direct_policy_cmd(
                 &owner(),
                 &policy_id,
-                PolicyCmd::SetRelationship(Relationship::with_entity(
-                    "file",
-                    "report",
-                    relation,
-                    reader(),
-                )),
+                PolicyCmd::SetRelationship(
+                    vera_modules::acp::relationship_values::actor_relationship(
+                        "file",
+                        "report",
+                        relation,
+                        &reader(),
+                    )
+                    .unwrap(),
+                ),
             )
             .unwrap();
     }
@@ -456,12 +469,15 @@ fn delegated_management_is_limited_to_declared_relations() {
         module.direct_policy_cmd(
             &reader(),
             &policy_id,
-            PolicyCmd::DeleteRelationship(Relationship::with_entity(
-                "file",
-                "report",
-                "writer",
-                reader()
-            ))
+            PolicyCmd::DeleteRelationship(
+                vera_modules::acp::relationship_values::actor_relationship(
+                    "file",
+                    "report",
+                    "writer",
+                    &reader()
+                )
+                .unwrap()
+            )
         ),
         Err(AcpError::Unauthorized { .. })
     ));
@@ -470,12 +486,15 @@ fn delegated_management_is_limited_to_declared_relations() {
         .direct_policy_cmd(
             &reader(),
             &policy_id,
-            PolicyCmd::DeleteRelationship(Relationship::with_entity(
-                "file",
-                "report",
-                "reader",
-                reader(),
-            )),
+            PolicyCmd::DeleteRelationship(
+                vera_modules::acp::relationship_values::actor_relationship(
+                    "file",
+                    "report",
+                    "reader",
+                    &reader(),
+                )
+                .unwrap(),
+            ),
         )
         .unwrap();
     assert!(!can_read(&module, &policy_id));
@@ -493,7 +512,8 @@ fn commitment_opening_cannot_reactivate_an_archived_object() {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     let opening = module
         .query_generate_commitment(&policy_id, &[object()], &Actor(reader()))
         .unwrap();
@@ -543,7 +563,7 @@ fn commitment_opening_cannot_reactivate_an_archived_object() {
 
 #[test]
 fn policy_edits_preserve_defra_specification_across_restore() {
-    let definition = "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n      - name: writer\n    permissions:\n      - name: read\n        expr: reader\n      - name: write\n        expr: writer\n";
+    let definition = "name: files\nresources:\n  - name: file\n    relations:\n      - name: reader\n      - name: writer\n    permissions:\n      - name: read\n        expr: reader\n      - name: update\n        expr: writer\n      - name: delete\n";
     let mut module = AcpModule::new();
     let policy = module
         .create_policy(
@@ -554,7 +574,8 @@ fn policy_edits_preserve_defra_specification_across_restore() {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     module
         .direct_policy_cmd(&owner(), &policy, PolicyCmd::RegisterObject(object()))
         .unwrap();
@@ -562,12 +583,15 @@ fn policy_edits_preserve_defra_specification_across_restore() {
         .direct_policy_cmd(
             &owner(),
             &policy,
-            PolicyCmd::SetRelationship(Relationship::with_entity(
-                "file",
-                "report",
-                "writer",
-                reader(),
-            )),
+            PolicyCmd::SetRelationship(
+                vera_modules::acp::relationship_values::actor_relationship(
+                    "file",
+                    "report",
+                    "writer",
+                    &reader(),
+                )
+                .unwrap(),
+            ),
         )
         .unwrap();
     assert!(can_read(&module, &policy));
@@ -585,7 +609,7 @@ fn policy_edits_preserve_defra_specification_across_restore() {
         assert!(can_read(&module, &policy));
         assert!(can_read(&restore(&module), &policy));
         let before = module.store().serialize();
-        let invalid = definition.replace("      - name: write\n        expr: writer\n", "");
+        let invalid = definition.replace("      - name: update\n        expr: writer\n", "");
         assert!(
             module
                 .edit_policy(&owner(), &policy, &invalid, PolicyMarshalingType::ShortYaml)
@@ -596,73 +620,44 @@ fn policy_edits_preserve_defra_specification_across_restore() {
 }
 
 #[test]
-fn actor_roles_require_management_authority_without_object_registration() {
+fn actor_relations_and_actor_objects_are_refused() {
     let mut module = AcpModule::new();
-    let definition = "name: files\nactor:\n  relations:\n    - name: member\n      types: [actor]\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor->member]\n    permissions:\n      - name: read\n        expr: reader\n";
-    let policy = module
-        .create_policy(
-            &owner(),
-            definition,
-            PolicyMarshalingType::ShortYaml,
-            Default::default(),
-        )
-        .unwrap()
-        .policy
-        .id;
+    let roles = "name: files\nactor:\n  relations:\n    - name: member\n      types: [actor]\nresources:\n  - name: file\n";
+    assert!(
+        module
+            .create_policy(
+                &owner(),
+                roles,
+                PolicyMarshalingType::ShortYaml,
+                Default::default()
+            )
+            .is_err()
+    );
+    let (mut module, policy) = setup();
+    let before = module.store().serialize();
     let actor = Object {
         resource: "actor".into(),
         id: reader().to_string(),
     };
-    for caller in [owner(), reader()] {
+    for command in [
+        PolicyCmd::RegisterObject(actor.clone()),
+        PolicyCmd::SetRelationship(
+            vera_modules::acp::relationship_values::actor_relationship(
+                "actor",
+                &actor.id,
+                "member",
+                &reader(),
+            )
+            .unwrap(),
+        ),
+    ] {
         assert!(
             module
-                .direct_policy_cmd(&caller, &policy, PolicyCmd::RegisterObject(actor.clone()))
+                .direct_policy_cmd(&owner(), &policy, command)
                 .is_err()
         );
     }
-    let role = Relationship::with_entity("actor", &actor.id, "member", reader());
-    assert!(
-        module
-            .direct_policy_cmd(&reader(), &policy, PolicyCmd::SetRelationship(role.clone()))
-            .is_err()
-    );
-    module
-        .direct_policy_cmd(&owner(), &policy, PolicyCmd::SetRelationship(role.clone()))
-        .unwrap();
-    module
-        .direct_policy_cmd(&owner(), &policy, PolicyCmd::RegisterObject(object()))
-        .unwrap();
-    module
-        .direct_policy_cmd(
-            &owner(),
-            &policy,
-            PolicyCmd::SetRelationship(Relationship::new(
-                "file",
-                "report",
-                "reader",
-                vera_acp::Subject::entity_set("actor", &actor.id, "member"),
-            )),
-        )
-        .unwrap();
-    assert!(can_read(&restore(&module), &policy));
-    assert!(
-        module
-            .direct_policy_cmd(
-                &owner(),
-                &policy,
-                PolicyCmd::SetRelationship(Relationship::with_entity(
-                    "actor",
-                    "invalid-id",
-                    "member",
-                    reader()
-                ))
-            )
-            .is_err()
-    );
-    module
-        .direct_policy_cmd(&owner(), &policy, PolicyCmd::DeleteRelationship(role))
-        .unwrap();
-    assert!(!can_read(&restore(&module), &policy));
+    assert_eq!(module.store().serialize(), before);
 }
 
 #[test]
@@ -703,7 +698,13 @@ fn duplicate_relationship_preserves_original_metadata() {
     use vera_modules::types::{BlockExecCtx, Timestamp, TxExecCtx};
 
     let (mut module, policy_id) = setup();
-    let relationship = Relationship::with_entity("file", "report", "reader", reader());
+    let relationship = vera_modules::acp::relationship_values::actor_relationship(
+        "file",
+        "report",
+        "reader",
+        &reader(),
+    )
+    .unwrap();
     let mut block = BlockExecCtx {
         timestamp: Timestamp {
             seconds: 100,
@@ -790,12 +791,15 @@ fn archive_results_preserve_registration_and_object_boundaries() {
         .direct_policy_cmd(
             &owner(),
             &policy_id,
-            PolicyCmd::SetRelationship(Relationship::with_entity(
-                "file",
-                "report",
-                "reader",
-                reader(),
-            )),
+            PolicyCmd::SetRelationship(
+                vera_modules::acp::relationship_values::actor_relationship(
+                    "file",
+                    "report",
+                    "reader",
+                    &reader(),
+                )
+                .unwrap(),
+            ),
         )
         .unwrap();
     let before = module.store().serialize();
@@ -864,60 +868,17 @@ fn archive_results_preserve_registration_and_object_boundaries() {
 }
 
 #[test]
-fn cyclic_exclusions_cannot_create_successful_access_decisions() {
-    use vera_modules::types::{BlockExecCtx, Timestamp, TxExecCtx};
-
+fn cyclic_exclusions_are_refused_when_a_policy_is_created() {
     let mut module = AcpModule::new();
-    let policy = module.create_policy(
+    let result = module.create_policy(
         &owner(),
         "name: exclusions\nresources:\n  - name: file\n    relations:\n      - name: reader\n        types: [actor]\n    permissions:\n      - name: read\n        expr: reader - excluded\n      - name: excluded\n        expr: read\n",
-        PolicyMarshalingType::ShortYaml, Default::default(),
-    ).unwrap();
-    let id = policy.policy.id;
-    for command in [
-        PolicyCmd::RegisterObject(object()),
-        PolicyCmd::SetRelationship(Relationship::with_entity(
-            "file",
-            "report",
-            "reader",
-            reader(),
-        )),
-    ] {
-        module.direct_policy_cmd(&owner(), &id, command).unwrap();
-    }
-    let request = AccessRequest {
-        actor: Actor(reader()),
-        operations: vec![Operation {
-            object: object(),
-            permission: "read".into(),
-        }],
-    };
-    let block = BlockExecCtx {
-        genesis_id: [7; 32],
-        deployment_id: 9001,
-        timestamp: Timestamp {
-            seconds: 100,
-            block_height: 5,
-        },
-    };
-    let tx = TxExecCtx {
-        sequence: 0,
-        tx_hash: vec![9; 32],
-        signer: owner().to_string(),
-    };
-    for mut candidate in [module.clone(), restore(&module)] {
-        candidate.validate_restored_state().unwrap();
-        let before = candidate.store().serialize();
-        assert!(
-            candidate
-                .query_verify_access_request(&id, &request)
-                .is_err()
-        );
-        assert!(
-            candidate
-                .check_access(&owner(), &id, &request, &block, &tx)
-                .is_err()
-        );
-        assert_eq!(candidate.store().serialize(), before);
-    }
+        PolicyMarshalingType::ShortYaml,
+        Default::default(),
+    );
+    assert!(
+        matches!(result, Err(AcpError::InvalidPolicy { .. })),
+        "{result:?}"
+    );
+    assert!(module.query_policy_ids().unwrap().is_empty());
 }

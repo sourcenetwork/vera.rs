@@ -34,9 +34,8 @@ Related repositories are independent checkouts; discover their paths rather than
 
 | Component | Source repo | Used in vera.rs for |
 |-----------|-----------|-------------------|
-| Zanzibar engine (relation-tuple graph) | vendored `crates/vera-zanzibar/` (from defradb.rs 8d34d9c) | ACP policy evaluation |
 | DID types, identity crate | vendored `crates/vera-identity/` (from defradb.rs 8d34d9c) | DID resolution |
-| YAML policy parser, DocumentACP types | vendored `crates/vera-acp/` (from defradb.rs 8d34d9c) | ACP policy creation |
+| ACP policy semantics and evaluation | `acp` crate of **acp-rs** (with its `zanzi` engine) | Policy language, processing, relationship form and evaluation |
 | Simplex consensus, e2e harness | bankd-commonware | Consensus, testing |
 | BLS12-381 threshold crypto | commonware monorepo | Block signing, native tx verification |
 
@@ -166,7 +165,7 @@ encode module calls (DefraDB's delegation crate) do not build the consensus
 stack. Verification that needs consensus types, such as an anchor's finality
 certificate, runs in the executor's shim before the module call.
 `.github/scripts/check-light-crate-graph.py` fails CI if `vera-modules`,
-`vera-crypto`, `vera-acp`, `vera-identity` or `vera-zanzibar` resolves
+`vera-crypto` or `vera-identity` resolves
 Commonware's runtime, glue, consensus, p2p or storage crates, or `vera-domain`.
 
 Operator policies list secp256k1 keys in hexadecimal and Ed25519 or P-256 keys

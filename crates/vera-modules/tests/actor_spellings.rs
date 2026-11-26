@@ -3,12 +3,12 @@
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use k256::ecdsa::{Signature, SigningKey, signature::Signer as _};
-use vera_acp::{Relationship, Subject};
 use vera_crypto::{
     jwt::{DelegationScope, JwtClaims},
     operation::{OperationClaim, OperationId},
 };
 use vera_identity::Did;
+use vera_modules::acp::types::{Relationship, Subject};
 use vera_modules::{
     acp::{
         AcpModule,
@@ -157,16 +157,12 @@ const fn context(now: u64) -> BlockExecCtx {
 }
 
 const POLICY: &str = "name: files
-actor:
-  relations:
-    - name: member
-      types: [actor]
 resources:
   - name: file
     relations:
       - name: reader
-        types: [actor, actor->member]
       - name: viewer
+        types: [actor, file]
     permissions:
       - name: read
         expr: reader
@@ -190,7 +186,7 @@ fn read(actor: &Did, object: Object) -> AccessRequest {
 }
 
 fn reader(subject: Subject) -> Relationship {
-    Relationship::new("file", "report", "reader", subject)
+    vera_modules::acp::relationship_values::relationship("file", "report", "reader", subject)
 }
 
 /// A policy owned by `owner` with one registered file.
@@ -201,7 +197,8 @@ fn fixture(owner: &Key) -> (AcpModule, String) {
         .create_policy(owner, POLICY, FORMAT, Default::default())
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     acp.direct_policy_cmd(owner, &policy, PolicyCmd::RegisterObject(file("report")))
         .unwrap();
     (acp, policy)

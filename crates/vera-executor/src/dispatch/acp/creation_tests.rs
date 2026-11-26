@@ -275,7 +275,7 @@ fn authenticated_creation_retry_after_retirement_is_metered_and_does_not_realloc
     let policy: PolicyRecord = serde_json::from_slice(&bytes).unwrap();
     fixture
         .acp
-        .delete_policy(&Did::new(issuer()).unwrap(), &policy.policy.id)
+        .delete_policy(&Did::new(issuer()).unwrap(), &policy.policy.id.to_string())
         .unwrap();
     let before = fixture.state();
     let retry = fixture.dispatch(&input, 1_000_000).unwrap();

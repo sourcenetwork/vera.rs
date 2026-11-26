@@ -41,6 +41,16 @@ pub enum AcpError {
     #[error("unauthorized: {reason}")]
     Unauthorized { reason: String },
 
+    /// The registering actor does not pass the resource's collection
+    /// `create`, over the stored relationships and the ones it supplied.
+    /// Nothing is stored.
+    #[error("{actor} may not create {resource}/{object_id} in its collection")]
+    CreateNotAuthorized {
+        actor: String,
+        resource: String,
+        object_id: String,
+    },
+
     #[error("invalid bearer token: {reason}")]
     InvalidBearerToken { reason: String },
 

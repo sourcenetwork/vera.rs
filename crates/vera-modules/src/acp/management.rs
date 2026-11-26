@@ -58,29 +58,36 @@ impl AcpModule {
             read_capture::PERMISSION_READ_LIMITS,
             budget.permissions.clone(),
         );
-        let record = zanzibar_store::read_policy(&capture, policy_id)
+        let record = evaluation::read_policy(&capture, policy_id)
             .map_err(relation_state_error)?
             .ok_or_else(|| AcpError::PolicyNotFound {
                 id: policy_id.into(),
             })?;
-        let policy = &record.policy;
-        let target = policy
-            .get_relation(&object.resource, relation)
-            .ok_or_else(|| AcpError::InvalidAccessRequest {
-                reason: format!("unknown managed relation '{}/{relation}'", object.resource),
-            })?;
-        if !target.expression.is_this() {
+        let unknown = || AcpError::InvalidAccessRequest {
+            reason: format!("unknown managed relation '{}/{relation}'", object.resource),
+        };
+        let resource = record
+            .policy
+            .resources
+            .iter()
+            .find(|resource| resource.name.as_str() == object.resource)
+            .ok_or_else(unknown)?;
+        if resource
+            .permissions
+            .iter()
+            .any(|permission| permission.name.as_str() == relation)
+        {
             return Err(AcpError::InvalidAccessRequest {
                 reason: "permissions cannot be managed as stored relations".into(),
             });
         }
-        // Actor roles have no object registration. Their policy owner controls bootstrap.
-        if policy
-            .actor
-            .as_ref()
-            .is_some_and(|definition| definition.name == object.resource)
+        if relation != ::acp::domain::OWNER_RELATION
+            && !resource
+                .relations
+                .iter()
+                .any(|declared| declared.name.as_str() == relation)
         {
-            return Ok(record.metadata.owner_did == actor.as_str());
+            return Err(unknown());
         }
         if self
             .registration_owner_record_with_budget(policy_id, object, Some(budget))?
@@ -88,22 +95,13 @@ impl AcpModule {
         {
             return Ok(false);
         }
-        let managers: Vec<String> = std::iter::once("owner")
-            .chain(policy.get_managers_for_relation(&object.resource, relation))
-            .map(str::to_owned)
-            .collect();
-        let evaluation = zanzibar_store::evaluation_for_policy(
+        evaluation::evaluation_for_policy(
             capture,
             record,
-            Some(Arc::new(budget.permissions.clone())),
-        );
-        for manager in managers {
-            if evaluation.check(object, &manager, actor).map_err(|error| {
-                AcpError::State(format!("management evaluation failed: {error}"))
-            })? {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+            self.policies.get(policy_id),
+            Some(budget.permissions.clone()),
+        )
+        .and_then(|evaluation| evaluation.check_management(object, relation, actor))
+        .map_err(|error| AcpError::State(format!("management evaluation failed: {error}")))
     }
 }

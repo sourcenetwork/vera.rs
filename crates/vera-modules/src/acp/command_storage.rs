@@ -16,22 +16,19 @@ pub(super) struct CommandRecords<'a> {
 }
 
 impl RecordStore for CommandRecords<'_> {
-    fn read_record(&self, key: &[u8]) -> vera_zanzibar::error::Result<Option<Vec<u8>>> {
+    fn read_record(&self, key: &[u8]) -> super::record_error::Result<Option<Vec<u8>>> {
         let value = self.store.get_ref(key);
         self.budget
             .permissions
             .records
             .read(key, value)
-            .map_err(|error| vera_zanzibar::error::Error::Serialization(error.to_string()))?;
+            .map_err(|error| super::record_error::RecordError::unavailable(error.to_string()))?;
         Ok(value.map(<[u8]>::to_vec))
     }
 
-    fn scan_records(
-        &self,
-        _prefix: &[u8],
-    ) -> vera_zanzibar::error::Result<Vec<(Vec<u8>, Vec<u8>)>> {
-        Err(vera_zanzibar::error::Error::Serialization(
-            "command storage requires point reads".into(),
+    fn scan_records(&self, _prefix: &[u8]) -> super::record_error::Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        Err(super::record_error::RecordError::unavailable(
+            "command storage requires point reads",
         ))
     }
 
@@ -39,12 +36,12 @@ impl RecordStore for CommandRecords<'_> {
         &self,
         key: &[u8],
         value: Option<&[u8]>,
-    ) -> vera_zanzibar::error::Result<RecordChange> {
+    ) -> super::record_error::Result<RecordChange> {
         self.budget
             .permissions
             .records
             .write(key, value)
-            .map_err(|error| vera_zanzibar::error::Error::Serialization(error.to_string()))?;
+            .map_err(|error| super::record_error::RecordError::unavailable(error.to_string()))?;
         Ok((key.to_vec(), value.map(<[u8]>::to_vec)))
     }
 
@@ -52,17 +49,17 @@ impl RecordStore for CommandRecords<'_> {
         &self,
         key: &[u8],
         value: &T,
-    ) -> vera_zanzibar::error::Result<RecordChange> {
+    ) -> super::record_error::Result<RecordChange> {
         let encoded = self
             .budget
             .permissions
             .records
             .encode(key, value)
-            .map_err(|error| vera_zanzibar::error::Error::Serialization(error.to_string()))?;
+            .map_err(|error| super::record_error::RecordError::unavailable(error.to_string()))?;
         Ok((key.to_vec(), Some(encoded)))
     }
 
-    fn apply_records(&mut self, changes: Vec<RecordChange>) -> vera_zanzibar::error::Result<()> {
+    fn apply_records(&mut self, changes: Vec<RecordChange>) -> super::record_error::Result<()> {
         // Only the private central planners call this adapter with prepaid changes.
         // No fallible work or second reservation is allowed after publication starts.
         self.store.apply_records(changes)

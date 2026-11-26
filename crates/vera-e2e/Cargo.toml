@@ -27,7 +27,6 @@ vera-cli.workspace = true
 orbis-reporting.workspace = true
 blst = "0.3"
 tempfile.workspace = true
-vera-acp.workspace = true
 alloy-primitives.workspace = true
 alloy-sol-types.workspace = true
 commonware-codec.workspace = true

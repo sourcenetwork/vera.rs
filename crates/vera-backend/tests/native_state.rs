@@ -10,6 +10,7 @@ use vera_backend::{
     BackendError,
     native::{self, NativeStateSet},
 };
+use vera_modules::acp::types::Subject;
 use vera_modules::{
     ModuleState,
     acp::{
@@ -21,7 +22,6 @@ use vera_modules::{
     module_state::{ModuleChanges, combine_module_roots},
     types::{BlockExecCtx, Timestamp, TxExecCtx},
 };
-use vera_zanzibar::{Relationship, Subject};
 
 const OWNER: &str = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 const READER: &str = "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH";
@@ -96,7 +96,8 @@ fn authorization_survives_forks_restart_and_rewind() {
                 )
                 .unwrap()
                 .policy
-                .id;
+                .id
+                .to_string();
             first_state
                 .acp
                 .direct_policy_cmd(
@@ -108,14 +109,20 @@ fn authorization_survives_forks_restart_and_rewind() {
                     }),
                 )
                 .unwrap();
-            let blocked = Relationship::new(
+            let blocked = vera_modules::acp::relationship_values::relationship(
                 "document",
                 "report",
                 "blocked",
-                Subject::typed_wildcard("document"),
+                Subject::AllActors,
             );
             for relationship in [
-                Relationship::with_entity("document", "report", "reader", READER.parse().unwrap()),
+                vera_modules::acp::relationship_values::actor_relationship(
+                    "document",
+                    "report",
+                    "reader",
+                    &READER.parse().unwrap(),
+                )
+                .unwrap(),
                 blocked.clone(),
             ] {
                 first_state

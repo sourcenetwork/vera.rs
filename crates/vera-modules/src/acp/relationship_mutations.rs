@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::record_error::{RecordError, Result};
 use super::{
     keys, object_pairs, object_state,
     record_store::{RecordChange, RecordStore},
@@ -9,7 +10,6 @@ use super::{
     spelling,
     types::{PolicyRecord, RelationPair, RelationshipRecord},
 };
-use vera_zanzibar::error::{Error, Result};
 
 pub(super) fn put<S: RecordStore>(store: &mut S, record: &RelationshipRecord) -> Result<()> {
     let changes = prepare_put(store, record)?;
@@ -21,10 +21,10 @@ pub(super) fn prepare_put<S: RecordStore>(
     record: &RelationshipRecord,
 ) -> Result<Vec<RecordChange>> {
     let policy = current_policy(store, &record.policy_id)?
-        .ok_or_else(|| Error::PolicyNotFound(record.policy_id.clone()))?;
+        .ok_or_else(|| RecordError::invalid(format!("policy not found: {}", record.policy_id)))?;
     // Commands rewrite actors before they reach storage; a spelling that slipped
     // through would become a second identity for the same key.
-    if !spelling::is_canonical(&policy.policy, &record.relationship)
+    if !spelling::is_canonical(&record.relationship)
         || crate::actor::canonical_str(&record.metadata.owner_did) != record.metadata.owner_did
     {
         return Err(invalid("relationship actor spelling is not canonical"));
@@ -82,6 +82,7 @@ pub(super) fn remove<S: RecordStore>(store: &mut S, key: &[u8]) -> Result<()> {
 
 /// Prepare all removals and combined pair deltas before the caller's atomic apply.
 /// The caller may append other prepared records to the same atomic change set.
+#[cfg(test)]
 pub(super) fn prepare_removals<S: RecordStore>(
     store: &S,
     keys: &[Vec<u8>],
@@ -136,13 +137,13 @@ fn prepare_removal_keys<'a, S: RecordStore>(
                 ));
             }
         }
-        let current_incarnation = if record.relationship.relation == "owner" {
+        let current_incarnation = if record.relationship.relation.as_str() == "owner" {
             0
         } else {
             let state_key = object_state::key(
                 &record.policy_id,
-                &record.relationship.resource,
-                &record.relationship.object_id,
+                record.relationship.object.resource.as_str(),
+                record.relationship.object.id.as_str(),
             );
             *match incarnations.entry(state_key) {
                 std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
@@ -219,7 +220,7 @@ fn current_policy<S: RecordStore>(store: &S, id: &str) -> Result<Option<PolicyRe
         .read_record(&keys::policy_key(id))?
         .map(|bytes| {
             let policy: PolicyRecord = serde_json::from_slice(&bytes)?;
-            if policy.policy.id != id {
+            if policy.policy.id.as_str() != id {
                 return Err(invalid("policy record identity mismatch"));
             }
             policy.relations.validate(&policy.policy)?;

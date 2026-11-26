@@ -21,7 +21,8 @@ fn owner_prefix_evidence_distinguishes_live_archived_and_absent_objects() {
                 )
                 .unwrap()
                 .policy
-                .id;
+                .id
+                .to_string();
             let object = |name: &str| Object {
                 resource: "document".into(),
                 id: name.into(),

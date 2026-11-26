@@ -1,4 +1,5 @@
 use super::*;
+use vera_identity::Did;
 use vera_modules::{
     acp::{
         object_state, relationship_index,
@@ -9,7 +10,6 @@ use vera_modules::{
     kv_store::ModuleKvStore as _,
     types::{BlockExecCtx, Timestamp},
 };
-use vera_zanzibar::{Did, Relationship};
 
 const POLICY: &str = "name: hydration\nresources:\n  - name: file\n    relations:\n      - name: reader\n    permissions:\n      - name: read\n        expr: reader\n";
 const OLD_GRANTS: usize = 257;
@@ -132,7 +132,8 @@ fn object_incarnation_cleanup_survives_native_reopen_without_reviving_grants() {
                 )
                 .unwrap()
                 .policy
-                .id;
+                .id
+                .to_string();
             modules
                 .acp
                 .direct_policy_cmd(&owner, &policy, PolicyCmd::RegisterObject(object.clone()))
@@ -144,12 +145,15 @@ fn object_incarnation_cleanup_survives_native_reopen_without_reviving_grants() {
                     .direct_policy_cmd(
                         &owner,
                         &policy,
-                        PolicyCmd::SetRelationship(Relationship::with_entity(
-                            "file",
-                            "report",
-                            "reader",
-                            reader(index),
-                        )),
+                        PolicyCmd::SetRelationship(
+                            vera_modules::acp::relationship_values::actor_relationship(
+                                "file",
+                                "report",
+                                "reader",
+                                &reader(index),
+                            )
+                            .unwrap(),
+                        ),
                     )
                     .unwrap()
                 else {
@@ -182,12 +186,15 @@ fn object_incarnation_cleanup_survives_native_reopen_without_reviving_grants() {
                 .direct_policy_cmd(
                     &owner,
                     &policy,
-                    PolicyCmd::SetRelationship(Relationship::with_entity(
-                        "file",
-                        "report",
-                        "reader",
-                        reader(0),
-                    )),
+                    PolicyCmd::SetRelationship(
+                        vera_modules::acp::relationship_values::actor_relationship(
+                            "file",
+                            "report",
+                            "reader",
+                            &reader(0),
+                        )
+                        .unwrap(),
+                    ),
                 )
                 .unwrap()
             else {

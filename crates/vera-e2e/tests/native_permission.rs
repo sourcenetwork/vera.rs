@@ -656,7 +656,7 @@ async fn certified_assignments_follow_grants_and_withdrawal() {
         .await
         .unwrap();
     assert_eq!(result.records.len(), 1);
-    assert_eq!(result.records[0].relationship.object_id, "report");
+    assert_eq!(result.records[0].relationship.object.id.as_str(), "report");
     assert_eq!(
         result
             .evidence

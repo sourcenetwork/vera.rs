@@ -104,7 +104,7 @@ impl AcpModule {
         }
         budget.input(policy.len())?;
         budget.metadata(supplied)?;
-        let record = Self::new_policy_record(
+        let (record, compiled) = Self::new_policy_record(
             policy,
             marshal_type,
             nonce,
@@ -112,7 +112,7 @@ impl AcpModule {
             specification,
             supplied.clone(),
         )?;
-        let policy_id = record.policy.id.clone();
+        let policy_id = record.policy.id.to_string();
         let key = keys::policy_key(&policy_id);
         budget.records.read(&key, self.store.get_ref(&key))?;
         let retired_key = retirement::retired_key(&policy_id);
@@ -122,8 +122,7 @@ impl AcpModule {
         self.refuse_taken_id(&policy_id)?;
         let bytes = budget.records.encode(&key, &record)?;
         self.store.put(&key, bytes);
-        self.zanzibar_policies
-            .insert(policy_id, Arc::new(record.policy.clone()));
+        self.policies.insert(policy_id, Arc::new(compiled));
         Ok(record)
     }
 
@@ -160,7 +159,7 @@ impl AcpModule {
         for placed in policies {
             let owner = Did::new(placed.owner.as_str())
                 .map_err(|error| AcpError::State(format!("seeded policy owner: {error}")))?;
-            let record = Self::new_policy_record(
+            let (record, compiled) = Self::new_policy_record(
                 &placed.definition,
                 placed.marshal_type.clone(),
                 placed.nonce,
@@ -173,13 +172,12 @@ impl AcpModule {
                 None,
                 SuppliedMetadata::default(),
             )?;
-            let policy_id = record.policy.id.clone();
+            let policy_id = record.policy.id.to_string();
             self.refuse_taken_id(&policy_id)?;
             let bytes = serde_json::to_vec(&record)
                 .map_err(|error| AcpError::State(format!("encode seeded policy: {error}")))?;
             self.store.put(&keys::policy_key(&policy_id), bytes);
-            self.zanzibar_policies
-                .insert(policy_id, Arc::new(record.policy.clone()));
+            self.policies.insert(policy_id, Arc::new(compiled));
             records.push(record);
         }
         Ok(records)
@@ -195,7 +193,7 @@ impl AcpModule {
         creator: &str,
     ) -> Result<String> {
         let (_, hash) = Self::compile_policy(policy, marshal_type, None)?;
-        Ok(policy_yaml::policy_id(
+        Ok(policy_id::policy_id(
             &hash,
             nonce,
             &crate::actor::canonical_str(creator),
@@ -211,21 +209,22 @@ impl AcpModule {
         metadata: RecordMetadata,
         specification: Option<PolicySpecification>,
         supplied_metadata: SuppliedMetadata,
-    ) -> Result<PolicyRecord> {
+    ) -> Result<(PolicyRecord, Compiled)> {
         let (mut compiled, policy_hash) =
             Self::compile_policy(policy, &marshal_type, specification)?;
-        compiled.id = policy_yaml::policy_id(&policy_hash, &nonce, &metadata.owner_did);
-        Ok(PolicyRecord {
-            relations: RelationGenerations::new(&compiled).map_err(relation_state_error)?,
+        compiled.policy.id = policy_id::policy_id(&policy_hash, &nonce, &metadata.owner_did).into();
+        let record = PolicyRecord {
+            relations: RelationGenerations::new(&compiled.policy).map_err(relation_state_error)?,
             supplied_metadata,
             last_modified: None,
-            policy: compiled,
+            policy: compiled.policy.clone(),
             raw_policy: policy.to_string(),
             marshal_type,
             metadata,
             nonce,
             policy_hash,
-        })
+        };
+        Ok((record, compiled))
     }
 
     fn refuse_taken_id(&self, policy_id: &str) -> Result<()> {

@@ -11,9 +11,9 @@ mod storage;
 /// Bulletin domain types.
 pub mod types;
 
+use ::acp::domain::{Object as AcpObject, Relationship, Subject};
 use error::BulletinError;
 use types::{Collaborator, Namespace, Post};
-use vera_acp::{Relationship, Subject};
 use vera_identity::Did;
 
 use crate::acp::types::{
@@ -29,11 +29,10 @@ name: bulletin-module-policy
 resources:
   - name: namespace
     relations:
-      - name: owner
       - name: collaborator
     permissions:
       - name: create_post
-        expr: owner + collaborator
+        expr: collaborator
 ";
 
 const MODULE_DID: &str = "did:key:bulletin";
@@ -61,9 +60,9 @@ pub const MAX_COLLABORATOR_DID_BYTES: usize = 256;
 ///
 /// The module lazily creates a single ACP policy on the first
 /// `register_namespace` call (stored as `"policy_id"` in the KV store).
-/// The policy defines one resource type `namespace` with the relations
-/// `owner` and `collaborator` and one permission
-/// `create_post = owner + collaborator`.
+/// The policy defines one resource type `namespace` with the relation
+/// `collaborator` and one permission `create_post = collaborator`; acp adds
+/// the `owner` relation and grants every permission to the owner.
 ///
 /// Cross-module calls use direct parameter passing — the caller
 /// (application/executor) passes `&mut AcpModule` to methods that
@@ -268,19 +267,20 @@ impl BulletinModule {
         let listed = self
             .get_collaborator(&namespace_id, collaborator_did)?
             .is_some();
-        let collab_did_parsed = Did::new(collaborator_did)
-            .map_err(|e| BulletinError::State(format!("invalid collaborator DID: {}", e)))?;
+        let collaborator = Did::new(collaborator_did)
+            .map_err(|e| e.to_string())
+            .and_then(|did| crate::acp::relationship_values::actor(&did).map_err(|e| e.to_string()))
+            .map_err(|e| BulletinError::State(format!("invalid collaborator DID: {e}")))?;
 
         let result = acp
             .direct_policy_cmd(
                 creator,
                 &policy_id,
-                PolicyCmd::SetRelationship(Relationship {
-                    resource: "namespace".into(),
-                    object_id: namespace_id.clone(),
-                    relation: "collaborator".into(),
-                    subject: Subject::Entity(collab_did_parsed),
-                }),
+                PolicyCmd::SetRelationship(Relationship::new(
+                    AcpObject::new("namespace", namespace_id.as_str()),
+                    "collaborator",
+                    Subject::Actor(collaborator),
+                )),
             )
             .map_err(|e| BulletinError::Unauthorized {
                 reason: e.to_string(),
@@ -336,19 +336,20 @@ impl BulletinModule {
         let listed = self
             .get_collaborator(&namespace_id, collaborator_did)?
             .is_some();
-        let collab_did_parsed = Did::new(collaborator_did)
-            .map_err(|e| BulletinError::State(format!("invalid collaborator DID: {}", e)))?;
+        let collaborator = Did::new(collaborator_did)
+            .map_err(|e| e.to_string())
+            .and_then(|did| crate::acp::relationship_values::actor(&did).map_err(|e| e.to_string()))
+            .map_err(|e| BulletinError::State(format!("invalid collaborator DID: {e}")))?;
 
         let result = acp
             .direct_policy_cmd(
                 creator,
                 &policy_id,
-                PolicyCmd::DeleteRelationship(Relationship {
-                    resource: "namespace".into(),
-                    object_id: namespace_id.clone(),
-                    relation: "collaborator".into(),
-                    subject: Subject::Entity(collab_did_parsed),
-                }),
+                PolicyCmd::DeleteRelationship(Relationship::new(
+                    AcpObject::new("namespace", namespace_id.as_str()),
+                    "collaborator",
+                    Subject::Actor(collaborator),
+                )),
             )
             .map_err(|e| BulletinError::Unauthorized {
                 reason: e.to_string(),
@@ -505,7 +506,7 @@ impl BulletinModule {
             )
             .map_err(|e| BulletinError::PolicyInitFailed(e.to_string()))?;
 
-        let policy_id = record.policy.id;
+        let policy_id = record.policy.id.to_string();
         self.set_policy_id(&policy_id);
         Ok(policy_id)
     }

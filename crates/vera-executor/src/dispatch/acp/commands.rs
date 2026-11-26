@@ -153,11 +153,10 @@ fn run(
             let creator = did_from_signer(&tx_ctx.signer)?;
             let policy_id = policy_id_to_string(&call.policyId);
             let actor_did = did_from_actor(&call.actor)?;
-            let cmd = PolicyCmd::SetRelationship(vera_acp::Relationship::new(
-                &call.resource,
-                &call.objectId,
-                &call.relation,
-                vera_acp::Subject::entity(actor_did),
+            let cmd = PolicyCmd::SetRelationship(Relationship::new(
+                AcpObject::new(call.resource.as_str(), call.objectId.as_str()),
+                call.relation.as_str(),
+                actor_subject(&actor_did)?,
             ));
 
             let result = match module.execute_policy_cmd_with_budget(
@@ -182,7 +181,7 @@ fn run(
             let event = IAcp::RelationshipSet {
                 policyId: alloy_primitives::keccak256(policy_id.as_bytes()),
                 resource: call.resource.clone(),
-                objectId: record.relationship.object_id.clone(),
+                objectId: record.relationship.object.id.to_string(),
                 relation: call.relation.clone(),
                 actor: subject_object_id(&record.relationship.subject, call.actor),
             };
@@ -198,11 +197,10 @@ fn run(
             let creator = did_from_signer(&tx_ctx.signer)?;
             let policy_id = policy_id_to_string(&call.policyId);
             let actor_did = did_from_actor(&call.actor)?;
-            let relationship = vera_acp::Relationship::new(
-                &call.resource,
-                &call.objectId,
-                &call.relation,
-                vera_acp::Subject::entity(actor_did),
+            let relationship = Relationship::new(
+                AcpObject::new(call.resource.as_str(), call.objectId.as_str()),
+                call.relation.as_str(),
+                actor_subject(&actor_did)?,
             );
             let cmd = PolicyCmd::DeleteRelationship(relationship.clone());
 
@@ -228,7 +226,7 @@ fn run(
             let event = IAcp::RelationshipDeleted {
                 policyId: alloy_primitives::keccak256(policy_id.as_bytes()),
                 resource: call.resource.clone(),
-                objectId: deleted.object_id,
+                objectId: deleted.object.id.to_string(),
                 relation: call.relation.clone(),
                 actor: subject_object_id(&deleted.subject, call.actor),
             };
@@ -246,10 +244,9 @@ fn run(
                 &call.subjectObjectId,
                 &call.subjectRelation,
             )?;
-            let cmd = PolicyCmd::SetRelationship(vera_acp::Relationship::new(
-                &call.resource,
-                &call.objectId,
-                &call.relation,
+            let cmd = PolicyCmd::SetRelationship(Relationship::new(
+                AcpObject::new(call.resource.as_str(), call.objectId.as_str()),
+                call.relation.as_str(),
                 subject,
             ));
 
@@ -275,7 +272,7 @@ fn run(
             let event = IAcp::RelationshipSubjectSet {
                 policyId: alloy_primitives::keccak256(policy_id.as_bytes()),
                 resource: call.resource,
-                objectId: record.relationship.object_id.clone(),
+                objectId: record.relationship.object.id.to_string(),
                 relation: call.relation,
                 subjectKind: call.subjectKind,
                 subjectResource: call.subjectResource,
@@ -305,10 +302,9 @@ fn run(
                 &call.subjectObjectId,
                 &call.subjectRelation,
             )?;
-            let relationship = vera_acp::Relationship::new(
-                &call.resource,
-                &call.objectId,
-                &call.relation,
+            let relationship = Relationship::new(
+                AcpObject::new(call.resource.as_str(), call.objectId.as_str()),
+                call.relation.as_str(),
                 subject,
             );
             let cmd = PolicyCmd::DeleteRelationship(relationship.clone());
@@ -335,7 +331,7 @@ fn run(
             let event = IAcp::RelationshipSubjectDeleted {
                 policyId: alloy_primitives::keccak256(policy_id.as_bytes()),
                 resource: call.resource,
-                objectId: deleted.object_id,
+                objectId: deleted.object.id.to_string(),
                 relation: call.relation,
                 subjectKind: call.subjectKind,
                 subjectResource: call.subjectResource,
@@ -688,8 +684,8 @@ fn run(
 fn recorded_relationship(
     module: &AcpModule,
     policy_id: &str,
-    relationship: vera_acp::Relationship,
-) -> Result<vera_acp::Relationship, ModuleError> {
+    relationship: Relationship,
+) -> Result<Relationship, ModuleError> {
     module
         .recorded_relationship(policy_id, relationship)
         .map_err(|error| ModuleError::invalid(format!("recorded relationship: {error}")))
@@ -697,10 +693,11 @@ fn recorded_relationship(
 
 /// The identifier an event reports for a subject: the recorded actor or
 /// object, or the caller's field for a subject that names neither.
-fn subject_object_id(subject: &vera_acp::Subject, written: String) -> String {
+fn subject_object_id(subject: &Subject, written: String) -> String {
     match subject {
-        vera_acp::Subject::Entity(actor) => actor.to_string(),
-        vera_acp::Subject::EntitySet { object_id, .. } => object_id.clone(),
-        _ => written,
+        Subject::Actor(actor) => actor.id.to_string(),
+        Subject::ActorSet(set) => set.object.id.to_string(),
+        Subject::Object(object) => object.id.to_string(),
+        Subject::AllActors => written,
     }
 }

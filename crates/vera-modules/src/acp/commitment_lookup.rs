@@ -80,6 +80,7 @@ mod tests {
                     .unwrap()
                     .policy
                     .id
+                    .to_string()
             });
         module
             .update_commitment(&RegistrationsCommitment {

@@ -1,6 +1,5 @@
 use super::super::retirement_cleanup::{MAX_BYTES, MAX_ITEMS};
 use super::*;
-use vera_acp::Subject;
 
 const ORIGINAL: &str = "name: generations\nresources:\n  - name: file\n    relations:\n      - name: reader\n      - name: viewer\n  - name: group\n    relations:\n      - name: member\n";
 const REMOVED: &str = "name: generations\nresources:\n  - name: file\n    relations:\n      - name: viewer\n  - name: group\n";
@@ -31,7 +30,7 @@ fn rows(module: &AcpModule, policy: &str) -> usize {
 }
 fn put_row(module: &mut AcpModule, policy: &str, index: usize) -> Vec<u8> {
     let definition = module.query_policy(policy).unwrap();
-    let relationship = Relationship::new(
+    let relationship = crate::acp::relationship_values::relationship(
         "file",
         format!("item-{index}"),
         if index.is_multiple_of(2) {
@@ -39,7 +38,7 @@ fn put_row(module: &mut AcpModule, policy: &str, index: usize) -> Vec<u8> {
         } else {
             "viewer"
         },
-        Subject::entity_set("group", "staff", "member"),
+        crate::acp::relationship_values::actor_set("group", "staff", "member"),
     );
     let record = RelationshipRecord {
         incarnation: 0,
@@ -67,7 +66,8 @@ fn setup(module: &mut AcpModule, count: usize) -> String {
         )
         .unwrap()
         .policy
-        .id;
+        .id
+        .to_string();
     for index in 0..count {
         put_row(module, &policy, index);
     }
@@ -273,11 +273,11 @@ fn restoration_rejects_generation_index_and_descriptor_corruption() {
         .query_policy(&policy)
         .unwrap()
         .relations
-        .pair(&Relationship::new(
+        .pair(&crate::acp::relationship_values::relationship(
             "file",
             "item-0",
             "reader",
-            Subject::entity_set("group", "staff", "member"),
+            crate::acp::relationship_values::actor_set("group", "staff", "member"),
         ))
         .unwrap();
     for key in [

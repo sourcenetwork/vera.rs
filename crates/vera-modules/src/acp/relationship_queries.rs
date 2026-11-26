@@ -30,7 +30,7 @@ impl AcpModule {
     ) -> Result<Vec<RelationshipRecord>> {
         let policy = self.query_policy_with_budget(policy_id, budget)?;
         let mut selector = selector.clone();
-        spelling::selector(&policy.policy, &mut selector);
+        spelling::selector(&mut selector);
         self.filter_relationships_for_policy(&policy, &selector, budget)
     }
 
@@ -117,7 +117,7 @@ impl AcpModule {
                     incarnation
                 } else {
                     let (incarnation, bytes) = self.query_object_incarnation(
-                        &policy.policy.id,
+                        policy.policy.id.as_str(),
                         &object.resource,
                         &object.id,
                         budget,
@@ -129,13 +129,13 @@ impl AcpModule {
             } else {
                 0
             };
-            let directory = relationship_index::active_key(&policy.policy.id, target);
+            let directory = relationship_index::active_key(policy.policy.id.as_str(), target);
             budget.read(&directory, self.store.get_ref(&directory))?;
             // Preserve the existing independent directory limits before owned decoding.
             let capture = read_capture::ReadCapture::new(self.store.clone(), limits);
             let subjects = relationship_index::live_pairs_for_active(
                 &capture,
-                &policy.policy.id,
+                policy.policy.id.as_str(),
                 target,
                 &active,
             )
@@ -154,7 +154,7 @@ impl AcpModule {
                     .entry(incarnation)
                     .or_insert_with(|| query_suffix(selector, incarnation));
                 prefixes.push(keys::relationship_generation_prefix(
-                    &policy.policy.id,
+                    policy.policy.id.as_str(),
                     RelationPair { target, subject },
                     suffix.as_str(),
                 ));
@@ -172,8 +172,8 @@ impl AcpModule {
     ) -> Result<(RelationshipRecord, bool, usize)> {
         let record: RelationshipRecord = serde_json::from_slice(value)
             .map_err(|e| AcpError::State(format!("invalid relationship record: {e}")))?;
-        if record.policy_id != policy.policy.id
-            || (record.relationship.relation == "owner" && record.incarnation != 0)
+        if record.policy_id != policy.policy.id.as_str()
+            || (record.relationship.relation.as_str() == "owner" && record.incarnation != 0)
             || policy
                 .relations
                 .pair(&record.relationship)
@@ -189,13 +189,13 @@ impl AcpModule {
                 "relationship record identity mismatch".into(),
             ));
         }
-        let (incarnation, bytes) = if record.relationship.relation == "owner" {
+        let (incarnation, bytes) = if record.relationship.relation.as_str() == "owner" {
             (0, 0)
         } else {
             self.query_object_incarnation(
                 &record.policy_id,
-                &record.relationship.resource,
-                &record.relationship.object_id,
+                record.relationship.object.resource.as_str(),
+                record.relationship.object.id.as_str(),
                 budget,
             )?
         };
@@ -235,8 +235,8 @@ fn planning_limit() -> AcpError {
     AcpError::State("relationship query planning budget exceeded".into())
 }
 
-const fn generation_prefix_size(policy: &PolicyRecord) -> usize {
-    keys::RELATIONSHIP_PREFIX.len() + policy.policy.id.len() + 1 + 17 + 17
+fn generation_prefix_size(policy: &PolicyRecord) -> usize {
+    keys::RELATIONSHIP_PREFIX.len() + policy.policy.id.as_str().len() + 1 + 17 + 17
 }
 
 fn query_suffix_size(policy: &PolicyRecord, selector: &RelationshipSelector) -> Result<usize> {
@@ -299,7 +299,10 @@ mod tests {
             },
             supplied_metadata: Default::default(),
             policy_id: policy.into(),
-            relationship: Relationship::with_entity("file", id, "owner", owner),
+            relationship: crate::acp::relationship_values::actor_relationship(
+                "file", id, "owner", &owner,
+            )
+            .unwrap(),
             archived: false,
             metadata: RecordMetadata {
                 creation_ts: Timestamp::default(),
@@ -332,7 +335,8 @@ mod tests {
             )
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         for i in 0..1000 {
             insert(&mut module, "other", &i.to_string());
         }
@@ -380,7 +384,8 @@ mod tests {
             )
             .unwrap()
             .policy
-            .id;
+            .id
+            .to_string();
         let key = insert(&mut module, &policy, "report");
         let valid = module.store.get(&key).unwrap();
         let excluded = selector();
@@ -399,7 +404,7 @@ mod tests {
                 .is_err()
         );
         record.policy_id = policy.clone();
-        record.relationship.object_id = "another".into();
+        record.relationship.object.id = "another".into();
         module.store.put(&key, serde_json::to_vec(&record).unwrap());
         assert!(
             module
@@ -431,15 +436,16 @@ mod tests {
             .unwrap()
             .policy
             .id
+            .to_string()
     }
 
     fn insert_pair(module: &mut AcpModule, policy: &str, subject: usize) {
         let definition = module.query_policy(policy).unwrap();
-        let relationship = Relationship::new(
+        let relationship = crate::acp::relationship_values::relationship(
             "file",
             "elsewhere",
             "reader",
-            vera_acp::Subject::entity_set("file", "source", format!("g{subject}")),
+            crate::acp::relationship_values::actor_set("file", "source", format!("g{subject}")),
         );
         let record = RelationshipRecord {
             incarnation: 0,

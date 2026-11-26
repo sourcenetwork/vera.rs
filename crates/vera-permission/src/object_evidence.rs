@@ -18,11 +18,11 @@ pub fn relationship_object_key(
 }
 
 fn object_key(record: &RelationshipRecord) -> Option<Vec<u8>> {
-    (record.relationship.relation != "owner").then(|| {
+    (record.relationship.relation.as_str() != "owner").then(|| {
         object_state::key(
             &record.policy_id,
-            &record.relationship.resource,
-            &record.relationship.object_id,
+            record.relationship.object.resource.as_str(),
+            record.relationship.object.id.as_str(),
         )
     })
 }

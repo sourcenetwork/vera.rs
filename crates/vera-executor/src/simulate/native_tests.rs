@@ -90,10 +90,11 @@ fn committed() -> (ModuleState, B256) {
         .abi_encode(),
         0,
     );
-    let record: PolicyRecord =
-        serde_json::from_slice(&IAcp::createPolicyCall::abi_decode_returns(&created).unwrap())
-            .unwrap();
-    let policy = record.policy.id.parse().unwrap();
+    let record: PolicyRecord = serde_json::from_slice::<PolicyRecord>(
+        &IAcp::createPolicyCall::abi_decode_returns(&created).unwrap(),
+    )
+    .unwrap();
+    let policy = record.policy.id.as_str().parse().unwrap();
     write(
         command(policy, PolicyCmd::RegisterObject(object("report"))),
         1,

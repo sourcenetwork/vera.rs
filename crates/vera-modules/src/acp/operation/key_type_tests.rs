@@ -113,7 +113,10 @@ fn ed25519_and_p256_actors_own_what_their_workers_create() {
                 Default::default(),
             )
             .unwrap();
-        assert_eq!(repeated.policy.id, created.policy.id);
+        assert_eq!(
+            repeated.policy.id.to_string(),
+            created.policy.id.to_string()
+        );
         assert_eq!(acp.store().serialize(), before);
     }
 }
@@ -138,7 +141,7 @@ fn actors_of_different_key_types_keep_separate_operation_outcomes() {
                 Default::default(),
             )
             .unwrap();
-        policies.push((created.policy.id, created.metadata.owner_did));
+        policies.push((created.policy.id.to_string(), created.metadata.owner_did));
     }
     assert_ne!(policies[0], policies[1]);
     assert_ne!(

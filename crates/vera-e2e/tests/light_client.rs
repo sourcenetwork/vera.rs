@@ -40,9 +40,10 @@ resources:
     relations:
       - name: reader
       - name: blocked
+        types: [actor, document->blocked]
     permissions:
       - name: read
-        expr: reader - blocked->blocked
+        expr: reader - blocked
 ";
 
 fn parse_policy_id(hex_str: &str) -> FixedBytes<32> {
@@ -210,7 +211,7 @@ async fn light_client_proof_verification() {
             .verify(policy_id_str, &request, h1, &trusted_key, PERMISSION_LIMITS)
             .unwrap()
     );
-    permission::assert_absent_relation_directory(&empty_readers.proof, policy_id_str, "reader");
+    permission::assert_absent_relation_grant(&empty_readers.proof, policy_id_str, "reader");
 
     let set_rel_calldata = IAcp::setRelationshipCall {
         policyId: policy_id,
@@ -293,7 +294,8 @@ async fn light_client_proof_verification() {
             )
             .is_err()
     );
-    // A direct grant needs only a point; an unrelated actor requires complete enumeration.
+    // An actor-only relation answers by points: an unrelated actor is denied by
+    // proven absence of its grants, and that evidence cannot be dropped.
     let mut outsider = request.clone();
     outsider.actor = vera_client::Actor(
         "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
@@ -312,15 +314,9 @@ async fn light_client_proof_verification() {
             )
             .unwrap()
     );
-    let reader_prefix = permission::relation_prefix(&readers.proof, policy_id_str, "reader", None);
-    assert_eq!(
-        permission::prefix(&readers.proof, &reader_prefix)
-            .entries
-            .len(),
-        1
-    );
+    permission::assert_absent_relation_grant(&readers.proof, policy_id_str, "reader");
     let mut omitted = readers.clone();
-    permission::remove_prefix_records(&mut omitted.proof, &reader_prefix);
+    permission::remove_absent_relation_grants(&mut omitted.proof, policy_id_str, "reader");
     assert!(
         omitted
             .verify(

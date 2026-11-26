@@ -99,7 +99,7 @@ async fn registration_workflow(pruning: bool) {
     assert!(empty.continuation.is_none());
     let first = BlsSigner::new(7u64.into(), deployment).unwrap();
     let second = BlsSigner::new(8u64.into(), deployment).unwrap();
-    let created = client.native_create_policy(&first, br#"{"name":"registrations","resources":[{"name":"file","permissions":[{"name":"read","expr":"owner"}]}]}"#, 2, Default::default()).await.unwrap();
+    let created = client.native_create_policy(&first, br#"{"name":"registrations","resources":[{"name":"file","permissions":[{"name":"read"}]}]}"#, 2, Default::default()).await.unwrap();
     let page = client
         .read_policy_page(None, 1, created.block_number, &trusted)
         .await
@@ -107,7 +107,7 @@ async fn registration_workflow(pruning: bool) {
     assert!(page.continuation.is_none());
     assert_eq!(page.records.len(), 1);
     assert_eq!(page.records[0].metadata.owner_did, first.did());
-    let policy = page.records[0].policy.id.clone();
+    let policy = page.records[0].policy.id.to_string();
     let policy_id: B256 = policy.parse().unwrap();
     let selected = client
         .read_policy(policy_id, page.revision, &trusted)
@@ -156,8 +156,13 @@ resources:
         .unwrap();
     assert_eq!(last_page.records.len(), 1);
     assert!(last_page.continuation.is_none());
-    assert!(first_page.records[0].policy.id < last_page.records[0].policy.id);
-    assert!(first_page.records[0].policy.id == policy || last_page.records[0].policy.id == policy);
+    assert!(
+        first_page.records[0].policy.id.to_string() < last_page.records[0].policy.id.to_string()
+    );
+    assert!(
+        first_page.records[0].policy.id.to_string() == policy
+            || last_page.records[0].policy.id.to_string() == policy
+    );
 
     let generated = vera_client::registrations::generate_registration_commitment(
         policy_id,
@@ -422,12 +427,16 @@ resources:
     assert_eq!(last_relationships.records.len(), 1);
     assert!(last_relationships.continuation.is_none());
     let archived = &first_relationships.records[0];
-    assert_eq!(archived.relationship.object_id, "report");
+    assert_eq!(archived.relationship.object.id.as_str(), "report");
     assert!(archived.archived);
     assert_eq!(archived.metadata.owner_did, second.did());
     assert_eq!(archived.metadata.creation_ts.block_height, early_height);
     assert_eq!(
-        last_relationships.records[0].relationship.object_id,
+        last_relationships.records[0]
+            .relationship
+            .object
+            .id
+            .as_str(),
         "second"
     );
     assert!(!last_relationships.records[0].archived);

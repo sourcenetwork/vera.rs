@@ -3,7 +3,7 @@ use super::*;
 fn fixture() -> (AcpModule, Did, String, Object) {
     let mut module = AcpModule::new();
     let owner = Did::new("did:key:owner").unwrap();
-    let policy = module.create_policy(&owner, "name: incarnations\nresources:\n  - name: file\n    relations:\n      - name: reader\n", PolicyMarshalingType::ShortYaml, Default::default()).unwrap().policy.id;
+    let policy = module.create_policy(&owner, "name: incarnations\nresources:\n  - name: file\n    relations:\n      - name: reader\n", PolicyMarshalingType::ShortYaml, Default::default()).unwrap().policy.id.to_string();
     let object = Object {
         resource: "file".into(),
         id: "report".into(),
@@ -27,12 +27,15 @@ fn grant(module: &mut AcpModule, owner: &Did, policy: &str, index: usize) {
         .direct_policy_cmd(
             owner,
             policy,
-            PolicyCmd::SetRelationship(Relationship::with_entity(
-                "file",
-                "report",
-                "reader",
-                Did::new(format!("did:key:reader{index}")).unwrap(),
-            )),
+            PolicyCmd::SetRelationship(
+                crate::acp::relationship_values::actor_relationship(
+                    "file",
+                    "report",
+                    "reader",
+                    &Did::new(format!("did:key:reader{index}")).unwrap(),
+                )
+                .unwrap(),
+            ),
         )
         .unwrap();
 }
@@ -55,9 +58,8 @@ fn exact_queries_skip_retired_incarnations_while_broad_pages_keep_physical_progr
         .unwrap();
     assert_eq!(exact.len(), 2);
     assert!(
-        exact
-            .iter()
-            .all(|record| record.incarnation == u64::from(record.relationship.relation != "owner"))
+        exact.iter().all(|record| record.incarnation
+            == u64::from(record.relationship.relation.as_str() != "owner"))
     );
     let broad = selector(None);
     assert!(module.query_filter_relationships(&policy, &broad).is_err());
@@ -67,7 +69,7 @@ fn exact_queries_skip_retired_incarnations_while_broad_pages_keep_physical_progr
     };
     let first = module.query_relationships_page(&policy, &request).unwrap();
     assert_eq!(first.records.len(), 1);
-    assert_eq!(first.records[0].relationship.relation, "owner");
+    assert_eq!(first.records[0].relationship.relation.as_str(), "owner");
     assert!(first.next.is_some());
     request.after = first.next;
     let last = module.query_relationships_page(&policy, &request).unwrap();
@@ -123,7 +125,7 @@ fn incarnation_reads_are_reserved_before_decode_and_future_stamps_fail_closed() 
         .query_filter_relationships(&policy, &exact)
         .unwrap()
         .into_iter()
-        .find(|record| record.relationship.relation == "reader")
+        .find(|record| record.relationship.relation.as_str() == "reader")
         .unwrap();
     let old_key = keys::relationship_generation_key(
         &policy,

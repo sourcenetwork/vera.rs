@@ -2,15 +2,16 @@
 
 A policy ID is derived from the policy, its creator and a nonce the creator
 chooses, so separate deployments that seed the same definition under different
-keys get different IDs without coordinating. The derivation is acp's
-(acp `wiki/acp/policy-id.md`); `vera_acp::policy_yaml::{policy_hash, policy_id}`
-implements it until the vendored engine is replaced.
+keys get different IDs without coordinating.
+`vera_modules::acp::policy_id::{policy_hash, policy_id}` implements it as
+`acp::ppp::{policy_hash, policy_id}` do, and reproduces acp's
+`conformance/vectors/policy-id.json`.
 
 ```text
 policy id   = lowercase_hex(SHA-256(
                 "acp/policy-id/v2" || policy hash (32 bytes) || nonce (32 bytes)
                 || u64be(len(creator)) || creator))
-policy hash = SHA-256("acp/policy-hash/v1" || canonical encoding of the definition)
+policy hash = acp::ppp::policy_hash(processed policy)    ("acp/policy-hash/v1", 32 bytes)
 ```
 
 - **Creator**: the policy owner's canonical DID
@@ -22,13 +23,13 @@ policy hash = SHA-256("acp/policy-hash/v1" || canonical encoding of the definiti
   `createPolicyWithOptions` request. A host seeding policies deterministically
   uses a fixed nonce per policy; zeroes are fine because the creator already
   separates hosts.
-- **Policy hash**: covers the name, description, `meta`, specification, every
-  resource, relation (docs, `manages`, `types`) and permission (docs,
-  expression). Declaration order of resources, relations and permissions, the
-  order of `manages` and `types`, the operands of `+` and `&` (nested chains
-  flattened) and YAML formatting do not change it; a difference stays ordered.
-  Relations without `types`, `_this` and actor relations, which acp does not
-  accept as written, encode distinctly here.
+- **Policy hash**: acp's content hash of the processed policy, which covers
+  the name, description, `meta`, specification, the actor's doc, every
+  resource, relation (docs, `manages`, `types`), permission (docs, expression)
+  and collection `create` rule. acp encodes resources, relations and
+  permissions in name order, and `manages`, `types` and the operands of `+`
+  and `&` as sets, so declaration order and YAML formatting do not change it. This is not the hash of the retired vendored engine: a policy
+  stored by it does not reproduce its ID here.
 
 Creating the same definition, nonce and creator twice is refused with
 `PolicyAlreadyExists` (refusal kind `AlreadyExists`); the stored policy is
@@ -43,7 +44,3 @@ record and its owner. Restoration rejects a record whose ID does not.
 ID before the policy exists. Genesis `policies` are owned by
 `vera_modules::acp::GENESIS_POLICY_CREATOR` and carry a nonce each;
 `placed_policies` and `SoloGenesis::policies` name owner and nonce.
-
-`crates/vera-acp/tests/vectors/policy-id.json` is a byte-identical copy of
-acp's `conformance/vectors/policy-id.json`; `policy_id_vectors.rs` reproduces
-every hash and ID. Replace the copy when acp's file changes.

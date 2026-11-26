@@ -1,6 +1,6 @@
 //! Fallible record access for permission evaluation and proof-backed readers.
 
-use vera_zanzibar::error::{Error, Result};
+use super::record_error::{RecordError, Result};
 
 use crate::kv_store::ModuleKvStore;
 
@@ -21,12 +21,12 @@ pub trait RecordStore: Send + Sync {
 
     /// Write a record when this store supports mutation.
     fn write_record(&mut self, _key: &[u8], _value: Vec<u8>) -> Result<()> {
-        Err(Error::Serialization("record store is read-only".into()))
+        Err(RecordError::unavailable("record store is read-only"))
     }
 
     /// Remove a record when this store supports mutation.
     fn remove_record(&mut self, _key: &[u8]) -> Result<()> {
-        Err(Error::Serialization("record store is read-only".into()))
+        Err(RecordError::unavailable("record store is read-only"))
     }
 
     /// Prepare a copied replacement or deletion before applying a mutation plan.
@@ -50,7 +50,7 @@ pub trait RecordStore: Send + Sync {
     /// Returning an error must leave every record unchanged. Writable custom stores
     /// must implement this contract; callers never fall back to individual writes.
     fn apply_records(&mut self, _changes: Vec<RecordChange>) -> Result<()> {
-        Err(Error::Serialization("record store is read-only".into()))
+        Err(RecordError::unavailable("record store is read-only"))
     }
 }
 

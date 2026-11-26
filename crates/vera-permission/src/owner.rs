@@ -1,9 +1,8 @@
 use vera_domain::FinalityTrust;
 use vera_modules::acp::{
-    keys,
-    types::{RelationPair, RelationshipRecord},
+    keys, relationship_values,
+    types::{RelationPair, RelationshipRecord, Subject},
 };
-use vera_zanzibar::Subject;
 
 use crate::{
     Actor, Object, ObjectRegistration, PERMISSION_LIMITS, PermissionError, PolicyPrefixResponse,
@@ -67,9 +66,9 @@ pub(crate) fn registration<'a>(
                     target: 0,
                     subject: 0,
                 })
-            || relation.resource != object.resource
-            || relation.object_id != object.id
-            || relation.relation != "owner"
+            || relation.object.resource.as_str() != object.resource
+            || relation.object.id.as_str() != object.id
+            || relation.relation.as_str() != "owner"
             || keys::relationship_key(
                 policy,
                 &keys::relationship_storage_key(relation, record.incarnation),
@@ -79,9 +78,11 @@ pub(crate) fn registration<'a>(
                 "owner record differs from its key",
             ));
         }
-        let Subject::Entity(did) = relation.subject.clone() else {
+        let Subject::Actor(actor) = &relation.subject else {
             return Err(PermissionError::Invalid("owner is not an actor"));
         };
+        let did = relationship_values::did(actor)
+            .map_err(|_| PermissionError::Invalid("owner is not an actor"))?;
         if record.archived {
             archived = true;
         } else if owner.replace(Actor(did)).is_some() {
