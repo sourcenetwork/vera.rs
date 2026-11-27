@@ -114,20 +114,59 @@ impl VeraClient {
     /// Throttled polls are retried. Connection failures, timeouts and HTTP 5xx
     /// replies are retried until `interval * max_attempts` has elapsed. Every
     /// failure names the transaction, which may still execute.
+    ///
+    /// A node that pruned the receipt answers as it does for a request it
+    /// never saw, so this polls until its attempts run out;
+    /// [`Self::wait_for_receipt_after`] stops instead.
     pub async fn wait_for_receipt(
         &self,
         tx_hash: B256,
         interval: Duration,
         max_attempts: u32,
     ) -> Result<TransactionReceipt, ClientError> {
+        self.poll_receipt(tx_hash, None, interval, max_attempts)
+            .await
+    }
+
+    /// Poll as [`Self::wait_for_receipt`] does for a request that was not
+    /// finalized at or below revision `after`, such as [`Self::block_number`]
+    /// read before it was submitted.
+    ///
+    /// Polling ends with [`ClientError::ReceiptPruned`] as soon as the node
+    /// holds no receipt and has pruned a revision above `after`.
+    pub async fn wait_for_receipt_after(
+        &self,
+        tx_hash: B256,
+        after: u64,
+        interval: Duration,
+        max_attempts: u32,
+    ) -> Result<TransactionReceipt, ClientError> {
+        self.poll_receipt(tx_hash, Some(after), interval, max_attempts)
+            .await
+    }
+
+    async fn poll_receipt(
+        &self,
+        tx_hash: B256,
+        after: Option<u64>,
+        interval: Duration,
+        max_attempts: u32,
+    ) -> Result<TransactionReceipt, ClientError> {
         let started = tokio::time::Instant::now();
         let outage_budget = interval.saturating_mul(max_attempts);
         for _ in 0..max_attempts {
-            match self.get_transaction_receipt(tx_hash).await {
+            let polled = match after {
+                Some(after) => self.get_transaction_receipt_after(tx_hash, after).await,
+                None => self.get_transaction_receipt(tx_hash).await,
+            };
+            match polled {
                 Ok(Some(receipt)) => return Ok(receipt),
                 Ok(None) => {}
                 Err(error) if error.is_throttled() => {}
                 Err(error) if is_outage(&error) && started.elapsed() < outage_budget => {}
+                Err(ClientError::HistoryPruned { floor, .. }) => {
+                    return Err(ClientError::ReceiptPruned { tx_hash, floor });
+                }
                 Err(error) => {
                     return Err(ClientError::ReceiptUnavailable {
                         tx_hash,

@@ -99,6 +99,7 @@ fn a_write_below_the_retained_history_is_pruned_and_a_restart_recovers_from_the_
     settings.history_retention = Some(retained);
 
     let node = block_on(EmbeddedNode::start(settings.clone())).unwrap();
+    let sent_at = height(&node);
     let early = finalize_a_write(&node, &BlsSigner::new(42u64.into(), chain_id).unwrap());
     let written_at = height(&node);
     let deadline = Instant::now() + Duration::from_secs(1_500);
@@ -117,6 +118,18 @@ fn a_write_below_the_retained_history_is_pruned_and_a_restart_recovers_from_the_
         )
         .unwrap();
         assert!(receipt.is_none(), "a pruned receipt is not served");
+        let known = block_on(node.rpc().request::<serde_json::Value>(
+            "vera_getReceiptProof",
+            vec![
+                serde_json::json!(early),
+                serde_json::json!(format!("{sent_at:#x}")),
+            ],
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(&known, LocalRpcError::Call { code: 4444, .. }),
+            "{known}"
+        );
         let refused = block_on(node.rpc().request::<serde_json::Value>(
             "vera_getLightBlock",
             vec![serde_json::json!(format!("{written_at:#x}"))],

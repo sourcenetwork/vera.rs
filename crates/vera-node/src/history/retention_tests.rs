@@ -184,43 +184,6 @@ fn reads_below_the_floor_are_refused_and_retained_revisions_still_prove() {
     assert_eq!(chain.history.head_height(), 60);
 }
 
-#[test]
-fn a_pruned_submission_is_not_found_and_never_pending() {
-    let chain = chain(100);
-    chain.history.prune_below(60, epoch_length()).unwrap();
-    let epochs = LightBlockIndex::new(epoch_length());
-    // Its mapping went with its record: the lookup finds nothing.
-    assert!(
-        chain
-            .history
-            .receipt_proof(submission(30), &epochs)
-            .unwrap()
-            .is_none()
-    );
-    assert!(
-        chain
-            .history
-            .receipt_proof(submission(70), &epochs)
-            .unwrap()
-            .is_some()
-    );
-    // A mapping that still names a pruned revision is refused, not pending.
-    let mut batch = WriteBatch::default();
-    query::index_submission(&mut batch, &submission(30).0, 30);
-    write(&chain.history.db, batch).unwrap();
-    let error = chain
-        .history
-        .receipt_proof(submission(30), &epochs)
-        .unwrap_err();
-    assert_eq!(
-        pruned(&error),
-        Some(HistoryPruned {
-            height: 30,
-            floor: 56
-        })
-    );
-}
-
 #[tokio::test]
 async fn a_crash_after_the_floor_is_raised_leaves_pruned_records_reading_as_pruned() {
     let chain = chain(100);
@@ -238,12 +201,19 @@ async fn a_crash_after_the_floor_is_raised_leaves_pruned_records_reading_as_prun
     assert_eq!(chain.history.floor_height().unwrap(), 48);
     assert!(chain.holds(RECORD, 10) && !chain.holds(CERTIFICATE, 10));
     // The mapping still names the record, which is below the floor.
+    assert_eq!(chain.submission_height(submission(10)), Some(10));
+    assert!(
+        chain
+            .history
+            .execution_by_submission(submission(10))
+            .unwrap()
+            .is_none()
+    );
     let error = chain
         .history
-        .execution_by_submission(submission(10))
-        .unwrap_err();
+        .light_block(10, &LightBlockIndex::new(epoch_length()));
     assert_eq!(
-        pruned(&error),
+        pruned(&error.unwrap_err()),
         Some(HistoryPruned {
             height: 10,
             floor: 48

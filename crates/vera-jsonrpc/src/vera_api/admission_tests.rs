@@ -170,7 +170,7 @@ async fn receipt_poll_does_not_wait_for_a_missing_certificate() {
         .map(|_| state.permission_read_permit().unwrap())
         .collect();
     assert!(
-        tokio::time::timeout(Duration::from_secs(1), api.get_receipt_proof(hash))
+        tokio::time::timeout(Duration::from_secs(1), api.get_receipt_proof(hash, None))
             .await
             .unwrap()
             .unwrap()
@@ -178,8 +178,13 @@ async fn receipt_poll_does_not_wait_for_a_missing_certificate() {
     );
     assert_eq!(lookups.load(Ordering::Relaxed), 1);
     let permits: Vec<_> = (0..8).map(|_| state.proof_permit().unwrap()).collect();
-    assert!(api.get_receipt_proof(B256::ZERO).await.unwrap().is_none());
-    let busy = api.get_receipt_proof(hash).await.unwrap_err();
+    assert!(
+        api.get_receipt_proof(B256::ZERO, None)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let busy = api.get_receipt_proof(hash, None).await.unwrap_err();
     assert_eq!(busy.code(), codes::RESOURCE_UNAVAILABLE);
     assert_eq!(busy.data().unwrap().get(), r#"{"retryable":true}"#);
     assert_eq!(lookups.load(Ordering::Relaxed), 1);
@@ -188,7 +193,7 @@ async fn receipt_poll_does_not_wait_for_a_missing_certificate() {
         Err(RpcError::Internal("corrupt certificate".into()))
     }));
     assert!(
-        api.get_receipt_proof(hash)
+        api.get_receipt_proof(hash, None)
             .await
             .unwrap_err()
             .message()
@@ -200,7 +205,7 @@ async fn receipt_poll_does_not_wait_for_a_missing_certificate() {
 async fn archived_receipt_waits_for_published_revision() {
     let state = Arc::new(NodeState::new(1, 0, 1));
     let index = Arc::new(BlockIndex::new());
-    let mut api = VeraApiImpl::new(state, None).with_receipt_proof_lookup(Arc::new(|_| {
+    let mut api = VeraApiImpl::new(state, None).with_receipt_proof_lookup(Arc::new(|_, _| {
         Ok(Some(vera_domain::ReceiptResponse {
             revision: vera_domain::LightBlock {
                 block_hash: String::new(),
@@ -221,7 +226,12 @@ async fn archived_receipt_waits_for_published_revision() {
         }))
     }));
     api.index = Some(index.clone());
-    assert!(api.get_receipt_proof(B256::ZERO).await.unwrap().is_none());
+    assert!(
+        api.get_receipt_proof(B256::ZERO, None)
+            .await
+            .unwrap()
+            .is_none()
+    );
     index.insert_block(
         vera_indexer::IndexedBlock {
             hash: B256::repeat_byte(1),
@@ -237,7 +247,7 @@ async fn archived_receipt_waits_for_published_revision() {
         vec![],
     );
     assert_eq!(
-        api.get_receipt_proof(B256::ZERO)
+        api.get_receipt_proof(B256::ZERO, None)
             .await
             .unwrap()
             .unwrap()
@@ -258,7 +268,7 @@ async fn cancelled_archive_receipt_keeps_blocking_lookup_bounded() {
     let entered = Arc::new(tokio::sync::Notify::new());
     let signal = entered.clone();
     let mut api =
-        VeraApiImpl::new(state.clone(), None).with_receipt_proof_lookup(Arc::new(move |_| {
+        VeraApiImpl::new(state.clone(), None).with_receipt_proof_lookup(Arc::new(move |_, _| {
             signal.notify_one();
             receiver
                 .lock()
@@ -270,14 +280,17 @@ async fn cancelled_archive_receipt_keeps_blocking_lookup_bounded() {
     api.index = Some(Arc::new(BlockIndex::new()));
     let api = Arc::new(api);
     let running = api.clone();
-    let task = tokio::spawn(async move { running.get_receipt_proof(B256::ZERO).await });
+    let task = tokio::spawn(async move { running.get_receipt_proof(B256::ZERO, None).await });
     tokio::time::timeout(Duration::from_secs(2), entered.notified())
         .await
         .unwrap();
     task.abort();
     assert!(task.await.unwrap_err().is_cancelled());
     assert_eq!(
-        api.get_receipt_proof(B256::ZERO).await.unwrap_err().code(),
+        api.get_receipt_proof(B256::ZERO, None)
+            .await
+            .unwrap_err()
+            .code(),
         codes::RESOURCE_UNAVAILABLE
     );
     release.send(()).unwrap();
@@ -339,7 +352,7 @@ async fn evidence_deadline_is_a_retryable_error() {
     }));
     api.index = Some(index);
     let started = std::time::Instant::now();
-    let error = api.get_receipt_proof(hash).await.unwrap_err();
+    let error = api.get_receipt_proof(hash, None).await.unwrap_err();
     assert!(started.elapsed() >= Duration::from_secs(2));
     assert_eq!(error.code(), codes::RESOURCE_UNAVAILABLE);
     assert_eq!(error.data().unwrap().get(), r#"{"retryable":true}"#);

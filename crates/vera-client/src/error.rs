@@ -20,6 +20,16 @@ pub enum ClientError {
         message: String,
     },
 
+    /// The node no longer retains the history a read needs (JSON-RPC code
+    /// 4444). The same node does not serve it later.
+    #[error("history pruned below revision {floor}: {message}")]
+    HistoryPruned {
+        /// The oldest revision the node retains.
+        floor: u64,
+        /// The node's message.
+        message: String,
+    },
+
     /// The client rejected work before sending because its request slots are occupied.
     #[error("client request capacity exhausted")]
     ClientCapacityExhausted,
@@ -65,6 +75,17 @@ pub enum ClientError {
         tx_hash: B256,
         /// Failure of the last poll.
         source: Box<Self>,
+    },
+
+    /// Receipt polling stopped: the node holds no receipt for the submission
+    /// and has pruned revisions that may have held it, so polling this
+    /// deployment further cannot settle whether the submission executed.
+    #[error("receipt for {tx_hash} is not retained: history is pruned below revision {floor}")]
+    ReceiptPruned {
+        /// Submission whose receipt was asked for.
+        tx_hash: B256,
+        /// The oldest revision the node retains.
+        floor: u64,
     },
 
     /// A native request was sent but its reply was lost, so admission is unknown.
@@ -161,6 +182,14 @@ impl ClientError {
             Self::ResourceBusy(message)
         } else if code == -32006 && retryable {
             Self::FinalityPending(message)
+        } else if let (4444, Some(floor)) = (
+            code,
+            error
+                .get("data")
+                .and_then(|data| data.get("floor"))
+                .and_then(serde_json::Value::as_u64),
+        ) {
+            Self::HistoryPruned { floor, message }
         } else {
             Self::Rpc { code, message }
         }
@@ -184,6 +213,23 @@ mod tests {
             "code": -32006, "message": "pending",
         }));
         assert!(matches!(error, ClientError::Rpc { code: -32006, .. }));
+    }
+
+    #[test]
+    fn pruned_history_names_the_floor() {
+        let pruned = |data: serde_json::Value| {
+            ClientError::from_rpc(&serde_json::json!({
+                "code": 4444, "message": "history pruned", "data": data,
+            }))
+        };
+        assert!(matches!(
+            pruned(serde_json::json!({"retryable": false, "floor": 48})),
+            ClientError::HistoryPruned { floor: 48, .. }
+        ));
+        assert!(matches!(
+            pruned(serde_json::json!({})),
+            ClientError::Rpc { code: 4444, .. }
+        ));
     }
 
     #[test]

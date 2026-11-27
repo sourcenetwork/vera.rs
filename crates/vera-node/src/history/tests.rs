@@ -557,14 +557,14 @@ async fn indirect_proof_survives_reopen_and_uses_the_rpc_history_lookup() {
         .with_receipt_proof_lookup({
             let history = history.clone();
             let epochs = epochs.clone();
-            Arc::new(move |hash| {
+            Arc::new(move |hash, after| {
                 history
-                    .receipt_proof(hash, &epochs)
+                    .receipt_proof(hash, after, &epochs)
                     .map_err(|error| vera_jsonrpc::RpcError::Internal(error.to_string()))
             })
         });
     let archived = archive_api
-        .get_receipt_proof(receipt.tx_hash)
+        .get_receipt_proof(receipt.tx_hash, None)
         .await
         .unwrap()
         .unwrap();
@@ -577,7 +577,7 @@ async fn indirect_proof_survives_reopen_and_uses_the_rpc_history_lookup() {
     assert!(archived.verify(B256::ZERO, &trusted).is_err());
     assert!(
         archive_api
-            .get_receipt_proof(B256::ZERO)
+            .get_receipt_proof(B256::ZERO, None)
             .await
             .unwrap()
             .is_none()

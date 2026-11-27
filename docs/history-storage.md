@@ -247,8 +247,9 @@ revision.
 Raising the floor is one small atomic write. It stores the new floor with its
 block's hash, removes every certificate, imported finality and proof block below
 it, and removes the hash mappings of the new floor's parent. From then on readers
-refuse heights below the floor, and a mapping that still names one reads as
-pruned. The records left below the floor's parent are removed afterwards by a
+refuse heights below the floor, and a mapping that still names one is not
+followed: the hash reads as not found, as it does once the sweep has removed the
+mapping. The records left below the floor's parent are removed afterwards by a
 sweep driven by the `sweep` key, the lowest height whose record may remain. Each
 sweep batch is one atomic write over at most 256 heights that ends after the
 record bringing its mapping deletes to 4,096: it removes the block-hash and
@@ -275,19 +276,56 @@ floor:
 | --- | --- |
 | Point lookup by height (`execution_bounded`), light block | `HistoryPruned`; over JSON-RPC code `4444` with `{"retryable": false, "floor": F}` |
 | History chunk or proof served to an importing peer | served for the floor's parent; `HistoryPruned` below it, which the peer receives as a refusal naming the floor |
-| Lookup by block or submission hash | not found once the mapping is removed; a mapping that still names a pruned revision fails with `HistoryPruned` |
-| Receipt (`vera_getTransactionReceipt`, `vera_getReceiptProof`) | `null` for a pruned submission, as for an unknown one; it does not become available later. `4444` when a stale mapping names a pruned revision, or while the in-memory execution index still holds a revision whose finalization is pruned |
+| Lookup by block or submission hash | not found from the write that raises the floor, whether or not the sweep has removed the mapping yet |
+| Receipt (`vera_getTransactionReceipt`, `vera_getReceiptProof`) | `null` for a pruned submission, as for an unknown one; it does not become available later. With the caller's `after` revision, `4444` (see [pruned receipts](#pruned-receipts)) |
 | Cut back to a block (`standing`, `rewind_to`) or a recovery anchor | `HistoryPruned`; nothing is removed |
 | Term ancestry search | compares blocks only from the higher of the two devices' floors; differing there refuses with `TermRefusal::Pruned` instead of reporting a shared block |
 
 Code `4444` is the code Ethereum clients return for pruned history. It is not
 retryable on the same node. Receipts and light blocks below the floor are
 unavailable on every device of a deployment, since a device that catches up
-adopts its peer's floor. A pruned submission's receipt reads as unknown: a client
-polling for it sees `null` until its own deadline, because the node cannot tell
-a pruned submission from one it never received once the mapping is gone. The
-Rust client's `wait_for_receipt` then returns `ReceiptTimeout`, and returns
-`ReceiptUnavailable` at once for a `4444` reply.
+adopts its peer's floor.
+
+### Pruned receipts
+
+A submission hash names retained records only. The store keeps no trace of a
+pruned submission once the sweep has removed its mapping, and a device that
+imported its history from the floor never held the mapping, so a node cannot in
+general tell a pruned submission from one it never received. Both receipt
+methods therefore answer `null` for a pruned submission from the write that
+raises the floor past its revision, on every device, before and after the sweep,
+and never answer `4444` for the hash alone. The execution index holds at most
+the newest 1,024 revisions, which `minimum_history_retention` keeps above the
+floor, so the in-memory and the durable lookup agree.
+
+A caller that knows more can ask for a definite answer. Both methods take an
+optional second parameter `after`, a hexadecimal revision at or below which the
+caller knows the submission was not finalized, such as the node's `headHeight`
+read before the submission was sent. The node then answers, under one snapshot
+of the store:
+
+| Retained history | Floor | Answer |
+| --- | --- | --- |
+| holds the submission | any | the receipt |
+| does not hold it | at most `after + 1` | `null`: every revision that could hold it is retained, so it is not finalized |
+| does not hold it | above `after + 1` | `4444` with `{"retryable": false, "floor": F}`: a pruned revision may have held it |
+
+The last answer does not say the submission executed, only that this
+deployment can no longer show whether it did; the signer's sequence
+(`vera_getNativeNonce`) still tells whether that sequence was consumed.
+`vera_getReceiptProof` also answers `null` while a retained revision that holds
+the submission has no certificate yet, with or without `after`.
+
+The Rust client reports `4444` as `ClientError::HistoryPruned` with the floor.
+`get_transaction_receipt_after`, `read_receipt_after` and
+`wait_for_receipt_after` send `after`; `wait_for_receipt_after` ends with
+`ClientError::ReceiptPruned` at the first such answer. `wait_for_receipt` sends
+no revision, so for a pruned submission it sees `null` until its attempts run
+out and returns `ReceiptTimeout`. The sign-and-submit helpers poll that way,
+every 300 ms from admission: a receipt is served from the revision that
+finalizes it until at least 2,560 further revisions have finalized, so those
+polls read it before the floor can pass it. A caller that stores a submission
+to poll for later stores the head it read before sending with it.
 
 ### Importing from a pruned peer
 

@@ -10,7 +10,14 @@ pub enum IndexQuery {
     /// Canonical revision hash.
     RevisionHash(B256),
     /// Submission identifier.
-    Submission(B256),
+    Submission {
+        /// The submission.
+        hash: B256,
+        /// A revision the caller knows the submission was not finalized at or
+        /// below. With it, a lookup that finds nothing fails as pruned when
+        /// history no longer retains every revision above it.
+        after: Option<u64>,
+    },
 }
 
 /// An indexed revision header with the identifiers of its requests.

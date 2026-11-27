@@ -46,8 +46,12 @@ pub type AncestryProofLookup =
     Arc<dyn Fn(u64, u64) -> Result<vera_domain::AncestryProof, RpcError> + Send + Sync>;
 
 /// Durable receipt evidence lookup, executed on a bounded blocking worker.
-pub type ReceiptProofLookup =
-    Arc<dyn Fn(B256) -> Result<Option<vera_domain::ReceiptResponse>, RpcError> + Send + Sync>;
+/// The second argument is the caller's `after` revision, as `vera_getReceiptProof` takes it.
+pub type ReceiptProofLookup = Arc<
+    dyn Fn(B256, Option<u64>) -> Result<Option<vera_domain::ReceiptResponse>, RpcError>
+        + Send
+        + Sync,
+>;
 
 /// Vera-specific JSON-RPC API trait.
 ///
@@ -78,16 +82,27 @@ pub trait VeraApi {
     /// revision, target module, signer, sequence, gas, logs and refusal.
     ///
     /// Execution data only; `vera_getReceiptProof` returns finality evidence.
+    ///
+    /// `null` means retained history holds no such submission: it is pending,
+    /// unknown or pruned. `after` is a revision the caller knows the
+    /// submission was not finalized at or below; with it, a submission that
+    /// is not found is refused as pruned history once the node no longer
+    /// retains every revision above `after`, and `null` means not finalized.
     #[method(name = "getTransactionReceipt")]
-    async fn get_transaction_receipt(&self, hash: B256)
-    -> RpcResult<Option<RpcTransactionReceipt>>;
+    async fn get_transaction_receipt(
+        &self,
+        hash: B256,
+        after: Option<U64>,
+    ) -> RpcResult<Option<RpcTransactionReceipt>>;
 
     /// Return the complete receipt commitment and finality evidence for a submission.
-    /// A missing response does not prove that the submission was never accepted.
+    /// A missing response does not prove that the submission was never accepted;
+    /// `after` narrows it as for `vera_getTransactionReceipt`.
     #[method(name = "getReceiptProof")]
     async fn get_receipt_proof(
         &self,
         hash: B256,
+        after: Option<U64>,
     ) -> RpcResult<Option<vera_domain::ReceiptResponse>>;
 
     /// Returns the on-chain native nonce for a BLS identity.
@@ -371,6 +386,7 @@ impl VeraApiServer for VeraApiImpl {
     async fn get_transaction_receipt(
         &self,
         hash: B256,
+        after: Option<U64>,
     ) -> RpcResult<Option<RpcTransactionReceipt>> {
         let Some(ref index) = self.index else {
             return Err(RpcError::Internal("block index not available".into()).into());
@@ -380,7 +396,10 @@ impl VeraApiServer for VeraApiImpl {
         if receipt.is_none()
             && let Some(archive) = &self.archive
             && let Some(index) = archive
-                .read(vera_indexer::IndexQuery::Submission(hash))
+                .read(vera_indexer::IndexQuery::Submission {
+                    hash,
+                    after: after.map(|after| after.to::<u64>()),
+                })
                 .await?
         {
             receipt = index.get_receipt(&hash);
@@ -423,8 +442,10 @@ impl VeraApiServer for VeraApiImpl {
     async fn get_receipt_proof(
         &self,
         hash: B256,
+        after: Option<U64>,
     ) -> RpcResult<Option<vera_domain::ReceiptResponse>> {
-        self.receipt_proof(hash).await
+        self.receipt_proof(hash, after.map(|after| after.to::<u64>()))
+            .await
     }
 
     async fn get_native_nonce(&self, did: String) -> RpcResult<U64> {

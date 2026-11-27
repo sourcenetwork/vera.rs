@@ -10,8 +10,8 @@
 //! removes every certificate, imported finality and proof block below it,
 //! and the hash mappings of the new floor's parent. Readers refuse heights
 //! below the floor from then on, and a mapping that still names one reads as
-//! pruned. The records left below the floor's parent, and their mappings, are
-//! removed afterwards in bounded batches (see `sweep`).
+//! not found. The records left below the floor's parent, and their mappings,
+//! are removed afterwards in bounded batches (see `sweep`).
 
 use std::num::NonZeroU64;
 
@@ -178,6 +178,10 @@ pub(super) mod fixture;
 #[cfg(test)]
 #[path = "retention_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "pruned_answer_tests.rs"]
+mod answer_tests;
 
 #[cfg(test)]
 #[path = "import_floor_tests.rs"]
