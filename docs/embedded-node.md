@@ -475,6 +475,19 @@ back new proposals, then waits up to two seconds for the blocks already
 proposed to finalize, and only then drops the runtime. Dropping an
 `EmbeddedNode` requests the same stop without waiting.
 
+When `stop` returns, with `Ok` or with an error, no thread of the node runs
+and its directory can be opened at once. That includes a node whose
+`take_over` or `follow` the host dropped midway: the node owns the thread it
+was stopping, or the one it had started, and `stop` waits for it and joins it.
+A host therefore never needs to watch `.node-hold`. Three cases leave a
+thread that nobody joins: a dropped `EmbeddedNode`, a `stop` dropped before
+it returned, and a `start` dropped before it returned. The thread then stops
+by itself after the same two seconds and its runtime's teardown, and until it
+has, a start on the directory fails with `EmbedError::DirectoryInUse` and can
+be repeated. See
+[a cancelled switch](active-term.md#a-cancelled-switch) for what the node
+accepts after one.
+
 The wait matters for the next start. Commonware does not replay a validator's
 own votes after a restart, so a lone validator that stopped after voting for a
 block and before storing that block's certificate waits out the certification

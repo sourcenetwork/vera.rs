@@ -32,6 +32,11 @@ pub enum EmbedError {
     /// The host's thread setup failed; no other thread was started.
     #[error("node thread setup failed: {0}")]
     ThreadSetup(std::io::Error),
+    /// An earlier `take_over` or `follow` stopped the node and did not start
+    /// it again: it failed, or its caller dropped it midway. The host stops
+    /// the node and starts it in the role the stored certificate names.
+    #[error("a switch stopped the node and did not complete")]
+    Interrupted,
     /// A node actor stopped; the node no longer makes progress.
     #[error("node stopped: {0}")]
     Stopped(String),

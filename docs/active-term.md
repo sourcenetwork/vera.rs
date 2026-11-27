@@ -140,6 +140,37 @@ node's method table, and clones taken before end with `LocalRpcError::Stopped`.
 `EmbeddedConfig::activated` and `EmbeddedConfig::following` build the same
 configurations for a host that starts a device after it already switched.
 
+### A cancelled switch
+
+A host may drop `take_over` or `follow` before it returns, as when it shuts
+down. What the node does next depends on how far the call got:
+
+- Dropped before the node accepted the certificate, the node keeps running in
+  its role. The certificate may be stored already, since the node finishes
+  accepting it without the caller. The host repeats the call with the same
+  certificate.
+- Dropped after that, the node is stopped or stopping, as it is after an error
+  from either call. The decision is in `term.json`, and a thread the call was
+  stopping or had started stays owned by the node and is told to stop.
+
+In the second case, and after a `take_over` or `follow` that returned an error
+once the certificate was accepted:
+
+- `stop` waits for the thread and joins it; when it returns the directory is
+  free.
+- `take_over`, `follow`, `hand_over`, `resume` and `takeover_change` fail with
+  `EmbedError::Interrupted` and change nothing, and `failed` resolves with it.
+  `demoted` and `contested` do not resolve. `rpc()` returns the method table
+  of the node that was stopped, whose calls fail with `LocalRpcError::Stopped`.
+- A start with `EmbeddedConfig::activated` or `EmbeddedConfig::following`
+  completes the switch, as it does after a killed process: the start reads the
+  stored decision and finishes a clearing of consensus storage that the
+  stopped node had begun.
+- `EmbeddedNode::resume_stopped` fails with `EmbedError::DirectoryInUse` until
+  `stop` has returned, and then decides from the stored record as for any
+  stopped directory: it undoes an announced handover unless a certificate
+  names another device.
+
 ### Announced handover
 
 The active device hands over when it is about to quit or sleep and a backup is

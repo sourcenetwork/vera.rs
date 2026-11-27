@@ -516,7 +516,11 @@ daemon's 64 and 4,096. A stopped node's directory is free even while clones of
 its `LocalRpc` survive, and starting on a directory in use fails with
 `EmbedError::DirectoryInUse`; the node locks `.node-hold` in its data
 directory from before it changes its term record or consensus storage until
-its runtime stops. An RPC address that cannot be bound fails the
+its runtime stops. `take_over` and `follow` keep the thread they stop and the
+thread they start owned by the node before waiting for either, so `stop`
+joins whatever a dropped call left and the directory is free when it returns;
+a node whose switch failed or was dropped refuses further switch calls with
+`EmbedError::Interrupted` (docs/active-term.md#a-cancelled-switch). An RPC address that cannot be bound fails the
 start with `EmbedError::RpcBind`. `EmbeddedNode::rpc_addr` reports the bound
 RPC address, including a port the system chose for port 0, and stays the same
 across `take_over` and `follow`. The consensus listener always binds; `127.0.0.1:0` keeps

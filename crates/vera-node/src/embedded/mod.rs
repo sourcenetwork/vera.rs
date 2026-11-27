@@ -7,21 +7,16 @@
 mod config;
 mod directory;
 mod error;
+mod launch;
 mod role;
 mod rpc_socket;
+mod thread;
 mod thread_budget;
 mod thread_setup;
 
-use std::{
-    net::SocketAddr,
-    path::PathBuf,
-    pin::Pin,
-    sync::{Arc, OnceLock},
-    thread::JoinHandle,
-};
+use std::net::SocketAddr;
 
-use commonware_runtime::Runner as _;
-use tokio::sync::oneshot;
+use launch::Launched;
 use vera_domain::{ConsensusPublicKey, PublicKey, TermCertificate, TermChange};
 use vera_genesis::VeraGenesis;
 use vera_jsonrpc::LocalRpc;
@@ -34,296 +29,31 @@ pub use thread_budget::ThreadBudget;
 pub use thread_setup::ThreadSetup;
 
 use crate::{
-    DiscardedSubmission, NodeOptions, NodeSettings, RpcMode, SoloDeployment, SoloError, SoloKeys,
-    TermRefusal, WatchdogMode,
-    term::{Accept, TermControl, TermRecord, device_id},
+    DiscardedSubmission, SoloDeployment, SoloError, SoloKeys, TermRefusal,
+    term::{Accept, TermRecord, device_id},
 };
-
-/// The node's root future is polled on this thread and needs more than a spawned thread's default stack.
-const NODE_STACK_BYTES: usize = 16 * 1024 * 1024;
-
-/// Longest a stop waits for the blocks already proposed to finalize.
-///
-/// A block normally finalizes within a few hundred milliseconds. A stop that
-/// gives up here is recovered like an interruption.
-const STOP_SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// A running embedded node.
 #[derive(Debug)]
 pub struct EmbeddedNode {
     rpc: LocalRpc,
-    rpc_socket: Option<RpcSocket>,
-    genesis: VeraGenesis,
-    consensus_key: ConsensusPublicKey,
-    identity: PublicKey,
-    backup: bool,
-    data_dir: PathBuf,
-    deployment: Option<SoloDeployment>,
-    config: Box<EmbeddedConfig>,
-    term: TermControl,
-    stop: Option<oneshot::Sender<()>>,
-    exit: oneshot::Receiver<Result<(), EmbedError>>,
-    thread: Option<JoinHandle<()>>,
+    node: Launched,
+    /// Set while a switch runs, and left set by one that failed or was dropped.
+    interrupted: bool,
 }
 
 impl EmbeddedNode {
     /// Create or reopen the deployment and return once the node serves requests.
+    ///
+    /// Dropping the call before it returns leaves a node that stops by
+    /// itself; until it has, the directory is in use.
     pub async fn start(config: EmbeddedConfig) -> Result<Self, EmbedError> {
-        launch(config, None).await
-    }
-
-    async fn launch(
-        config: EmbeddedConfig,
-        rpc_socket: Option<RpcSocket>,
-    ) -> Result<Self, EmbedError> {
-        let threads = config.thread_budget();
-        if let Some(reason) = config.history_memory.rejection() {
-            return Err(EmbedError::Config(reason));
-        }
-        let node_config = config.node_config();
-        let configured = Box::new(config.clone());
-        refuse_role(&config)?;
-        if matches!(config.role, DeviceRole::Backup(_)) && config.deployment.is_some() {
-            return Err(EmbedError::Config("a backup takes no key material"));
-        }
-        let (genesis, peers, backup) = match (&config.role, &config.deployment) {
-            (DeviceRole::Backup(backup), _) => {
-                let (genesis, peers) = crate::solo::follow_solo(
-                    &node_config,
-                    &config.genesis,
-                    &backup.record,
-                    backup.active,
-                )?;
-                let key = match (&backup.transport_key, &config.switching) {
-                    (Some(key), _) => key.clone(),
-                    (None, Some(switching)) => switching.device_key.clone(),
-                    (None, None) => crate::DeviceKey::load_or_create(&config.data_dir)?,
-                };
-                (genesis, peers, Some(key))
-            }
-            (DeviceRole::Active, Some(deployment)) => {
-                let (genesis, peers) =
-                    crate::solo::adopt_solo(&node_config, &config.genesis, deployment)?;
-                (genesis, peers, None)
-            }
-            (DeviceRole::Active, None) => {
-                let (genesis, peers) = crate::prepare_solo(&node_config, &config.genesis)?;
-                (genesis, peers, None)
-            }
-        };
-        let is_backup = backup.is_some();
-        let claim = directory::claim(&config.data_dir)?;
-        // Nothing below may touch a directory another node runs on.
-        let storage = config.data_dir.join("commonware");
-        if storage.is_dir() {
-            directory::refuse_held(&storage)?;
-        }
-        crate::term::settle_role(&config.data_dir, is_backup)?;
-        if is_backup {
-            let this = config
-                .switching
-                .as_ref()
-                .map(|switching| device_id(&switching.device_key.public_key()));
-            crate::term::rewind(&config.data_dir, this, config.history_memory)?;
-        }
-        let identity = backup.as_ref().map_or_else(
-            || peers.participants[0].clone(),
-            crate::DeviceKey::public_key,
-        );
-        let consensus_key = *genesis
-            .decode_epoch_info()
-            .map_err(|error| crate::SoloError::Genesis(error.to_string()))?
-            .ok_or_else(|| crate::SoloError::Genesis("missing epoch information".into()))?
-            .output
-            .public()
-            .public();
-        let verification_threads = std::num::NonZeroUsize::new(threads.verification);
-        if threads.workers == 0 || threads.max_blocking == 0 || verification_threads.is_none() {
-            return Err(EmbedError::Config("thread counts must be nonzero"));
-        }
-        crate::consensus_timeouts::validate(
-            config.leader_timeout,
-            config.certification_timeout,
-            config.timeout_retry,
-            std::time::Duration::from_millis(genesis.simplex.stall_timeout_ms),
-        )
-        .map_err(|error| EmbedError::Config(error.reason()))?;
-        if let (Some(retained), Some(epoch_length)) = (
-            config.history_retention,
-            std::num::NonZeroU64::new(genesis.blocks_per_epoch),
-        ) {
-            crate::check_history_retention(retained, epoch_length)?;
-        }
-        if config
-            .pacing
-            .is_some_and(|pacing| pacing.idle >= config.leader_timeout)
-        {
-            return Err(EmbedError::Config(
-                "idle wait must be shorter than the leader timeout",
-            ));
-        }
-        let rpc_socket = match (rpc_socket, config.rpc_listen) {
-            (Some(socket), Some(_)) => Some(socket),
-            (_, Some(address)) => Some(RpcSocket::bind(address)?),
-            (_, None) => None,
-        };
-        let rpc = match &rpc_socket {
-            Some(socket) => RpcMode::Network(Some(socket.share()?)),
-            None => RpcMode::Local,
-        };
-        let settings = NodeSettings {
-            secrets_path: node_config.data_dir.join("secrets.json"),
-            config: node_config,
-            genesis: genesis.clone(),
-            peers,
-            // Unused without a network listener.
-            rpc_addr: rpc_socket
-                .as_ref()
-                .map_or_else(|| SocketAddr::from(([127, 0, 0, 1], 0)), RpcSocket::address),
-            leader_timeout: config.leader_timeout,
-            certification_timeout: config.certification_timeout,
-            timeout_retry: config.timeout_retry,
-        };
-        let (ready_tx, ready_rx) = oneshot::channel();
-        let (table_tx, table_rx) = oneshot::channel::<LocalRpc>();
-        let (stop_tx, stop_rx) = oneshot::channel();
-        let (exit_tx, mut exit_rx) = oneshot::channel();
-        let hold = crate::ProposalHold::default();
-        let (term, seat) = TermControl::new();
-        let mut devices = config.backups;
-        if let Some(switching) = &config.switching {
-            devices.extend(switching.devices.iter().map(|device| device.key.clone()));
-        }
-        let options = NodeOptions {
-            rpc,
-            watchdog: WatchdogMode::Report,
-            ready: Some(table_tx),
-            solo_pacing: config.pacing,
-            verification_threads,
-            history_memory: Some(config.history_memory),
-            sizing: config.sizing,
-            hold: Some(hold.clone()),
-            keys: config
-                .deployment
-                .as_ref()
-                .map(|deployment| deployment.keys().clone()),
-            // Backups do not connect to each other, and a peer that never
-            // connects would still be asked for blocks and state.
-            devices: if is_backup { Vec::new() } else { devices },
-            backup,
-            switching: config.switching,
-            term: Some(seat),
-        };
-        let thread_setup = config.thread_setup;
-        let data_dir = config.data_dir.clone();
-        let deployment = config.deployment;
-        let storage = config.data_dir.join("commonware");
-        std::fs::create_dir_all(&storage).map_err(|source| crate::SoloError::Io {
-            path: storage.clone(),
-            source,
-        })?;
-        directory::refuse_held(&storage)?;
-        let thread = std::thread::Builder::new()
-            .name("vera-node".into())
-            .stack_size(NODE_STACK_BYTES)
-            .spawn(move || {
-                // Threads take their placement from their creator, so the setup precedes the runtime.
-                if let Some(setup) = thread_setup
-                    && let Err(error) = setup.run()
-                {
-                    drop(claim);
-                    let _ = exit_tx.send(Err(EmbedError::ThreadSetup(error)));
-                    return;
-                }
-                let runtime = commonware_runtime::tokio::Config::default()
-                    .with_storage_directory(storage)
-                    .with_worker_threads(threads.workers)
-                    .with_max_blocking_threads(threads.max_blocking);
-                let table = Arc::new(OnceLock::new());
-                let served = table.clone();
-                let decided = Arc::new(std::sync::Mutex::new(None));
-                let recorded = decided.clone();
-                let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    commonware_runtime::tokio::Runner::new(runtime).start(|context| async move {
-                        ::tokio::spawn(async move {
-                            if let Ok(rpc) = table_rx.await {
-                                let _ = served.set(rpc.clone());
-                                let _ = ready_tx.send(rpc);
-                            }
-                        });
-                        let stopped = |result: anyhow::Result<()>| {
-                            Err(match result {
-                                Ok(()) => EmbedError::Stopped("node actors exited".into()),
-                                Err(error) => match error.downcast::<TermRefusal>() {
-                                    Ok(refusal) => EmbedError::Term(refusal),
-                                    Err(error) => EmbedError::Stopped(format!("{error:#}")),
-                                },
-                            })
-                        };
-                        let mut node = std::pin::pin!(crate::run_node_with_options(
-                            context, settings, options
-                        ));
-                        let result = async {
-                            ::tokio::select! {
-                                result = &mut node => return stopped(result),
-                                _ = stop_rx => {}
-                            }
-                            // The node keeps running until the views in flight have finalized.
-                            ::tokio::select! {
-                                result = &mut node => stopped(result),
-                                _ = hold.settle(STOP_SETTLE) => Ok(()),
-                            }
-                        }
-                        .await;
-                        *recorded
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(result);
-                    });
-                }));
-                let decided = decided
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .take();
-                let result = ended(run.is_ok(), decided);
-                // The table holds the node's state, and that state holds the directory.
-                // A host's clone may outlive the node, so the directory is freed here.
-                if let Some(rpc) = table.get() {
-                    rpc.close();
-                }
-                drop(claim);
-                // A host that dropped the node no longer observes the outcome.
-                let _ = exit_tx.send(result);
-            })
-            .map_err(EmbedError::Thread)?;
-        // A received exit must not be awaited again: a completed receiver panics when polled.
-        let started = ::tokio::select! {
-            ready = ready_rx => ready.map_err(|_| None),
-            exit = &mut exit_rx => Err(Some(exit)),
-        };
-        let rpc = match started {
-            Ok(rpc) => rpc,
-            Err(exit) => {
-                let exit = match exit {
-                    Some(exit) => exit,
-                    None => exit_rx.await,
-                };
-                return Err(joined(exit, thread).err().unwrap_or(EmbedError::Panicked));
-            }
-        };
+        let (mut node, mut ready) = launch::launch(config, None)?;
+        let rpc = node.thread.started(&mut ready).await?;
         Ok(Self {
             rpc,
-            rpc_socket,
-            genesis,
-            consensus_key,
-            identity,
-            backup: is_backup,
-            data_dir,
-            deployment,
-            config: configured,
-            term,
-            stop: Some(stop_tx),
-            exit: exit_rx,
-            thread: Some(thread),
+            node,
+            interrupted: false,
         })
     }
 
@@ -338,26 +68,26 @@ impl EmbeddedNode {
     /// `None` when the node has no network listener.
     #[must_use]
     pub fn rpc_addr(&self) -> Option<SocketAddr> {
-        self.rpc_socket.as_ref().map(RpcSocket::address)
+        self.node.rpc_socket.as_ref().map(RpcSocket::address)
     }
 
     /// The deployment's genesis.
     #[must_use]
     pub const fn genesis(&self) -> &VeraGenesis {
-        &self.genesis
+        &self.node.genesis
     }
 
     /// The consensus key that finality proofs from this deployment verify against.
     #[must_use]
     pub const fn consensus_key(&self) -> &ConsensusPublicKey {
-        &self.consensus_key
+        &self.node.consensus_key
     }
 
     /// The key the account's other devices know this node by: the validator
     /// key on the active device, the device's transport key on a backup.
     #[must_use]
     pub const fn identity(&self) -> &PublicKey {
-        &self.identity
+        &self.node.identity
     }
 
     /// The deployment's genesis record and current key material, as
@@ -369,11 +99,11 @@ impl EmbeddedNode {
     ///
     /// A backup holds no key material and fails with [`SoloError::Incomplete`].
     pub fn export(&self) -> Result<SoloDeployment, SoloError> {
-        if self.backup {
+        if self.node.backup {
             return Err(SoloError::Incomplete("a backup holds no key material"));
         }
-        self.deployment.as_ref().map_or_else(
-            || crate::solo::export_solo(&self.data_dir),
+        self.node.deployment.as_ref().map_or_else(
+            || crate::solo::export_solo(&self.node.data_dir),
             |deployment| Ok(deployment.clone()),
         )
     }
@@ -416,14 +146,14 @@ impl EmbeddedNode {
     /// whose active device never changed is in term 0.
     #[must_use]
     pub fn term(&self) -> u64 {
-        self.term.term()
+        self.node.term.term()
     }
 
     /// The certificate of the newest term this device holds, verified
     /// against the operator policy in its own state. `None` in term 0.
     #[must_use]
     pub fn term_certificate(&self) -> Option<TermCertificate> {
-        self.term.certificate()
+        self.node.term.certificate()
     }
 
     /// Announce that `successor`, one of [`crate::Switching::devices`],
@@ -442,7 +172,8 @@ impl EmbeddedNode {
     /// within [`crate::Switching::answer_timeout`], fails the call with
     /// [`TermRefusal::SuccessorNotCurrent`] and the device stays active.
     pub async fn hand_over(&self, successor: &PublicKey) -> Result<TermChange, EmbedError> {
-        Ok(self.term.hand_over(successor.clone()).await?)
+        self.running()?;
+        Ok(self.node.term.hand_over(successor.clone()).await?)
     }
 
     /// Undo [`Self::hand_over`] and propose again, for a handover whose
@@ -452,7 +183,8 @@ impl EmbeddedNode {
     /// deployment: only the host knows whether it did. The first block after
     /// a resume can be late by the leader timeout.
     pub async fn resume(&self) -> Result<(), EmbedError> {
-        Ok(self.term.resume().await?)
+        self.running()?;
+        Ok(self.node.term.resume().await?)
     }
 
     /// The term change a certificate must approve for this backup to take
@@ -463,7 +195,8 @@ impl EmbeddedNode {
     /// above that cut and are lost to the switch. The host asks the user to
     /// confirm before it has the change approved.
     pub async fn takeover_change(&self) -> Result<TermChange, EmbedError> {
-        Ok(self.term.offer().await?)
+        self.running()?;
+        Ok(self.node.term.offer().await?)
     }
 
     /// Become the active device in the term `certificate` starts.
@@ -478,13 +211,19 @@ impl EmbeddedNode {
     /// An error after the certificate was accepted leaves the node stopped;
     /// the certificate is stored, and a start with
     /// [`EmbeddedConfig::activated`] completes the switch.
+    ///
+    /// The call may be dropped. Dropped before the certificate was accepted,
+    /// the backup keeps running and the call is repeated. Dropped after, the
+    /// node is stopped or stopping as after an error: further calls on it
+    /// fail with [`EmbedError::Interrupted`], and [`Self::stop`] joins it.
     pub async fn take_over(
         &mut self,
         keys: SoloKeys,
         certificate: TermCertificate,
     ) -> Result<(), EmbedError> {
-        let config = self.config.activated(keys)?;
-        self.term.accept(certificate, Accept::TakeOver).await?;
+        self.running()?;
+        let config = self.node.config.activated(keys)?;
+        self.node.term.accept(certificate, Accept::TakeOver).await?;
         self.restart(config).await
     }
 
@@ -502,11 +241,14 @@ impl EmbeddedNode {
     ///
     /// An error after the certificate was accepted leaves the node stopped;
     /// a start with [`EmbeddedConfig::following`] completes the switch.
+    /// Dropping the call does what dropping [`Self::take_over`] does.
     pub async fn follow(
         &mut self,
         certificate: TermCertificate,
     ) -> Result<Vec<DiscardedSubmission>, EmbedError> {
+        self.running()?;
         let switching = self
+            .node
             .config
             .switching
             .as_ref()
@@ -516,8 +258,8 @@ impl EmbeddedNode {
             .iter()
             .find(|device| device_id(&device.key) == certificate.change.holder)
             .ok_or(TermRefusal::Holder)?;
-        let config = self.config.following(&holder.key)?;
-        self.term.accept(certificate, Accept::Follow).await?;
+        let config = self.node.config.following(&holder.key)?;
+        self.node.term.accept(certificate, Accept::Follow).await?;
         self.restart(config).await?;
         self.discarded()
     }
@@ -531,12 +273,12 @@ impl EmbeddedNode {
     /// submits again what it still wants, to the active device, and then
     /// calls [`Self::acknowledge_discarded`].
     pub fn discarded(&self) -> Result<Vec<DiscardedSubmission>, EmbedError> {
-        Ok(crate::term::discarded(&self.data_dir)?)
+        Ok(crate::term::discarded(&self.node.data_dir)?)
     }
 
     /// Forget the report [`Self::discarded`] returns.
     pub fn acknowledge_discarded(&self) -> Result<(), EmbedError> {
-        Ok(crate::term::acknowledge(&self.data_dir)?)
+        Ok(crate::term::acknowledge(&self.node.data_dir)?)
     }
 
     /// Resolves when this active device learns that another device holds a
@@ -547,7 +289,7 @@ impl EmbeddedNode {
     /// slept. Once this resolves it proposes nothing more, and the host
     /// calls [`Self::follow`] with the certificate.
     pub async fn demoted(&self) -> TermCertificate {
-        self.term.demoted().await
+        self.node.term.demoted().await
     }
 
     /// Resolves when another device answers this active device as the
@@ -558,45 +300,66 @@ impl EmbeddedNode {
     /// asks again at each of its turns. Nothing is stored. The host follows
     /// with a certificate this device can verify, or stops the other device.
     pub async fn contested(&self) -> crate::Contest {
-        self.term.contested().await
+        self.node.term.contested().await
     }
 
     /// Stop this node and start one with `config` in its place.
+    ///
+    /// The node owns the thread it stops and the thread it starts before it
+    /// waits for either, so a caller dropped during a wait leaves both to
+    /// [`Self::stop`].
     async fn restart(&mut self, config: EmbeddedConfig) -> Result<(), EmbedError> {
-        let rpc_socket = self.rpc_socket.take();
-        self.halt().await?;
-        *self = launch(config, rpc_socket).await?;
+        self.interrupted = true;
+        let switch = Switch(self);
+        switch.0.node.thread.halt().await?;
+        let rpc_socket = switch.0.node.rpc_socket.take();
+        let (node, mut ready) = launch::launch(config, rpc_socket)?;
+        switch.0.node = node;
+        switch.0.rpc = switch.0.node.thread.started(&mut ready).await?;
+        switch.0.interrupted = false;
+        Ok(())
+    }
+
+    /// Refuse a call on a node that a switch stopped and did not start again.
+    const fn running(&self) -> Result<(), EmbedError> {
+        if self.interrupted {
+            return Err(EmbedError::Interrupted);
+        }
         Ok(())
     }
 
     /// Wait until the node stops on its own, which is always an error.
+    ///
+    /// After a switch that failed or was dropped midway this resolves at
+    /// once with [`EmbedError::Interrupted`].
     pub async fn failed(&mut self) -> EmbedError {
-        match (&mut self.exit).await {
-            Ok(Err(error)) => error,
-            Ok(Ok(())) | Err(_) => EmbedError::Panicked,
+        if self.interrupted {
+            return EmbedError::Interrupted;
         }
+        self.node.thread.failed().await
     }
 
     /// Stop the node and wait for its thread to finish.
+    ///
+    /// When this returns, with `Ok` or with the error the node ended on, no
+    /// thread of the node runs and its directory is free. That holds after a
+    /// [`Self::take_over`] or [`Self::follow`] that failed or was dropped
+    /// midway: this waits for the thread that call was stopping or had
+    /// started. Dropping this call before it returns leaves the thread to
+    /// stop by itself, like dropping the node.
     pub async fn stop(mut self) -> Result<(), EmbedError> {
-        self.halt().await
-    }
-
-    async fn halt(&mut self) -> Result<(), EmbedError> {
-        if let Some(stop) = self.stop.take() {
-            // The node may already have stopped by itself.
-            let _ = stop.send(());
-        }
-        let thread = self.thread.take().ok_or(EmbedError::Panicked)?;
-        let exit = std::mem::replace(&mut self.exit, oneshot::channel().1);
-        joined(exit.await, thread)
+        self.node.thread.halt().await
     }
 }
 
-impl Drop for EmbeddedNode {
+/// A switch in progress. One that ends before the new node serves leaves the
+/// node marked as interrupted and its thread told to stop.
+struct Switch<'a>(&'a mut EmbeddedNode);
+
+impl Drop for Switch<'_> {
     fn drop(&mut self) {
-        if let Some(stop) = self.stop.take() {
-            let _ = stop.send(());
+        if self.0.interrupted {
+            self.0.node.thread.signal();
         }
     }
 }
@@ -644,42 +407,8 @@ fn refuse_role(config: &EmbeddedConfig) -> Result<(), EmbedError> {
     }
 }
 
-/// Builds the start future in this crate.
-///
-/// A host that instantiated it would compute the layout of the whole actor
-/// graph and need a raised recursion limit; here it sees only a pointer.
-#[inline(never)]
-fn launch(
-    config: EmbeddedConfig,
-    rpc_socket: Option<RpcSocket>,
-) -> Pin<Box<dyn Future<Output = Result<EmbeddedNode, EmbedError>> + Send>> {
-    Box::pin(EmbeddedNode::launch(config, rpc_socket))
-}
-
-/// How a node ended, from whether its runtime unwound and the result its root
-/// returned, if it returned.
-///
-/// Commonware aborts the node's tasks once the root has returned, and a task
-/// that observes a sibling's abort can panic then. How the node ended was
-/// decided before that.
-fn ended(completed: bool, decided: Option<Result<(), EmbedError>>) -> Result<(), EmbedError> {
-    let result = decided.ok_or(EmbedError::Panicked)?;
-    if !completed {
-        tracing::warn!("a node task panicked while the stopped node's runtime shut down");
-    }
-    result
-}
-
-fn joined(
-    exit: Result<Result<(), EmbedError>, oneshot::error::RecvError>,
-    thread: JoinHandle<()>,
-) -> Result<(), EmbedError> {
-    // The thread has sent its result or is unwinding, so this join is brief.
-    match (exit, thread.join()) {
-        (Ok(result), Ok(())) => result,
-        _ => Err(EmbedError::Panicked),
-    }
-}
+#[cfg(test)]
+mod cancel_tests;
 
 #[cfg(test)]
 mod tests {
@@ -689,19 +418,6 @@ mod tests {
 
     use super::*;
     use crate::{DeviceKey, SoloGenesis, Switching};
-
-    #[test]
-    fn a_panic_after_the_node_returned_keeps_how_it_ended() {
-        let refusal = || Err(EmbedError::Term(TermRefusal::NotCertified));
-        for completed in [true, false] {
-            assert!(matches!(
-                ended(completed, Some(refusal())),
-                Err(EmbedError::Term(TermRefusal::NotCertified))
-            ));
-            assert!(matches!(ended(completed, Some(Ok(()))), Ok(())));
-        }
-        assert!(matches!(ended(false, None), Err(EmbedError::Panicked)));
-    }
 
     fn switching(directory: &std::path::Path) -> (EmbeddedConfig, B256) {
         let genesis = SoloGenesis {
