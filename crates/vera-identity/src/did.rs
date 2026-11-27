@@ -14,11 +14,29 @@ pub const DID_KEY_PREFIX: &str = "did:key:";
 /// The prefix for stable OpenPubkey actor identifiers.
 pub const DID_OPK_PREFIX: &str = "did:opk:";
 
+/// The prefix for DKIM-email-authorized actor identifiers. The suffix is a
+/// lowercase SHA-256 hex digest of the verified, normalized email address —
+/// same shape as `DID_OPK_PREFIX`'s suffix, but a distinct identity scheme
+/// (see the `orbis-email` crate in the `orbis-rs` workspace, which is the
+/// only producer of this identity today).
+pub const DID_EMAILHASH_PREFIX: &str = "did:emailhash:";
+
+/// Whether `s` is a lowercase SHA-256 hex digest: exactly 64 ASCII hex
+/// characters. Shared by every identity scheme here whose suffix is such a
+/// digest, rather than duplicated per scheme.
+fn is_sha256_hex_digest(s: &str) -> bool {
+    s.len() == 64
+        && s.bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
 /// A validated DID (Decentralized Identifier).
 ///
-/// Accepts key identities and stable provider actors. Provider identifiers contain
-/// a lowercase SHA-256 digest of the verified provider's user identifier.
-/// Parsing validates representation; it does not authenticate a provider claim.
+/// Accepts key identities, stable provider actors, and email-hash actors.
+/// Provider and email-hash identifiers each contain a lowercase SHA-256
+/// digest (of the verified provider's user identifier, or of the verified,
+/// normalized email address, respectively). Parsing validates
+/// representation; it does not authenticate a provider or email claim.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct Did(String);
@@ -28,16 +46,17 @@ impl Did {
     ///
     /// # Errors
     ///
-    /// Rejects unsupported methods and malformed provider actor identifiers.
+    /// Rejects unsupported methods and malformed provider/email-hash actor
+    /// identifiers.
     pub fn new(s: impl Into<String>) -> Result<Self, Error> {
         let s = s.into();
-        let provider = s.strip_prefix(DID_OPK_PREFIX).is_some_and(|hash| {
-            hash.len() == 64
-                && hash
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        });
-        if !s.starts_with(DID_KEY_PREFIX) && !provider {
+        let provider = s
+            .strip_prefix(DID_OPK_PREFIX)
+            .is_some_and(is_sha256_hex_digest);
+        let email_hash = s
+            .strip_prefix(DID_EMAILHASH_PREFIX)
+            .is_some_and(is_sha256_hex_digest);
+        if !s.starts_with(DID_KEY_PREFIX) && !provider && !email_hash {
             return Err(Error::InvalidDid(
                 "unsupported or malformed identity".into(),
             ));
@@ -131,6 +150,31 @@ mod tests {
     fn test_did_new_invalid_prefix() {
         let result = Did::new("invalid:key:z6Mk...");
         assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), Error::InvalidDid(_)));
+    }
+
+    #[test]
+    fn test_did_new_valid_email_hash() {
+        let hash = "a".repeat(64);
+        let did = Did::new(format!("did:emailhash:{hash}")).unwrap();
+        assert_eq!(did.as_str(), format!("did:emailhash:{hash}"));
+    }
+
+    #[test]
+    fn test_did_new_email_hash_rejects_wrong_length() {
+        let result = Did::new(format!("did:emailhash:{}", "a".repeat(63)));
+        assert!(matches!(result.unwrap_err(), Error::InvalidDid(_)));
+    }
+
+    #[test]
+    fn test_did_new_email_hash_rejects_non_hex() {
+        let result = Did::new(format!("did:emailhash:{}", "g".repeat(64)));
+        assert!(matches!(result.unwrap_err(), Error::InvalidDid(_)));
+    }
+
+    #[test]
+    fn test_did_new_email_hash_rejects_uppercase_hex() {
+        let result = Did::new(format!("did:emailhash:{}", "A".repeat(64)));
         assert!(matches!(result.unwrap_err(), Error::InvalidDid(_)));
     }
 
