@@ -1,7 +1,7 @@
 //! vera's actors and objects as acp relationship values, and back.
 //!
-//! vera admits fewer DIDs than acp (`did:key` and `did:opk` actors), so an actor
-//! that enters a stored relationship is checked as a vera DID too.
+//! vera admits fewer DIDs than acp (`did:key`, `did:opk` and `did:emailhash`
+//! actors), so an actor entering a stored relationship is checked as a vera DID too.
 
 use ::acp::domain::{
     Actor as AcpActor, Did as AcpDid, OWNER_RELATION, Object as AcpObject, Relationship, Subject,
