@@ -576,7 +576,9 @@ records on the same cadence as consensus pruning; the oldest revision it keeps
 is the first of its epoch. Receipts and light blocks below it are unavailable on
 every device of the account: `vera_getReceiptProof` returns `null` for such a
 submission, as for an unknown one, and height-based reads fail with JSON-RPC
-code `4444`. The value must be at least `minimum_history_retention` for the
+code `4444`. A caller that names the head it read before sending the submission
+gets `4444` for the receipt too (see
+[pruned receipts](history-storage.md#pruned-receipts)). The value must be at least `minimum_history_retention` for the
 deployment, 2,560 revisions with 256-block epochs, or `start` fails with
 `EmbedError::HistoryRetention`. A backup started on an empty directory imports
 the history behind the active device's newest block down to the active device's

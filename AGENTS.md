@@ -112,7 +112,11 @@ directory layouts before opening the database.
 See [history storage](docs/history-storage.md) for the format and qualification limits.
 `history_retention` (daemon default none) removes records below an epoch-aligned
 floor, keeping only the floor's parent below it; reads below it fail with
-`HistoryPruned`, and an importer from a pruned peer adopts a floor. See
+`HistoryPruned`, and an importer from a pruned peer adopts a floor. A receipt
+read answers `null` for a pruned submission as for an unknown one, and
+`HistoryPruned` when the caller names a revision the submission was not
+finalized at or below and the floor has passed the next one
+(`wait_for_receipt_after` then ends with `ClientError::ReceiptPruned`). See
 [retention and the floor](docs/history-storage.md#retention-and-the-floor).
 Proposal transaction exclusion stops at the published finalized revision, including
 the recovered index head, so it does not fetch pruned finalized ancestors.

@@ -48,7 +48,7 @@ async fn recent_and_archived_receipts_name_the_same_refusal() {
     let mut recent = VeraApiImpl::new(state.clone(), None);
     recent.index = Some(refused_revision(submission, &refusal));
     let recent = recent
-        .get_transaction_receipt(submission)
+        .get_transaction_receipt(submission, None)
         .await
         .unwrap()
         .unwrap();
@@ -59,14 +59,14 @@ async fn recent_and_archived_receipts_name_the_same_refusal() {
             (*state).clone(),
             Arc::new(move |query, _| {
                 Ok(
-                    matches!(query, IndexQuery::Submission(hash) if hash == submission)
+                    matches!(query, IndexQuery::Submission { hash, .. } if hash == submission)
                         .then(|| archived_index.clone()),
                 )
             }),
         ));
     archived.index = Some(Arc::new(BlockIndex::new()));
     let archived = archived
-        .get_transaction_receipt(submission)
+        .get_transaction_receipt(submission, None)
         .await
         .unwrap()
         .unwrap();
@@ -119,7 +119,7 @@ async fn an_archived_receipt_matches_the_resident_one_and_archive_failures_propa
     let mut resident = VeraApiImpl::new(state.clone(), None);
     resident.index = Some(retained.clone());
     let expected = resident
-        .get_transaction_receipt(submission)
+        .get_transaction_receipt(submission, None)
         .await
         .unwrap()
         .unwrap();
@@ -133,7 +133,7 @@ async fn an_archived_receipt_matches_the_resident_one_and_archive_failures_propa
                 calls.fetch_add(1, Ordering::Relaxed);
                 assert_eq!(*remaining_bytes, 64 << 20);
                 Ok(
-                    matches!(query, IndexQuery::Submission(hash) if hash == submission)
+                    matches!(query, IndexQuery::Submission { hash, .. } if hash == submission)
                         .then(|| retained.clone()),
                 )
             }),
@@ -142,7 +142,7 @@ async fn an_archived_receipt_matches_the_resident_one_and_archive_failures_propa
     let mut evicted = VeraApiImpl::new(state.clone(), None).with_archive(reader(&state));
     evicted.index = Some(Arc::new(BlockIndex::new()));
     let actual = evicted
-        .get_transaction_receipt(submission)
+        .get_transaction_receipt(submission, None)
         .await
         .unwrap()
         .unwrap();
@@ -153,7 +153,7 @@ async fn an_archived_receipt_matches_the_resident_one_and_archive_failures_propa
     );
     assert!(
         evicted
-            .get_transaction_receipt(B256::ZERO)
+            .get_transaction_receipt(B256::ZERO, None)
             .await
             .unwrap()
             .is_none()
@@ -163,7 +163,7 @@ async fn an_archived_receipt_matches_the_resident_one_and_archive_failures_propa
         .map(|_| state.light_lookup_permit().unwrap())
         .collect();
     let busy = evicted
-        .get_transaction_receipt(submission)
+        .get_transaction_receipt(submission, None)
         .await
         .unwrap_err();
     assert_eq!(busy.code(), crate::error::codes::RESOURCE_UNAVAILABLE);
@@ -177,10 +177,76 @@ async fn an_archived_receipt_matches_the_resident_one_and_archive_failures_propa
     broken.index = Some(Arc::new(BlockIndex::new()));
     assert!(
         broken
-            .get_transaction_receipt(submission)
+            .get_transaction_receipt(submission, None)
             .await
             .unwrap_err()
             .message()
             .contains("unready archive")
+    );
+}
+
+#[tokio::test]
+async fn both_receipt_reads_pass_the_callers_revision_to_history_and_refuse_alike() {
+    const FLOOR: u64 = 48;
+    fn pruned<T>(after: Option<u64>) -> Result<Option<T>, RpcError> {
+        match after {
+            Some(after) if after + 1 < FLOOR => Err(RpcError::HistoryPruned {
+                height: after + 1,
+                floor: FLOOR,
+            }),
+            _ => Ok(None),
+        }
+    }
+    let resident = B256::repeat_byte(1);
+    let absent = B256::repeat_byte(9);
+    let state = Arc::new(NodeState::new(1, 0, 1));
+    let mut api = VeraApiImpl::new(state.clone(), None)
+        .with_archive(crate::ArchiveReader::new(
+            (*state).clone(),
+            Arc::new(move |query, _| match query {
+                IndexQuery::Submission { after, .. } => pruned(after),
+                _ => Ok(None),
+            }),
+        ))
+        .with_receipt_proof_lookup(Arc::new(move |_, after| pruned(after)));
+    api.index = Some(refused_revision(
+        resident,
+        &Refusal::new(RefusingModule::Acp, RefusalKind::InvalidPolicy, "refused"),
+    ));
+
+    for after in [None, Some(U64::from(47)), Some(U64::from(1_000))] {
+        assert!(
+            api.get_transaction_receipt(absent, after)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            api.get_receipt_proof(absent, after)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+    let after = Some(U64::from(9));
+    let refusals = [
+        api.get_transaction_receipt(absent, after)
+            .await
+            .unwrap_err(),
+        api.get_receipt_proof(absent, after).await.unwrap_err(),
+    ];
+    for refused in refusals {
+        assert_eq!(refused.code(), crate::error::codes::HISTORY_PRUNED);
+        assert_eq!(
+            refused.data().unwrap().get(),
+            r#"{"floor":48,"retryable":false}"#
+        );
+    }
+    // A submission the execution index holds is served without asking history.
+    assert!(
+        api.get_transaction_receipt(resident, after)
+            .await
+            .unwrap()
+            .is_some()
     );
 }

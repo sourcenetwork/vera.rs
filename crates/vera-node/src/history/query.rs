@@ -51,12 +51,17 @@ impl FinalizedHistory {
     }
 
     /// Assemble complete receipt evidence from durable execution and finality records.
+    ///
+    /// `None` means retained history holds no such submission, or its revision
+    /// has no certificate yet. With `after`, a submission that is not found
+    /// fails with [`HistoryPruned`] as [`Self::execution_bounded`] describes.
     pub fn receipt_proof(
         &self,
         hash: B256,
+        after: Option<u64>,
         epochs: &LightBlockIndex,
     ) -> Result<Option<vera_domain::ReceiptResponse>> {
-        let Some(execution) = self.execution_by_submission(hash)? else {
+        let Some(execution) = self.execution(IndexQuery::Submission { hash, after })? else {
             return Ok(None);
         };
         let Some(revision) = self.certified_light_block(execution.block.height, epochs)? else {
@@ -73,11 +78,12 @@ impl FinalizedHistory {
         }))
     }
 
+    #[cfg(test)]
     pub(super) fn execution_by_submission(
         &self,
         hash: B256,
     ) -> Result<Option<HistoricalExecution>> {
-        self.execution(IndexQuery::Submission(hash))
+        self.execution(IndexQuery::Submission { hash, after: None })
     }
 
     /// One record's bytes are bounded by the block and receipt limits.
@@ -88,8 +94,13 @@ impl FinalizedHistory {
 
     /// Charge encoded record bytes before decoding, across a caller's whole query.
     ///
-    /// A revision below the floor fails with [`HistoryPruned`]; a hash whose
-    /// mapping was removed with its record is not found.
+    /// A revision below the floor fails with [`HistoryPruned`]. A hash names
+    /// retained records only: one whose record is below the floor is not
+    /// found, whether or not the sweep has removed its mapping yet. A
+    /// submission that is not found and carries `after` fails with
+    /// [`HistoryPruned`] when the floor is above the revision following
+    /// `after`, since a pruned revision may have held it; otherwise every
+    /// revision that could hold it is retained and it is not finalized.
     pub fn execution_bounded(
         &self,
         query: IndexQuery,
@@ -106,38 +117,49 @@ impl FinalizedHistory {
             "history query index requires recovery"
         );
         let (maximum, _): (u64, [u8; 32]) = borsh::from_slice(&head)?;
+        let floor = floor::floor_height(snapshot.get(FLOOR)?.as_deref())?;
         let height = match query {
             IndexQuery::Revision(height) => {
                 if height == 0 || height > maximum {
                     return Ok(None);
                 }
+                check_retained(height, floor)?;
                 height
             }
-            IndexQuery::RevisionHash(hash) | IndexQuery::Submission(hash) => {
+            IndexQuery::RevisionHash(hash) | IndexQuery::Submission { hash, .. } => {
                 let prefix = if matches!(query, IndexQuery::RevisionHash(_)) {
                     BLOCK_HASH
                 } else {
                     SUBMISSION_HASH
                 };
-                let Some(height) = snapshot.get(hash_key(prefix, &hash.0))? else {
-                    return Ok(None);
-                };
-                u64::from_be_bytes(
-                    height
-                        .as_slice()
-                        .try_into()
-                        .context("invalid history query height")?,
-                )
+                let height = snapshot
+                    .get(hash_key(prefix, &hash.0))?
+                    .map(|height| {
+                        height
+                            .as_slice()
+                            .try_into()
+                            .map(u64::from_be_bytes)
+                            .context("invalid history query height")
+                    })
+                    .transpose()?;
+                match height {
+                    Some(height) if height >= floor => height,
+                    _ => {
+                        if let IndexQuery::Submission {
+                            after: Some(after), ..
+                        } = query
+                        {
+                            check_retained(after.saturating_add(1), floor)?;
+                        }
+                        return Ok(None);
+                    }
+                }
             }
         };
         ensure!(
             height > 0 && height <= maximum,
             "history query exceeds published head"
         );
-        check_retained(
-            height,
-            floor::floor_height(snapshot.get(FLOOR)?.as_deref())?,
-        )?;
         let bytes = snapshot
             .get_pinned(key(RECORD, height))?
             .context("missing indexed execution record")?;
@@ -150,7 +172,9 @@ impl FinalizedHistory {
         let matches = match query {
             IndexQuery::Revision(_) => true,
             IndexQuery::RevisionHash(hash) => block.id().0 == hash,
-            IndexQuery::Submission(hash) => receipts.iter().any(|receipt| receipt.tx_hash == hash),
+            IndexQuery::Submission { hash, .. } => {
+                receipts.iter().any(|receipt| receipt.tx_hash == hash)
+            }
         };
         ensure!(matches, "execution record differs from its query key");
         Ok(Some(HistoricalExecution {
@@ -185,7 +209,7 @@ mod tests {
         assert!(history.certified_light_block(1, &epochs).unwrap().is_none());
         assert!(
             history
-                .receipt_proof(receipt.tx_hash, &epochs)
+                .receipt_proof(receipt.tx_hash, None, &epochs)
                 .unwrap()
                 .is_none()
         );

@@ -170,7 +170,9 @@ impl VeraClient {
 
     /// Fetch the execution result of a native request (`vera_getTransactionReceipt`).
     ///
-    /// Returns `None` if the request has not yet been included. The receipt
+    /// Returns `None` if the node's retained history holds no such request:
+    /// it is not yet included, unknown to the node or pruned.
+    /// [`Self::get_transaction_receipt_after`] tells these apart. The receipt
     /// is execution data without finality evidence; [`Self::read_receipt`]
     /// verifies a receipt against a trusted consensus key.
     pub async fn get_transaction_receipt(
@@ -180,6 +182,26 @@ impl VeraClient {
         self.rpc_call_typed(
             "vera_getTransactionReceipt",
             serde_json::json!([format!("{tx_hash:?}")]),
+        )
+        .await
+    }
+
+    /// Fetch the execution result of a request that was not finalized at or
+    /// below revision `after`, such as [`Self::block_number`] read before it
+    /// was submitted.
+    ///
+    /// `None` then means the request is not finalized: the node retains every
+    /// revision above `after` and none holds it. Once the node has pruned any
+    /// of them and holds no receipt, the read fails with
+    /// [`ClientError::HistoryPruned`].
+    pub async fn get_transaction_receipt_after(
+        &self,
+        tx_hash: B256,
+        after: u64,
+    ) -> Result<Option<TransactionReceipt>, ClientError> {
+        self.rpc_call_typed(
+            "vera_getTransactionReceipt",
+            serde_json::json!([format!("{tx_hash:?}"), format!("{after:#x}")]),
         )
         .await
     }
@@ -320,6 +342,8 @@ mod tests {
 
 #[cfg(test)]
 mod permission_transport;
+#[cfg(test)]
+mod pruned_receipt_tests;
 #[cfg(test)]
 mod readiness_tests;
 #[cfg(test)]

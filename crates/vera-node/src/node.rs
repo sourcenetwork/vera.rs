@@ -1270,7 +1270,7 @@ pub async fn run_node_with_options(
                 &execution.receipts,
                 gas_used,
             );
-            if let vera_indexer::IndexQuery::Submission(hash) = query
+            if let vera_indexer::IndexQuery::Submission { hash, .. } = query
                 && index.get_receipt(&hash).is_none()
             {
                 return Err(vera_jsonrpc::RpcError::StateError(
@@ -1364,10 +1364,12 @@ pub async fn run_node_with_options(
         .with_vera_receipt_proof_lookup({
             let history = history.clone();
             let epochs = light_block_index.clone();
-            Arc::new(move |hash| {
-                history.receipt_proof(hash, &epochs).map_err(|error| {
-                    crate::history::rpc_error(&error, vera_jsonrpc::RpcError::Internal)
-                })
+            Arc::new(move |hash, after| {
+                history
+                    .receipt_proof(hash, after, &epochs)
+                    .map_err(|error| {
+                        crate::history::rpc_error(&error, vera_jsonrpc::RpcError::Internal)
+                    })
             })
         })
         .with_vera_ancestry_proof_lookup({

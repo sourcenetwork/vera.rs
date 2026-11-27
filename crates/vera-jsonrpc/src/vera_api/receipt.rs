@@ -11,13 +11,17 @@ use super::{
 };
 
 impl VeraApiImpl {
-    pub(super) async fn receipt_proof(&self, hash: B256) -> RpcResult<Option<ReceiptResponse>> {
+    pub(super) async fn receipt_proof(
+        &self,
+        hash: B256,
+        after: Option<u64>,
+    ) -> RpcResult<Option<ReceiptResponse>> {
         let index = self
             .index
             .as_ref()
             .ok_or_else(|| error("receipt index unavailable"))?;
         let Some(execution) = index.receipt_revision(&hash) else {
-            return self.archived_receipt(hash).await;
+            return self.archived_receipt(hash, after).await;
         };
         let _permit = self.state.proof_permit()?;
         let started = tracing::enabled!(target: "vera_diagnostics", tracing::Level::DEBUG)
@@ -78,7 +82,11 @@ impl VeraApiImpl {
         Ok(Some(response))
     }
 
-    async fn archived_receipt(&self, hash: B256) -> RpcResult<Option<ReceiptResponse>> {
+    async fn archived_receipt(
+        &self,
+        hash: B256,
+        after: Option<u64>,
+    ) -> RpcResult<Option<ReceiptResponse>> {
         let Some(lookup) = self.receipt_proof_lookup.clone() else {
             return Ok(None);
         };
@@ -89,7 +97,7 @@ impl VeraApiImpl {
         let permit = self.state.light_lookup_permit()?;
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            let response = lookup(hash).map_err(|failure| match failure {
+            let response = lookup(hash, after).map_err(|failure| match failure {
                 RpcError::Internal(message) => error(message),
                 failure => failure.into(),
             })?;

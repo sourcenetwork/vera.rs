@@ -16,7 +16,6 @@ use serde_json::json;
 use short_epochs::{BLOCKS_PER_EPOCH, deployment, height};
 use support::{await_certified_receipt, block_on, finalize_a_write};
 use vera_client::BlsSigner;
-use vera_domain::ReceiptResponse;
 use vera_jsonrpc::LocalRpcError;
 use vera_node::{DeviceKey, EmbeddedNode, minimum_history_retention};
 
@@ -30,18 +29,30 @@ fn refuses_as_pruned(node: &EmbeddedNode, height: u64) -> bool {
     matches!(refused, Err(LocalRpcError::Call { code: 4444, .. }))
 }
 
-/// Whether `node` holds no receipt for `submission`: `null` once its
-/// mapping is pruned, or `4444` while the execution index still names the
-/// pruned revision.
-fn receipt_unavailable(node: &EmbeddedNode, submission: alloy_primitives::B256) -> bool {
-    let receipt = block_on(
-        node.rpc()
-            .request::<Option<ReceiptResponse>>("vera_getReceiptProof", vec![json!(submission)]),
-    );
-    matches!(
-        receipt,
-        Ok(None) | Err(LocalRpcError::Call { code: 4444, .. })
-    )
+/// Asserts what `node` answers about `submission`, sent when its head was
+/// `after`, once its revision is pruned: nothing, as for a submission it
+/// never saw, and the pruned error to a caller that names `after`.
+#[track_caller]
+fn assert_receipt_pruned(node: &EmbeddedNode, submission: alloy_primitives::B256, after: u64) {
+    let after = json!(format!("{after:#x}"));
+    for method in ["vera_getReceiptProof", "vera_getTransactionReceipt"] {
+        let unhinted = block_on(
+            node.rpc()
+                .request::<serde_json::Value>(method, vec![json!(submission)]),
+        );
+        assert!(
+            matches!(&unhinted, Ok(serde_json::Value::Null)),
+            "{unhinted:?}"
+        );
+        let hinted = block_on(
+            node.rpc()
+                .request::<serde_json::Value>(method, vec![json!(submission), after.clone()]),
+        );
+        assert!(
+            matches!(&hinted, Err(LocalRpcError::Call { code: 4444, .. })),
+            "{hinted:?}"
+        );
+    }
 }
 
 #[test]
@@ -55,6 +66,7 @@ fn a_backup_catches_up_from_a_pruned_active_device_and_keeps_its_window() {
     active_settings.history_retention = Some(retained);
     let active = block_on(EmbeddedNode::start(active_settings.clone())).unwrap();
     let signer = BlsSigner::new(90u64.into(), chain_id).unwrap();
+    let sent_at = height(&active);
     let early = finalize_a_write(&active, &signer);
     let written_at = height(&active);
     let deadline = Instant::now() + Duration::from_secs(1_200);
@@ -62,7 +74,7 @@ fn a_backup_catches_up_from_a_pruned_active_device_and_keeps_its_window() {
         assert!(Instant::now() < deadline, "history retention deadline");
         std::thread::sleep(Duration::from_millis(500));
     }
-    assert!(receipt_unavailable(&active, early));
+    assert_receipt_pruned(&active, early, sent_at);
     let late = finalize_a_write(&active, &signer);
 
     let mut settings = backup::backup(second.path(), &dealt, &active_settings, &key);
@@ -71,7 +83,7 @@ fn a_backup_catches_up_from_a_pruned_active_device_and_keeps_its_window() {
     let follower = block_on(EmbeddedNode::start(settings.clone())).unwrap();
     backup::await_height(&follower, height(&active));
     await_certified_receipt(&follower, late);
-    assert!(receipt_unavailable(&follower, early));
+    assert_receipt_pruned(&follower, early, sent_at);
     assert!(refuses_as_pruned(&follower, written_at));
     block_on(follower.stop()).unwrap();
 
